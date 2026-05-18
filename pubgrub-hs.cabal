@@ -1,0 +1,61 @@
+cabal-version:   3.8
+name:            pubgrub-hs
+version:         0.1.0.0
+license:         BSD-3-Clause
+license-files:   LICENSE.md
+copyright:       (c) 2026 Tweag I/O by Modus Create
+author:          Andrea Bedini
+maintainer:      andrea.bedini@moduscreate.com
+build-type:      Simple
+extra-doc-files: CHANGELOG.md
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+    exposed-modules:  MyLib
+    build-depends:    base ^>=4.21.0.0
+    hs-source-dirs:   src
+    default-language: GHC2021
+
+executable pubgrub-hs
+    import:           warnings
+    main-is:          Main.hs
+    other-modules:
+        HttpClient
+        Hackage.Security.Unlifted
+        Database
+        Solver
+    build-depends:
+        , pubgrub-hs
+        , Cabal
+        , Cabal-syntax
+        , base
+        , binary
+        , bytestring
+        , microlens
+        , mtl
+        , stm
+        , tar
+        , time
+        , containers
+        , optparse-applicative
+        , optparse-generic
+        , hackage-security
+        , http-client
+        , http-types
+        , network-uri
+        , async
+        , unliftio
+        , co-log
+        , ki
+        , ki-unlifted
+        , stm
+        , scheduler
+        , concurrent-output
+        , lmdb-simple
+        , serialise
+
+    hs-source-dirs:   app
+    default-language: GHC2021
