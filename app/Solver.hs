@@ -26,7 +26,8 @@ import           Distribution.PackageDescription        (GenericPackageDescripti
 import           Distribution.PackageDescription.Parsec (parseGenericPackageDescription,
                                                          runParseResult)
 import           Distribution.Pretty                    (prettyShow)
-import           Distribution.Version                   (Version, mkVersion)
+import           Distribution.Version                   (Version, mkVersion,
+                                                         simplifyVersionRange)
 
 import           Hackage.Security.Client                (IndexCallbacks,
                                                          LogMessage)
@@ -73,7 +74,7 @@ renderSolverMsg msg = case msg of
   where
     name = T.pack . prettyShow
     showVer = T.pack . prettyShow
-    showRange = T.pack . prettyShow . VS.toVersionRange
+    showRange = T.pack . prettyShow . simplifyVersionRange . VS.toVersionRange
 
 -- | Resolve the dependency closure of @target@ within @range@ and print the
 -- plan (or a derivation tree on failure). Runs in the logging monad 'App'.
