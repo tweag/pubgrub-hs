@@ -21,13 +21,13 @@ import           Hackage.Security.Unlifted
 import           Hackage.Security.Util.Path      (Absolute, Path, fragment,
                                                   fromFilePath, makeAbsolute,
                                                   rootPath)
-import           Hackage.Security.Util.Pretty    (Pretty (..))
 import           Network.HTTP.Client             (Manager,
                                                   defaultManagerSettings,
                                                   newManager)
 import qualified Network.URI
 import qualified PubGrub.VersionSet              as VS
-import           Solver                          (runSolve)
+import           Solver                          (hackageSink, runSolve,
+                                                  solverSink)
 import           System.Environment              (getArgs)
 import           UnliftIO                        (MonadIO (..))
 
@@ -44,17 +44,14 @@ main = do
             (r : _) -> case eitherParsec r :: Either String VersionRange of
               Right vr -> VS.fromVersionRange vr
               Left err -> error ("invalid version range: " ++ err)
-      usingLoggerT logMessageAction $
-        withHackage cache manager $ \repository ->
+      usingLoggerT solverSink $
+        withHackage cache manager (liftIO . unLogAction hackageSink) $ \repository ->
           withIndex repository $ \indexCallbacks ->
-            liftIO (runSolve indexCallbacks target range)
+            runSolve indexCallbacks target range
     [] -> putStrLn "usage: pubgrub-hs <package> [version-range]"
 
 parseURI :: (HasCallStack) => [Char] -> URI
 parseURI str = fromMaybe (error $ "failed parsing URI " ++ str) $ Network.URI.parseURI str
-
-logMessageAction :: (MonadIO m) => LogAction m LogMessage
-logMessageAction = LogAction (liftIO . putStrLn . pretty)
 
 mkCache :: Path Absolute -> Cache
 mkCache root =
@@ -73,11 +70,11 @@ mkCache root =
         }
 
 withHackage ::
-  (MonadUnliftIO m, WithLog env LogMessage m) =>
-  Cache -> Manager -> (Repository RemoteTemp -> m a) -> m a
-withHackage cache manager act =
+  (MonadUnliftIO m) =>
+  Cache -> Manager -> (LogMessage -> m ()) -> (Repository RemoteTemp -> m a) -> m a
+withHackage cache manager logAction act =
   withClient manager $ \httpLib ->
-    withRepository httpLib [uri] cache logMsg $ \repository -> do
+    withRepository httpLib [uri] cache logAction $ \repository -> do
       uncheckClientErrors $ liftIO $ do
         rb <- requiresBootstrap repository
         when rb $ bootstrap repository [] (KeyThreshold 0)
