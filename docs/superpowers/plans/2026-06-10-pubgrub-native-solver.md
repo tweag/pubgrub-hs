@@ -24,10 +24,10 @@ These refinements were validated against Cabal's API and the Rust reference duri
 The sandbox cannot reach `hackage.haskell.org`, so `tasty`/`QuickCheck` cannot be fetched here. **The implementer (you, the human, or CI) runs `cabal build` / `cabal test` where hackage is reachable** — those are the authoritative pass/fail gates. As an *interim* check the agent can typecheck library modules offline (they need only boot libs):
 
 ```sh
-ghc -fno-code -isrc -package Cabal-syntax -XGHC2021 src/PubGrub/VersionSet.hs
+ghc -fno-code -Wall -isrc -package Cabal-syntax -XGHC2021 src/PubGrub/VersionSet.hs
 ```
 
-Each task's "run tests" step is the human/CI gate; treat the offline typecheck as a fast pre-check, not a substitute.
+Always pass `-Wall` so the offline check matches the cabal `warnings` stanza (otherwise warnings like redundant imports slip through). Even better, run the real library build when offline allows it (it needs only boot libs): `cabal build pubgrub-hs:lib:pubgrub-hs`. Each task's "run tests" step is the human/CI gate; treat the offline typecheck/build as a fast pre-check, not a substitute.
 
 ---
 
@@ -873,8 +873,8 @@ backtrack level ps@PartialSolution{psAssignments} =
 termIntersectionForPackage :: Ord p => PartialSolution p -> p -> Maybe Term
 termIntersectionForPackage PartialSolution{psAssignments} p =
   case [ assignmentTerm a | a <- psAssignments, aPackage a == p ] of
-    [] -> Nothing
-    ts -> Just (foldl' intersectTerms (head ts) (tail ts))
+    []       -> Nothing
+    (t : ts) -> Just (foldl' intersectTerms t ts)
 
 -- | Relation of the whole partial solution to an incompatibility.
 relation :: Ord p => PartialSolution p -> Incompatibility p -> IncompatRelation p
@@ -1100,7 +1100,7 @@ Append to `src/PubGrub/Solver.hs`:
 -- | Failure: no solution; carries the terminal incompatibility (the root of
 -- the derivation tree, for reporting).
 newtype SolveError p = NoSolution (Incompatibility p)
-  deriving stock (Show)
+  deriving stock (Eq, Show)
 
 -- | Solve for a root package pinned to @rootV@. Returns a complete assignment
 -- or a 'SolveError'. Mirrors the main loop in the Rust reference / intro §6.
@@ -1324,17 +1324,16 @@ reportConflict = render
       [(p, Negative r)] -> show p ++ " " ++ showVS r ++ " is mandatory"
       [(p1, Positive r1), (p2, Negative r2)] -> dep p1 r1 p2 r2
       [(p2, Negative r2), (p1, Positive r1)] -> dep p1 r1 p2 r2
-      terms -> intercalateList ", " [ showTerm p t | (p, t) <- terms ] ++ " are incompatible"
+      terms -> intercalate ", " [ showTerm p t | (p, t) <- terms ] ++ " are incompatible"
 
     dep p1 r1 p2 r2 =
       show p1 ++ " " ++ showVS r1 ++ " depends on " ++ show p2 ++ " " ++ showVS r2
     showTerm p (Positive r) = show p ++ " " ++ showVS r
     showTerm p (Negative r) = show p ++ " not " ++ showVS r
     showVS = show . VS.intervals
-    intercalateList sep = foldr1 (\a b -> a ++ sep ++ b)
 ```
 
-No new imports are needed: the local `intercalateList` is used only in the `terms` (≥2 elements) branch, so `foldr1` is safe there.
+Update the `Data.List` import to `import Data.List (foldl', maximumBy, intercalate)`. `intercalate` is total (unlike `foldr1`), satisfying the project's no-partial-functions rule.
 
 - [ ] **Step 3: Typecheck offline**
 
