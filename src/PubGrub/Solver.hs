@@ -25,9 +25,11 @@ module PubGrub.Solver
     -- * Solve
   , SolveError (..)
   , solve
+    -- * Reporting
+  , reportConflict
   ) where
 
-import           Data.List            (foldl', maximumBy)
+import           Data.List            (foldl', intercalate, maximumBy)
 import           Data.Map.Strict      (Map)
 import qualified Data.Map.Strict      as Map
 import           Data.Maybe           (mapMaybe)
@@ -252,3 +254,29 @@ solve dp rootPkg rootV = go [notRoot rootPkg rootV] emptyPS
                         [ fromDependency p (VS.singleton v) (q, r)
                         | (q, r) <- Map.toList deps ]
                   in go (depIncs ++ incompats') (addDecision p v ps')
+
+-- | Render an incompatibility (and its derivation, if any) as a human-readable
+-- proof. Leaves describe external facts. A subderivation used twice is
+-- written out twice, not numbered and referred back to.
+reportConflict :: (Package p) => Incompatibility p -> String
+reportConflict = render
+  where
+    render i = case incompCause i of
+      DerivedFrom c1 c2 ->
+        "Because " ++ render c1 ++ " and " ++ render c2
+          ++ ", " ++ summary i ++ "."
+      _ -> summary i
+
+    summary i = case Map.toList (incompTerms i) of
+      [] -> "version solving failed"
+      [(p, Positive r)] -> show p ++ " " ++ showVS r ++ " is forbidden"
+      [(p, Negative r)] -> show p ++ " " ++ showVS r ++ " is mandatory"
+      [(p1, Positive r1), (p2, Negative r2)] -> dep p1 r1 p2 r2
+      [(p2, Negative r2), (p1, Positive r1)] -> dep p1 r1 p2 r2
+      terms -> intercalate ", " [ showTerm p t | (p, t) <- terms ] ++ " are incompatible"
+
+    dep p1 r1 p2 r2 =
+      show p1 ++ " " ++ showVS r1 ++ " depends on " ++ show p2 ++ " " ++ showVS r2
+    showTerm p (Positive r) = show p ++ " " ++ showVS r
+    showTerm p (Negative r) = show p ++ " not " ++ showVS r
+    showVS = show . VS.intervals

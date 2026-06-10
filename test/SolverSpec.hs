@@ -2,7 +2,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 module SolverSpec (tests) where
 
-import           Data.List            (sortBy)
+import           Data.List            (isInfixOf, sortBy)
 import           Data.Map.Strict      (Map)
 import qualified Data.Map.Strict      as Map
 import           Data.Maybe           (listToMaybe)
@@ -76,7 +76,7 @@ tests = testGroup "Solver"
       in solve r "root" (v [1])
            @?= Right (Map.fromList [("root", v [1]), ("a", v [1]), ("b", v [2])])
 
-  , testCase "unsat: conflicting text requirements" $
+  , testCase "unsat: conflicting text requirements (report mentions text)" $
       let r = reg
             [ ("root", [([1], [("aeson", geq [2,2]), ("servant", VS.full)])])
             , ("aeson", [([2,2], [("text", geq [2,0])])])
@@ -84,8 +84,11 @@ tests = testGroup "Solver"
             , ("text", [([2,0], []), ([1,2], [])])
             ]
       in case solve r "root" (v [1]) of
-           Left _  -> pure ()
            Right s -> assertBool ("expected unsat, got " ++ show s) False
+           Left (NoSolution i) ->
+             let msg = reportConflict i
+             in assertBool ("report should mention text: " ++ msg)
+                  ("text" `isInfixOf` msg)
 
   , testCase "no valid version: dependency range has no package version" $
       let r = reg
