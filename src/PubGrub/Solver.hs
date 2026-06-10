@@ -41,9 +41,10 @@ import           PubGrub.VersionSet   (VersionSet)
 import qualified PubGrub.VersionSet   as VS
 
 -- | The oracle: pick a version in a range and report a version's dependencies.
-class Package p => DependencyProvider dp p | dp -> p where
-  chooseVersion   :: dp -> p -> VersionSet -> Maybe Version
-  getDependencies :: dp -> p -> Version -> Map p VersionSet
+-- Effects (e.g. lazy index loading) run in the monad @m@.
+class (Package p, Monad m) => DependencyProvider dp p m | dp -> p where
+  chooseVersion   :: dp -> p -> VersionSet -> m (Maybe Version)
+  getDependencies :: dp -> p -> Version -> m (Map p VersionSet)
 
 -- | A single entry in the partial solution.
 data Assignment p
@@ -231,29 +232,30 @@ newtype SolveError p = NoSolution (Incompatibility p)
 -- | Solve for a root package pinned to @rootV@. Returns a complete assignment
 -- or a 'SolveError'.
 solve
-  :: DependencyProvider dp p
+  :: DependencyProvider dp p m
   => dp -> p -> Version
-  -> Either (SolveError p) (Map p Version)
+  -> m (Either (SolveError p) (Map p Version))
 solve dp rootPkg rootV = go [notRoot rootPkg rootV] emptyPS
   where
     go incompats ps =
       case unitPropagation rootPkg rootV incompats ps of
-        Left terminal -> Left (NoSolution terminal)
+        Left terminal -> pure (Left (NoSolution terminal))
         Right (incompats', ps') ->
           case undecidedPositive ps' of
-            [] -> Right (extractSolution ps')
-            ((p, range) : _) ->
-              case chooseVersion dp p range of
+            [] -> pure (Right (extractSolution ps'))
+            ((p, range) : _) -> do
+              mv <- chooseVersion dp p range
+              case mv of
                 Nothing ->
                   -- No version available in the allowed range: ban it and let
                   -- the next propagation turn it into a conflict.
                   go (noVersions p range : incompats') ps'
-                Just v ->
-                  let deps = getDependencies dp p v
-                      depIncs =
+                Just v -> do
+                  deps <- getDependencies dp p v
+                  let depIncs =
                         [ fromDependency p (VS.singleton v) (q, r)
                         | (q, r) <- Map.toList deps ]
-                  in go (depIncs ++ incompats') (addDecision p v ps')
+                  go (depIncs ++ incompats') (addDecision p v ps')
 
 -- | Render an incompatibility (and its derivation, if any) as a human-readable
 -- proof. Leaves describe external facts. A subderivation used twice is
