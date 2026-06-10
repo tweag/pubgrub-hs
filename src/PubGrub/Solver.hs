@@ -18,12 +18,15 @@ module PubGrub.Solver
   , relation
   , extractSolution
   , undecidedPositive
+    -- * Conflict resolution
+  , conflictResolution
   ) where
 
-import           Data.List            (foldl')
+import           Data.List            (foldl', maximumBy)
 import           Data.Map.Strict      (Map)
 import qualified Data.Map.Strict      as Map
 import           Data.Maybe           (mapMaybe)
+import           Data.Ord             (comparing)
 import           Distribution.Version (Version)
 
 import           PubGrub.Types
@@ -124,3 +127,63 @@ undecidedPositive ps@PartialSolution{psAssignments} =
       where go seen [] = reverse seen
             go seen (x:xs) | x `elem` seen = go seen xs
                            | otherwise     = go (x:seen) xs
+
+-- | All assignments for a package, oldest first.
+packageHistory :: Ord p => PartialSolution p -> p -> [Assignment p]
+packageHistory PartialSolution{psAssignments} p =
+  reverse [ a | a <- psAssignments, aPackage a == p ]
+
+-- | Earliest assignment of @p@ whose running accumulated term becomes disjoint
+-- from @startTerm@.
+-- Precondition: such an assignment exists (guaranteed during conflict resolution).
+satisfierOf :: Ord p => PartialSolution p -> p -> Term -> Assignment p
+satisfierOf ps p startTerm = go anyTerm (packageHistory ps p)
+  where
+    go _ [] = error "satisfierOf: no satisfier (precondition violated)"
+    go acc (a : as) =
+      let acc' = intersectTerms acc (assignmentTerm a)
+      in if termIsDisjoint acc' startTerm then a else go acc' as
+
+-- | Result of searching for the satisfier of a conflict incompatibility.
+data SatisfierSearch p
+  = DifferentDecisionLevels !Int               -- ^ backtrack to this level
+  | SameDecisionLevels (Incompatibility p)      -- ^ satisfier's cause
+
+-- | The satisfier of an incompatibility is the latest of its terms' satisfiers.
+-- When the satisfier is a derivation and the previous satisfier sits at its
+-- level, resolution continues with the satisfier's cause; otherwise it
+-- backtracks to the previous satisfier's level (at least 1).
+satisfierSearch :: Ord p => PartialSolution p -> Incompatibility p -> (p, SatisfierSearch p)
+satisfierSearch ps i =
+  let satMap = [ (p, satisfierOf ps p (negateTerm it))
+               | (p, it) <- Map.toList (incompTerms i) ]
+      (satPkg, satAssign) = maximumBy (comparing (aIndex . snd)) satMap
+      satLevel = aLevel satAssign
+      it_s = maybe anyTerm id (incompGet satPkg i)
+      startTerm' = intersectTerms (assignmentTerm satAssign) (negateTerm it_s)
+      prevForSat = satisfierOf ps satPkg startTerm'
+      satMap' = [ (p, if p == satPkg then prevForSat else a) | (p, a) <- satMap ]
+      prevLevel = max 1 (aLevel (snd (maximumBy (comparing (aIndex . snd)) satMap')))
+  in case satAssign of
+       Derivation{aCause}
+         | prevLevel >= satLevel -> (satPkg, SameDecisionLevels aCause)
+       _ -> (satPkg, DifferentDecisionLevels prevLevel)
+
+-- | Conflict resolution loop. Returns either the terminal (unsatisfiable)
+-- incompatibility, or @(almostPackage, rootCause, backtrackedSolution)@.
+conflictResolution
+  :: Ord p
+  => p -> Version           -- ^ root package and version (for is-terminal)
+  -> Incompatibility p      -- ^ the satisfied (conflict) incompatibility
+  -> PartialSolution p
+  -> Either (Incompatibility p) (p, Incompatibility p, PartialSolution p)
+conflictResolution rootPkg rootV = loop
+  where
+    loop current ps
+      | isTerminal rootPkg rootV current = Left current
+      | otherwise =
+          case satisfierSearch ps current of
+            (satPkg, DifferentDecisionLevels prevLevel) ->
+              Right (satPkg, current, backtrack prevLevel ps)
+            (satPkg, SameDecisionLevels satCause) ->
+              loop (priorCause current satCause satPkg) ps
