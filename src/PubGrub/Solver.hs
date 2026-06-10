@@ -20,6 +20,8 @@ module PubGrub.Solver
   , undecidedPositive
     -- * Conflict resolution
   , conflictResolution
+    -- * Unit propagation
+  , unitPropagation
   ) where
 
 import           Data.List            (foldl', maximumBy)
@@ -187,3 +189,31 @@ conflictResolution rootPkg rootV = loop
               Right (satPkg, current, backtrack prevLevel ps)
             (satPkg, SameDecisionLevels satCause) ->
               loop (priorCause current satCause satPkg) ps
+
+-- | Naïve unit propagation: repeatedly scan all
+-- incompatibilities until a fixpoint, handling conflicts via
+-- 'conflictResolution'. Returns the (possibly extended) incompatibility list
+-- and updated partial solution, or a terminal incompatibility on failure.
+unitPropagation
+  :: Ord p
+  => p -> Version
+  -> [Incompatibility p]
+  -> PartialSolution p
+  -> Either (Incompatibility p) ([Incompatibility p], PartialSolution p)
+unitPropagation rootPkg rootV = scan
+  where
+    scan incompats ps = step incompats ps incompats
+
+    -- Walk the worklist of incompatibilities once; on any action, restart scan.
+    step incompats ps [] = Right (incompats, ps)   -- fixpoint
+    step incompats ps (i : rest) =
+      case relation ps i of
+        ISatisfied ->
+          case conflictResolution rootPkg rootV i ps of
+            Left terminal -> Left terminal
+            Right (almostPkg, rootCause, ps') ->
+              let ps'' = addDerivation almostPkg rootCause ps'
+              in scan (rootCause : incompats) ps''
+        IAlmostSatisfied q ->
+          scan incompats (addDerivation q i ps)
+        _ -> step incompats ps rest
