@@ -16,7 +16,7 @@
 - `WithLog env msg m = (MonadReader env m, HasLog env msg m, HasCallStack)`; `logMsg :: WithLog env msg m => msg -> m ()`. (`MonadReader` has fundep `m -> env`, so `env` is determined by `m`; no ambiguity from a constraint-only `env`.)
 - `instance Applicative m => Monoid (LogAction m a)` — `mempty :: LogAction m msg` is the no-op sink.
 - `(>$<) :: (a -> b) -> LogAction m b -> LogAction m a` (contravariant map).
-- The local `withRepository` wrapper takes its logger as `(LogMessage -> m ())` (a plain function), so pass `unLogAction hackageSink`.
+- The local `withRepository` wrapper takes its logger as `(LogMessage -> m ())` (a plain function). The sinks live in base `IO`, so Main passes `liftIO . unLogAction hackageSink` (lifting the `IO` action into `App`).
 
 ## Environment / verification note
 
