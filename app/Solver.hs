@@ -40,8 +40,8 @@ import           UnliftIO                               (try)
 
 import           BootPackages                           (queryBootPackages)
 import           Database                               (ParseError (..),
-                                                         indexEntries,
-                                                         parseEntry)
+                                                         indexVersions,
+                                                         lookupCabal)
 import           HackageProvider                        (HackageProvider (..),
                                                          Pkg (..),
                                                          ResolveError (..))
@@ -98,15 +98,15 @@ runSolve idxTime indexCallbacks target range = do
   note "\ESC[2mQuerying GHC boot packages\x2026\ESC[0m"
   boot <- liftIO queryBootPackages
   note "\ESC[2mLoading package index\x2026\ESC[0m"
-  let entries = indexEntries indexCallbacks
+  let versions = indexVersions indexCallbacks
       hp = HackageProvider
-        { hpEntries = entries
-        , hpParse   = parseEntry indexCallbacks parseGPD
-        , hpBoot    = boot
-        , hpTarget  = target
-        , hpRange   = range
+        { hpVersions    = versions
+        , hpLookupCabal = lookupCabal indexCallbacks parseGPD
+        , hpBoot        = boot
+        , hpTarget      = target
+        , hpRange       = range
         }
-      pkgCount = Map.size entries   -- forcing this does the single index traversal
+      pkgCount = Map.size versions   -- forcing this does the single index traversal
   note ("\ESC[2m  " <> T.pack (show pkgCount) <> " packages indexed\ESC[0m")
   outcome <-
     try (solve hp Root (mkVersion [0]))

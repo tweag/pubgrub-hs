@@ -21,12 +21,11 @@ import           Distribution.Compiler           (AbiTag (..),
                                                   CompilerId (..), CompilerInfo,
                                                   unknownCompilerInfo)
 import           Distribution.PackageDescription (GenericPackageDescription,
+                                                  PackageIdentifier (..),
                                                   PackageName)
 import           Distribution.System             (Arch (..), OS (..),
                                                   Platform (..))
 import           Distribution.Version            (Version, mkVersion)
-
-import           Hackage.Security.Client         (DirectoryEntry)
 
 import           Database                        (ParseError)
 import           PubGrub.Cabal.Flatten           (flattenDeps)
@@ -47,14 +46,15 @@ data ResolveError = ResolveError PackageName Version
 
 instance Exception ResolveError
 
--- | A dependency provider backed by the Hackage index. @hpEntries@ remembers each
--- version's directory entry; @hpParse@ parses one on demand.
+-- | A dependency provider backed by the Hackage index. @hpVersions@ lists each
+-- package's available versions; @hpLookupCabal@ reads and parses one version's
+-- .cabal file when its dependencies are asked for.
 data HackageProvider = HackageProvider
-  { hpEntries :: Map PackageName (Map Version DirectoryEntry)
-  , hpParse   :: DirectoryEntry -> IO (Either ParseError GenericPackageDescription)
-  , hpBoot    :: Map PackageName Version
-  , hpTarget  :: PackageName
-  , hpRange   :: VersionSet
+  { hpVersions    :: Map PackageName [Version]
+  , hpLookupCabal :: PackageIdentifier -> IO (Either ParseError GenericPackageDescription)
+  , hpBoot        :: Map PackageName Version
+  , hpTarget      :: PackageName
+  , hpRange       :: VersionSet
   }
 
 thePlatform :: Platform
@@ -73,17 +73,14 @@ instance MonadIO m => DependencyProvider HackageProvider Pkg m where
           listToMaybe
             (sortBy (comparing Down)
               (filter (VS.contains range)
-                (Map.keys (Map.findWithDefault Map.empty n (hpEntries hp)))))
+                (Map.findWithDefault [] n (hpVersions hp))))
 
   getDependencies hp pkg v = case pkg of
     Root -> pure (Map.singleton (Pkg (hpTarget hp)) (hpRange hp))
     Pkg n
       | Map.member n (hpBoot hp) -> pure Map.empty
-      | otherwise ->
-          case Map.lookup n (hpEntries hp) >>= Map.lookup v of
-            Just entry -> do
-              res <- liftIO (hpParse hp entry)
-              case res of
-                Right gpd -> pure (Map.mapKeys Pkg (flattenDeps thePlatform theCompiler gpd))
-                Left _    -> liftIO (throwIO (ResolveError n v))
-            Nothing -> liftIO (throwIO (ResolveError n v))
+      | otherwise -> do
+          res <- liftIO (hpLookupCabal hp (PackageIdentifier n v))
+          case res of
+            Right gpd -> pure (Map.mapKeys Pkg (flattenDeps thePlatform theCompiler gpd))
+            Left _    -> liftIO (throwIO (ResolveError n v))

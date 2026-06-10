@@ -16,11 +16,10 @@ import           Distribution.PackageDescription
 import qualified Distribution.Types.Lens         as L
 import           Distribution.Version            (Version)
 import           Hackage.Security.Client         (Directory (..),
-                                                  DirectoryEntry,
                                                   IndexCallbacks (..),
-                                                  IndexEntry (..),
                                                   IndexFile (..),
                                                   uncheckClientErrors)
+import           Hackage.Security.Trusted        (trusted)
 import           Hackage.Security.Util.Some      (Some (..))
 
 type Result e a = Either (Either SomeException e) a
@@ -30,26 +29,26 @@ data ParseError
     | ParseException SomeException
     deriving Show
 
--- | The index as package -> version -> directory entry, in one pure pass. The
--- name and version come from the decoded 'IndexPkgCabal', so no .cabal file or
--- path is parsed.
-indexEntries :: IndexCallbacks -> Map PackageName (Map Version DirectoryEntry)
-indexEntries IndexCallbacks{indexDirectory} =
-    M.fromListWith (<>)
-        [ (pkgName pkgId, M.singleton (pkgVersion pkgId) entry)
-        | (entry, _indexPath, msIndexFile) <- directoryEntries indexDirectory
+-- | The index as package -> versions, in one pure pass. The name and version
+-- come from the decoded 'IndexPkgCabal', so no .cabal file or path is parsed.
+indexVersions :: IndexCallbacks -> Map PackageName [Version]
+indexVersions IndexCallbacks{indexDirectory} =
+    M.fromListWith (++)
+        [ (pkgName pkgId, [pkgVersion pkgId])
+        | (_entry, _indexPath, msIndexFile) <- directoryEntries indexDirectory
         , Just (Some (IndexPkgCabal pkgId)) <- [msIndexFile]
         ]
 
--- | Parse a single index entry's .cabal on demand.
-parseEntry
+-- | Fetch and parse a specific package version's .cabal on demand, by
+-- 'PackageIdentifier' — a targeted index lookup, no directory enumeration.
+lookupCabal
     :: IndexCallbacks
     -> (BSL.ByteString -> Either e a)
-    -> DirectoryEntry
+    -> PackageIdentifier
     -> IO (Either e a)
-parseEntry IndexCallbacks{indexLookupEntry} parse entry = do
-    (Some indexEntry, _) <- uncheckClientErrors $ indexLookupEntry entry
-    return $ parse (indexEntryContent indexEntry)
+lookupCabal IndexCallbacks{indexLookupCabal} parse pid = do
+    bytes <- uncheckClientErrors (indexLookupCabal pid)
+    return $ parse (trusted bytes)
 
 -- Unused. Kept for the conditional-dependency work (flags, OS, architecture).
 newtype DepInfo = DepInfo (Map ComponentName (CondTree ConfVar [Dependency] ()))
