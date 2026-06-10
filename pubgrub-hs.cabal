@@ -16,12 +16,16 @@ library
     import:           warnings
     exposed-modules:
         PubGrub
+        PubGrub.VersionSet
+        PubGrub.Types
+        PubGrub.Solver
     other-modules:
         PubGrub.Lattice
     build-depends:
         , base ^>=4.21.0.0
         , containers
         , Cabal-syntax
+        , text
     hs-source-dirs:   src
     default-language: GHC2021
 
@@ -61,4 +65,22 @@ executable pubgrub-hs
         , serialise
 
     hs-source-dirs:   app
+    default-language: GHC2021
+
+test-suite pubgrub-hs-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
+    other-modules:
+        VersionSetSpec
+        SolverSpec
+    build-depends:
+        , pubgrub-hs
+        , base
+        , containers
+        , Cabal-syntax
+        , tasty
+        , tasty-quickcheck
+        , tasty-hunit
+    hs-source-dirs:   test
     default-language: GHC2021
