@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts       #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE NamedFieldPuns         #-}
+{-# LANGUAGE ScopedTypeVariables    #-}
 
 module PubGrub.Solver
   ( -- * Provider
@@ -198,30 +199,41 @@ conflictResolution rootPkg rootV = loop
             (satPkg, SameDecisionLevels satCause) ->
               loop (priorCause current satCause satPkg) ps
 
--- | Naïve unit propagation: repeatedly scan all
--- incompatibilities until a fixpoint, handling conflicts via
--- 'conflictResolution'. Returns the (possibly extended) incompatibility list
--- and updated partial solution, or a terminal incompatibility on failure.
+-- | Naïve unit propagation: repeatedly scan all incompatibilities until a
+-- fixpoint, logging 'Conflict' and 'Backtracked' as they happen. The monad is
+-- constrained only by 'WithLog', not @MonadIO@, so the loop can log but cannot
+-- perform other I/O.
 unitPropagation
-  :: Ord p
+  :: forall p env m. (Ord p, WithLog env (SolverMsg p) m)
   => p -> Version
   -> [Incompatibility p]
   -> PartialSolution p
-  -> Either (Incompatibility p) ([Incompatibility p], PartialSolution p)
+  -> m (Either (Incompatibility p) ([Incompatibility p], PartialSolution p))
 unitPropagation rootPkg rootV = scan
   where
+    scan
+      :: [Incompatibility p]
+      -> PartialSolution p
+      -> m (Either (Incompatibility p) ([Incompatibility p], PartialSolution p))
     scan incompats ps = step incompats ps incompats
 
     -- Walk the worklist of incompatibilities once; on any action, restart scan.
-    step incompats ps [] = Right (incompats, ps)   -- fixpoint
+    step
+      :: [Incompatibility p]
+      -> PartialSolution p
+      -> [Incompatibility p]
+      -> m (Either (Incompatibility p) ([Incompatibility p], PartialSolution p))
+    step incompats ps [] = pure (Right (incompats, ps))   -- fixpoint
     step incompats ps (i : rest) =
       case relation ps i of
-        ISatisfied ->
+        ISatisfied -> do
+          logMsg (Conflict i)
           case conflictResolution rootPkg rootV i ps of
-            Left terminal -> Left terminal
-            Right (almostPkg, rootCause, ps') ->
+            Left terminal -> pure (Left terminal)
+            Right (almostPkg, rootCause, ps') -> do
+              logMsg (Backtracked (psLevel ps') :: SolverMsg p)
               let ps'' = addDerivation almostPkg rootCause ps'
-              in scan (rootCause : incompats) ps''
+              scan (rootCause : incompats) ps''
         IAlmostSatisfied q ->
           scan incompats (addDerivation q i ps)
         _ -> step incompats ps rest
@@ -236,6 +248,8 @@ data SolverMsg p
   = Deciding p VersionSet      -- ^ about to choose a version for p within this range
   | Chose p Version            -- ^ picked this version for p
   | NoVersionFor p VersionSet  -- ^ no version available in range (forces a conflict next)
+  | Conflict (Incompatibility p) -- ^ this incompatibility is satisfied (a conflict)
+  | Backtracked Int            -- ^ backtracked to this decision level
   deriving stock (Eq, Show)
 
 -- | Solve for a root package pinned to @rootV@. Returns a complete assignment
@@ -246,8 +260,9 @@ solve
   -> m (Either (SolveError p) (Map p Version))
 solve dp rootPkg rootV = go [notRoot rootPkg rootV] emptyPS
   where
-    go incompats ps =
-      case unitPropagation rootPkg rootV incompats ps of
+    go incompats ps = do
+      result <- unitPropagation rootPkg rootV incompats ps
+      case result of
         Left terminal -> pure (Left (NoSolution terminal))
         Right (incompats', ps') ->
           case undecidedPositive ps' of

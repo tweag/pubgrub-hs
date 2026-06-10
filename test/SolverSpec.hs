@@ -115,4 +115,20 @@ tests = testGroup "Solver"
       in case runIdentity (usingLoggerT noLog (solve r "root" (v [1]))) of
            Left _  -> pure ()
            Right s -> assertBool ("expected unsat, got " ++ show s) False
+
+  , testCase "trace streams Conflict and Backtracked during backtracking" $ do
+      ref <- newIORef ([] :: [SolverMsg String])
+      let r = reg
+            [ ("root", [([1], [("a", VS.full), ("b", geq [2])])])
+            , ("a", [ ([2], [("b", VS.fromVersionRange (Distribution.Version.earlierVersion (mkVersion [2])))])
+                    , ([1], [("b", VS.full)]) ])
+            , ("b", [ ([2], []), ([1], []) ])
+            ]
+          collect = LogAction (\m -> modifyIORef' ref (++ [m]))
+      _ <- usingLoggerT collect (solve r "root" (v [1]))
+      evs <- readIORef ref
+      assertBool ("expected a Conflict event, got: " ++ show evs)
+        (not (null [() | Conflict _ <- evs]))
+      assertBool ("expected a Backtracked event, got: " ++ show evs)
+        (not (null [() | Backtracked _ <- evs]))
   ]
