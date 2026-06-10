@@ -19,8 +19,21 @@ module PubGrub.Types
     -- * Term relation
   , TermRelation (..)
   , relationWith
+    -- * Incompatibilities
+  , IncompatCause (..)
+  , Incompatibility (..)
+  , notRoot
+  , noVersions
+  , fromDependency
+  , incompGet
+  , IncompatRelation (..)
+  , incompRelation
+  , isTerminal
+  , priorCause
   ) where
 
+import           Data.Map.Strict      (Map)
+import qualified Data.Map.Strict      as Map
 import           Distribution.Version (Version)
 import           PubGrub.VersionSet   (VersionSet)
 import qualified PubGrub.VersionSet   as VS
@@ -103,3 +116,108 @@ relationWith t acc
   | acc `termSubsetOf` t = Satisfied
   | termIsDisjoint t acc = Contradicted
   | otherwise            = Inconclusive
+
+-- | Why an incompatibility exists (drives error reporting).
+data IncompatCause p
+  = NotRoot p Version
+  | NoVersions p VersionSet
+  | FromDependencyOf p VersionSet p VersionSet
+  | DerivedFrom (Incompatibility p) (Incompatibility p)
+  deriving stock (Eq, Show)
+
+-- | A set of terms (at most one per package) that can never all hold.
+data Incompatibility p = Incompatibility
+  { incompTerms :: Map p Term
+  , incompCause :: IncompatCause p
+  }
+  deriving stock (Eq, Show)
+
+-- | The root seed: it is impossible for @root@ to NOT be @version@.
+notRoot :: p -> Version -> Incompatibility p
+notRoot p v = Incompatibility
+  { incompTerms = Map.singleton p (Negative (VS.singleton v))
+  , incompCause = NotRoot p v
+  }
+
+-- | No version of the package in this set is available, so none of them can
+--   be selected.
+noVersions :: p -> VersionSet -> Incompatibility p
+noVersions p s = Incompatibility
+  { incompTerms = Map.singleton p (Positive s)
+  , incompCause = NoVersions p s
+  }
+
+-- | Dependency incompatibility: @package@ in @versions@ requires @dep@ in @depSet@.
+--   Encoded as @{ package: Positive versions, dep: Negative depSet }@.
+--   If @depSet@ is empty the dependency is unsatisfiable, leaving a unit term.
+fromDependency :: Ord p => p -> VersionSet -> (p, VersionSet) -> Incompatibility p
+fromDependency package versions (dep, depSet) = Incompatibility
+  { incompTerms =
+      if VS.isEmpty depSet
+        then Map.singleton package (Positive versions)
+        else Map.fromList [(package, Positive versions), (dep, Negative depSet)]
+  , incompCause = FromDependencyOf package versions dep depSet
+  }
+
+incompGet :: Ord p => p -> Incompatibility p -> Maybe Term
+incompGet p i = Map.lookup p (incompTerms i)
+
+-- | How an incompatibility relates to the partial solution.
+data IncompatRelation p
+  = ISatisfied
+  | IContradicted p
+  | IAlmostSatisfied p   -- ^ all terms satisfied but one (the named package)
+  | IInconclusive
+  deriving stock (Eq, Show)
+
+-- | @lookupTerm p@ returns the accumulated term for @p@ in the partial
+--   solution, or Nothing if @p@ is absent (treated as the any-term).
+incompRelation :: Ord p => (p -> Maybe Term) -> Incompatibility p -> IncompatRelation p
+incompRelation lookupTerm i = go ISatisfied (Map.toList (incompTerms i))
+  where
+    go acc [] = acc
+    go acc ((p, it) : rest) =
+      case lookupTerm p of
+        Just term ->
+          case relationWith it term of
+            Satisfied    -> go acc rest
+            Contradicted -> IContradicted p
+            Inconclusive -> almost p acc rest
+        Nothing -> almost p acc rest
+    -- absent or inconclusive term: at most one allowed for AlmostSatisfied
+    almost p ISatisfied rest = go (IAlmostSatisfied p) rest
+    almost _ _ _             = IInconclusive
+
+-- | Does this incompatibility end the solve: is it empty, or does it forbid
+--   the root version?
+isTerminal :: Ord p => p -> Version -> Incompatibility p -> Bool
+isTerminal rootPkg rootV i =
+  case Map.toList (incompTerms i) of
+    []          -> True
+    [(p, term)] -> p == rootPkg && termContains term rootV
+    _           -> False
+
+-- | Rule of Resolution. From the current incompatibility and the cause of the
+--   satisfier (sharing @package@), derive their resolvent: union the shared
+--   term, intersect every other package's terms, drop the shared term if it
+--   becomes always-true.
+priorCause
+  :: Ord p
+  => Incompatibility p   -- ^ current incompatibility
+  -> Incompatibility p   -- ^ satisfier's cause
+  -> p                   -- ^ shared (pivot) package
+  -> Incompatibility p
+priorCause cur sat package = Incompatibility
+  { incompTerms = finalTerms
+  , incompCause = DerivedFrom cur sat
+  }
+  where
+    curTerms = Map.delete package (incompTerms cur)
+    satTerms = Map.delete package (incompTerms sat)
+    merged   = Map.unionWith intersectTerms curTerms satTerms
+    t1 = Map.findWithDefault anyTerm package (incompTerms cur)
+    t2 = Map.findWithDefault anyTerm package (incompTerms sat)
+    unioned = unionTerms t1 t2
+    finalTerms
+      | unioned == anyTerm = merged
+      | otherwise          = Map.insert package unioned merged
