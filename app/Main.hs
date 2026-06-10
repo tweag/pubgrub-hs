@@ -4,53 +4,49 @@
 
 module Main where
 
-import           Colog                                  (LogAction (..))
+import           Colog                           (LogAction (..))
 import           Colog.Monad
-import           Control.Monad                          (when)
-import qualified Data.ByteString.Lazy                   as BSL
-import           Data.Maybe                             (fromMaybe)
-import           Database                               (ParseError (..),
-                                                         mkDatabase)
-import           Distribution.PackageDescription        (GenericPackageDescription,
-                                                         PackageIdentifier (..),
-                                                         mkPackageName)
-import           Distribution.PackageDescription.Parsec (parseGenericPackageDescription,
-                                                         runParseResult)
-import           Distribution.Version                   (mkVersion)
-import           GHC.Stack                              (HasCallStack)
-import           Hackage.Security.Client                (CacheLayout (..),
-                                                         KeyThreshold (..),
-                                                         bootstrap,
-                                                         requiresBootstrap)
+import           Control.Monad                   (when)
+import           Data.Maybe                      (fromMaybe)
+import           Distribution.PackageDescription (mkPackageName)
+import           Distribution.Parsec             (eitherParsec)
+import           Distribution.Types.VersionRange (VersionRange)
+import           GHC.Stack                       (HasCallStack)
+import           Hackage.Security.Client         (CacheLayout (..),
+                                                  KeyThreshold (..), bootstrap,
+                                                  requiresBootstrap)
 import           Hackage.Security.Unlifted
-import           Hackage.Security.Util.Path             (Absolute, Path,
-                                                         fragment, fromFilePath,
-                                                         makeAbsolute, rootPath)
-import           Hackage.Security.Util.Pretty           (Pretty (..))
-import           Network.HTTP.Client                    (Manager,
-                                                         defaultManagerSettings,
-                                                         newManager)
+import           Hackage.Security.Util.Path      (Absolute, Path, fragment,
+                                                  fromFilePath, makeAbsolute,
+                                                  rootPath)
+import           Hackage.Security.Util.Pretty    (Pretty (..))
+import           Network.HTTP.Client             (Manager,
+                                                  defaultManagerSettings,
+                                                  newManager)
 import qualified Network.URI
-import           UnliftIO                               (MonadIO (..))
+import qualified PubGrub.VersionSet              as VS
+import           Solver                          (runSolve)
+import           System.Environment              (getArgs)
+import           UnliftIO                        (MonadIO (..))
 
 main :: IO ()
 main = do
   manager <- liftIO $ newManager defaultManagerSettings
   cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
-
-  usingLoggerT logMessageAction $ do
-    withHackage cache manager $ \repository -> do
-      withIndex repository $ \indexCallbacks -> liftIO $ do
-        dblookup <- mkDatabase indexCallbacks parse
-        dblookup (PackageIdentifier (mkPackageName "lens") (mkVersion [5, 3, 6])) >>= print
-
-  putStrLn "Done."
-
-parse :: BSL.ByteString -> Either ParseError GenericPackageDescription
-parse bs =
-  case runParseResult (parseGenericPackageDescription (BSL.toStrict bs)) of
-    (_, Left (mver, errs)) -> Left (ParseError mver errs)
-    (_, Right gpd)         -> Right gpd
+  args <- getArgs
+  case args of
+    (pkgStr : rest) -> do
+      let target = mkPackageName pkgStr
+          range = case rest of
+            [] -> VS.full
+            (r : _) -> case eitherParsec r :: Either String VersionRange of
+              Right vr -> VS.fromVersionRange vr
+              Left err -> error ("invalid version range: " ++ err)
+      usingLoggerT logMessageAction $
+        withHackage cache manager $ \repository ->
+          withIndex repository $ \indexCallbacks ->
+            liftIO (runSolve indexCallbacks target range)
+    [] -> putStrLn "usage: pubgrub-hs <package> [version-range]"
 
 parseURI :: (HasCallStack) => [Char] -> URI
 parseURI str = fromMaybe (error $ "failed parsing URI " ++ str) $ Network.URI.parseURI str
