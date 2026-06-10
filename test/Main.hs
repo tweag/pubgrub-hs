@@ -1,4 +1,11 @@
 module Main (main) where
 
+import qualified SolverSpec
+import           Test.Tasty     (defaultMain, testGroup)
+import qualified VersionSetSpec
+
 main :: IO ()
-main = putStrLn "placeholder"
+main = defaultMain $ testGroup "pubgrub-hs"
+  [ VersionSetSpec.tests
+  , SolverSpec.tests
+  ]
