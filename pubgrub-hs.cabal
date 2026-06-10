@@ -29,6 +29,20 @@ library
     hs-source-dirs:   src
     default-language: GHC2021
 
+library cabal-bridge
+    import:           warnings
+    exposed-modules:
+        PubGrub.Cabal.Flatten
+        PubGrub.Cabal.Boot
+    build-depends:
+        , base
+        , containers
+        , Cabal
+        , Cabal-syntax
+        , pubgrub-hs
+    hs-source-dirs:   app-lib
+    default-language: GHC2021
+
 executable pubgrub-hs
     import:           warnings
     main-is:          Main.hs
@@ -37,8 +51,12 @@ executable pubgrub-hs
         Hackage.Security.Unlifted
         Database
         Solver
+        HackageProvider
+        BootPackages
     build-depends:
         , pubgrub-hs
+        , pubgrub-hs:cabal-bridge
+        , process
         , Cabal
         , Cabal-syntax
         , base
@@ -74,8 +92,12 @@ test-suite pubgrub-hs-test
     other-modules:
         VersionSetSpec
         SolverSpec
+        FlattenSpec
+        BootSpec
     build-depends:
         , pubgrub-hs
+        , pubgrub-hs:cabal-bridge
+        , bytestring
         , base
         , containers
         , Cabal-syntax
