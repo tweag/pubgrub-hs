@@ -18,6 +18,10 @@ import qualified Data.Text                              as T
 import qualified Data.Text.IO                           as TIO
 import           System.IO                              (stderr)
 
+import           Data.Time.Clock                        (UTCTime)
+import           Data.Time.Format                       (defaultTimeLocale,
+                                                         formatTime)
+
 import           Colog                                  (LogAction (..),
                                                          LoggerT, (>$<))
 
@@ -44,6 +48,7 @@ import           HackageProvider                        (HackageProvider (..),
 import           PubGrub.Solver                         (SolveError (..),
                                                          SolverMsg (..),
                                                          reportConflict, solve)
+import           PubGrub.Types                          (Term (..), incompTerms)
 import           PubGrub.VersionSet                     (VersionSet)
 import qualified PubGrub.VersionSet                     as VS
 
@@ -69,18 +74,31 @@ renderSolverMsg msg = case msg of
   Deciding (Pkg n) r     -> "\ESC[2mdeciding " <> name n <> " " <> showRange r <> "\ESC[0m"
   Chose (Pkg n) v        -> "  \ESC[32m\x2713\ESC[0m " <> name n <> "-" <> showVer v
   NoVersionFor (Pkg n) r -> "  \ESC[31m\x2717\ESC[0m no version for " <> name n <> " in " <> showRange r
-  _                      -> ""  -- Root events: no output
+  Conflict i             -> "  \ESC[33m\x26A0\ESC[0m conflict: " <> renderIncompat i
+  Backtracked n          -> "  \ESC[2m\x21A9 backtracking to level " <> T.pack (show n) <> "\ESC[0m"
+  _                      -> ""  -- Root payloads: no output
   where
     name = T.pack . prettyShow
     showVer = T.pack . prettyShow
     showRange = T.pack . prettyShow . VS.toVersionRange
+    renderIncompat i = T.intercalate ", " [ renderTerm p t | (p, t) <- Map.toList (incompTerms i) ]
+    renderTerm Root _               = "root"
+    renderTerm (Pkg n) (Positive r) = name n <> " " <> showRange r
+    renderTerm (Pkg n) (Negative r) = name n <> " not " <> showRange r
 
--- | Resolve the dependency closure of @target@ within @range@ and print the
--- plan (or a derivation tree on failure). Runs in the logging monad 'App'.
-runSolve :: IndexCallbacks -> PackageName -> VersionSet -> App ()
-runSolve indexCallbacks target range = do
-  dblookup <- liftIO (mkDatabase indexCallbacks parseGPD)
+-- | Resolve the dependency closure of @target@ within @range@, printing a
+-- startup banner and phase notes to stderr and the plan to stdout. Runs in 'App'.
+runSolve :: UTCTime -> IndexCallbacks -> PackageName -> VersionSet -> App ()
+runSolve idxTime indexCallbacks target range = do
+  note ("\ESC[1mSolving for " <> T.pack (prettyShow target) <> " "
+          <> T.pack (prettyShow (VS.toVersionRange range))
+          <> " (index from "
+          <> T.pack (formatTime defaultTimeLocale "%Y-%m-%d %H:%M UTC" idxTime)
+          <> ")\ESC[0m")
+  note "\ESC[2mQuerying GHC boot packages\x2026\ESC[0m"
   boot <- liftIO queryBootPackages
+  note "\ESC[2mLoading package index\x2026\ESC[0m"
+  dblookup <- liftIO (mkDatabase indexCallbacks parseGPD)
   let hp = HackageProvider
         { hpVersions = indexVersions indexCallbacks
         , hpLookup   = dblookup
@@ -88,6 +106,8 @@ runSolve indexCallbacks target range = do
         , hpTarget   = target
         , hpRange    = range
         }
+      pkgCount = Map.size (hpVersions hp)   -- forcing this does the costly index traversal
+  note ("\ESC[2m  " <> T.pack (show pkgCount) <> " packages indexed\ESC[0m")
   outcome <-
     try (solve hp Root (mkVersion [0]))
       :: App (Either ResolveError (Either (SolveError Pkg) (Map Pkg Version)))
@@ -97,12 +117,20 @@ runSolve indexCallbacks target range = do
     Right (Left (NoSolution i)) -> liftIO $ do
       putStrLn "No solution:"
       putStrLn (reportConflict i)
-    Right (Right plan) -> liftIO $ do
-      putStrLn "Resolved:"
-      mapM_ putPlanLine (Map.toList plan)
+    Right (Right plan) -> do
+      liftIO $ do
+        putStrLn "Resolved:"
+        mapM_ putPlanLine (Map.toList plan)
+      note ("\ESC[2mResolved "
+              <> T.pack (show (length [() | (Pkg _, _) <- Map.toList plan]))
+              <> " packages\ESC[0m")
   where
     putPlanLine (Root, _)  = pure ()
     putPlanLine (Pkg n, v) = putStrLn ("  " ++ prettyShow n ++ " => " ++ prettyShow v)
+
+-- | Emit an app-level note (banner / phase / summary) to stderr.
+note :: Text -> App ()
+note t = liftIO (TIO.hPutStrLn stderr t)
 
 parseGPD :: BSL.ByteString -> Either ParseError GenericPackageDescription
 parseGPD bs =

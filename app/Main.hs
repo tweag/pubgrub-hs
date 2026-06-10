@@ -10,9 +10,11 @@ import           Control.Monad                   (when)
 import           Data.Maybe                      (fromMaybe)
 import           Data.Time.Clock                 (NominalDiffTime, UTCTime,
                                                   diffUTCTime, getCurrentTime)
-import           Distribution.PackageDescription (mkPackageName)
+import           Distribution.PackageDescription (PackageName, mkPackageName)
 import           Distribution.Parsec             (eitherParsec)
+import           Distribution.Types.PackageId    (PackageIdentifier (..))
 import           Distribution.Types.VersionRange (VersionRange)
+import           Distribution.Version            (versionNumbers)
 import           GHC.Stack                       (HasCallStack)
 import           Hackage.Security.Client         (CacheLayout (..),
                                                   KeyThreshold (..), bootstrap,
@@ -38,19 +40,30 @@ main = do
   manager <- liftIO $ newManager defaultManagerSettings
   cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
   args <- getArgs
-  case args of
-    (pkgStr : rest) -> do
-      let target = mkPackageName pkgStr
-          range = case rest of
-            [] -> VS.full
-            (r : _) -> case eitherParsec r :: Either String VersionRange of
-              Right vr -> VS.fromVersionRange vr
-              Left err -> error ("invalid version range: " ++ err)
+  case parseTarget args of
+    Nothing -> putStrLn "usage: pubgrub-hs <package>[-<version>] [version-range]"
+    Just (target, range) ->
       usingLoggerT solverSink $
         withHackage cache manager (liftIO . unLogAction hackageSink) $ \repository ->
-          withIndex repository $ \indexCallbacks ->
-            runSolve indexCallbacks target range
-    [] -> putStrLn "usage: pubgrub-hs <package> [version-range]"
+          withIndex repository $ \indexCallbacks -> do
+            idxTime <- liftIO (getModificationTime (cacheRoot cache </> fragment "01-index.tar"))
+            runSolve idxTime indexCallbacks target range
+
+-- | Parse CLI args into a target package and version range. A single
+-- @name-version@ arg (e.g. @lens-5.3.5@) means @== version@; a bare name means
+-- any version; @<name> <range>@ uses an explicit Cabal version range.
+parseTarget :: [String] -> Maybe (PackageName, VS.VersionSet)
+parseTarget [one] =
+  case eitherParsec one :: Either String PackageIdentifier of
+    Right (PackageIdentifier n v)
+      | null (versionNumbers v) -> Just (n, VS.full)
+      | otherwise               -> Just (n, VS.singleton v)
+    Left _ -> Just (mkPackageName one, VS.full)
+parseTarget (name : r : _) =
+  case eitherParsec r :: Either String VersionRange of
+    Right vr -> Just (mkPackageName name, VS.fromVersionRange vr)
+    Left _   -> Nothing
+parseTarget [] = Nothing
 
 parseURI :: (HasCallStack) => [Char] -> URI
 parseURI str = fromMaybe (error $ "failed parsing URI " ++ str) $ Network.URI.parseURI str
