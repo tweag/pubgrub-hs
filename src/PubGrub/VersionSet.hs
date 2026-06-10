@@ -25,7 +25,9 @@ import           Distribution.Types.VersionInterval (Bound (..),
                                                      LowerBound (..),
                                                      UpperBound (..),
                                                      VersionInterval (..),
-                                                     asVersionIntervals)
+                                                     asVersionIntervals,
+                                                     fromVersionIntervals,
+                                                     mkVersionIntervals)
 import           Distribution.Version               (Version, VersionRange,
                                                      anyVersion, earlierVersion,
                                                      intersectVersionRanges,
@@ -48,22 +50,13 @@ intervals (VersionSet is) = is
 fromVersionRange :: VersionRange -> VersionSet
 fromVersionRange = VersionSet . asVersionIntervals
 
--- | Convert back to a 'VersionRange' (used to delegate set arithmetic to Cabal).
--- The empty set is 'noVersion'; any other set is the union of its intervals,
--- with no 'noVersion' term.
+-- | Convert back to a 'VersionRange' (used to delegate set arithmetic to Cabal),
+-- via Cabal's own canonical 'VersionIntervals' round-trip. Our interval list is
+-- always canonical (it comes from 'asVersionIntervals'), so 'mkVersionIntervals'
+-- always succeeds; the 'noVersion' fallback is unreachable.
 toVersionRange :: VersionSet -> VersionRange
 toVersionRange (VersionSet is) =
-  case map intervalToRange is of
-    []       -> noVersion
-    (r : rs) -> foldr unionVersionRanges r rs
-  where
-    intervalToRange (VersionInterval lo hi) =
-      intersectVersionRanges (lowerToRange lo) (upperToRange hi)
-    lowerToRange (LowerBound v InclusiveBound) = orLaterVersion v
-    lowerToRange (LowerBound v ExclusiveBound) = laterVersion v
-    upperToRange NoUpperBound                  = anyVersion
-    upperToRange (UpperBound v InclusiveBound) = orEarlierVersion v
-    upperToRange (UpperBound v ExclusiveBound) = earlierVersion v
+  maybe noVersion fromVersionIntervals (mkVersionIntervals is)
 
 empty :: VersionSet
 empty = VersionSet []
