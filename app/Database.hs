@@ -38,7 +38,6 @@ data Entry e a
 
 type Database e a = Index (TVar (Entry e a))
 
-
 type Result e a = Either (Either SomeException e) a
 
 data ParseError

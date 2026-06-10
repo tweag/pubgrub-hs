@@ -14,8 +14,14 @@ common warnings
 
 library
     import:           warnings
-    exposed-modules:  MyLib
-    build-depends:    base ^>=4.21.0.0
+    exposed-modules:
+        PubGrub
+    other-modules:
+        PubGrub.Lattice
+    build-depends:
+        , base ^>=4.21.0.0
+        , containers
+        , Cabal-syntax
     hs-source-dirs:   src
     default-language: GHC2021
 
@@ -49,9 +55,6 @@ executable pubgrub-hs
         , async
         , unliftio
         , co-log
-        , ki
-        , ki-unlifted
-        , stm
         , scheduler
         , concurrent-output
         , lmdb-simple
