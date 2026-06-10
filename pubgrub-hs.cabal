@@ -63,6 +63,7 @@ executable pubgrub-hs
         , base
         , binary
         , bytestring
+        , text
         , microlens
         , mtl
         , stm
