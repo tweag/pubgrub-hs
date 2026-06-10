@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE NamedFieldPuns        #-}
 
@@ -10,6 +11,7 @@ module HackageProvider
   ) where
 
 import           Control.Exception               (Exception, throwIO)
+import           Control.Monad.IO.Class          (MonadIO, liftIO)
 import           Data.List                       (sortBy)
 import           Data.Map.Strict                 (Map)
 import qualified Data.Map.Strict                 as Map
@@ -76,7 +78,7 @@ indexVersions IndexCallbacks{indexDirectory} =
     , Just (Some (IndexPkgCabal pkgId)) <- [msIndexFile]
     ]
 
-instance DependencyProvider HackageProvider Pkg IO where
+instance MonadIO m => DependencyProvider HackageProvider Pkg m where
   chooseVersion hp pkg range = pure $ case pkg of
     Root -> Just (mkVersion [0])
     Pkg n
@@ -93,7 +95,7 @@ instance DependencyProvider HackageProvider Pkg IO where
     Pkg n
       | Map.member n (hpBoot hp) -> pure Map.empty
       | otherwise -> do
-          res <- hpLookup hp (PackageIdentifier n v)
+          res <- liftIO (hpLookup hp (PackageIdentifier n v))
           case res of
             Right gpd -> pure (Map.mapKeys Pkg (flattenDeps thePlatform theCompiler gpd))
-            Left _    -> throwIO (ResolveError n v)
+            Left _    -> liftIO (throwIO (ResolveError n v))
