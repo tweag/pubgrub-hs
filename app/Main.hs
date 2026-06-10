@@ -8,12 +8,14 @@ import           Colog                           (LogAction (..))
 import           Colog.Monad
 import           Control.Monad                   (when)
 import           Data.Maybe                      (fromMaybe)
+import           Data.Time.Clock                 (getCurrentTime)
 import           Distribution.PackageDescription (mkPackageName)
 import           Distribution.Parsec             (eitherParsec)
 import           Distribution.Types.VersionRange (VersionRange)
 import           GHC.Stack                       (HasCallStack)
 import           Hackage.Security.Client         (CacheLayout (..),
                                                   KeyThreshold (..), bootstrap,
+                                                  checkForUpdates,
                                                   requiresBootstrap)
 import           Hackage.Security.Unlifted
 import           Hackage.Security.Util.Path      (Absolute, Path, fragment,
@@ -79,6 +81,9 @@ withHackage cache manager act =
       uncheckClientErrors $ liftIO $ do
         rb <- requiresBootstrap repository
         when rb $ bootstrap repository [] (KeyThreshold 0)
+        now <- getCurrentTime
+        _ <- checkForUpdates repository (Just now)
+        pure ()
       act repository
   where
     uri = parseURI "http://hackage.haskell.org"
