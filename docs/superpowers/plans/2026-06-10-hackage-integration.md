@@ -208,7 +208,7 @@ library cabal-bridge
 In the `executable pubgrub-hs` stanza `build-depends`, add these lines:
 
 ```cabal
-        , cabal-bridge
+        , pubgrub-hs:cabal-bridge
         , process
 ```
 
@@ -224,7 +224,7 @@ In the `executable pubgrub-hs` stanza `build-depends`, add these lines:
 In the `test-suite pubgrub-hs-test` stanza, add to `build-depends`:
 
 ```cabal
-        , cabal-bridge
+        , pubgrub-hs:cabal-bridge
         , bytestring
 ```
 
