@@ -49,9 +49,13 @@ fromVersionRange :: VersionRange -> VersionSet
 fromVersionRange = VersionSet . asVersionIntervals
 
 -- | Convert back to a 'VersionRange' (used to delegate set arithmetic to Cabal).
+-- The empty set is 'noVersion'; any other set is the union of its intervals,
+-- with no 'noVersion' term.
 toVersionRange :: VersionSet -> VersionRange
 toVersionRange (VersionSet is) =
-  foldr (unionVersionRanges . intervalToRange) noVersion is
+  case map intervalToRange is of
+    []       -> noVersion
+    (r : rs) -> foldr unionVersionRanges r rs
   where
     intervalToRange (VersionInterval lo hi) =
       intersectVersionRanges (lowerToRange lo) (upperToRange hi)
