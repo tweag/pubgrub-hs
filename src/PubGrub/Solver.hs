@@ -29,7 +29,7 @@ module PubGrub.Solver
   , reportConflict
   ) where
 
-import           Data.List            (foldl', intercalate, maximumBy)
+import           Data.List            (intercalate, maximumBy)
 import           Data.Map.Strict      (Map)
 import qualified Data.Map.Strict      as Map
 import           Data.Maybe           (mapMaybe)
