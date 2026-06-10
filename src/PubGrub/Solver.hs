@@ -22,6 +22,9 @@ module PubGrub.Solver
   , conflictResolution
     -- * Unit propagation
   , unitPropagation
+    -- * Solve
+  , SolveError (..)
+  , solve
   ) where
 
 import           Data.List            (foldl', maximumBy)
@@ -217,3 +220,35 @@ unitPropagation rootPkg rootV = scan
         IAlmostSatisfied q ->
           scan incompats (addDerivation q i ps)
         _ -> step incompats ps rest
+
+-- | Failure: no solution; carries the terminal incompatibility (the root of
+-- the derivation tree, for reporting).
+newtype SolveError p = NoSolution (Incompatibility p)
+  deriving stock (Eq, Show)
+
+-- | Solve for a root package pinned to @rootV@. Returns a complete assignment
+-- or a 'SolveError'.
+solve
+  :: DependencyProvider dp p
+  => dp -> p -> Version
+  -> Either (SolveError p) (Map p Version)
+solve dp rootPkg rootV = go [notRoot rootPkg rootV] emptyPS
+  where
+    go incompats ps =
+      case unitPropagation rootPkg rootV incompats ps of
+        Left terminal -> Left (NoSolution terminal)
+        Right (incompats', ps') ->
+          case undecidedPositive ps' of
+            [] -> Right (extractSolution ps')
+            ((p, range) : _) ->
+              case chooseVersion dp p range of
+                Nothing ->
+                  -- No version available in the allowed range: ban it and let
+                  -- the next propagation turn it into a conflict.
+                  go (noVersions p range : incompats') ps'
+                Just v ->
+                  let deps = getDependencies dp p v
+                      depIncs =
+                        [ fromDependency p (VS.singleton v) (q, r)
+                        | (q, r) <- Map.toList deps ]
+                  in go (depIncs ++ incompats') (addDecision p v ps')
