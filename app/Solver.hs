@@ -40,11 +40,11 @@ import           UnliftIO                               (try)
 
 import           BootPackages                           (queryBootPackages)
 import           Database                               (ParseError (..),
-                                                         mkDatabase)
+                                                         indexEntries,
+                                                         parseEntry)
 import           HackageProvider                        (HackageProvider (..),
                                                          Pkg (..),
-                                                         ResolveError (..),
-                                                         indexVersions)
+                                                         ResolveError (..))
 import           PubGrub.Solver                         (SolveError (..),
                                                          SolverMsg (..),
                                                          reportConflict, solve)
@@ -98,15 +98,15 @@ runSolve idxTime indexCallbacks target range = do
   note "\ESC[2mQuerying GHC boot packages\x2026\ESC[0m"
   boot <- liftIO queryBootPackages
   note "\ESC[2mLoading package index\x2026\ESC[0m"
-  dblookup <- liftIO (mkDatabase indexCallbacks parseGPD)
-  let hp = HackageProvider
-        { hpVersions = indexVersions indexCallbacks
-        , hpLookup   = dblookup
-        , hpBoot     = boot
-        , hpTarget   = target
-        , hpRange    = range
+  let entries = indexEntries indexCallbacks
+      hp = HackageProvider
+        { hpEntries = entries
+        , hpParse   = parseEntry indexCallbacks parseGPD
+        , hpBoot    = boot
+        , hpTarget  = target
+        , hpRange   = range
         }
-      pkgCount = Map.size (hpVersions hp)   -- forcing this does the costly index traversal
+      pkgCount = Map.size entries   -- forcing this does the single index traversal
   note ("\ESC[2m  " <> T.pack (show pkgCount) <> " packages indexed\ESC[0m")
   outcome <-
     try (solve hp Root (mkVersion [0]))
