@@ -8,7 +8,8 @@ import           Colog                           (LogAction (..))
 import           Colog.Monad
 import           Control.Monad                   (when)
 import           Data.Maybe                      (fromMaybe)
-import           Data.Time.Clock                 (getCurrentTime)
+import           Data.Time.Clock                 (NominalDiffTime, UTCTime,
+                                                  diffUTCTime, getCurrentTime)
 import           Distribution.PackageDescription (mkPackageName)
 import           Distribution.Parsec             (eitherParsec)
 import           Distribution.Types.VersionRange (VersionRange)
@@ -18,9 +19,10 @@ import           Hackage.Security.Client         (CacheLayout (..),
                                                   checkForUpdates,
                                                   requiresBootstrap)
 import           Hackage.Security.Unlifted
-import           Hackage.Security.Util.Path      (Absolute, Path, fragment,
-                                                  fromFilePath, makeAbsolute,
-                                                  rootPath)
+import           Hackage.Security.Util.Path      (Absolute, Path, doesFileExist,
+                                                  fragment, fromFilePath,
+                                                  getModificationTime,
+                                                  makeAbsolute, rootPath, (</>))
 import           Network.HTTP.Client             (Manager,
                                                   defaultManagerSettings,
                                                   newManager)
@@ -79,8 +81,23 @@ withHackage cache manager logAction act =
         rb <- requiresBootstrap repository
         when rb $ bootstrap repository [] (KeyThreshold 0)
         now <- getCurrentTime
-        _ <- checkForUpdates repository (Just now)
-        pure ()
+        stale <- indexOlderThan oneWeek (cacheRoot cache) now
+        when stale $ do
+          _ <- checkForUpdates repository (Just now)
+          pure ()
       act repository
   where
     uri = parseURI "http://hackage.haskell.org"
+    oneWeek = 7 * 24 * 60 * 60
+
+-- | True if the cached package index is missing, or older than @maxAge@.
+-- Used to skip the (slow) Hackage index refresh on most runs.
+indexOlderThan :: NominalDiffTime -> Path Absolute -> UTCTime -> IO Bool
+indexOlderThan maxAge cacheRoot' now = do
+  let idx = cacheRoot' </> fragment "01-index.tar"
+  exists <- doesFileExist idx
+  if not exists
+    then pure True
+    else do
+      mtime <- getModificationTime idx
+      pure (diffUTCTime now mtime > maxAge)
