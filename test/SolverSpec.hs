@@ -3,6 +3,7 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 module SolverSpec (tests) where
 
+import           Colog                 (LogAction, usingLoggerT)
 import           Data.Functor.Identity (Identity, runIdentity)
 import           Data.List             (isInfixOf, sortBy)
 import           Data.Map.Strict       (Map)
@@ -23,7 +24,7 @@ instance Package String
 -- | An in-memory registry: package -> version -> its dependencies.
 newtype Registry = Registry (Map String (Map Version (Map String VersionSet)))
 
-instance DependencyProvider Registry String Identity where
+instance Monad m => DependencyProvider Registry String m where
   chooseVersion (Registry regMap) p range =
     let vs = maybe [] Map.keys (Map.lookup p regMap)
     in pure (listToMaybe (sortBy (comparing Down) (filter (VS.contains range) vs)))
@@ -35,6 +36,9 @@ v = mkVersion
 
 geq :: [Int] -> VersionSet
 geq = VS.fromVersionRange . Distribution.Version.orLaterVersion . mkVersion
+
+noLog :: LogAction Identity (SolverMsg String)
+noLog = mempty
 
 reg :: [(String, [([Int], [(String, VersionSet)])])] -> Registry
 reg xs = Registry $ Map.fromList
@@ -57,7 +61,7 @@ tests = testGroup "Solver"
 
   , testCase "trivial: root with no deps" $
       let r = reg [("root", [([1], [])])]
-      in runIdentity (solve r "root" (v [1])) @?= Right (Map.fromList [("root", v [1])])
+      in runIdentity (usingLoggerT noLog (solve r "root" (v [1]))) @?= Right (Map.fromList [("root", v [1])])
 
   , testCase "transitive: root -> a -> b" $
       let r = reg
@@ -65,7 +69,7 @@ tests = testGroup "Solver"
             , ("a",    [([1], [("b", VS.full)])])
             , ("b",    [([1], [])])
             ]
-      in runIdentity (solve r "root" (v [1]))
+      in runIdentity (usingLoggerT noLog (solve r "root" (v [1])))
            @?= Right (Map.fromList [("root", v [1]), ("a", v [1]), ("b", v [1])])
 
   , testCase "backtracking: newest a (2) conflicts, falls back to a (1)" $
@@ -75,7 +79,7 @@ tests = testGroup "Solver"
                     , ([1], [("b", VS.full)]) ])
             , ("b", [ ([2], []), ([1], []) ])
             ]
-      in runIdentity (solve r "root" (v [1]))
+      in runIdentity (usingLoggerT noLog (solve r "root" (v [1])))
            @?= Right (Map.fromList [("root", v [1]), ("a", v [1]), ("b", v [2])])
 
   , testCase "unsat: conflicting text requirements (report mentions text)" $
@@ -85,7 +89,7 @@ tests = testGroup "Solver"
             , ("servant", [([0,20], [("text", VS.fromVersionRange (Distribution.Version.earlierVersion (mkVersion [2,0])))])])
             , ("text", [([2,0], []), ([1,2], [])])
             ]
-      in case runIdentity (solve r "root" (v [1])) of
+      in case runIdentity (usingLoggerT noLog (solve r "root" (v [1]))) of
            Right s -> assertBool ("expected unsat, got " ++ show s) False
            Left (NoSolution i) ->
              let msg = reportConflict i
@@ -97,7 +101,7 @@ tests = testGroup "Solver"
             [ ("root", [([1], [("a", geq [5])])])
             , ("a", [([1], [])])
             ]
-      in case runIdentity (solve r "root" (v [1])) of
+      in case runIdentity (usingLoggerT noLog (solve r "root" (v [1]))) of
            Left _  -> pure ()
            Right s -> assertBool ("expected unsat, got " ++ show s) False
   ]

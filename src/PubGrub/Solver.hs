@@ -1,6 +1,6 @@
 {-# LANGUAGE DerivingStrategies     #-}
+{-# LANGUAGE FlexibleContexts       #-}
 {-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE MultiParamTypeClasses  #-}
 {-# LANGUAGE NamedFieldPuns         #-}
 
 module PubGrub.Solver
@@ -24,6 +24,7 @@ module PubGrub.Solver
   , unitPropagation
     -- * Solve
   , SolveError (..)
+  , SolverMsg (..)
   , solve
     -- * Reporting
   , reportConflict
@@ -36,6 +37,7 @@ import           Data.Maybe           (mapMaybe)
 import           Data.Ord             (comparing)
 import           Distribution.Version (Version)
 
+import           Colog                (WithLog, logMsg)
 import           PubGrub.Types
 import           PubGrub.VersionSet   (VersionSet)
 import qualified PubGrub.VersionSet   as VS
@@ -229,10 +231,17 @@ unitPropagation rootPkg rootV = scan
 newtype SolveError p = NoSolution (Incompatibility p)
   deriving stock (Eq, Show)
 
+-- | Structured progress events emitted during resolution.
+data SolverMsg p
+  = Deciding p VersionSet      -- ^ about to choose a version for p within this range
+  | Chose p Version            -- ^ picked this version for p
+  | NoVersionFor p VersionSet  -- ^ no version available in range (forces a conflict next)
+  deriving stock (Eq, Show)
+
 -- | Solve for a root package pinned to @rootV@. Returns a complete assignment
--- or a 'SolveError'.
+-- or a 'SolveError'. Emits decision-level progress via co-log.
 solve
-  :: DependencyProvider dp p m
+  :: (DependencyProvider dp p m, WithLog env (SolverMsg p) m)
   => dp -> p -> Version
   -> m (Either (SolveError p) (Map p Version))
 solve dp rootPkg rootV = go [notRoot rootPkg rootV] emptyPS
@@ -244,13 +253,14 @@ solve dp rootPkg rootV = go [notRoot rootPkg rootV] emptyPS
           case undecidedPositive ps' of
             [] -> pure (Right (extractSolution ps'))
             ((p, range) : _) -> do
+              logMsg (Deciding p range)
               mv <- chooseVersion dp p range
               case mv of
-                Nothing ->
-                  -- No version available in the allowed range: ban it and let
-                  -- the next propagation turn it into a conflict.
+                Nothing -> do
+                  logMsg (NoVersionFor p range)
                   go (noVersions p range : incompats') ps'
                 Just v -> do
+                  logMsg (Chose p v)
                   deps <- getDependencies dp p v
                   let depIncs =
                         [ fromDependency p (VS.singleton v) (q, r)
