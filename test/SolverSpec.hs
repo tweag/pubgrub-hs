@@ -3,8 +3,9 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 module SolverSpec (tests) where
 
-import           Colog                 (LogAction, usingLoggerT)
+import           Colog                 (LogAction (..), usingLoggerT)
 import           Data.Functor.Identity (Identity, runIdentity)
+import           Data.IORef            (modifyIORef', newIORef, readIORef)
 import           Data.List             (isInfixOf, sortBy)
 import           Data.Map.Strict       (Map)
 import qualified Data.Map.Strict       as Map
@@ -62,6 +63,16 @@ tests = testGroup "Solver"
   , testCase "trivial: root with no deps" $
       let r = reg [("root", [([1], [])])]
       in runIdentity (usingLoggerT noLog (solve r "root" (v [1]))) @?= Right (Map.fromList [("root", v [1])])
+
+  , testCase "trace emits Chose events for resolved packages" $ do
+      ref <- newIORef ([] :: [SolverMsg String])
+      let r = reg [ ("root", [([1], [("a", VS.full)])])
+                  , ("a",    [([1], [])]) ]
+          collect = LogAction (\m -> modifyIORef' ref (++ [m]))
+      _ <- usingLoggerT collect (solve r "root" (v [1]))
+      evs <- readIORef ref
+      assertBool ("expected Chose for root and a, got: " ++ show evs)
+        (Chose "root" (v [1]) `elem` evs && Chose "a" (v [1]) `elem` evs)
 
   , testCase "transitive: root -> a -> b" $
       let r = reg

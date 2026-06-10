@@ -178,20 +178,7 @@ import Colog (usingLoggerT)
 
 - [ ] **Step 6: Wrap the five `solve` call sites in a no-op logger**
 
-Bare `usingLoggerT mempty` leaves the message type ambiguous (GHC can't infer `msg`
-from the result), so add a typed helper to `test/SolverSpec.hs` (and import `LogAction`):
-
-```haskell
-import Colog (LogAction, usingLoggerT)
-
-noLog :: LogAction Identity (SolverMsg String)
-noLog = mempty
-```
-
-Then replace each `runIdentity (solve r "root" (v [1]))` with
-`runIdentity (usingLoggerT noLog (solve r "root" (v [1])))`. There are five
-occurrences (trivial, transitive, backtracking — direct; and the two unsat cases inside
-`case … of`). Use `grep -n "solve r" test/SolverSpec.hs` to confirm all five are wrapped.
+In `test/SolverSpec.hs`, replace each `runIdentity (solve r "root" (v [1]))` with `runIdentity (usingLoggerT mempty (solve r "root" (v [1])))`. There are five occurrences (trivial, transitive, backtracking — direct; and the two unsat cases inside `case … of`). Use `grep -n "solve r" test/SolverSpec.hs` to confirm all five are wrapped.
 
 - [ ] **Step 7: Build + run the suite (offline)**
 
