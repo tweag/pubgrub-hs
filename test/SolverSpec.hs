@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 module SolverSpec (tests) where
 
 import           Data.List            (isInfixOf, sortBy)
@@ -22,11 +23,11 @@ instance Package String
 newtype Registry = Registry (Map String (Map Version (Map String VersionSet)))
 
 instance DependencyProvider Registry String where
-  chooseVersion (Registry reg) p range =
-    let vs = maybe [] Map.keys (Map.lookup p reg)
+  chooseVersion (Registry regMap) p range =
+    let vs = maybe [] Map.keys (Map.lookup p regMap)
     in listToMaybe (sortBy (comparing Down) (filter (VS.contains range) vs))
-  getDependencies (Registry reg) p v =
-    Map.findWithDefault Map.empty v (Map.findWithDefault Map.empty p reg)
+  getDependencies (Registry regMap) p ver =
+    Map.findWithDefault Map.empty ver (Map.findWithDefault Map.empty p regMap)
 
 v :: [Int] -> Version
 v = mkVersion

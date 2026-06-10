@@ -376,8 +376,8 @@ tests = testGroup "VersionSet"
       VS.contains (VS.singleton v) v
         .&&. conjoinV (\w -> if w == v then property True
                              else VS.contains (VS.singleton v) w === False)
-  , testProperty "subsetOf agrees with membership" $ \(a :: VersionSet) (b :: VersionSet) ->
-      VS.subsetOf a b === all (\v -> not (VS.contains a v) || VS.contains b v) sampleVersions
+  , testProperty "subsetOf agrees with intersection" $ \(a :: VersionSet) (b :: VersionSet) ->
+      VS.subsetOf a b === (VS.intersection a b == a)
   , testGroup "Lattice laws"
       [ testProperty "union commutative" $ \(a :: VersionSet) b -> VS.union a b === VS.union b a
       , testProperty "intersection commutative" $ \(a :: VersionSet) b -> VS.intersection a b === VS.intersection b a
