@@ -2,43 +2,51 @@
 {-# LANGUAGE FlexibleContexts       #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE NamedFieldPuns         #-}
+{-# LANGUAGE OverloadedStrings      #-}
 {-# LANGUAGE ScopedTypeVariables    #-}
 
 module PubGrub.Solver
   ( -- * Provider
-    DependencyProvider (..)
-    -- * Partial solution
-  , Assignment (..)
-  , assignmentTerm
-  , PartialSolution (..)
-  , emptyPS
-  , addDecision
-  , addDerivation
-  , backtrack
-  , termIntersectionForPackage
-  , relation
-  , extractSolution
-  , undecidedPositive
-    -- * Conflict resolution
-  , conflictResolution
-    -- * Unit propagation
-  , unitPropagation
-    -- * Solve
-  , SolveError (..)
-  , SolverMsg (..)
-  , solve
-    -- * Reporting
-  , reportConflict
-  ) where
+    DependencyProvider (..),
 
-import           Data.List            (intercalate, maximumBy)
-import           Data.Map.Strict      (Map)
-import qualified Data.Map.Strict      as Map
-import           Data.Maybe           (mapMaybe)
-import           Data.Ord             (comparing)
-import           Distribution.Version (Version)
+    -- * Partial solution
+    Assignment (..),
+    assignmentTerm,
+    PartialSolution (..),
+    emptyPS,
+    addDecision,
+    addDerivation,
+    backtrack,
+    termIntersectionForPackage,
+    relation,
+    extractSolution,
+    undecidedPositive,
+
+    -- * Conflict resolution
+    conflictResolution,
+
+    -- * Unit propagation
+    unitPropagation,
+
+    -- * Solve
+    SolveError (..),
+    SolverMsg (..),
+    solve,
+
+    -- * Reporting
+    reportConflict,
+  )
+where
 
 import           Colog                (WithLog, logMsg)
+import           Data.List            (maximumBy)
+import           Data.Map.Strict      (Map)
+import qualified Data.Map.Strict      as Map
+import           Data.Maybe           (fromMaybe, mapMaybe)
+import           Data.Ord             (comparing)
+import           Data.Text            (Text)
+import qualified Data.Text            as T
+import           Distribution.Version (Version)
 import           PubGrub.Types
 import           PubGrub.VersionSet   (VersionSet)
 import qualified PubGrub.VersionSet   as VS
@@ -46,148 +54,160 @@ import qualified PubGrub.VersionSet   as VS
 -- | The oracle: pick a version in a range and report a version's dependencies.
 -- Effects (e.g. lazy index loading) run in the monad @m@.
 class (Package p, Monad m) => DependencyProvider dp p m | dp -> p where
-  chooseVersion   :: dp -> p -> VersionSet -> m (Maybe Version)
+  chooseVersion :: dp -> p -> VersionSet -> m (Maybe Version)
   getDependencies :: dp -> p -> Version -> m (Map p VersionSet)
 
 -- | A single entry in the partial solution.
 data Assignment p
   = Decision
-      { aIndex   :: !Int
-      , aLevel   :: !Int
-      , aPackage :: p
-      , aVersion :: Version
+      { aIndex   :: !Int,
+        aLevel   :: !Int,
+        aPackage :: p,
+        aVersion :: Version
       }
   | Derivation
-      { aIndex   :: !Int
-      , aLevel   :: !Int
-      , aPackage :: p
-      , aTerm    :: Term
-      , aCause   :: Incompatibility p
+      { aIndex   :: !Int,
+        aLevel   :: !Int,
+        aPackage :: p,
+        aTerm    :: Term,
+        aCause   :: Incompatibility p
       }
   deriving stock (Show)
 
 -- | The term contributed by an assignment.
 assignmentTerm :: Assignment p -> Term
-assignmentTerm Decision{aVersion} = exactTerm aVersion
-assignmentTerm Derivation{aTerm}  = aTerm
+assignmentTerm Decision {aVersion} = exactTerm aVersion
+assignmentTerm Derivation {aTerm}  = aTerm
 
 -- | Assignments are stored newest-first; @psLevel@ is the current decision
 -- level; @psNextIndex@ is a monotone counter giving chronological order.
 data PartialSolution p = PartialSolution
-  { psAssignments :: [Assignment p]
-  , psLevel       :: !Int
-  , psNextIndex   :: !Int
+  { psAssignments :: [Assignment p],
+    psLevel       :: !Int,
+    psNextIndex   :: !Int
   }
   deriving stock (Show)
 
 emptyPS :: PartialSolution p
-emptyPS = PartialSolution { psAssignments = [], psLevel = 0, psNextIndex = 0 }
+emptyPS = PartialSolution {psAssignments = [], psLevel = 0, psNextIndex = 0}
 
 -- | Record a decision (a guess); increments the decision level.
 addDecision :: p -> Version -> PartialSolution p -> PartialSolution p
-addDecision p v ps@PartialSolution{psAssignments, psLevel, psNextIndex} =
-  ps { psAssignments = Decision psNextIndex (psLevel + 1) p v : psAssignments
-     , psLevel = psLevel + 1
-     , psNextIndex = psNextIndex + 1
-     }
+addDecision p v ps@PartialSolution {psAssignments, psLevel, psNextIndex} =
+  ps
+    { psAssignments = Decision psNextIndex (psLevel + 1) p v : psAssignments,
+      psLevel = psLevel + 1,
+      psNextIndex = psNextIndex + 1
+    }
 
 -- | Record a derivation: the negation of @cause@'s term for @p@, at the
 -- current level.
-addDerivation :: Ord p => p -> Incompatibility p -> PartialSolution p -> PartialSolution p
-addDerivation p cause ps@PartialSolution{psAssignments, psLevel, psNextIndex} =
+addDerivation :: (Ord p) => p -> Incompatibility p -> PartialSolution p -> PartialSolution p
+addDerivation p cause ps@PartialSolution {psAssignments, psLevel, psNextIndex} =
   let term = maybe anyTerm negateTerm (incompGet p cause)
-  in ps { psAssignments = Derivation psNextIndex psLevel p term cause : psAssignments
-        , psNextIndex = psNextIndex + 1
+   in ps
+        { psAssignments = Derivation psNextIndex psLevel p term cause : psAssignments,
+          psNextIndex = psNextIndex + 1
         }
 
 -- | Backtrack: drop every assignment strictly above the target level.
 backtrack :: Int -> PartialSolution p -> PartialSolution p
-backtrack level ps@PartialSolution{psAssignments} =
-  ps { psAssignments = filter ((<= level) . aLevel) psAssignments
-     , psLevel = level
-     }
+backtrack level ps@PartialSolution {psAssignments} =
+  ps
+    { psAssignments = filter ((<= level) . aLevel) psAssignments,
+      psLevel = level
+    }
 
 -- | Intersection of all terms recorded for a package (Nothing if absent).
-termIntersectionForPackage :: Ord p => PartialSolution p -> p -> Maybe Term
-termIntersectionForPackage PartialSolution{psAssignments} p =
-  case [ assignmentTerm a | a <- psAssignments, aPackage a == p ] of
+termIntersectionForPackage :: (Ord p) => PartialSolution p -> p -> Maybe Term
+termIntersectionForPackage PartialSolution {psAssignments} p =
+  case [assignmentTerm a | a <- psAssignments, aPackage a == p] of
     []       -> Nothing
     (t : ts) -> Just (foldl' intersectTerms t ts)
 
 -- | Relation of the whole partial solution to an incompatibility.
-relation :: Ord p => PartialSolution p -> Incompatibility p -> IncompatRelation p
+relation :: (Ord p) => PartialSolution p -> Incompatibility p -> IncompatRelation p
 relation ps = incompRelation (termIntersectionForPackage ps)
 
 -- | The decisions, as a solution map.
-extractSolution :: Ord p => PartialSolution p -> Map p Version
-extractSolution PartialSolution{psAssignments} =
-  Map.fromList [ (aPackage a, aVersion a) | a@Decision{} <- psAssignments ]
+extractSolution :: (Ord p) => PartialSolution p -> Map p Version
+extractSolution PartialSolution {psAssignments} =
+  Map.fromList [(aPackage a, aVersion a) | a@Decision {} <- psAssignments]
 
 -- | Packages that have a positive accumulated term but no decision yet,
 -- with that positive range. Chronological (oldest first) for determinism.
-undecidedPositive :: Ord p => PartialSolution p -> [(p, VersionSet)]
-undecidedPositive ps@PartialSolution{psAssignments} =
-  let decided = [ aPackage a | a@Decision{} <- psAssignments ]
-      pkgs = uniqueOldestFirst [ aPackage a | a <- reverse psAssignments ]
-  in mapMaybe positive (filter (`notElem` decided) pkgs)
+undecidedPositive :: (Ord p) => PartialSolution p -> [(p, VersionSet)]
+undecidedPositive ps@PartialSolution {psAssignments} =
+  let decided = [aPackage a | a@Decision {} <- psAssignments]
+      pkgs = uniqueOldestFirst [aPackage a | a <- reverse psAssignments]
+   in mapMaybe positive (filter (`notElem` decided) pkgs)
   where
     positive p = case termIntersectionForPackage ps p of
       Just (Positive r) -> Just (p, r)
       _                 -> Nothing
     uniqueOldestFirst = go []
-      where go seen [] = reverse seen
-            go seen (x:xs) | x `elem` seen = go seen xs
-                           | otherwise     = go (x:seen) xs
+      where
+        go seen [] = reverse seen
+        go seen (x : xs)
+          | x `elem` seen = go seen xs
+          | otherwise = go (x : seen) xs
 
 -- | All assignments for a package, oldest first.
-packageHistory :: Ord p => PartialSolution p -> p -> [Assignment p]
-packageHistory PartialSolution{psAssignments} p =
-  reverse [ a | a <- psAssignments, aPackage a == p ]
+packageHistory :: (Ord p) => PartialSolution p -> p -> [Assignment p]
+packageHistory PartialSolution {psAssignments} p =
+  reverse [a | a <- psAssignments, aPackage a == p]
 
 -- | Earliest assignment of @p@ whose running accumulated term becomes disjoint
 -- from @startTerm@.
 -- Precondition: such an assignment exists (guaranteed during conflict resolution).
-satisfierOf :: Ord p => PartialSolution p -> p -> Term -> Assignment p
+satisfierOf :: (Ord p) => PartialSolution p -> p -> Term -> Assignment p
 satisfierOf ps p startTerm = go anyTerm (packageHistory ps p)
   where
     go _ [] = error "satisfierOf: no satisfier (precondition violated)"
     go acc (a : as) =
       let acc' = intersectTerms acc (assignmentTerm a)
-      in if termIsDisjoint acc' startTerm then a else go acc' as
+       in if termIsDisjoint acc' startTerm then a else go acc' as
 
 -- | Result of searching for the satisfier of a conflict incompatibility.
 data SatisfierSearch p
-  = DifferentDecisionLevels !Int               -- ^ backtrack to this level
-  | SameDecisionLevels (Incompatibility p)      -- ^ satisfier's cause
+  = -- | backtrack to this level
+    DifferentDecisionLevels !Int
+  | -- | satisfier's cause
+    SameDecisionLevels (Incompatibility p)
 
 -- | The satisfier of an incompatibility is the latest of its terms' satisfiers.
 -- When the satisfier is a derivation and the previous satisfier sits at its
 -- level, resolution continues with the satisfier's cause; otherwise it
 -- backtracks to the previous satisfier's level (at least 1).
-satisfierSearch :: Ord p => PartialSolution p -> Incompatibility p -> (p, SatisfierSearch p)
+satisfierSearch :: (Ord p) => PartialSolution p -> Incompatibility p -> (p, SatisfierSearch p)
 satisfierSearch ps i =
-  let satMap = [ (p, satisfierOf ps p (negateTerm it))
-               | (p, it) <- Map.toList (incompTerms i) ]
+  let satMap =
+        [ (p, satisfierOf ps p (negateTerm it))
+        | (p, it) <- Map.toList (incompTerms i)
+        ]
       (satPkg, satAssign) = maximumBy (comparing (aIndex . snd)) satMap
       satLevel = aLevel satAssign
-      it_s = maybe anyTerm id (incompGet satPkg i)
+      it_s = fromMaybe anyTerm (incompGet satPkg i)
       startTerm' = intersectTerms (assignmentTerm satAssign) (negateTerm it_s)
       prevForSat = satisfierOf ps satPkg startTerm'
-      satMap' = [ (p, if p == satPkg then prevForSat else a) | (p, a) <- satMap ]
+      satMap' = [(p, if p == satPkg then prevForSat else a) | (p, a) <- satMap]
       prevLevel = max 1 (aLevel (snd (maximumBy (comparing (aIndex . snd)) satMap')))
-  in case satAssign of
-       Derivation{aCause}
-         | prevLevel >= satLevel -> (satPkg, SameDecisionLevels aCause)
-       _ -> (satPkg, DifferentDecisionLevels prevLevel)
+   in case satAssign of
+        Derivation {aCause}
+          | prevLevel >= satLevel -> (satPkg, SameDecisionLevels aCause)
+        _ -> (satPkg, DifferentDecisionLevels prevLevel)
 
 -- | Conflict resolution loop. Returns either the terminal (unsatisfiable)
 -- incompatibility, or @(almostPackage, rootCause, backtrackedSolution)@.
-conflictResolution
-  :: Ord p
-  => p -> Version           -- ^ root package and version (for is-terminal)
-  -> Incompatibility p      -- ^ the satisfied (conflict) incompatibility
-  -> PartialSolution p
-  -> Either (Incompatibility p) (p, Incompatibility p, PartialSolution p)
+conflictResolution ::
+  (Ord p) =>
+  p ->
+  -- | root package and version (for is-terminal)
+  Version ->
+  -- | the satisfied (conflict) incompatibility
+  Incompatibility p ->
+  PartialSolution p ->
+  Either (Incompatibility p) (p, Incompatibility p, PartialSolution p)
 conflictResolution rootPkg rootV = loop
   where
     loop current ps
@@ -203,27 +223,29 @@ conflictResolution rootPkg rootV = loop
 -- fixpoint, logging 'Conflict' and 'Backtracked' as they happen. The monad is
 -- constrained only by 'WithLog', not @MonadIO@, so the loop can log but cannot
 -- perform other I/O.
-unitPropagation
-  :: forall p env m. (Ord p, WithLog env (SolverMsg p) m)
-  => p -> Version
-  -> [Incompatibility p]
-  -> PartialSolution p
-  -> m (Either (Incompatibility p) ([Incompatibility p], PartialSolution p))
+unitPropagation ::
+  forall p env m.
+  (Ord p, WithLog env (SolverMsg p) m) =>
+  p ->
+  Version ->
+  [Incompatibility p] ->
+  PartialSolution p ->
+  m (Either (Incompatibility p) ([Incompatibility p], PartialSolution p))
 unitPropagation rootPkg rootV = scan
   where
-    scan
-      :: [Incompatibility p]
-      -> PartialSolution p
-      -> m (Either (Incompatibility p) ([Incompatibility p], PartialSolution p))
+    scan ::
+      [Incompatibility p] ->
+      PartialSolution p ->
+      m (Either (Incompatibility p) ([Incompatibility p], PartialSolution p))
     scan incompats ps = step incompats ps incompats
 
     -- Walk the worklist of incompatibilities once; on any action, restart scan.
-    step
-      :: [Incompatibility p]
-      -> PartialSolution p
-      -> [Incompatibility p]
-      -> m (Either (Incompatibility p) ([Incompatibility p], PartialSolution p))
-    step incompats ps [] = pure (Right (incompats, ps))   -- fixpoint
+    step ::
+      [Incompatibility p] ->
+      PartialSolution p ->
+      [Incompatibility p] ->
+      m (Either (Incompatibility p) ([Incompatibility p], PartialSolution p))
+    step incompats ps [] = pure (Right (incompats, ps)) -- fixpoint
     step incompats ps (i : rest) =
       case relation ps i of
         ISatisfied -> do
@@ -245,19 +267,26 @@ newtype SolveError p = NoSolution (Incompatibility p)
 
 -- | Structured progress events emitted during resolution.
 data SolverMsg p
-  = Deciding p VersionSet      -- ^ about to choose a version for p within this range
-  | Chose p Version            -- ^ picked this version for p
-  | NoVersionFor p VersionSet  -- ^ no version available in range (forces a conflict next)
-  | Conflict (Incompatibility p) -- ^ this incompatibility is satisfied (a conflict)
-  | Backtracked Int            -- ^ backtracked to this decision level
+  = -- | about to choose a version for p within this range
+    Deciding p VersionSet
+  | -- | picked this version for p
+    Chose p Version
+  | -- | no version available in range (forces a conflict next)
+    NoVersionFor p VersionSet
+  | -- | this incompatibility is satisfied (a conflict)
+    Conflict (Incompatibility p)
+  | -- | backtracked to this decision level
+    Backtracked Int
   deriving stock (Eq, Show)
 
 -- | Solve for a root package pinned to @rootV@. Returns a complete assignment
 -- or a 'SolveError'. Emits decision-level progress via co-log.
-solve
-  :: (DependencyProvider dp p m, WithLog env (SolverMsg p) m)
-  => dp -> p -> Version
-  -> m (Either (SolveError p) (Map p Version))
+solve ::
+  (DependencyProvider dp p m, WithLog env (SolverMsg p) m) =>
+  dp ->
+  p ->
+  Version ->
+  m (Either (SolveError p) (Map p Version))
 solve dp rootPkg rootV = go [notRoot rootPkg rootV] emptyPS
   where
     go incompats ps = do
@@ -279,31 +308,40 @@ solve dp rootPkg rootV = go [notRoot rootPkg rootV] emptyPS
                   deps <- getDependencies dp p v
                   let depIncs =
                         [ fromDependency p (VS.singleton v) (q, r)
-                        | (q, r) <- Map.toList deps ]
+                        | (q, r) <- Map.toList deps
+                        ]
                   go (depIncs ++ incompats') (addDecision p v ps')
 
 -- | Render an incompatibility (and its derivation, if any) as a human-readable
 -- proof. Leaves describe external facts. A subderivation used twice is
 -- written out twice, not numbered and referred back to.
-reportConflict :: (Package p) => Incompatibility p -> String
+reportConflict :: (Package p) => Incompatibility p -> Text
 reportConflict = render
   where
     render i = case incompCause i of
       DerivedFrom c1 c2 ->
-        "Because " ++ render c1 ++ " and " ++ render c2
-          ++ ", " ++ summary i ++ "."
+        "Because "
+          <> render c1
+          <> " and "
+          <> render c2
+          <> ", "
+          <> summary i
+          <> "."
       _ -> summary i
 
     summary i = case Map.toList (incompTerms i) of
       [] -> "version solving failed"
-      [(p, Positive r)] -> show p ++ " " ++ showVS r ++ " is forbidden"
-      [(p, Negative r)] -> show p ++ " " ++ showVS r ++ " is mandatory"
+      [(p, Positive r)] -> showText p <> " " <> showVS r <> " is forbidden"
+      [(p, Negative r)] -> showText p <> " " <> showVS r <> " is mandatory"
       [(p1, Positive r1), (p2, Negative r2)] -> dep p1 r1 p2 r2
       [(p2, Negative r2), (p1, Positive r1)] -> dep p1 r1 p2 r2
-      terms -> intercalate ", " [ showTerm p t | (p, t) <- terms ] ++ " are incompatible"
+      terms -> T.intercalate ", " [showTerm p t | (p, t) <- terms] <> " are incompatible"
 
     dep p1 r1 p2 r2 =
-      show p1 ++ " " ++ showVS r1 ++ " depends on " ++ show p2 ++ " " ++ showVS r2
-    showTerm p (Positive r) = show p ++ " " ++ showVS r
-    showTerm p (Negative r) = show p ++ " not " ++ showVS r
-    showVS = show . VS.intervals
+      showText p1 <> " " <> showText r1 <> " depends on " <> showText p2 <> " " <> showText r2
+    showTerm p (Positive r) = showText p <> " " <> showText r
+    showTerm p (Negative r) = showText p <> " not " <> showText r
+    showVS = foldMap showText . VS.intervals
+
+showText :: Show a => a -> Text
+showText = T.pack . show

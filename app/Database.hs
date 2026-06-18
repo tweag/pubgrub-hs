@@ -10,17 +10,10 @@ import           Data.Map                        (Map)
 import qualified Data.Map.Strict                 as M
 
 import           Control.Exception               (SomeException)
-import qualified Data.ByteString.Lazy            as BSL
 import           Distribution.Fields
 import           Distribution.PackageDescription
 import qualified Distribution.Types.Lens         as L
 import           Distribution.Version            (Version)
-import           Hackage.Security.Client         (Directory (..),
-                                                  IndexCallbacks (..),
-                                                  IndexFile (..),
-                                                  uncheckClientErrors)
-import           Hackage.Security.Trusted        (trusted)
-import           Hackage.Security.Util.Some      (Some (..))
 
 type Result e a = Either (Either SomeException e) a
 
@@ -28,27 +21,6 @@ data ParseError
     = ParseError (Maybe Version) (NonEmpty PError)
     | ParseException SomeException
     deriving Show
-
--- | The index as package -> versions, in one pure pass. The name and version
--- come from the decoded 'IndexPkgCabal', so no .cabal file or path is parsed.
-indexVersions :: IndexCallbacks -> Map PackageName [Version]
-indexVersions IndexCallbacks{indexDirectory} =
-    M.fromListWith (++)
-        [ (pkgName pkgId, [pkgVersion pkgId])
-        | (_entry, _indexPath, msIndexFile) <- directoryEntries indexDirectory
-        , Just (Some (IndexPkgCabal pkgId)) <- [msIndexFile]
-        ]
-
--- | Fetch and parse a specific package version's .cabal on demand, by
--- 'PackageIdentifier' — a targeted index lookup, no directory enumeration.
-lookupCabal
-    :: IndexCallbacks
-    -> (BSL.ByteString -> Either e a)
-    -> PackageIdentifier
-    -> IO (Either e a)
-lookupCabal IndexCallbacks{indexLookupCabal} parse pid = do
-    bytes <- uncheckClientErrors (indexLookupCabal pid)
-    return $ parse (trusted bytes)
 
 -- Unused. Kept for the conditional-dependency work (flags, OS, architecture).
 newtype DepInfo = DepInfo (Map ComponentName (CondTree ConfVar [Dependency] ()))

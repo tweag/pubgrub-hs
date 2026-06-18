@@ -1,25 +1,26 @@
 {-# LANGUAGE DerivingStrategies #-}
 
--- | A version set: a canonical, sorted, disjoint, non-adjacent collection of
--- version intervals. Backed by Cabal's 'VersionInterval' so that derived
--- structural equality coincides with semantic equality.
-module PubGrub.VersionSet
-  ( VersionSet
-  , empty
-  , full
-  , singleton
-  , fromVersionRange
-  , toVersionRange
-  , complement
-  , union
-  , intersection
-  , contains
-  , isEmpty
-  , isFull
-  , subsetOf
-  , isDisjoint
-  , intervals
-  ) where
+{- | A version set: a canonical, sorted, disjoint, non-adjacent collection of
+version intervals. Backed by Cabal's 'VersionInterval' so that derived
+structural equality coincides with semantic equality.
+-}
+module PubGrub.VersionSet (
+    VersionSet,
+    empty,
+    full,
+    singleton,
+    fromVersionRange,
+    toVersionRange,
+    complement,
+    union,
+    intersection,
+    contains,
+    isEmpty,
+    isFull,
+    subsetOf,
+    isDisjoint,
+    intervals,
+) where
 
 import           Distribution.Types.VersionInterval (Bound (..),
                                                      LowerBound (..),
@@ -40,7 +41,7 @@ import           Distribution.Version               (Version, VersionRange,
 import           PubGrub.Lattice                    (Lattice (..))
 
 newtype VersionSet = VersionSet [VersionInterval]
-  deriving stock (Eq, Show)
+    deriving stock (Eq, Show)
 
 -- | The raw canonical interval list (for testing / reporting).
 intervals :: VersionSet -> [VersionInterval]
@@ -50,13 +51,14 @@ intervals (VersionSet is) = is
 fromVersionRange :: VersionRange -> VersionSet
 fromVersionRange = VersionSet . asVersionIntervals
 
--- | Convert back to a 'VersionRange' (used to delegate set arithmetic to Cabal),
--- via Cabal's own canonical 'VersionIntervals' round-trip. Our interval list is
--- always canonical (it comes from 'asVersionIntervals'), so 'mkVersionIntervals'
--- always succeeds; the 'noVersion' fallback is unreachable.
+{- | Convert back to a 'VersionRange' (used to delegate set arithmetic to Cabal),
+via Cabal's own canonical 'VersionIntervals' round-trip. Our interval list is
+always canonical (it comes from 'asVersionIntervals'), so 'mkVersionIntervals'
+always succeeds; the 'noVersion' fallback is unreachable.
+-}
 toVersionRange :: VersionSet -> VersionRange
 toVersionRange (VersionSet is) =
-  maybe noVersion fromVersionIntervals (mkVersionIntervals is)
+    maybe noVersion fromVersionIntervals (mkVersionIntervals is)
 
 empty :: VersionSet
 empty = VersionSet []
@@ -77,15 +79,15 @@ intersection a b = fromVersionRange (intersectVersionRanges (toVersionRange a) (
 -- | The versions not in the set.
 complement :: VersionSet -> VersionSet
 complement (VersionSet is) =
-  fromVersionRange (foldr (intersectVersionRanges . complementInterval) anyVersion is)
+    fromVersionRange (foldr (intersectVersionRanges . complementInterval) anyVersion is)
   where
     complementInterval (VersionInterval lo hi) =
-      unionVersionRanges (belowLower lo) (aboveUpper hi)
-    belowLower (LowerBound v InclusiveBound) = earlierVersion v   -- < v
+        unionVersionRanges (belowLower lo) (aboveUpper hi)
+    belowLower (LowerBound v InclusiveBound) = earlierVersion v -- < v
     belowLower (LowerBound v ExclusiveBound) = orEarlierVersion v -- <= v
-    aboveUpper NoUpperBound                  = noVersion                           -- nothing above
-    aboveUpper (UpperBound v InclusiveBound) = laterVersion v     -- > v
-    aboveUpper (UpperBound v ExclusiveBound) = orLaterVersion v   -- >= v
+    aboveUpper NoUpperBound                  = noVersion -- nothing above
+    aboveUpper (UpperBound v InclusiveBound) = laterVersion v -- > v
+    aboveUpper (UpperBound v ExclusiveBound) = orLaterVersion v -- >= v
 
 contains :: VersionSet -> Version -> Bool
 contains (VersionSet is) v = any inside is
@@ -112,5 +114,5 @@ isDisjoint :: VersionSet -> VersionSet -> Bool
 isDisjoint a b = isEmpty (intersection a b)
 
 instance Lattice VersionSet where
-  (\/) = union
-  (/\) = intersection
+    (\/) = union
+    (/\) = intersection

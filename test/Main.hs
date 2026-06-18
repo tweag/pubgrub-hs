@@ -7,9 +7,12 @@ import           Test.Tasty     (defaultMain, testGroup)
 import qualified VersionSetSpec
 
 main :: IO ()
-main = defaultMain $ testGroup "pubgrub-hs"
-  [ VersionSetSpec.tests
-  , SolverSpec.tests
-  , FlattenSpec.tests
-  , BootSpec.tests
-  ]
+main =
+    defaultMain $
+        testGroup
+            "pubgrub-hs"
+            [ VersionSetSpec.tests
+            , SolverSpec.tests
+            , FlattenSpec.tests
+            , BootSpec.tests
+            ]

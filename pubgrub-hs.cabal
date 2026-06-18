@@ -48,12 +48,14 @@ executable pubgrub-hs
     import:           warnings
     main-is:          Main.hs
     other-modules:
-        HttpClient
-        Hackage.Security.Unlifted
-        Database
-        Solver
-        HackageProvider
         BootPackages
+        Database
+        HackageProvider
+        Hackage
+        Hackage.Security.Unlifted
+        HttpClient
+        Solver
+        Utils
     build-depends:
         , pubgrub-hs
         , pubgrub-hs:cabal-bridge
@@ -107,5 +109,6 @@ test-suite pubgrub-hs-test
         , tasty-quickcheck
         , tasty-hunit
         , co-log
+        , text
     hs-source-dirs:   test
     default-language: GHC2021
