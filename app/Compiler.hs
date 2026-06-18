@@ -42,15 +42,17 @@ instance Exception CompilerError
 
 -- | Run a GHC-family executable, converting a missing/failed process into a
 -- 'CompilerError' instead of a raw 'IOException'.
-runTool :: FilePath -> [String] -> IO String
-runTool exe args = do
+runTool :: Text -> FilePath -> [String] -> IO String
+runTool label exe args = do
   result <- try (readProcess exe args "")
   case result of
     Right out -> pure out
     Left (e :: IOException) ->
       throwIO
         ( CompilerError
-            ( "could not query compiler '"
+            ( "could not query "
+                <> label
+                <> " '"
                 <> T.pack exe
                 <> "': "
                 <> T.pack (show e)
@@ -62,8 +64,8 @@ runTool exe args = do
 -- boot-package set from the version-matched @ghc-pkg@.
 resolveCompiler :: FilePath -> IO Compiler
 resolveCompiler ghcExe = do
-  libdir <- trim <$> runTool ghcExe ["--print-libdir"]
-  verStr <- trim <$> runTool ghcExe ["--numeric-version"]
+  libdir <- trim <$> runTool "compiler" ghcExe ["--print-libdir"]
+  verStr <- trim <$> runTool "compiler" ghcExe ["--numeric-version"]
   version <- case eitherParsec verStr :: Either String Version of
     Right v -> pure v
     Left err ->
@@ -78,7 +80,7 @@ resolveCompiler ghcExe = do
             )
         )
   let ghcPkg = ghcPkgFromLibdir libdir
-  bootOut <- runTool ghcPkg ["list", "--global", "--simple-output"]
+  bootOut <- runTool "ghc-pkg" ghcPkg ["list", "--global", "--simple-output"]
   pure
     Compiler
       { compilerInfo = unknownCompilerInfo (CompilerId GHC version) NoAbiTag,

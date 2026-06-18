@@ -87,7 +87,7 @@ main = do
     manager <- liftIO $ newManager defaultManagerSettings
     ecompiler <- liftIO (try (resolveCompiler (fromMaybe "ghc" (optWithCompiler opts))))
     case ecompiler of
-      Left (CompilerError msg) -> logMsg ("error: " <> msg)
+      Left (CompilerError msg) -> logMsg @Text ("error: " <> msg)
       Right compiler -> do
         let (target, targetRange) = optTarget opts
             range = fromMaybe targetRange (optRange opts)
