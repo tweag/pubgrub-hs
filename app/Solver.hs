@@ -19,8 +19,9 @@ import           Distribution.Pretty  (prettyShow)
 import           Distribution.Version (mkVersion)
 import           HackageProvider      (HackageProvider (..), Pkg (..),
                                        ResolveError (..))
-import           PubGrub.Solver       (SolveError (..), SolverMsg (..),
-                                       reportConflict, solve)
+import           PubGrub.Solver       (ReportEnv (..), SolveError (..),
+                                       SolverMsg (..), reportConflictWith,
+                                       solve)
 import           PubGrub.Types        (Term (..), incompTerms)
 import qualified PubGrub.VersionSet   as VS
 import           UnliftIO             (MonadUnliftIO, try)
@@ -55,7 +56,16 @@ runSolve hp = do
     Left (ResolveError n v) ->
       logMsg ("Failed to parse " <> T.pack (prettyShow n) <> "-" <> T.pack (prettyShow v))
     Right (Left (NoSolution i)) -> do
-      logMsg $ T.unlines ["No solution:", reportConflict i]
+      let env =
+            ReportEnv
+              { rePinnedVersion = \case
+                  Pkg n -> Map.lookup n (hpBoot hp)
+                  Root -> Nothing,
+                reIsRoot = \case
+                  Root -> True
+                  _ -> False
+              }
+      logMsg $ T.unlines ["No solution:", reportConflictWith env i]
     Right (Right plan) -> do
       logMsg @Text "Resolved:"
       for_ (Map.toList plan) $ \case

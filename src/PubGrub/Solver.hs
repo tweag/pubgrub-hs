@@ -34,7 +34,10 @@ module PubGrub.Solver
     solve,
 
     -- * Reporting
+    ReportEnv (..),
+    defaultReportEnv,
     reportConflict,
+    reportConflictWith,
   )
 where
 
@@ -313,14 +316,37 @@ solve dp rootPkg rootV = go [notRoot rootPkg rootV] emptyPS
                         ]
                   go (depIncs ++ incompats') (addDecision p v ps')
 
+-- | Caller-supplied context for rendering a conflict. The solver is generic
+-- over the package type, but a good report needs facts only the caller knows:
+-- which packages are the synthetic root, and which are fixed by the compiler
+-- (boot packages) rather than chosen from a range.
+data ReportEnv p = ReportEnv
+  { -- | The version a package is pinned to by the compiler, if it is a boot
+    -- package. Used to explain an empty range as "provided by the compiler as
+    -- X" instead of the misleading "no version for …".
+    rePinnedVersion :: p -> Maybe Version,
+    -- | Whether a package is the synthetic root. Its version carries no
+    -- meaning to the user, so it is omitted when it appears as a depender.
+    reIsRoot        :: p -> Bool
+  }
+
+-- | A context that knows nothing special: every package is an ordinary,
+-- range-selected dependency. Used by 'reportConflict'.
+defaultReportEnv :: ReportEnv p
+defaultReportEnv = ReportEnv {rePinnedVersion = const Nothing, reIsRoot = const False}
+
+-- | 'reportConflictWith' using 'defaultReportEnv'.
+reportConflict :: (Package p) => Incompatibility p -> Text
+reportConflict = reportConflictWith defaultReportEnv
+
 -- | Render an incompatibility and its derivation as a human-readable proof.
 --
 -- Each derived ('DerivedFrom') step becomes a numbered line; a step references
 -- the earlier lines it was derived from as @(n)@, while external leaf facts are
 -- inlined. Post-order numbering guarantees every reference points backwards.
 -- A sub-derivation shared by two steps gets a line for each.
-reportConflict :: forall p. (Package p) => Incompatibility p -> Text
-reportConflict root = case incompCause root of
+reportConflictWith :: forall p. (Package p) => ReportEnv p -> Incompatibility p -> Text
+reportConflictWith env root = case incompCause root of
   DerivedFrom c1 c2 ->
     let (r1, acc1, n1) = visit c1 [] 1
         (r2, acc2, n2) = visit c2 acc1 n1
@@ -344,9 +370,17 @@ reportConflict root = case incompCause root of
 
     -- External facts at the leaves of the proof. We render these from the cause
     -- rather than the bare terms so each explains itself: a 'NoVersions' leaf
-    -- means the range is simply empty, not in conflict with anything else.
+    -- means the range is simply empty, not in conflict with anything else, and
+    -- for a compiler-provided package we say which version the compiler provides.
     leaf c = case incompCause c of
-      NoVersions p s -> "no version for " <> prettyPackage p <> " " <> prettyVS s
+      NoVersions p s -> case rePinnedVersion env p of
+        Just v ->
+          prettyPackage p
+            <> " is provided by the compiler as "
+            <> prettyVer v
+            <> ", which does not satisfy "
+            <> prettyVS s
+        Nothing -> "no version for " <> prettyPackage p <> " " <> prettyVS s
       _ -> summary c
 
     -- The final line of the proof. A lone positive term here is the root being
@@ -359,16 +393,23 @@ reportConflict root = case incompCause root of
       [] -> "version solving failed"
       [(p, Positive r)] -> prettyPackage p <> " " <> prettyVS r <> " is forbidden"
       [(p, Negative r)] -> prettyPackage p <> " " <> prettyVS r <> " is required"
-      [(p1, Positive _), (p2, Negative r2)] -> dep p1 p2 r2
-      [(p2, Negative r2), (p1, Positive _)] -> dep p1 p2 r2
-      terms -> T.intercalate ", " [showTerm p t | (p, t) <- terms] <> " are incompatible"
+      [(p1, Positive r1), (p2, Negative r2)] -> dep p1 r1 p2 r2
+      [(p2, Negative r2), (p1, Positive r1)] -> dep p1 r1 p2 r2
+      terms -> T.intercalate " and " [showTerm p t | (p, t) <- terms] <> " are incompatible"
 
-    -- The depender's own range is always its single deciding version, so we omit
-    -- it: "lens depends on text >=2" reads better than "lens ==5.2 depends on …".
-    dep p1 p2 r2 =
-      prettyPackage p1 <> " depends on " <> prettyPackage p2 <> " " <> prettyVS r2
+    -- Keep the depender's range so distinct derivation steps stay distinct
+    -- ("assoc ==1.0.2 depends on …" vs "assoc >=1.0.2 && <1.1 depends on …"),
+    -- but omit it for the root, whose synthetic version means nothing.
+    dep p1 r1 p2 r2 =
+      prettyPackage p1 <> depender r1 <> " depends on " <> prettyPackage p2 <> " " <> prettyVS r2
+      where
+        depender r = if reIsRoot env p1 then "" else " " <> prettyVS r
     showTerm p (Positive r) = prettyPackage p <> " " <> prettyVS r
     showTerm p (Negative r) = prettyPackage p <> " not " <> prettyVS r
+
+-- | Render a single version, e.g. @4.21.0.0@.
+prettyVer :: Version -> Text
+prettyVer = T.pack . prettyShow
 
 -- | Render a version set the way Cabal would, e.g. @==5.2@ or @>=1 && <2@.
 prettyVS :: VersionSet -> Text
