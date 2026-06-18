@@ -70,7 +70,7 @@ optionsParser =
           )
       )
     <*> argument (eitherReader readTarget) (metavar "TARGET")
-    <*> optional (argument (eitherReader readRange) (metavar "[VERSION-RANGE]"))
+    <*> optional (argument (eitherReader readRange) (metavar "VERSION-RANGE"))
 
 optionsInfo :: ParserInfo Options
 optionsInfo =

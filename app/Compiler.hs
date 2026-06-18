@@ -12,17 +12,18 @@ where
 import           Control.Exception              (Exception, IOException,
                                                  throwIO, try)
 import           Data.Map.Strict                (Map)
+import qualified Data.Map.Strict                as Map
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Compiler          (AbiTag (NoAbiTag),
                                                  CompilerFlavor (GHC),
                                                  CompilerId (..), CompilerInfo,
                                                  unknownCompilerInfo)
-import           Distribution.Parsec            (eitherParsec)
-import           Distribution.Types.PackageName (PackageName)
+import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Version           (Version)
 import           PubGrub.Cabal.Boot             (parseBootList)
-import           PubGrub.Cabal.Compiler         (ghcPkgFromLibdir)
+import           PubGrub.Cabal.Compiler         (ghcPkgFromLibdir,
+                                                 parseCompilerVersion)
 import           System.Process                 (readProcess)
 
 -- | Everything the resolver needs to know about one GHC: the compiler info
@@ -65,26 +66,27 @@ runTool label exe args = do
 resolveCompiler :: FilePath -> IO Compiler
 resolveCompiler ghcExe = do
   libdir <- trim <$> runTool "compiler" ghcExe ["--print-libdir"]
-  verStr <- trim <$> runTool "compiler" ghcExe ["--numeric-version"]
-  version <- case eitherParsec verStr :: Either String Version of
+  verOut <- runTool "compiler" ghcExe ["--numeric-version"]
+  version <- case parseCompilerVersion verOut of
     Right v -> pure v
-    Left err ->
+    Left msg ->
+      throwIO (CompilerError ("compiler '" <> T.pack ghcExe <> "': " <> T.pack msg))
+  let ghcPkg = ghcPkgFromLibdir libdir
+  boot <- parseBootList <$> runTool "ghc-pkg" ghcPkg ["list", "--global", "--simple-output"]
+  if Map.member (mkPackageName "base") boot
+    then
+      pure
+        Compiler
+          { compilerInfo = unknownCompilerInfo (CompilerId GHC version) NoAbiTag,
+            bootPackages = boot
+          }
+    else
       throwIO
         ( CompilerError
-            ( "could not parse version '"
-                <> T.pack verStr
-                <> "' from '"
-                <> T.pack ghcExe
-                <> "': "
-                <> T.pack err
+            ( "ghc-pkg '"
+                <> T.pack ghcPkg
+                <> "' reported no 'base' package; its output may be malformed"
             )
         )
-  let ghcPkg = ghcPkgFromLibdir libdir
-  bootOut <- runTool "ghc-pkg" ghcPkg ["list", "--global", "--simple-output"]
-  pure
-    Compiler
-      { compilerInfo = unknownCompilerInfo (CompilerId GHC version) NoAbiTag,
-        bootPackages = parseBootList bootOut
-      }
   where
     trim = T.unpack . T.strip . T.pack
