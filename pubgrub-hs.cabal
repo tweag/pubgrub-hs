@@ -51,6 +51,7 @@ executable pubgrub-hs
     main-is:          Main.hs
     other-modules:
         BootPackages
+        Compiler
         Database
         HackageProvider
         Hackage
