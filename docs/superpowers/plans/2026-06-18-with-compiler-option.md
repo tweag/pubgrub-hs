@@ -34,22 +34,22 @@ Introduces `app/Compiler.hs` with only the pure, unit-testable parts first: the 
 
 - [ ] **Step 1: Add `filepath` to the cabal file**
 
-In `pubgrub-hs.cabal`, under `executable pubgrub-hs` → `build-depends`, add a line:
+The pure helper lives in the `cabal-bridge` library (`app-lib/`), alongside
+`PubGrub.Cabal.Boot` — matching the existing pattern where pure, testable
+helpers are tested from the test suite (which already depends on
+`pubgrub-hs:cabal-bridge`). This keeps the test target decoupled from the
+executable's source tree.
+
+In `pubgrub-hs.cabal`, under `library cabal-bridge` → `build-depends`, add a line:
 
 ```
         , filepath
 ```
 
-Under `executable pubgrub-hs` → `other-modules`, add `Compiler` (leave `BootPackages` in place — it is removed in Task 5):
+Under `library cabal-bridge` → `exposed-modules`, add:
 
 ```
-        Compiler
-```
-
-Under `test-suite pubgrub-hs-test` → `build-depends`, add:
-
-```
-        , filepath
+        PubGrub.Cabal.Compiler
 ```
 
 Under `test-suite pubgrub-hs-test` → `other-modules`, add:
@@ -58,6 +58,10 @@ Under `test-suite pubgrub-hs-test` → `other-modules`, add:
         CompilerSpec
 ```
 
+(Do NOT modify the `executable pubgrub-hs` stanza or the test suite's
+`hs-source-dirs` in this task — `app/Compiler.hs` and the `Compiler`
+`other-module` are introduced in Task 2.)
+
 - [ ] **Step 2: Write the failing test**
 
 Create `test/CompilerSpec.hs`:
@@ -65,7 +69,7 @@ Create `test/CompilerSpec.hs`:
 ```haskell
 module CompilerSpec (tests) where
 
-import Compiler (ghcPkgFromLibdir)
+import PubGrub.Cabal.Compiler (ghcPkgFromLibdir)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
@@ -86,12 +90,13 @@ tests =
 
 Open `test/Main.hs`, add `import qualified CompilerSpec` (matching the existing import style for `BootSpec`), and add `CompilerSpec.tests` to the top-level `testGroup` list alongside the other specs. (Read the file to match its exact style — it aggregates `VersionSetSpec`, `SolverSpec`, `FlattenSpec`, `BootSpec`.)
 
-- [ ] **Step 4: Create `app/Compiler.hs` with the pure helper only**
+- [ ] **Step 4: Create `app-lib/PubGrub/Cabal/Compiler.hs` with the pure helper only**
 
 ```haskell
-{-# LANGUAGE OverloadedStrings #-}
-
-module Compiler
+-- | Pure helpers for locating a GHC's tooling. The IO that runs these
+-- (and assembles a full compiler description) lives in the @Compiler@
+-- module of the executable.
+module PubGrub.Cabal.Compiler
   ( ghcPkgFromLibdir,
   )
 where
@@ -112,8 +117,8 @@ Expected: build succeeds, `Compiler` group passes (both cases), and the previous
 - [ ] **Step 6: Commit**
 
 ```bash
-git add pubgrub-hs.cabal app/Compiler.hs test/CompilerSpec.hs test/Main.hs
-git commit -m "feat: add Compiler.ghcPkgFromLibdir + filepath dep"
+git add pubgrub-hs.cabal app-lib/PubGrub/Cabal/Compiler.hs test/CompilerSpec.hs test/Main.hs
+git commit -m "feat: add PubGrub.Cabal.Compiler.ghcPkgFromLibdir + filepath dep"
 ```
 
 ---
@@ -123,28 +128,39 @@ git commit -m "feat: add Compiler.ghcPkgFromLibdir + filepath dep"
 Adds the runtime side of `Compiler.hs`: the record, error type, and the function that shells out to GHC. This is IO glue over external processes; verified by manual run, not a unit test.
 
 **Files:**
-- Modify: `app/Compiler.hs`
+- Create: `app/Compiler.hs`
+- Modify: `pubgrub-hs.cabal` (add `Compiler` to `executable pubgrub-hs` → `other-modules`)
 
 **Interfaces:**
-- Consumes: `ghcPkgFromLibdir` (Task 1); `PubGrub.Cabal.Boot.parseBootList :: String -> Map PackageName Version`.
+- Consumes: `PubGrub.Cabal.Compiler.ghcPkgFromLibdir :: FilePath -> FilePath` (Task 1, in the `cabal-bridge` library); `PubGrub.Cabal.Boot.parseBootList :: String -> Map PackageName Version`.
 - Produces:
   - `data Compiler = Compiler { compilerInfo :: CompilerInfo, bootPackages :: Map PackageName Version }`
   - `newtype CompilerError = CompilerError Text` (instance `Exception`)
   - `resolveCompiler :: FilePath -> IO Compiler` — throws `CompilerError` on any process/parse failure.
 
-- [ ] **Step 1: Extend the module's exports and imports**
+Note: the executable already depends on `pubgrub-hs:cabal-bridge`, so no new
+dependency is needed to import `PubGrub.Cabal.Compiler`. `filepath` is NOT
+added to the executable — the path helper lives in `cabal-bridge`.
 
-Replace the export list and add imports in `app/Compiler.hs`:
+- [ ] **Step 1: Add `Compiler` to the executable's modules, then create the file header/imports**
+
+In `pubgrub-hs.cabal`, under `executable pubgrub-hs` → `other-modules`, add `Compiler` (leave `BootPackages` in place — it is removed in Task 5):
+
+```
+        Compiler
+```
+
+Create `app/Compiler.hs` with this header, export list, and imports:
 
 ```haskell
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE DerivingStrategies #-}
 
 module Compiler
   ( Compiler (..),
     CompilerError (..),
     resolveCompiler,
-    ghcPkgFromLibdir,
   )
 where
 
@@ -163,7 +179,7 @@ import Distribution.Parsec (eitherParsec)
 import Distribution.Types.PackageName (PackageName)
 import Distribution.Version (Version)
 import PubGrub.Cabal.Boot (parseBootList)
-import System.FilePath (takeDirectory, (</>))
+import PubGrub.Cabal.Compiler (ghcPkgFromLibdir)
 import System.Process (readProcess)
 ```
 
@@ -188,7 +204,7 @@ newtype CompilerError = CompilerError Text
 instance Exception CompilerError
 ```
 
-(Add `{-# LANGUAGE DerivingStrategies #-}` to the pragma block at the top for the `deriving stock`.)
+(`DerivingStrategies` for the `deriving stock` was already added to the pragma block in Step 1.)
 
 - [ ] **Step 3: Add a process helper that converts IO errors to `CompilerError`**
 
@@ -259,7 +275,7 @@ Expected: compiles with no warnings (note `Main.hs` still references the old `qu
 - [ ] **Step 6: Commit**
 
 ```bash
-git add app/Compiler.hs
+git add app/Compiler.hs pubgrub-hs.cabal
 git commit -m "feat: add Compiler type and resolveCompiler process glue"
 ```
 
