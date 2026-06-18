@@ -12,8 +12,8 @@ module HackageProvider
   )
 where
 
-import           BootPackages                           (queryBootPackages)
 import           Colog                                  (WithLog, logMsg)
+import           Compiler                               (Compiler (..))
 import           Control.Exception                      (Exception, throwIO)
 import           Control.Monad                          (when)
 import           Control.Monad.IO.Class                 (MonadIO)
@@ -29,11 +29,7 @@ import           Data.Text                              (Text)
 import qualified Data.Text                              as T
 import           Data.Time                              (getCurrentTime)
 import           Database                               (ParseError (..))
-import           Distribution.Compiler                  (AbiTag (..),
-                                                         CompilerFlavor (..),
-                                                         CompilerId (..),
-                                                         CompilerInfo,
-                                                         unknownCompilerInfo)
+import           Distribution.Compiler                  (CompilerInfo)
 import           Distribution.PackageDescription        (GenericPackageDescription,
                                                          PackageIdentifier (..),
                                                          PackageName)
@@ -85,15 +81,13 @@ data HackageProvider = HackageProvider
   { hpVersions :: Map PackageName [Version],
     hpLookupCabal :: PackageIdentifier -> IO (Either ParseError GenericPackageDescription),
     hpBoot :: Map PackageName Version,
+    hpCompiler :: CompilerInfo,
     hpTarget :: PackageName,
     hpRange :: VersionSet
   }
 
 thePlatform :: Platform
 thePlatform = Platform X86_64 Linux
-
-theCompiler :: CompilerInfo
-theCompiler = unknownCompilerInfo (CompilerId GHC (mkVersion [9, 12, 4])) NoAbiTag
 
 instance (MonadIO m) => DependencyProvider HackageProvider Pkg m where
   chooseVersion :: (MonadIO m) => HackageProvider -> Pkg -> VersionSet -> m (Maybe Version)
@@ -120,18 +114,19 @@ instance (MonadIO m) => DependencyProvider HackageProvider Pkg m where
       | otherwise -> do
           res <- liftIO (hpLookupCabal hp (PackageIdentifier n v))
           case res of
-            Right gpd -> pure (Map.mapKeys Pkg (flattenDeps thePlatform theCompiler gpd))
+            Right gpd -> pure (Map.mapKeys Pkg (flattenDeps thePlatform (hpCompiler hp) gpd))
             Left _ -> liftIO (throwIO (ResolveError n v))
 
 withHackageProvider ::
   (MonadIO m, MonadUnliftIO m, WithLog env Text m) =>
   Sec.Cache ->
   Manager ->
+  Compiler ->
   PackageName ->
   VersionSet ->
   (HackageProvider -> m a) ->
   m a
-withHackageProvider cache manager target range act =
+withHackageProvider cache manager compiler target range act =
   withClient manager $ \httpLib ->
     withRepository httpLib [uri] cache logger $ \repository -> do
       uncheckClientErrors $ do
@@ -156,7 +151,7 @@ withHackageProvider cache manager target range act =
           (indexVersions, t') <- timed $ liftIO $ decodeFile (toFilePath cacheFile)
           logMsg @Text ("\ESC[2mPackage index read in " <> T.pack (show t') <> " seconds\ESC[0m")
 
-          boot <- liftIO queryBootPackages
+          let boot = bootPackages compiler
           let hp =
                 HackageProvider
                   { hpVersions = indexVersions,
@@ -164,6 +159,7 @@ withHackageProvider cache manager target range act =
                       bytes <- uncheckClientErrors $ indexLookupCabal indexCallbacks pkgId
                       return $ parseGPD (trusted bytes),
                     hpBoot = boot,
+                    hpCompiler = compilerInfo compiler,
                     hpTarget = target,
                     hpRange = range
                   }
