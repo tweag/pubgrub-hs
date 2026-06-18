@@ -50,7 +50,6 @@ executable pubgrub-hs
     import:           warnings
     main-is:          Main.hs
     other-modules:
-        BootPackages
         Compiler
         Database
         HackageProvider
