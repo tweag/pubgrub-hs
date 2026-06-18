@@ -1,6 +1,7 @@
 module Main (main) where
 
 import qualified BootSpec
+import qualified CompilerSpec
 import qualified FlattenSpec
 import qualified SolverSpec
 import           Test.Tasty     (defaultMain, testGroup)
@@ -15,4 +16,5 @@ main =
             , SolverSpec.tests
             , FlattenSpec.tests
             , BootSpec.tests
+            , CompilerSpec.tests
             ]

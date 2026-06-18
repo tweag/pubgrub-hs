@@ -35,12 +35,14 @@ library cabal-bridge
     exposed-modules:
         PubGrub.Cabal.Flatten
         PubGrub.Cabal.Boot
+        PubGrub.Cabal.Compiler
     build-depends:
         , base
         , containers
         , Cabal
         , Cabal-syntax
         , pubgrub-hs
+        , filepath
     hs-source-dirs:   app-lib
     default-language: GHC2021
 
@@ -98,6 +100,7 @@ test-suite pubgrub-hs-test
         SolverSpec
         FlattenSpec
         BootSpec
+        CompilerSpec
     build-depends:
         , pubgrub-hs
         , pubgrub-hs:cabal-bridge
