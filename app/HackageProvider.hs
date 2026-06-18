@@ -17,7 +17,8 @@ import           Compiler                               (Compiler (..))
 import           Control.Exception                      (Exception, throwIO)
 import           Control.Monad                          (when)
 import           Control.Monad.IO.Class                 (MonadIO)
-import           Data.Binary                            (decodeFile, encodeFile)
+import           Data.Binary                            (decodeFileOrFail,
+                                                         encodeFile)
 import qualified Data.ByteString.Lazy                   as BSL
 import           Data.List                              (sortBy)
 import qualified Data.List.NonEmpty                     as NE
@@ -61,7 +62,6 @@ import           PubGrub.Types                          (Package (..))
 import           PubGrub.VersionSet                     (VersionSet)
 import qualified PubGrub.VersionSet                     as VS
 import           UnliftIO                               (MonadIO (..))
-import           Utils                                  (timed)
 
 -- | Resolution package: a synthetic root, or a real Hackage package.
 data Pkg = Root | Pkg PackageName
@@ -146,13 +146,25 @@ withHackageProvider cache manager compiler target range act =
 
         withIndex repository $ \indexCallbacks -> do
           cacheExists <- liftIO $ doesFileExist cacheFile
-          when (not cacheExists || hasUpdates == HasUpdates) $ do
-            logMsg @Text "\ESC[2mPackage index updated\ESC[0m"
-            updateCache cacheFile indexCallbacks
-
-          logMsg @Text "\ESC[2mReading package index\ESC[0m"
-          (indexVersions, t') <- timed $ liftIO $ decodeFile (toFilePath cacheFile)
-          logMsg @Text ("\ESC[2mPackage index read in " <> T.pack (show t') <> " seconds\ESC[0m")
+          -- Read an existing cache only when the index has no updates;
+          -- 'readVersionCache' also rejects one written under another
+          -- 'cacheFormatVersion', and either case rebuilds it.
+          cached <-
+            if cacheExists && hasUpdates /= HasUpdates
+              then liftIO (readVersionCache (toFilePath cacheFile))
+              else pure Nothing
+          indexVersions <- case cached of
+            Just versions -> do
+              logMsg @Text "\ESC[2mPackage version cache is current\ESC[0m"
+              pure versions
+            Nothing -> do
+              logMsg @Text "\ESC[2mRebuilding package version cache\ESC[0m"
+              updateCache cacheFile indexCallbacks
+              rebuilt <- liftIO (readVersionCache (toFilePath cacheFile))
+              maybe
+                (liftIO (throwIO (userError "version cache unreadable after rebuild")))
+                pure
+                rebuilt
 
           let boot = bootPackages compiler
           let hp =
@@ -179,6 +191,21 @@ withHackageProvider cache manager compiler target range act =
 
     cacheFile = cacheRoot cache </> fragment "index-versions.bin"
 
+-- | On-disk schema version for the package-version cache. Bump this whenever
+-- the encoding written by 'updateCache' changes, so caches from older builds
+-- are rebuilt instead of being misread.
+cacheFormatVersion :: Int
+cacheFormatVersion = 1
+
+-- | Read the version cache, returning 'Nothing' if the file is corrupt or was
+-- written by a different 'cacheFormatVersion'.
+readVersionCache :: FilePath -> IO (Maybe (Map PackageName [Version]))
+readVersionCache path = do
+  result <- decodeFileOrFail path
+  pure $ case result of
+    Right (v, versions) | v == cacheFormatVersion -> Just versions
+    _                                             -> Nothing
+
 updateCache ::
   (MonadIO m, WithLog env Text m) =>
   Path Absolute ->
@@ -198,7 +225,7 @@ updateCache cacheFile IndexCallbacks {indexDirectory} = do
             let pkgName = fst (NE.head g),
             let versions = NE.map snd g
           ]
-  liftIO $ encodeFile (toFilePath cacheFile) index
+  liftIO $ encodeFile (toFilePath cacheFile) (cacheFormatVersion, Map.map NE.toList index)
 
 parseGPD :: BSL.ByteString -> Either ParseError GenericPackageDescription
 parseGPD bs =

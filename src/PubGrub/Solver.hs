@@ -313,19 +313,34 @@ solve dp rootPkg rootV = go [notRoot rootPkg rootV] emptyPS
                         ]
                   go (depIncs ++ incompats') (addDecision p v ps')
 
--- | Render an incompatibility (and its derivation, if any) as a human-readable
--- proof. Leaves describe external facts. A subderivation used twice is
--- written out twice, not numbered and referred back to.
-reportConflict :: (Package p) => Incompatibility p -> Text
-reportConflict i = case incompCause i of
+-- | Render an incompatibility and its derivation as a human-readable proof.
+--
+-- Each derived ('DerivedFrom') step becomes a numbered line; a step references
+-- the earlier lines it was derived from as @(n)@, while external leaf facts are
+-- inlined. Post-order numbering guarantees every reference points backwards.
+-- A sub-derivation shared by two steps gets a line for each.
+reportConflict :: forall p. (Package p) => Incompatibility p -> Text
+reportConflict root = case incompCause root of
   DerivedFrom c1 c2 ->
-    "Because " <> render c1 <> " and " <> render c2 <> ", " <> conclusion i <> "."
-  _ -> leaf i
+    let (r1, acc1, n1) = visit c1 [] 1
+        (r2, acc2, n2) = visit c2 acc1 n1
+        final = "Because " <> r1 <> " and " <> r2 <> ", " <> conclusion root <> "."
+        steps = reverse ((n2, final) : acc2)
+     in T.intercalate "\n" [T.pack (show n) <> ". " <> t | (n, t) <- steps]
+  _ -> leaf root
   where
-    render c = case incompCause c of
+    -- Emit a line per derived step, threading the next free number and the
+    -- lines accumulated so far (newest first). Returns how to refer to this
+    -- node: @(n)@ for a derived step, or the inlined phrase for a leaf.
+    visit ::
+      Incompatibility p -> [(Int, Text)] -> Int -> (Text, [(Int, Text)], Int)
+    visit inc acc n = case incompCause inc of
       DerivedFrom c1 c2 ->
-        "Because " <> render c1 <> " and " <> render c2 <> ", " <> summary c
-      _ -> leaf c
+        let (r1, acc1, n1) = visit c1 acc n
+            (r2, acc2, n2) = visit c2 acc1 n1
+            line = "Because " <> r1 <> " and " <> r2 <> ", " <> summary inc
+         in ("(" <> T.pack (show n2) <> ")", (n2, line) : acc2, n2 + 1)
+      _ -> (leaf inc, acc, n)
 
     -- External facts at the leaves of the proof. We render these from the cause
     -- rather than the bare terms so each explains itself: a 'NoVersions' leaf
