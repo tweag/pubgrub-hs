@@ -56,7 +56,7 @@ and the compiler version always come from the same GHC.
 > Note: an earlier sketch used `<LIBDIR>/../ghc-pkg`; the actual ghcup layout is
 > `<LIBDIR>/../bin/ghc-pkg` (verified: `--print-libdir` →
 > `…/ghc-9.12.2/lib/ghc-9.12.2/lib`, with `bin/ghc-pkg` one level up). The path is
-> derived as `takeDirectory (takeDirectory libdir) </> "bin" </> "ghc-pkg"`.
+> derived as `takeDirectory libdir </> "bin" </> "ghc-pkg"` (i.e. `<LIBDIR>/../bin/ghc-pkg`).
 
 The pure parser `parseBootList` stays in the `cabal-bridge` library
 (`app-lib/PubGrub/Cabal/Boot.hs`) and keeps its existing test coverage.
