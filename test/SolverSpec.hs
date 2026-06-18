@@ -23,7 +23,8 @@ import qualified PubGrub.VersionSet    as VS
 import           Test.Tasty            (TestTree, testGroup)
 import           Test.Tasty.HUnit      (assertBool, testCase, (@?=))
 
-instance Package String
+instance Package String where
+  prettyPackage = T.pack
 
 -- | An in-memory registry: package -> version -> its dependencies.
 newtype Registry = Registry (Map String (Map Version (Map String VersionSet)))

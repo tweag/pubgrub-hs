@@ -46,6 +46,7 @@ import           Data.Maybe           (fromMaybe, mapMaybe)
 import           Data.Ord             (comparing)
 import           Data.Text            (Text)
 import qualified Data.Text            as T
+import           Distribution.Pretty  (prettyShow)
 import           Distribution.Version (Version)
 import           PubGrub.Types
 import           PubGrub.VersionSet   (VersionSet)
@@ -316,32 +317,44 @@ solve dp rootPkg rootV = go [notRoot rootPkg rootV] emptyPS
 -- proof. Leaves describe external facts. A subderivation used twice is
 -- written out twice, not numbered and referred back to.
 reportConflict :: (Package p) => Incompatibility p -> Text
-reportConflict = render
+reportConflict i = case incompCause i of
+  DerivedFrom c1 c2 ->
+    "Because " <> render c1 <> " and " <> render c2 <> ", " <> conclusion i <> "."
+  _ -> leaf i
   where
-    render i = case incompCause i of
+    render c = case incompCause c of
       DerivedFrom c1 c2 ->
-        "Because "
-          <> render c1
-          <> " and "
-          <> render c2
-          <> ", "
-          <> summary i
-          <> "."
-      _ -> summary i
+        "Because " <> render c1 <> " and " <> render c2 <> ", " <> summary c
+      _ -> leaf c
 
-    summary i = case Map.toList (incompTerms i) of
+    -- External facts at the leaves of the proof. We render these from the cause
+    -- rather than the bare terms so each explains itself: a 'NoVersions' leaf
+    -- means the range is simply empty, not in conflict with anything else.
+    leaf c = case incompCause c of
+      NoVersions p s -> "no version for " <> prettyPackage p <> " " <> prettyVS s
+      _ -> summary c
+
+    -- The final line of the proof. A lone positive term here is the root being
+    -- ruled out at its synthetic version, which reads better as plain failure.
+    conclusion c = case Map.toList (incompTerms c) of
+      [(_, Positive _)] -> "version solving failed"
+      _                 -> summary c
+
+    summary c = case Map.toList (incompTerms c) of
       [] -> "version solving failed"
-      [(p, Positive r)] -> showText p <> " " <> showVS r <> " is forbidden"
-      [(p, Negative r)] -> showText p <> " " <> showVS r <> " is mandatory"
-      [(p1, Positive r1), (p2, Negative r2)] -> dep p1 r1 p2 r2
-      [(p2, Negative r2), (p1, Positive r1)] -> dep p1 r1 p2 r2
+      [(p, Positive r)] -> prettyPackage p <> " " <> prettyVS r <> " is forbidden"
+      [(p, Negative r)] -> prettyPackage p <> " " <> prettyVS r <> " is required"
+      [(p1, Positive _), (p2, Negative r2)] -> dep p1 p2 r2
+      [(p2, Negative r2), (p1, Positive _)] -> dep p1 p2 r2
       terms -> T.intercalate ", " [showTerm p t | (p, t) <- terms] <> " are incompatible"
 
-    dep p1 r1 p2 r2 =
-      showText p1 <> " " <> showText r1 <> " depends on " <> showText p2 <> " " <> showText r2
-    showTerm p (Positive r) = showText p <> " " <> showText r
-    showTerm p (Negative r) = showText p <> " not " <> showText r
-    showVS = foldMap showText . VS.intervals
+    -- The depender's own range is always its single deciding version, so we omit
+    -- it: "lens depends on text >=2" reads better than "lens ==5.2 depends on …".
+    dep p1 p2 r2 =
+      prettyPackage p1 <> " depends on " <> prettyPackage p2 <> " " <> prettyVS r2
+    showTerm p (Positive r) = prettyPackage p <> " " <> prettyVS r
+    showTerm p (Negative r) = prettyPackage p <> " not " <> prettyVS r
 
-showText :: Show a => a -> Text
-showText = T.pack . show
+-- | Render a version set the way Cabal would, e.g. @==5.2@ or @>=1 && <2@.
+prettyVS :: VersionSet -> Text
+prettyVS = T.pack . prettyShow . VS.toVersionRange

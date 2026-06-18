@@ -2,7 +2,7 @@
 
 module PubGrub.Types (
     -- * Packages
-    Package,
+    Package (..),
 
     -- * Terms
     Term (..),
@@ -37,12 +37,16 @@ module PubGrub.Types (
 
 import           Data.Map.Strict      (Map)
 import qualified Data.Map.Strict      as Map
+import           Data.Text            (Text)
 import           Distribution.Version (Version)
 import           PubGrub.VersionSet   (VersionSet)
 import qualified PubGrub.VersionSet   as VS
 
--- | A package is anything with equality, ordering, and a printable name.
-class (Eq p, Ord p, Show p) => Package p
+-- | A package is anything with equality, ordering, and a human-readable name.
+class (Eq p, Ord p, Show p) => Package p where
+    -- | Render the package name for conflict reports. Unlike 'show', this is
+    -- meant for end users (e.g. @lens@ rather than @Pkg (PackageName "lens")@).
+    prettyPackage :: p -> Text
 
 -- | A positive or negative assertion about a package's selected version.
 data Term

@@ -35,6 +35,7 @@ import           Distribution.PackageDescription        (GenericPackageDescripti
                                                          PackageName)
 import           Distribution.PackageDescription.Parsec (parseGenericPackageDescription,
                                                          runParseResult)
+import           Distribution.Pretty                    (prettyShow)
 import           Distribution.System                    (Arch (..), OS (..),
                                                          Platform (..))
 import           Distribution.Version                   (Version, mkVersion)
@@ -56,7 +57,7 @@ import           Hackage.Security.Util.Some             (Some (..))
 import           HttpClient                             (Manager)
 import           PubGrub.Cabal.Flatten                  (flattenDeps)
 import           PubGrub.Solver                         (DependencyProvider (..))
-import           PubGrub.Types                          (Package)
+import           PubGrub.Types                          (Package (..))
 import           PubGrub.VersionSet                     (VersionSet)
 import qualified PubGrub.VersionSet                     as VS
 import           UnliftIO                               (MonadIO (..))
@@ -66,7 +67,9 @@ import           Utils                                  (timed)
 data Pkg = Root | Pkg PackageName
   deriving (Eq, Ord, Show)
 
-instance Package Pkg
+instance Package Pkg where
+  prettyPackage Root    = "root"
+  prettyPackage (Pkg n) = T.pack (prettyShow n)
 
 -- | Thrown when a selected package version's .cabal cannot be parsed.
 data ResolveError = ResolveError PackageName Version
