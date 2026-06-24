@@ -3,13 +3,14 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE NamedFieldPuns        #-}
 {-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE TypeFamilies          #-}
 
-module HackageProvider
-  ( Pkg (..),
+module HackageProvider (
+    Pkg (..),
     HackageProvider (..),
     ResolveError (..),
     withHackageProvider,
-  )
+)
 where
 
 import           Colog                                  (WithLog, logMsg)
@@ -52,7 +53,7 @@ import           Hackage.Security.Unlifted              (doesFileExist)
 import           Hackage.Security.Unlifted              hiding (doesFileExist)
 import qualified Hackage.Security.Unlifted              as Sec hiding
                                                                (doesFileExist)
-import           Hackage.Security.Util.Pretty           (Pretty (pretty))
+import           Hackage.Security.Util.Pretty           as Hackage (pretty)
 import           Hackage.Security.Util.Some             (Some (..))
 import           HttpClient                             (Manager)
 import           PubGrub.Cabal.Flatten                  (flattenDeps)
@@ -62,127 +63,134 @@ import           PubGrub.VersionSet                     (VersionSet)
 import qualified PubGrub.VersionSet                     as VS
 import           UnliftIO                               (MonadIO (..))
 
-
 -- | Resolution package: a synthetic root, or a real Hackage package.
 data Pkg = Root | Pkg PackageName
-  deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show)
 
 instance Package Pkg where
-  prettyPackage Root    = "root"
-  prettyPackage (Pkg n) = T.pack (prettyShow n)
+    type Key Pkg = PackageName
+    prettyPackage Root    = "root"
+    prettyPackage (Pkg n) = T.pack (prettyShow n)
 
 -- | Thrown when a selected package version's .cabal cannot be parsed.
 data ResolveError = ResolveError PackageName Version
-  deriving (Show)
+    deriving (Show)
 
 instance Exception ResolveError
+
+
 
 -- | A dependency provider backed by the Hackage index. @hpVersions@ lists each
 -- package's available versions; @hpLookupCabal@ reads and parses one version's
 -- .cabal file when its dependencies are asked for.
 data HackageProvider = HackageProvider
-  { hpVersions :: Map PackageName (NonEmpty Version),
-    hpLookupCabal :: PackageIdentifier -> IO (Either ParseError GenericPackageDescription),
-    hpBoot :: Map PackageName Version,
-    hpCompiler :: CompilerInfo,
-    hpTarget :: PackageName,
-    hpRange :: VersionSet
-  }
+    { hpVersions :: Map PackageName (NonEmpty Version)
+    , hpLookupCabal :: PackageIdentifier -> IO (Either ParseError GenericPackageDescription)
+    , hpBoot :: Map PackageName Version
+    , hpCompiler :: CompilerInfo
+    , hpTarget :: PackageName
+    , hpRange :: VersionSet
+    }
 
 thePlatform :: Platform
 thePlatform = Platform X86_64 Linux
 
-instance (MonadIO m) => DependencyProvider HackageProvider Pkg m where
-  expand :: (MonadIO m) => HackageProvider -> Pkg -> VersionSet -> m (Maybe (Version, Map Pkg VersionSet))
-  expand hp pkg range = case pkg of
-    Root ->
-      pure (Just (mkVersion [0], Map.singleton (Pkg (hpTarget hp)) (hpRange hp)))
-    Pkg n
-      -- A boot package is pinned to the version the compiler ships, and has no
-      -- dependencies: the compiler provides the boot packages as a consistent set.
-      | Just bv <- Map.lookup n (hpBoot hp) ->
-          pure (if VS.contains range bv then Just (bv, Map.empty) else Nothing)
-      | otherwise ->
-          case Map.lookup n (hpVersions hp) >>= filterInRange of
-            Nothing -> pure Nothing
-            Just neVs -> do
-              let v = Foldable1.maximum neVs
-              res <- liftIO (hpLookupCabal hp (PackageIdentifier n v))
-              case res of
-                Right gpd ->
-                  pure (Just (v, Map.mapKeys Pkg (flattenDeps thePlatform (hpCompiler hp) gpd)))
-                Left _ -> liftIO (throwIO (ResolveError n v))
-    where
-      filterInRange = NE.nonEmpty . NE.filter (VS.contains range)
+instance (MonadIO m) => DependencyProvider HackageProvider Pkg VersionSet m where
+    expand
+        :: (MonadIO m)
+        => HackageProvider
+        -> Pkg
+        -> VersionSet
+        -> m (Maybe (Version, Map Pkg VersionSet))
+    expand hp pkg range = case pkg of
+        Root ->
+            pure (Just (mkVersion [0], Map.singleton (Pkg (hpTarget hp)) (hpRange hp)))
+        Pkg n
+            -- A boot package is pinned to the version the compiler ships, and has no
+            -- dependencies: the compiler provides the boot packages as a consistent set.
+            | Just bv <- Map.lookup n (hpBoot hp) ->
+                pure (if VS.contains range bv then Just (bv, Map.empty) else Nothing)
+            | otherwise ->
+                case Map.lookup n (hpVersions hp) >>= filterInRange of
+                    Nothing -> pure Nothing
+                    Just neVs -> do
+                        let v = Foldable1.maximum neVs
+                        res <- liftIO (hpLookupCabal hp (PackageIdentifier n v))
+                        case res of
+                            Right gpd ->
+                                pure (Just (v, Map.mapKeys Pkg (flattenDeps thePlatform (hpCompiler hp) gpd)))
+                            Left _ -> liftIO (throwIO (ResolveError n v))
+      where
+        filterInRange = NE.nonEmpty . NE.filter (VS.contains range)
 
-withHackageProvider ::
-  (MonadIO m, MonadUnliftIO m, WithLog env Text m) =>
-  Sec.Cache ->
-  Manager ->
-  Compiler ->
-  PackageName ->
-  VersionSet ->
-  (HackageProvider -> m a) ->
-  m a
+withHackageProvider
+    :: (MonadIO m, MonadUnliftIO m, WithLog env Text m)
+    => Sec.Cache
+    -> Manager
+    -> Compiler
+    -> PackageName
+    -> VersionSet
+    -> (HackageProvider -> m a)
+    -> m a
 withHackageProvider cache manager compiler target range act =
-  withClient manager $ \httpLib ->
-    withRepository httpLib [uri] cache logger $ \repository -> do
-      uncheckClientErrors $ do
-        now <- liftIO getCurrentTime
-        hasUpdates <- uncheckClientErrors $ liftIO $ do
-          rb <- requiresBootstrap repository
-          when rb $ bootstrap repository [] (KeyThreshold 0)
-          stale <- indexOlderThan oneWeek cache now
-          if stale
-            then
-              checkForUpdates repository (Just now)
-            else
-              return NoUpdates
+    withClient manager $ \httpLib ->
+        withRepository httpLib [uri] cache logger $ \repository -> do
+            uncheckClientErrors $ do
+                now <- liftIO getCurrentTime
+                hasUpdates <- uncheckClientErrors $ liftIO $ do
+                    rb <- requiresBootstrap repository
+                    when rb $ bootstrap repository [] (KeyThreshold 0)
+                    stale <- indexOlderThan oneWeek cache now
+                    if stale
+                        then
+                            checkForUpdates repository (Just now)
+                        else
+                            return NoUpdates
 
-        withIndex repository $ \indexCallbacks -> do
-          cacheExists <- liftIO $ doesFileExist cacheFile
-          -- Read an existing cache only when the index has no updates;
-          -- 'readVersionCache' also rejects one written under another
-          -- 'cacheFormatVersion', and either case rebuilds it.
-          cached <-
-            if cacheExists && hasUpdates /= HasUpdates
-              then liftIO (readVersionCache (toFilePath cacheFile))
-              else pure Nothing
-          indexVersions <- case cached of
-            Just versions -> do
-              logMsg @Text "\ESC[2mPackage version cache is current\ESC[0m"
-              pure versions
-            Nothing -> do
-              logMsg @Text "\ESC[2mRebuilding package version cache\ESC[0m"
-              updateCache cacheFile indexCallbacks
-              rebuilt <- liftIO (readVersionCache (toFilePath cacheFile))
-              maybe
-                (liftIO (throwIO (userError "version cache unreadable after rebuild")))
-                pure
-                rebuilt
+                withIndex repository $ \indexCallbacks -> do
+                    cacheExists <- liftIO $ doesFileExist cacheFile
+                    -- Read an existing cache only when the index has no updates;
+                    -- 'readVersionCache' also rejects one written under another
+                    -- 'cacheFormatVersion', and either case rebuilds it.
+                    cached <-
+                        if cacheExists && hasUpdates /= HasUpdates
+                            then liftIO (readVersionCache (toFilePath cacheFile))
+                            else pure Nothing
+                    indexVersions <- case cached of
+                        Just versions -> do
+                            logMsg @Text "\ESC[2mPackage version cache is current\ESC[0m"
+                            pure versions
+                        Nothing -> do
+                            logMsg @Text "\ESC[2mRebuilding package version cache\ESC[0m"
+                            updateCache cacheFile indexCallbacks
+                            rebuilt <- liftIO (readVersionCache (toFilePath cacheFile))
+                            maybe
+                                (liftIO (throwIO (userError "version cache unreadable after rebuild")))
+                                pure
+                                rebuilt
 
-          let boot = bootPackages compiler
-          let hp =
-                HackageProvider
-                  { hpVersions = indexVersions,
-                    hpLookupCabal = \pkgId -> do
-                      bytes <- uncheckClientErrors $ indexLookupCabal indexCallbacks pkgId
-                      return $ parseGPD (trusted bytes),
-                    hpBoot = boot,
-                    hpCompiler = compilerInfo compiler,
-                    hpTarget = target,
-                    hpRange = range
-                  }
+                    let boot = bootPackages compiler
+                    let hp =
+                            HackageProvider
+                                { hpVersions = indexVersions
+                                , hpLookupCabal = \pkgId -> do
+                                    bytes <- uncheckClientErrors $ indexLookupCabal indexCallbacks pkgId
+                                    return $ parseGPD (trusted bytes)
+                                , hpBoot = boot
+                                , hpCompiler = compilerInfo compiler
+                                , hpTarget = target
+                                , hpRange = range
+                                }
 
-          let pkgCount = Map.size (hpVersions hp)
-          logMsg @Text ("\ESC[2m  " <> T.pack (show pkgCount) <> " packages indexed\ESC[0m")
-          act hp
+                    let pkgCount = Map.size (hpVersions hp)
+                    logMsg @Text ("\ESC[2m  " <> T.pack (show pkgCount) <> " packages indexed\ESC[0m")
+                    act hp
   where
     uri = parseURI "http://hackage.haskell.org"
     oneWeek = 7 * 24 * 60 * 60
 
     logger :: (WithLog env Text m) => LogMessage -> m ()
-    logger = logMsg . T.pack . pretty
+    logger = logMsg . T.pack . Hackage.pretty
 
     cacheFile = cacheRoot cache </> fragment "index-versions.bin"
 
@@ -196,34 +204,34 @@ cacheFormatVersion = 2
 -- written by a different 'cacheFormatVersion'.
 readVersionCache :: FilePath -> IO (Maybe (Map PackageName (NonEmpty Version)))
 readVersionCache path = do
-  result <- decodeFileOrFail path
-  pure $ case result of
-    Right (v, versions) | v == cacheFormatVersion -> Just versions
-    _                                             -> Nothing
+    result <- decodeFileOrFail path
+    pure $ case result of
+        Right (v, versions) | v == cacheFormatVersion -> Just versions
+        _                                             -> Nothing
 
-updateCache ::
-  (MonadIO m, WithLog env Text m) =>
-  Path Absolute ->
-  IndexCallbacks ->
-  m ()
-updateCache cacheFile IndexCallbacks {indexDirectory} = do
-  logMsg @Text "\ESC[2mUpdating package index\ESC[0m"
-  let pkgs =
-        [ (pkgName pkgId, pkgVersion pkgId)
-        | (_entry, _, Just (Some (IndexPkgCabal pkgId))) <- directoryEntries indexDirectory
-        ]
-      index =
-        Map.fromListWith
-          (<>)
-          [ (pkgName, versions)
-          | g <- NE.groupWith fst pkgs,
-            let pkgName = fst (NE.head g),
-            let versions = NE.map snd g
-          ]
-  liftIO $ encodeFile (toFilePath cacheFile) (cacheFormatVersion, index)
+updateCache
+    :: (MonadIO m, WithLog env Text m)
+    => Path Absolute
+    -> IndexCallbacks
+    -> m ()
+updateCache cacheFile IndexCallbacks{indexDirectory} = do
+    logMsg @Text "\ESC[2mUpdating package index\ESC[0m"
+    let pkgs =
+            [ (pkgName pkgId, pkgVersion pkgId)
+            | (_entry, _, Just (Some (IndexPkgCabal pkgId))) <- directoryEntries indexDirectory
+            ]
+        index =
+            Map.fromListWith
+                (<>)
+                [ (pkgName, versions)
+                | g <- NE.groupWith fst pkgs
+                , let pkgName = fst (NE.head g)
+                , let versions = NE.map snd g
+                ]
+    liftIO $ encodeFile (toFilePath cacheFile) (cacheFormatVersion, index)
 
 parseGPD :: BSL.ByteString -> Either ParseError GenericPackageDescription
 parseGPD bs =
-  case runParseResult (parseGenericPackageDescription (BSL.toStrict bs)) of
-    (_, Left (mver, errs)) -> Left (ParseError mver errs)
-    (_, Right gpd)         -> Right gpd
+    case runParseResult (parseGenericPackageDescription (BSL.toStrict bs)) of
+        (_, Left (mver, errs)) -> Left (ParseError mver errs)
+        (_, Right gpd)         -> Right gpd

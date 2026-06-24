@@ -5,6 +5,7 @@ import qualified CompilerSpec
 import qualified FlattenSpec
 import qualified LatticeSpec
 import qualified PowSpec
+import qualified PrettySpec
 import qualified SolverSpec
 import           Test.Tasty     (defaultMain, testGroup)
 import qualified VersionSetSpec
@@ -17,6 +18,7 @@ main =
             [ VersionSetSpec.tests
             , LatticeSpec.tests
             , PowSpec.tests
+            , PrettySpec.tests
             , SolverSpec.tests
             , FlattenSpec.tests
             , BootSpec.tests

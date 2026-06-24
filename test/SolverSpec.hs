@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies          #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module SolverSpec (tests) where
@@ -12,11 +13,12 @@ import           Data.Map.Strict       (Map)
 import qualified Data.Map.Strict       as Map
 import           Data.Maybe            (listToMaybe)
 import           Data.Ord              (Down (..), comparing)
-import           Data.Text             (Text)
 import qualified Data.Text             as T
 import           Distribution.Version  (Version, mkVersion)
 import qualified Distribution.Version
+import           PubGrub.Report        (reportConflict)
 import           PubGrub.Solver
+import           PubGrub.Term
 import           PubGrub.Types
 import           PubGrub.VersionSet    (VersionSet)
 import qualified PubGrub.VersionSet    as VS
@@ -24,12 +26,13 @@ import           Test.Tasty            (TestTree, testGroup)
 import           Test.Tasty.HUnit      (assertBool, testCase, (@?=))
 
 instance Package String where
-  prettyPackage = T.pack
+    type Key String = String
+    prettyPackage = T.pack
 
 -- | An in-memory registry: package -> version -> its dependencies.
 newtype Registry = Registry (Map String (Map Version (Map String VersionSet)))
 
-instance Monad m => DependencyProvider Registry String m where
+instance Monad m => DependencyProvider Registry String VersionSet m where
     expand (Registry regMap) p range =
         let vs = maybe [] Map.keys (Map.lookup p regMap)
          in pure $ case listToMaybe (sortBy (comparing Down) (filter (VS.contains range) vs)) of
@@ -44,7 +47,7 @@ v = mkVersion
 geq :: [Int] -> VersionSet
 geq = VS.fromVersionRange . Distribution.Version.orLaterVersion . mkVersion
 
-noLog :: LogAction Identity (SolverMsg String)
+noLog :: LogAction Identity (SolverMsg String VersionSet)
 noLog = mempty
 
 reg :: [(String, [([Int], [(String, VersionSet)])])] -> Registry
@@ -76,7 +79,7 @@ tests =
             let r = reg [("root", [([1], [])])]
              in runIdentity (usingLoggerT noLog (solve r "root" (v [1]))) @?= Right (Map.fromList [("root", v [1])])
         , testCase "trace emits Chose events for resolved packages" $ do
-            ref <- newIORef ([] :: [SolverMsg String])
+            ref <- newIORef ([] :: [SolverMsg String VersionSet])
             let r =
                     reg
                         [ ("root", [([1], [("a", VS.full)])])
@@ -119,7 +122,9 @@ tests =
                         , ("aeson", [([2, 2], [("text", geq [2, 0])])])
                         ,
                             ( "servant"
-                            , [([0, 20], [("text", VS.fromVersionRange (Distribution.Version.earlierVersion (mkVersion [2, 0])))])]
+                            ,
+                                [ ([0, 20], [("text", VS.fromVersionRange (Distribution.Version.earlierVersion (mkVersion [2, 0])))])
+                                ]
                             )
                         , ("text", [([2, 0], []), ([1, 2], [])])
                         ]
@@ -140,7 +145,7 @@ tests =
                     Left _ -> pure ()
                     Right s -> assertBool ("expected unsat, got " ++ show s) False
         , testCase "trace streams Conflict and Backtracked during backtracking" $ do
-            ref <- newIORef ([] :: [SolverMsg String])
+            ref <- newIORef ([] :: [SolverMsg String VersionSet])
             let r =
                     reg
                         [ ("root", [([1], [("a", VS.full), ("b", geq [2])])])

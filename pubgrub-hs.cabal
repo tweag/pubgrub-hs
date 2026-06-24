@@ -17,10 +17,13 @@ library
     exposed-modules:
         PubGrub
         PubGrub.VersionSet
+        PubGrub.Term
         PubGrub.Types
         PubGrub.Solver
+        PubGrub.Report
         PubGrub.Lattice
         PubGrub.Pow
+        PubGrub.Pretty
     build-depends:
         , base ^>=4.21.0.0
         , containers
@@ -104,6 +107,7 @@ test-suite pubgrub-hs-test
         CompilerSpec
         LatticeSpec
         PowSpec
+        PrettySpec
     build-depends:
         , pubgrub-hs
         , pubgrub-hs:cabal-bridge
