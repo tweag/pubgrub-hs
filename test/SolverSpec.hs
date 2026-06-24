@@ -30,11 +30,13 @@ instance Package String where
 newtype Registry = Registry (Map String (Map Version (Map String VersionSet)))
 
 instance Monad m => DependencyProvider Registry String m where
-    chooseVersion (Registry regMap) p range =
+    expand (Registry regMap) p range =
         let vs = maybe [] Map.keys (Map.lookup p regMap)
-         in pure (listToMaybe (sortBy (comparing Down) (filter (VS.contains range) vs)))
-    getDependencies (Registry regMap) p ver =
-        pure (Map.findWithDefault Map.empty ver (Map.findWithDefault Map.empty p regMap))
+         in pure $ case listToMaybe (sortBy (comparing Down) (filter (VS.contains range) vs)) of
+                Nothing -> Nothing
+                Just ver ->
+                    let deps = Map.findWithDefault Map.empty ver (Map.findWithDefault Map.empty p regMap)
+                     in Just (ver, deps)
 
 v :: [Int] -> Version
 v = mkVersion

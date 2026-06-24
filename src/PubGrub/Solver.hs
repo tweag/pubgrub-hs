@@ -55,11 +55,35 @@ import           PubGrub.Types
 import           PubGrub.VersionSet   (VersionSet)
 import qualified PubGrub.VersionSet   as VS
 
--- | The oracle: pick a version in a range and report a version's dependencies.
+-- | The oracle the solver consults whenever it needs to make a decision.
 -- Effects (e.g. lazy index loading) run in the monad @m@.
 class (Package p, Monad m) => DependencyProvider dp p m | dp -> p where
-  chooseVersion :: dp -> p -> VersionSet -> m (Maybe Version)
-  getDependencies :: dp -> p -> Version -> m (Map p VersionSet)
+  -- | Pick a version of @p@ and report that version's dependencies.
+  --
+  -- The solver calls @expand dp p range@ when it has narrowed @p@ down to the
+  -- term @range@ and needs to commit to a concrete version. The @range@ is the
+  -- accumulated constraint on @p@ from the current partial solution, not a
+  -- hint: it is a hard precondition the result must satisfy.
+  --
+  -- Contract:
+  --
+  --   * On @Just (v, deps)@, @v@ MUST satisfy @range@ (i.e.
+  --     @VS.contains range v@). The solver immediately records @v@ as a
+  --     /decision/ — a positive assignment — so an out-of-range @v@ directly
+  --     contradicts the derivations that produced @range@ and corrupts the
+  --     search invariant. @deps@ is the dependency map of exactly that @v@.
+  --
+  --   * Return @Nothing@ iff no version of @p@ satisfies @range@. The solver
+  --     turns this into a \"no versions\" incompatibility and backtracks.
+  --
+  -- A provider is free to choose /which/ in-range version to return (this is
+  -- where a version-selection policy lives, e.g. \"newest first\"). It need not
+  -- be clever: a wrong-but-in-range guess is not an error. If the chosen
+  -- version leads to a conflict, the solver derives an incompatibility,
+  -- backtracks, and calls @expand@ again with a strictly smaller @range@ that
+  -- excludes the rejected version — so repeated calls see a monotonically
+  -- shrinking range until a consistent version is found or the range is empty.
+  expand :: dp -> p -> VersionSet -> m (Maybe (Version, Map p VersionSet))
 
 -- | A single entry in the partial solution.
 data Assignment p
@@ -302,14 +326,13 @@ solve dp rootPkg rootV = go [notRoot rootPkg rootV] emptyPS
             [] -> pure (Right (extractSolution ps'))
             ((p, range) : _) -> do
               logMsg (Deciding p range)
-              mv <- chooseVersion dp p range
-              case mv of
+              expanded <- expand dp p range
+              case expanded of
                 Nothing -> do
                   logMsg (NoVersionFor p range)
                   go (noVersions p range : incompats') ps'
-                Just v -> do
+                Just (v, deps) -> do
                   logMsg (Chose p v)
-                  deps <- getDependencies dp p v
                   let depIncs =
                         [ fromDependency p (VS.singleton v) (q, r)
                         | (q, r) <- Map.toList deps

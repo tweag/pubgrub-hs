@@ -93,13 +93,26 @@ thePlatform :: Platform
 thePlatform = Platform X86_64 Linux
 
 instance (MonadIO m) => DependencyProvider HackageProvider Pkg m where
-  chooseVersion :: (MonadIO m) => HackageProvider -> Pkg -> VersionSet -> m (Maybe Version)
-  chooseVersion hp pkg range = pure $ case pkg of
-    Root -> Just (mkVersion [0])
+  expand :: (MonadIO m) => HackageProvider -> Pkg -> VersionSet -> m (Maybe (Version, Map Pkg VersionSet))
+  expand hp pkg range = case pkg of
+    Root ->
+      pure (Just (mkVersion [0], Map.singleton (Pkg (hpTarget hp)) (hpRange hp)))
     Pkg n
+      -- A boot package is pinned to the version the compiler ships, and has no
+      -- dependencies: the compiler provides the boot packages as a consistent set.
       | Just bv <- Map.lookup n (hpBoot hp) ->
-          if VS.contains range bv then Just bv else Nothing
+          pure (if VS.contains range bv then Just (bv, Map.empty) else Nothing)
       | otherwise ->
+          case newestInRange of
+            Nothing -> pure Nothing
+            Just v -> do
+              res <- liftIO (hpLookupCabal hp (PackageIdentifier n v))
+              case res of
+                Right gpd ->
+                  pure (Just (v, Map.mapKeys Pkg (flattenDeps thePlatform (hpCompiler hp) gpd)))
+                Left _ -> liftIO (throwIO (ResolveError n v))
+      where
+        newestInRange =
           listToMaybe
             ( sortBy
                 (comparing Down)
@@ -108,17 +121,6 @@ instance (MonadIO m) => DependencyProvider HackageProvider Pkg m where
                     (Map.findWithDefault [] n (hpVersions hp))
                 )
             )
-
-  getDependencies :: (MonadIO m) => HackageProvider -> Pkg -> Version -> m (Map Pkg VersionSet)
-  getDependencies hp pkg v = case pkg of
-    Root -> pure (Map.singleton (Pkg (hpTarget hp)) (hpRange hp))
-    Pkg n
-      | Map.member n (hpBoot hp) -> pure Map.empty
-      | otherwise -> do
-          res <- liftIO (hpLookupCabal hp (PackageIdentifier n v))
-          case res of
-            Right gpd -> pure (Map.mapKeys Pkg (flattenDeps thePlatform (hpCompiler hp) gpd))
-            Left _ -> liftIO (throwIO (ResolveError n v))
 
 withHackageProvider ::
   (MonadIO m, MonadUnliftIO m, WithLog env Text m) =>
