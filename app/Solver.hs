@@ -1,6 +1,7 @@
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE PatternSynonyms     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Solver (
@@ -20,7 +21,7 @@ import           Distribution.Version (mkVersion)
 import           HackageProvider      (HackageProvider, ResolveError (..))
 import           Pkg                  (Pkg (..))
 import           Provider             (Combined)
-import           PubGrub.Choice       (Choice (..), ChoiceSet)
+import           PubGrub.Choice       (Choice, ChoiceSet, pattern Source)
 import qualified PubGrub.Pretty       as P
 import           PubGrub.Report       (ReportEnv (..), reportConflictWith)
 import           PubGrub.Solver       (SolveError (..), SolverMsg (..), solve)

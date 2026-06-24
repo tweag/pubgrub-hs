@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE PatternSynonyms       #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE UndecidableInstances  #-}
 
@@ -20,7 +21,9 @@ import           Distribution.Version           (mkVersion)
 import           PackageDbProvider              (PackageDbProvider,
                                                  installedInRange)
 import           Pkg                            (Pkg (..))
-import           PubGrub.Choice                 (Choice (..), ChoiceSet (..))
+import           PubGrub.Choice                 (ChoiceSet (..),
+                                                 pattern Installed,
+                                                 pattern Source)
 import           PubGrub.Lattice                (bottom)
 import           PubGrub.Solver                 (DependencyProvider (..))
 import           PubGrub.VersionSet             (VersionSet)
@@ -42,11 +45,12 @@ instance
     expand c Root _ =
         let dep =
                 ChoiceSet
-                    (installedInRange (cDb c) (cTarget c) (cRange c))
-                    (cRange c)
+                    ( installedInRange (cDb c) (cTarget c) (cRange c)
+                    , cRange c
+                    )
             root = Source (mkVersion [0])
          in pure (Just (root, Map.singleton (Pkg (cTarget c)) dep))
-    expand c p (ChoiceSet inst src) = do
+    expand c p (ChoiceSet (inst, src)) = do
         mi <- expand (cDb c) p inst -- Maybe (UnitId, Map Pkg (Pow UnitId))
         case mi of
             Just (uid, ideps) ->
@@ -57,7 +61,7 @@ instance
                 ms <- expand (cSource c) p src -- Maybe (Version, Map Pkg VersionSet)
                 pure (fmap sourceResult ms)
       where
-        installedDep i = ChoiceSet i bottom
+        installedDep i = ChoiceSet (i, bottom)
         sourceResult (v, sdeps) =
             ( Source v
             , Map.mapWithKey liftSourceDep sdeps
@@ -65,5 +69,5 @@ instance
         -- A source dependency spans both worlds: its range, plus any installed
         -- instance falling within that range.
         liftSourceDep (Pkg dn) range =
-            ChoiceSet (installedInRange (cDb c) dn range) range
-        liftSourceDep Root range = ChoiceSet bottom range
+            ChoiceSet (installedInRange (cDb c) dn range, range)
+        liftSourceDep Root range = ChoiceSet (bottom, range)

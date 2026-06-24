@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE PatternSynonyms       #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
@@ -20,7 +21,9 @@ import           PackageDbProvider              (PackageDbProvider,
 import           Pkg                            (Pkg (..))
 import           Provider                       (Combined (..))
 import           PubGrub.Cabal.InstalledDb      (InstalledPkg (..))
-import           PubGrub.Choice                 (Choice (..), ChoiceSet (..))
+import           PubGrub.Choice                 (ChoiceSet (..),
+                                                 pattern Installed,
+                                                 pattern Source)
 import           PubGrub.Lattice                (bottom)
 import           PubGrub.Solver                 (DependencyProvider (..))
 import           PubGrub.VersionSet             (VersionSet)
@@ -88,15 +91,16 @@ tests =
             let combined = Combined db src (mkPackageName "base") VS.full
                 sel =
                     ChoiceSet
-                        (installedInRange db (mkPackageName "base") VS.full)
-                        sourceVersions
+                        ( installedInRange db (mkPackageName "base") VS.full
+                        , sourceVersions
+                        )
              in case runIdentity (expand combined basePkg sel) of
                     Just (Installed _, _) -> pure ()
                     Just (Source _, _) -> assertFailure "expected Installed, got Source"
                     Nothing -> assertFailure "expand returned Nothing unexpectedly"
         , testCase "source fallback: returns a Source choice when nothing installed" $
             let combined = Combined emptyDb src (mkPackageName "base") VS.full
-                sel = ChoiceSet bottom sourceVersions
+                sel = ChoiceSet (bottom, sourceVersions)
              in case runIdentity (expand combined basePkg sel) of
                     Just (Source _, _) -> pure ()
                     Just (Installed _, _) -> assertFailure "expected Source, got Installed"

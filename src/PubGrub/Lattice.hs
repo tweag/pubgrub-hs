@@ -94,3 +94,26 @@ class Boolean a => Sets a where
     type Elem a
     singleton :: Elem a -> a
     member :: Elem a -> a -> Bool
+
+-- The product of two of each structure, taken componentwise. A pair of sets is
+-- itself a set whose elements are the disjoint union ('Either') of the two
+-- component element types: a left element lives in the first component (the
+-- other empty), a right element in the second.
+
+instance (Lattice a, Lattice b) => Lattice (a, b) where
+    (a1, b1) \/ (a2, b2) = (a1 \/ a2, b1 \/ b2)
+    (a1, b1) /\ (a2, b2) = (a1 /\ a2, b1 /\ b2)
+
+instance (BoundedLattice a, BoundedLattice b) => BoundedLattice (a, b) where
+    bottom = (bottom, bottom)
+    top = (top, top)
+
+instance (Boolean a, Boolean b) => Boolean (a, b) where
+    neg (a, b) = (neg a, neg b)
+
+instance (Sets a, Sets b) => Sets (a, b) where
+    type Elem (a, b) = Either (Elem a) (Elem b)
+    singleton (Left x)  = (singleton x, bottom)
+    singleton (Right y) = (bottom, singleton y)
+    member (Left x) (a, _)  = member x a
+    member (Right y) (_, b) = member y b
