@@ -45,6 +45,7 @@ library cabal-bridge
         PubGrub.Cabal.InstalledDb
         PackageDbProvider
         Pkg
+        Provider
     build-depends:
         , base
         , bytestring
@@ -118,6 +119,7 @@ test-suite pubgrub-hs-test
         ChoiceSetSpec
         InstalledDbSpec
         PackageDbProviderSpec
+        ProviderSpec
     build-depends:
         , pubgrub-hs
         , pubgrub-hs:cabal-bridge

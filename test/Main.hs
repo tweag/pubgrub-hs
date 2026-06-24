@@ -9,6 +9,7 @@ import qualified LatticeSpec
 import qualified PackageDbProviderSpec
 import qualified PowSpec
 import qualified PrettySpec
+import qualified ProviderSpec
 import qualified SolverSpec
 import           Test.Tasty            (defaultMain, testGroup)
 import qualified VersionSetSpec
@@ -29,4 +30,5 @@ main =
             , CompilerSpec.tests
             , InstalledDbSpec.tests
             , PackageDbProviderSpec.tests
+            , ProviderSpec.tests
             ]

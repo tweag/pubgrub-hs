@@ -31,13 +31,13 @@ tests =
     testGroup
         "InstalledDb"
         [ testCase "parses two records with names, versions, unit-ids" $
-            (fmap (map ipName) (parseGhcPkgDump' dump))
+            fmap (map ipName) (parseGhcPkgDump' dump)
                 @?= Right [mkPackageName "ghc-prim", mkPackageName "base"]
         , testCase "parses dependency unit-ids" $
-            (fmap (map ipDepends) (parseGhcPkgDump' dump))
+            fmap (map ipDepends) (parseGhcPkgDump' dump)
                 @?= Right [[], [mkUnitId "ghc-prim-0.11.0-aaa"]]
         , testCase "parses the unit-id and version of base" $
-            (fmap (take 1 . drop 1) (parseGhcPkgDump' dump))
+            fmap (take 1 . drop 1) (parseGhcPkgDump' dump)
                 @?= Right
                     [ InstalledPkg
                         (mkUnitId "base-4.21.0.0-bbb")

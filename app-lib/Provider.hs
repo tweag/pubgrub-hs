@@ -1,0 +1,73 @@
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies          #-}
+{-# LANGUAGE UndecidableInstances  #-}
+
+-- | The combined installed and source dependency provider. It resolves over
+-- 'ChoiceSet', the product of the installed world (@Pow UnitId@, from a
+-- 'PackageDbProvider') and the source world ('VersionSet').
+--
+-- The policy prefers installed: when the constraint admits an installed
+-- instance, it commits to it and pins its dependencies to exact unit-ids.
+-- Otherwise it falls back to a source release, whose dependencies span both
+-- worlds: a range, plus the installed instances within it.
+module Provider (Combined (..)) where
+
+import qualified Data.Map.Strict                as Map
+import           Distribution.Types.PackageName (PackageName)
+import           Distribution.Version           (mkVersion)
+import           PackageDbProvider              (PackageDbProvider,
+                                                 installedChoice,
+                                                 installedInRange)
+import           Pkg                            (Pkg (..))
+import           PubGrub.Choice                 (Choice (..), ChoiceSet (..),
+                                                 ChoiceSource (..),
+                                                 Repository (..))
+import           PubGrub.Lattice                (bottom)
+import           PubGrub.Solver                 (DependencyProvider (..))
+import           PubGrub.VersionSet             (VersionSet)
+
+-- | @cTarget@ and @cRange@ are the root's single dependency: the package
+-- being solved for, and its range.
+data Combined src = Combined
+    { cDb     :: PackageDbProvider
+    , cSource :: src
+    , cTarget :: PackageName
+    , cRange  :: VersionSet
+    }
+
+instance
+    (Monad m, DependencyProvider src Pkg VersionSet m)
+    => DependencyProvider (Combined src) Pkg ChoiceSet m
+    where
+    -- The synthetic root depends on the target across both worlds.
+    expand c Root _ =
+        let dep =
+                ChoiceSet
+                    (installedInRange (cDb c) (cTarget c) (cRange c))
+                    (cRange c)
+            root = Source (ChoiceSource (cTarget c) (mkVersion [0]) Hackage)
+         in pure (Just (root, Map.singleton (Pkg (cTarget c)) dep))
+    expand c p@(Pkg n) (ChoiceSet inst src) = do
+        mi <- expand (cDb c) p inst -- Maybe (UnitId, Map Pkg (Pow UnitId))
+        case mi of
+            Just (uid, ideps)
+                | Just ci <- installedChoice (cDb c) uid ->
+                    -- An installed instance's dependencies are exact unit-ids,
+                    -- with no source half.
+                    pure (Just (Installed ci, fmap installedDep ideps))
+            _ -> do
+                ms <- expand (cSource c) p src -- Maybe (Version, Map Pkg VersionSet)
+                pure (fmap sourceResult ms)
+      where
+        installedDep i = ChoiceSet i bottom
+        sourceResult (v, sdeps) =
+            ( Source (ChoiceSource n v Hackage)
+            , Map.mapWithKey liftSourceDep sdeps
+            )
+        -- A source dependency spans both worlds: its range, plus any installed
+        -- instance falling within that range.
+        liftSourceDep (Pkg dn) range =
+            ChoiceSet (installedInRange (cDb c) dn range) range
+        liftSourceDep Root range = ChoiceSet bottom range
