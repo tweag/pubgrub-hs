@@ -1,14 +1,15 @@
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE TypeFamilies       #-}
 
-{- | A version set: a canonical, sorted, disjoint, non-adjacent collection of
-version intervals. Backed by Cabal's 'VersionInterval' so that derived
-structural equality coincides with semantic equality.
--}
+-- | A version set: a canonical, sorted, disjoint, non-adjacent collection of
+-- version intervals. Backed by Cabal's 'VersionInterval' so that derived
+-- structural equality coincides with semantic equality.
 module PubGrub.VersionSet (
+    -- The constructor is hidden so that every 'VersionSet' stays canonical.
     VersionSet,
     empty,
     full,
-    singleton,
+    PubGrub.VersionSet.singleton,
     fromVersionRange,
     toVersionRange,
     complement,
@@ -17,7 +18,7 @@ module PubGrub.VersionSet (
     contains,
     isEmpty,
     isFull,
-    subsetOf,
+    PubGrub.VersionSet.subsetOf,
     isDisjoint,
     intervals,
 ) where
@@ -37,8 +38,7 @@ import           Distribution.Version               (Version, VersionRange,
                                                      orLaterVersion,
                                                      thisVersion,
                                                      unionVersionRanges)
-
-import           PubGrub.Lattice                    (Lattice (..))
+import           PubGrub.Lattice
 
 newtype VersionSet = VersionSet [VersionInterval]
     deriving stock (Eq, Show)
@@ -51,11 +51,10 @@ intervals (VersionSet is) = is
 fromVersionRange :: VersionRange -> VersionSet
 fromVersionRange = VersionSet . asVersionIntervals
 
-{- | Convert back to a 'VersionRange' (used to delegate set arithmetic to Cabal),
-via Cabal's own canonical 'VersionIntervals' round-trip. Our interval list is
-always canonical (it comes from 'asVersionIntervals'), so 'mkVersionIntervals'
-always succeeds; the 'noVersion' fallback is unreachable.
--}
+-- | Convert back to a 'VersionRange' (used to delegate set arithmetic to Cabal),
+-- via Cabal's own canonical 'VersionIntervals' round-trip. Our interval list is
+-- always canonical (it comes from 'asVersionIntervals'), so 'mkVersionIntervals'
+-- always succeeds; the 'noVersion' fallback is unreachable.
 toVersionRange :: VersionSet -> VersionRange
 toVersionRange (VersionSet is) =
     maybe noVersion fromVersionIntervals (mkVersionIntervals is)
@@ -116,3 +115,15 @@ isDisjoint a b = isEmpty (intersection a b)
 instance Lattice VersionSet where
     (\/) = union
     (/\) = intersection
+
+instance BoundedLattice VersionSet where
+    bottom = empty
+    top = full
+
+instance Boolean VersionSet where
+    neg = complement
+
+instance Sets VersionSet where
+    type Elem VersionSet = Version
+    singleton = PubGrub.VersionSet.singleton
+    member = flip contains
