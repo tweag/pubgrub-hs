@@ -6,7 +6,6 @@
 {-# LANGUAGE TypeFamilies          #-}
 
 module HackageProvider (
-    Pkg (..),
     HackageProvider (..),
     ResolveError (..),
     withHackageProvider,
@@ -56,21 +55,12 @@ import qualified Hackage.Security.Unlifted              as Sec hiding
 import           Hackage.Security.Util.Pretty           as Hackage (pretty)
 import           Hackage.Security.Util.Some             (Some (..))
 import           HttpClient                             (Manager)
+import           Pkg                                    (Pkg (..))
 import           PubGrub.Cabal.Flatten                  (flattenDeps)
 import           PubGrub.Solver                         (DependencyProvider (..))
-import           PubGrub.Types                          (Package (..))
 import           PubGrub.VersionSet                     (VersionSet)
 import qualified PubGrub.VersionSet                     as VS
 import           UnliftIO                               (MonadIO (..))
-
--- | Resolution package: a synthetic root, or a real Hackage package.
-data Pkg = Root | Pkg PackageName
-    deriving (Eq, Ord, Show)
-
-instance Package Pkg where
-    type Key Pkg = PackageName
-    prettyPackage Root    = "root"
-    prettyPackage (Pkg n) = T.pack (prettyShow n)
 
 -- | Thrown when a selected package version's .cabal cannot be parsed.
 data ResolveError = ResolveError PackageName Version

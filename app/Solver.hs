@@ -17,8 +17,8 @@ import           Data.Text            (Text)
 import qualified Data.Text            as T
 import           Distribution.Pretty  (prettyShow)
 import           Distribution.Version (mkVersion)
-import           HackageProvider      (HackageProvider (..), Pkg (..),
-                                       ResolveError (..))
+import           HackageProvider      (HackageProvider (..), ResolveError (..))
+import           Pkg                  (Pkg (..))
 import           PubGrub.Report       (ReportEnv (..), reportConflictWith)
 import           PubGrub.Solver       (SolveError (..), SolverMsg (..), solve)
 import           PubGrub.Term         (Term (..))

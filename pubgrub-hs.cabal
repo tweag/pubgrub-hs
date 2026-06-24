@@ -64,6 +64,7 @@ executable pubgrub-hs
         Hackage
         Hackage.Security.Unlifted
         HttpClient
+        Pkg
         Solver
         Utils
     build-depends:
