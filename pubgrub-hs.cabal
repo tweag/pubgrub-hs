@@ -42,8 +42,10 @@ library cabal-bridge
         PubGrub.Cabal.Flatten
         PubGrub.Cabal.Boot
         PubGrub.Cabal.Compiler
+        PubGrub.Cabal.InstalledDb
     build-depends:
         , base
+        , bytestring
         , containers
         , Cabal
         , Cabal-syntax
@@ -111,6 +113,7 @@ test-suite pubgrub-hs-test
         PowSpec
         PrettySpec
         ChoiceSetSpec
+        InstalledDbSpec
     build-depends:
         , pubgrub-hs
         , pubgrub-hs:cabal-bridge

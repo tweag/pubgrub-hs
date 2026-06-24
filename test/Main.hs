@@ -4,11 +4,12 @@ import qualified BootSpec
 import qualified ChoiceSetSpec
 import qualified CompilerSpec
 import qualified FlattenSpec
+import qualified InstalledDbSpec
 import qualified LatticeSpec
 import qualified PowSpec
 import qualified PrettySpec
 import qualified SolverSpec
-import           Test.Tasty     (defaultMain, testGroup)
+import           Test.Tasty      (defaultMain, testGroup)
 import qualified VersionSetSpec
 
 main :: IO ()
@@ -25,4 +26,5 @@ main =
             , FlattenSpec.tests
             , BootSpec.tests
             , CompilerSpec.tests
+            , InstalledDbSpec.tests
             ]
