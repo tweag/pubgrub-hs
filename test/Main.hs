@@ -1,6 +1,7 @@
 module Main (main) where
 
 import qualified BootSpec
+import qualified ChoiceSetSpec
 import qualified CompilerSpec
 import qualified FlattenSpec
 import qualified LatticeSpec
@@ -19,6 +20,7 @@ main =
             , LatticeSpec.tests
             , PowSpec.tests
             , PrettySpec.tests
+            , ChoiceSetSpec.tests
             , SolverSpec.tests
             , FlattenSpec.tests
             , BootSpec.tests

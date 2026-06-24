@@ -110,6 +110,7 @@ test-suite pubgrub-hs-test
         LatticeSpec
         PowSpec
         PrettySpec
+        ChoiceSetSpec
     build-depends:
         , pubgrub-hs
         , pubgrub-hs:cabal-bridge

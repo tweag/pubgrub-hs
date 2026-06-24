@@ -1,7 +1,10 @@
+{-# LANGUAGE TypeFamilies #-}
+
 -- | The concrete element and set types for choosing between installed and
--- source instances of a package. Not yet wired into the solver: 'ChoiceSet'
--- has no 'PubGrub.Lattice.Sets' or 'PubGrub.Pretty.Pretty' instance, and no
--- provider produces it.
+-- source instances of a package: 'Choice', one realisation of a package, and
+-- 'ChoiceSet', a set of them. 'ChoiceSet' is a 'PubGrub.Lattice.Sets'
+-- instance, so the solver can resolve over it. It has no
+-- 'PubGrub.Pretty.Pretty' instance yet, and no provider produces it.
 module PubGrub.Choice (
     Choice (..),
     ChoiceInstalled (..),
@@ -16,6 +19,7 @@ import           Distribution.Types.PackageName (PackageName)
 import           Distribution.Types.UnitId      (UnitId)
 import           Distribution.Types.Version     (Version)
 import           PubGrub.Compiler               (PackageDb)
+import           PubGrub.Lattice
 import           PubGrub.Pow                    (Pow)
 import           PubGrub.VersionSet             (VersionSet)
 
@@ -56,8 +60,31 @@ name (Source cs)    = csName cs
 
 -- | A set of choices: a product of the two worlds. The installed world is keyed
 -- by 'UnitId', so instances sharing name and version stay distinct; the source
--- world is keyed by version. Boolean structure is componentwise.
+-- world is keyed by version. As a product of two Boolean algebras it is itself
+-- one, with every operation taken componentwise.
 data ChoiceSet = ChoiceSet
     { csetInstalled :: Pow UnitId
     , csetSource    :: VersionSet
     }
+    deriving (Eq, Show)
+
+instance Lattice ChoiceSet where
+    ChoiceSet i1 s1 \/ ChoiceSet i2 s2 = ChoiceSet (i1 \/ i2) (s1 \/ s2)
+    ChoiceSet i1 s1 /\ ChoiceSet i2 s2 = ChoiceSet (i1 /\ i2) (s1 /\ s2)
+
+instance BoundedLattice ChoiceSet where
+    bottom = ChoiceSet bottom bottom
+    top = ChoiceSet top top
+
+instance Boolean ChoiceSet where
+    neg (ChoiceSet i s) = ChoiceSet (neg i) (neg s)
+
+-- | An installed choice lives only in the installed world (keyed by its
+-- unit-id), a source choice only in the source world (keyed by its version), so
+-- the two are distinct even at the same version.
+instance Sets ChoiceSet where
+    type Elem ChoiceSet = Choice
+    singleton (Installed ci) = ChoiceSet (singleton (ciUnitId ci)) bottom
+    singleton (Source cs)    = ChoiceSet bottom (singleton (csVersion cs))
+    member (Installed ci) (ChoiceSet i _) = member (ciUnitId ci) i
+    member (Source cs) (ChoiceSet _ s)    = member (csVersion cs) s
