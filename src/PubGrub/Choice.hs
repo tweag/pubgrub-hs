@@ -1,4 +1,5 @@
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies      #-}
 
 -- | The concrete element and set types for choosing between installed and
 -- source instances of a package: 'Choice', one realisation of a package, and
@@ -15,12 +16,15 @@ module PubGrub.Choice (
     name,
 ) where
 
+import qualified Data.Set                       as Set
+import qualified Data.Text                      as T
 import           Distribution.Types.PackageName (PackageName)
 import           Distribution.Types.UnitId      (UnitId)
 import           Distribution.Types.Version     (Version)
 import           PubGrub.Compiler               (PackageDb)
 import           PubGrub.Lattice
-import           PubGrub.Pow                    (Pow)
+import           PubGrub.Pow                    (Pow (..))
+import           PubGrub.Pretty                 (Pretty (..))
 import           PubGrub.VersionSet             (VersionSet)
 
 -- | One concrete realisation of a package: a pre-installed instance or a
@@ -88,3 +92,15 @@ instance Sets ChoiceSet where
     singleton (Source cs)    = ChoiceSet bottom (singleton (csVersion cs))
     member (Installed ci) (ChoiceSet i _) = member (ciUnitId ci) i
     member (Source cs) (ChoiceSet _ s)    = member (csVersion cs) s
+
+instance Pretty Choice where
+    pretty (Installed ci) = pretty (ciVersion ci) <> " (installed)"
+    pretty (Source cs)    = pretty (csVersion cs)
+
+instance Pretty ChoiceSet where
+    pretty (ChoiceSet i s) = pretty s <> installedNote i
+      where
+        installedNote (Incl u)
+            | Set.null u = ""
+            | otherwise = " (+" <> T.pack (show (Set.size u)) <> " installed)"
+        installedNote (Excl _) = ""
