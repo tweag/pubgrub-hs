@@ -15,7 +15,7 @@ module PackageDbProvider (
 ) where
 
 import           Data.List                      (maximumBy)
-import           Data.List.NonEmpty             (NonEmpty ((:|)))
+import           Data.List.NonEmpty             (NonEmpty)
 import qualified Data.List.NonEmpty             as NE
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
@@ -47,7 +47,11 @@ mkPackageDbProvider kind pkgs =
     PackageDbProvider
         { pdbKind = kind
         , pdbById = Map.fromList [(ipUnitId p, p) | p <- pkgs]
-        , pdbByName = Map.fromListWith (<>) [(ipName p, ipUnitId p :| []) | p <- pkgs]
+        , pdbByName =
+            Map.fromList
+                [ (ipName (NE.head g), NE.map ipUnitId g)
+                | g <- NE.groupAllWith ipName pkgs
+                ]
         }
 
 -- | The installed unit-ids of @name@ whose version lies in @range@.
