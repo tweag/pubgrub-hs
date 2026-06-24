@@ -20,13 +20,11 @@ import           Control.Monad.IO.Class                 (MonadIO)
 import           Data.Binary                            (decodeFileOrFail,
                                                          encodeFile)
 import qualified Data.ByteString.Lazy                   as BSL
-import           Data.List                              (sortBy)
+import qualified Data.Foldable1                         as Foldable1
 import           Data.List.NonEmpty                     (NonEmpty)
 import qualified Data.List.NonEmpty                     as NE
 import           Data.Map.Strict                        (Map)
 import qualified Data.Map.Strict                        as Map
-import           Data.Maybe                             (listToMaybe)
-import           Data.Ord                               (Down (..), comparing)
 import           Data.Text                              (Text)
 import qualified Data.Text                              as T
 import           Data.Time                              (getCurrentTime)
@@ -63,6 +61,7 @@ import           PubGrub.Types                          (Package (..))
 import           PubGrub.VersionSet                     (VersionSet)
 import qualified PubGrub.VersionSet                     as VS
 import           UnliftIO                               (MonadIO (..))
+
 
 -- | Resolution package: a synthetic root, or a real Hackage package.
 data Pkg = Root | Pkg PackageName
@@ -104,24 +103,17 @@ instance (MonadIO m) => DependencyProvider HackageProvider Pkg m where
       | Just bv <- Map.lookup n (hpBoot hp) ->
           pure (if VS.contains range bv then Just (bv, Map.empty) else Nothing)
       | otherwise ->
-          case newestInRange of
+          case Map.lookup n (hpVersions hp) >>= filterInRange of
             Nothing -> pure Nothing
-            Just v -> do
+            Just neVs -> do
+              let v = Foldable1.maximum neVs
               res <- liftIO (hpLookupCabal hp (PackageIdentifier n v))
               case res of
                 Right gpd ->
                   pure (Just (v, Map.mapKeys Pkg (flattenDeps thePlatform (hpCompiler hp) gpd)))
                 Left _ -> liftIO (throwIO (ResolveError n v))
-      where
-        newestInRange =
-          listToMaybe
-            ( sortBy
-                (comparing Down)
-                ( filter
-                    (VS.contains range)
-                    (maybe [] NE.toList (Map.lookup n (hpVersions hp)))
-                )
-            )
+    where
+      filterInRange = NE.nonEmpty . NE.filter (VS.contains range)
 
 withHackageProvider ::
   (MonadIO m, MonadUnliftIO m, WithLog env Text m) =>
