@@ -15,6 +15,8 @@ module PackageDbProvider (
 ) where
 
 import           Data.List                      (maximumBy)
+import           Data.List.NonEmpty             (NonEmpty ((:|)))
+import qualified Data.List.NonEmpty             as NE
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Data.Ord                       (comparing)
@@ -37,7 +39,7 @@ import qualified PubGrub.VersionSet             as VS
 data PackageDbProvider = PackageDbProvider
     { pdbKind   :: PackageDb
     , pdbById   :: Map UnitId InstalledPkg
-    , pdbByName :: Map PackageName [UnitId]
+    , pdbByName :: Map PackageName (NonEmpty UnitId)
     }
 
 mkPackageDbProvider :: PackageDb -> [InstalledPkg] -> PackageDbProvider
@@ -45,7 +47,7 @@ mkPackageDbProvider kind pkgs =
     PackageDbProvider
         { pdbKind = kind
         , pdbById = Map.fromList [(ipUnitId p, p) | p <- pkgs]
-        , pdbByName = Map.fromListWith (++) [(ipName p, [ipUnitId p]) | p <- pkgs]
+        , pdbByName = Map.fromListWith (<>) [(ipName p, ipUnitId p :| []) | p <- pkgs]
         }
 
 -- | The installed unit-ids of @name@ whose version lies in @range@.
@@ -54,7 +56,7 @@ installedInRange pdb name range =
     Incl
         ( Set.fromList
             [ uid
-            | uid <- Map.findWithDefault [] name (pdbByName pdb)
+            | uid <- maybe [] NE.toList (Map.lookup name (pdbByName pdb))
             , Just p <- [Map.lookup uid (pdbById pdb)]
             , VS.contains range (ipVersion p)
             ]
