@@ -51,7 +51,7 @@ pattern Source v = Choice (Right v)
 -- componentwise. Its elements are 'Choice'.
 newtype ChoiceSet = ChoiceSet (Pow UnitId, VersionSet)
     deriving stock (Eq, Show)
-    deriving newtype (Lattice, BoundedLattice, Boolean)
+    deriving (Lattice, BoundedLattice, Boolean)
 
 instance Sets ChoiceSet where
     type Elem ChoiceSet = Choice
@@ -64,12 +64,15 @@ instance Pretty Choice where
     pretty (Installed uid) = T.pack (prettyShow uid) <> " (installed)"
     pretty (Source v)      = pretty v
 
--- | A choice set renders as its source range, followed by the number of
+-- | A choice set renders as its source range, followed by the unit-ids of the
 -- installed instances it admits when that set is finite and non-empty.
 instance Pretty ChoiceSet where
     pretty (ChoiceSet (i, s)) = pretty s <> installedNote i
       where
         installedNote (Incl u)
             | Set.null u = ""
-            | otherwise = " (+" <> T.pack (show (Set.size u)) <> " installed)"
+            | otherwise =
+                " (also installed: "
+                    <> T.intercalate ", " (map (T.pack . prettyShow) (Set.toList u))
+                    <> ")"
         installedNote (Excl _) = ""

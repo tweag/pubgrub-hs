@@ -3,11 +3,13 @@
 
 module PrettySpec (tests) where
 
+import qualified Data.Set                  as Set
 import           Distribution.Types.UnitId (mkUnitId)
 import           Distribution.Version      (mkVersion, orLaterVersion)
 import           PubGrub.Choice            (ChoiceSet (..), pattern Installed,
                                             pattern Source)
 import           PubGrub.Lattice           (bottom)
+import           PubGrub.Pow               (Pow (..))
 import           PubGrub.Pretty            (pretty)
 import qualified PubGrub.VersionSet        as VS
 import           Test.Tasty                (TestTree, testGroup)
@@ -28,4 +30,12 @@ tests =
         , testCase "choiceset renders the source range" $
             pretty (ChoiceSet (bottom, VS.fromVersionRange (orLaterVersion (mkVersion [1]))))
                 @?= ">=1"
+        , testCase "choiceset lists the installed instances it also admits" $
+            pretty
+                ( ChoiceSet
+                    ( Incl (Set.fromList [mkUnitId "base-4.21-x"])
+                    , VS.fromVersionRange (orLaterVersion (mkVersion [1]))
+                    )
+                )
+                @?= ">=1 (also installed: base-4.21-x)"
         ]
