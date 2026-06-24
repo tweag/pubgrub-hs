@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module InstalledDbSpec (tests) where
 
 import qualified Data.ByteString.Char8

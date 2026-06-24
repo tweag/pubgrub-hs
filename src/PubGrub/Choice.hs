@@ -4,8 +4,8 @@
 -- | The concrete element and set types for choosing between installed and
 -- source instances of a package: 'Choice', one realisation of a package, and
 -- 'ChoiceSet', a set of them. 'ChoiceSet' is a 'PubGrub.Lattice.Sets'
--- instance, so the solver can resolve over it. It has no
--- 'PubGrub.Pretty.Pretty' instance yet, and no provider produces it.
+-- instance, so the solver can resolve over it, and both types have
+-- 'PubGrub.Pretty.Pretty' instances for rendering.
 module PubGrub.Choice (
     Choice (..),
     ChoiceInstalled (..),

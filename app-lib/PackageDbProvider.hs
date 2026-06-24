@@ -25,7 +25,7 @@ import           Pkg                            (Pkg (..))
 import           PubGrub.Cabal.InstalledDb      (InstalledPkg (..))
 import           PubGrub.Choice                 (ChoiceInstalled (..))
 import           PubGrub.Compiler               (PackageDb)
-import           PubGrub.Lattice                (singleton)
+import           PubGrub.Lattice                (singleton, (\/))
 import           PubGrub.Pow                    (Pow (..))
 import           PubGrub.Solver                 (DependencyProvider (..))
 import           PubGrub.VersionSet             (VersionSet)
@@ -82,10 +82,8 @@ instance (Monad m) => DependencyProvider PackageDbProvider Pkg (Pow UnitId) m wh
       where
         depsOf uid =
             Map.fromListWith
-                orPow
+                (\/)
                 [ (Pkg (ipName dep), singleton duid)
                 | duid <- maybe [] ipDepends (Map.lookup uid (pdbById pdb))
                 , Just dep <- [Map.lookup duid (pdbById pdb)]
                 ]
-        orPow (Incl a) (Incl b) = Incl (Set.union a b)
-        orPow a _               = a

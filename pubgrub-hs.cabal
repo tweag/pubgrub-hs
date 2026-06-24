@@ -57,6 +57,7 @@ library cabal-bridge
         , text
     hs-source-dirs:   app-lib
     default-language: GHC2021
+    default-extensions: ImportQualifiedPost
 
 executable pubgrub-hs
     import:           warnings

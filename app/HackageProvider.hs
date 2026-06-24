@@ -67,8 +67,6 @@ data ResolveError = ResolveError PackageName Version
 
 instance Exception ResolveError
 
-
-
 -- | A source dependency provider backed by the Hackage index. @hpVersions@ lists
 -- each package's available versions; @hpLookupCabal@ reads and parses one
 -- version's .cabal file when its dependencies are asked for. The solve target,
