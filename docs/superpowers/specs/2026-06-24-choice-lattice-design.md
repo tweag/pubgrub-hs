@@ -54,11 +54,19 @@ without reworking the core.
   stolen from the `lattices` package's `Algebra.Heyting`; we do **not** depend on
   `lattices`.
 
-- **`ChoiceSet = VersionSet × VersionSet` (a product), not a map with a default.**
-  With worlds fixed to {installed, source}, the set is a literal two-component
-  product. Products of Boolean algebras are Boolean, so every operation is the
-  `VersionSet` operation applied componentwise — no bespoke arithmetic. Extra
-  repositories or flags later add *factors to the product*.
+- **`ChoiceSet` is a product of two Boolean algebras, one per world.** Not a map
+  with a default. Products of Boolean algebras are Boolean, so every operation is
+  componentwise — no bespoke arithmetic. Extra repositories or flags later add
+  *factors to the product*.
+
+- **The installed world is keyed by `UnitId`, not version.** There can be several
+  installed instances with the same name *and* version, distinguished only by their
+  package-db key (`UnitId`/`InstalledPackageId`). They are genuinely distinct
+  choices and the solver picks among them. So the installed component is a set *of
+  unit-ids*, represented as a finite-or-cofinite set `Pow UnitId` (universe-free
+  Boolean algebra over an unordered domain), while the source component stays a
+  version-keyed `VersionSet`. This gives us two primitive `Sets` instances
+  (`VersionSet` via intervals, `Pow` via finite/cofinite) plus the product.
 
 - **Plain-sum `Choice`, not a GADT-indexed `Choice k`.** The solver stores choices
   whose kind is a runtime outcome (`Map p Choice`, `Decision`), so a type index
@@ -118,6 +126,28 @@ keep compiling during the refactor.
 | `VS.subsetOf a b` | `(a /\ neg b) == bottom` |
 | `VS.isDisjoint a b` | `(a /\ b) == bottom` |
 
+### A second primitive: `Pow a` (finite/cofinite subsets)
+
+For domains without a useful order (here, `UnitId`), the Boolean algebra of
+subsets is represented so that complement needs no universe:
+
+```haskell
+data Pow a = Incl (Set a) | Excl (Set a)   -- Excl s = complement of finite s
+
+bottom = Incl Set.empty;  top = Excl Set.empty
+neg (Incl s) = Excl s;    neg (Excl s) = Incl s
+Incl a /\ Incl b = Incl (a `Set.intersection` b)
+Incl a /\ Excl b = Incl (a `Set.difference` b)         -- (and the dual cases)
+member x (Incl s) = x `Set.member` s
+member x (Excl s) = not (x `Set.member` s)
+singleton = Incl . Set.singleton
+-- type Elem (Pow a) = a;  requires Ord a;  derived Eq is canonical
+```
+
+This is universe-free: complement just swaps the constructor. Cofinite sets
+(`Excl`) arise naturally from `neg` during term arithmetic (e.g. `Negative {u}`
+denotes "every installed instance except `u`").
+
 ### Generalised core (`PubGrub.Types`, `PubGrub.Solver`)
 
 `Term` and the incompatibility types are parameterised by the set type `s`:
@@ -161,21 +191,21 @@ data Choice = Installed ChoiceInstalled | Source ChoiceSource
 
 data ChoiceInstalled = ChoiceInstalled
   { ciName :: PackageName, ciVersion :: Version
-  , ciPackageDB :: PackageDB, ciUnitId :: UnitId }
+  , ciPackageDB :: PackageDB, ciUnitId :: UnitId }   -- ciUnitId is the identity
 
 data ChoiceSource = ChoiceSource
   { csName :: PackageName, csVersion :: Version, csRepository :: Repository }
 
 data Repository = Hackage           -- room for more
 
-version :: Choice -> Version         -- total projection
-loc     :: Choice -> Loc             -- Installed | Source
-data Loc = LocInstalled | LocSource
+version :: Choice -> Version         -- total projection (provenance, reporting)
 
-data ChoiceSet = ChoiceSet { csetInstalled :: VersionSet, csetSource :: VersionSet }
+data ChoiceSet = ChoiceSet { csetInstalled :: Pow UnitId, csetSource :: VersionSet }
 ```
 
-`ChoiceSet` instances are derived componentwise from `VersionSet`:
+The installed component is a `Pow UnitId` (so two installed instances of the same
+name+version are distinct), the source component a `VersionSet`. Instances are
+derived componentwise from the two factors:
 
 ```haskell
 instance BoundedLattice ChoiceSet where
@@ -186,12 +216,10 @@ instance Heyting ChoiceSet where
   neg (ChoiceSet i s) = ChoiceSet (neg i) (neg s)
 instance Sets ChoiceSet where
   type Elem ChoiceSet = Choice
-  singleton c = case loc c of
-    LocInstalled -> ChoiceSet (singleton (version c)) bottom
-    LocSource    -> ChoiceSet bottom (singleton (version c))
-  member c (ChoiceSet i s) = case loc c of
-    LocInstalled -> member (version c) i
-    LocSource    -> member (version c) s
+  singleton (Installed ci) = ChoiceSet (singleton (ciUnitId ci)) bottom
+  singleton (Source cs)    = ChoiceSet bottom (singleton (csVersion cs))
+  member (Installed ci) cs = member (ciUnitId ci) (csetInstalled cs)
+  member (Source cs')   cs = member (csVersion cs') (csetSource cs)
 ```
 
 ### How `expand` populates `ChoiceSet` dependencies
@@ -199,21 +227,62 @@ instance Sets ChoiceSet where
 This is where the product earns its place:
 
 - **Installed package** — depends on specific recorded installed unit-ids, so each
-  dependency pins the installed component to an exact version and excludes source:
-  `ChoiceSet {csetInstalled = singleton v, csetSource = bottom}`.
+  dependency pins the installed component to those exact ids and excludes source:
+  `ChoiceSet {csetInstalled = Incl {u}, csetSource = bottom}`.
 - **Source package** — `build-depends: foo >=1 && <2` can be satisfied by an
-  installed *or* a freshly-built `foo`, so it spans both components with the same
-  range: `ChoiceSet {csetInstalled = R, csetSource = R}`.
+  installed *or* a freshly-built `foo`. The source part is the range `R`; the
+  installed part is the set of installed unit-ids of `foo` whose version is in `R`
+  (the provider enumerates the db): `ChoiceSet {csetInstalled = Incl matches, csetSource = R}`.
 
 "Deps fixed vs deps ranged" and "installed-only vs either-world" both fall out of
-*which components are populated* — no special-casing in the solver.
+*which components are populated* — no special-casing in the solver. The db→unit-id
+enumeration lives entirely in the provider, keeping the set algebra universe-free.
 
-### Reporting
+### Reporting (a core goal — must not regress)
 
-Conflict reports currently render concrete versions/ranges. Generic over
-`s`/`Elem s`, `reportConflictWith` needs a way to render them — either `Pretty`-style
-constraints on `s` and `Elem s`, or renderer functions carried in `ReportEnv`
-(which already abstracts root/pinned). Minor but it touches the reporting code.
+Conflict reporting is a primary feature, so generalisation must not weaken it.
+Today `reportConflictWith` renders an `Incompatibility p` with `prettyPackage`,
+`prettyVer :: Version -> Text`, and `prettyVS :: VersionSet -> Text`, and uses a
+`ReportEnv` with two bespoke hooks (`rePinnedVersion`, `reIsRoot`) to say e.g.
+"provided by the compiler as 4.21.0.0". Two mechanisms preserve and extend this
+once the types are generic:
+
+**(a) A `Pretty`-style rendering class.** So any set/element can always be shown —
+a report can never silently drop the concrete constraint:
+
+```haskell
+class Pretty a where pretty :: a -> Text
+-- instances: Version, VersionSet, UnitId, Pow UnitId, Choice, ChoiceSet
+```
+
+`reportConflictWith` gains `(Pretty s, Pretty (Elem s))` constraints; `prettyVer`
+becomes `pretty @(Elem s)` and `prettyVS` becomes `pretty @s`. `Choice` carries
+its provenance, so `Pretty Choice` renders the distinction intrinsically, e.g.
+`foo-1.5 (installed: global-db)` vs `foo-1.5 (source: hackage)` — exactly the
+information a generic version-only report would have lost. (We define our own
+lightweight `Pretty` to `Text` rather than reuse Cabal's `Distribution.Pretty`,
+which targets `Doc`/`String`; `Package` keeps `prettyPackage` for `p`.)
+
+**(b) Annotations.** Generalise `ReportEnv`'s bespoke `rePinnedVersion` into a
+uniform annotation capability — extra context the caller/provider knows that isn't
+in the bare terms (e.g. "provided by the compiler", "from the global package db").
+The guarantee we want is that we can *always attach an annotation* to the things a
+report names — packages, chosen elements (`Choice`), and decisions:
+
+```haskell
+data ReportEnv p s = ReportEnv
+  { reIsRoot   :: p -> Bool
+  , reAnnotate :: p -> Maybe Text          -- package-level provenance
+  , reAnnotateElem :: Elem s -> Maybe Text -- chosen-instance provenance (optional)
+  }
+```
+
+Annotations are supplied at report time and stay out of the solver's hot data
+structures (`Decision`/`Incompatibility` gain no reporting-only fields). The
+existing "compiler-provided as X, which does not satisfy R" leaf is reconstructed
+as `reAnnotate p` (the provenance phrase) composed with `pretty s` (the
+unsatisfied set). Open detail for implementation: the exact annotation key set
+(package vs element vs decision) — the principle is that all are annotatable.
 
 ## Staging
 
@@ -223,22 +292,23 @@ Each phase keeps the test suite green before the next begins.
   `VersionSet` an instance; keep its named API as thin wrappers. Behaviour
   unchanged.
 - **Phase 1** — parameterise `PubGrub.Types` and `PubGrub.Solver` over `s`/`Elem s`,
-  with `VersionSet` still the only instance (`Elem = Version`). **Behaviour-preserving**;
-  existing tests prove it. This is the large mechanical refactor (type-param churn
-  through every signature) and the reporting-genericity change.
-- **Phase 2** — add `PubGrub.Choice` with `Choice`/`ChoiceSet` and their derived
-  instances; unit-test the `ChoiceSet` algebra (product laws, membership).
+  with `VersionSet` still the only instance (`Elem = Version`). Add the `Pretty`
+  class and convert reporting to it + the generalised `ReportEnv` annotations.
+  **Behaviour-preserving**; existing tests prove identical report output. This is
+  the large mechanical refactor (type-param churn through every signature).
+- **Phase 2** — add `Pow a` (with tests) and `PubGrub.Choice` with
+  `Choice`/`ChoiceSet` and their derived instances; unit-test the `ChoiceSet`
+  algebra (product laws, membership, multiple installed instances per name+version).
 - **Phase 3** — `HackageProvider` emits `Choice`/`ChoiceSet`; introduce an
-  installed-package-DB source; fold the existing boot-package pinning into the
-  general installed-package mechanism.
+  installed-package-DB source (enumerating unit-ids); fold the existing
+  boot-package pinning into the general installed-package mechanism.
 
 ## Out of scope
 
 - **Flags.** Designed-for (another product factor / source-choice payload) but not
   implemented.
-- **Multiple source repositories.** `Repository` has room; `ChoiceSet` stays a
-  two-component product until a second source world is actually needed.
-- **>1 installed instance per (package, version).** Assumed not to occur; the
-  installed component is keyed by version, with unit-id/db carried as payload on the
-  concrete `Choice`.
-```
+- **Multiple source repositories.** `Repository` has room; the source component
+  stays a single `VersionSet` until a second source world is actually needed (at
+  which point it becomes a product over repositories, same pattern as the installed
+  world). Multiple installed instances per name+version *are* supported (keyed by
+  `UnitId`).
