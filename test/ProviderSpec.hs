@@ -15,9 +15,9 @@ import           Data.Ord                       (Down (..), comparing)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.UnitId      (mkUnitId)
 import           Distribution.Version           (Version, mkVersion)
-import           PackageDbProvider              (PackageDbProvider,
+import           InstalledDbProvider            (InstalledDbProvider,
                                                  installedInRange,
-                                                 mkPackageDbProvider)
+                                                 mkInstalledDbProvider)
 import           Pkg                            (Pkg (..))
 import           Provider                       (Combined (..))
 import           PubGrub.Cabal.InstalledDb      (InstalledPkg (..))
@@ -55,14 +55,14 @@ ip uid nm ver deps =
     InstalledPkg (mkUnitId uid) (mkPackageName nm) (mkVersion ver) (map mkUnitId deps)
 
 -- | A db with base installed at 4.21.
-db :: PackageDbProvider
+db :: InstalledDbProvider
 db =
-    mkPackageDbProvider
+    mkInstalledDbProvider
         [ ip "base-4.21-x" "base" [4, 21] []
         ]
 
-emptyDb :: PackageDbProvider
-emptyDb = mkPackageDbProvider []
+emptyDb :: InstalledDbProvider
+emptyDb = mkInstalledDbProvider []
 
 -- | Source registry: base at {4.21, 4.22}, no deps.
 src :: Src

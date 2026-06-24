@@ -5,10 +5,10 @@
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE TypeFamilies          #-}
 
-module HackageProvider (
-    HackageProvider (..),
+module SourceProvider (
+    SourceProvider (..),
     ResolveError (..),
-    withHackageProvider,
+    withSourceProvider,
 )
 where
 
@@ -67,49 +67,49 @@ data ResolveError = ResolveError PackageName Version
 
 instance Exception ResolveError
 
--- | A source dependency provider backed by the Hackage index. @hpVersions@ lists
--- each package's available versions; @hpLookupCabal@ reads and parses one
+-- | A source dependency provider backed by the Hackage index. @spVersions@ lists
+-- each package's available versions; @spLookupCabal@ reads and parses one
 -- version's .cabal file when its dependencies are asked for. The solve target,
 -- its range and the installed packages belong to 'Provider.Combined'.
-data HackageProvider = HackageProvider
-    { hpVersions :: Map PackageName (NonEmpty Version)
-    , hpLookupCabal :: PackageIdentifier -> IO (Either ParseError GenericPackageDescription)
-    , hpCompiler :: CompilerInfo
+data SourceProvider = SourceProvider
+    { spVersions :: Map PackageName (NonEmpty Version)
+    , spLookupCabal :: PackageIdentifier -> IO (Either ParseError GenericPackageDescription)
+    , spCompiler :: CompilerInfo
     }
 
 thePlatform :: Platform
 thePlatform = Platform X86_64 Linux
 
-instance (MonadIO m) => DependencyProvider HackageProvider Pkg VersionSet m where
+instance (MonadIO m) => DependencyProvider SourceProvider Pkg VersionSet m where
     expand
         :: (MonadIO m)
-        => HackageProvider
+        => SourceProvider
         -> Pkg
         -> VersionSet
         -> m (Maybe (Version, Map Pkg VersionSet))
     -- The combiner owns the synthetic root; a source provider never expands it.
     expand _ Root _ = pure Nothing
     expand hp (Pkg n) range =
-        case Map.lookup n (hpVersions hp) >>= filterInRange of
+        case Map.lookup n (spVersions hp) >>= filterInRange of
             Nothing -> pure Nothing
             Just neVs -> do
                 let v = Foldable1.maximum neVs
-                res <- liftIO (hpLookupCabal hp (PackageIdentifier n v))
+                res <- liftIO (spLookupCabal hp (PackageIdentifier n v))
                 case res of
                     Right gpd ->
-                        pure (Just (v, Map.mapKeys Pkg (flattenDeps thePlatform (hpCompiler hp) gpd)))
+                        pure (Just (v, Map.mapKeys Pkg (flattenDeps thePlatform (spCompiler hp) gpd)))
                     Left _ -> liftIO (throwIO (ResolveError n v))
       where
         filterInRange = NE.nonEmpty . NE.filter (VS.contains range)
 
-withHackageProvider
+withSourceProvider
     :: (MonadIO m, MonadUnliftIO m, WithLog env Text m)
     => Sec.Cache
     -> Manager
     -> Compiler
-    -> (HackageProvider -> m a)
+    -> (SourceProvider -> m a)
     -> m a
-withHackageProvider cache manager compiler act =
+withSourceProvider cache manager compiler act =
     withClient manager $ \httpLib ->
         withRepository httpLib [uri] cache logger $ \repository -> do
             uncheckClientErrors $ do
@@ -147,15 +147,15 @@ withHackageProvider cache manager compiler act =
                                 rebuilt
 
                     let hp =
-                            HackageProvider
-                                { hpVersions = indexVersions
-                                , hpLookupCabal = \pkgId -> do
+                            SourceProvider
+                                { spVersions = indexVersions
+                                , spLookupCabal = \pkgId -> do
                                     bytes <- uncheckClientErrors $ indexLookupCabal indexCallbacks pkgId
                                     return $ parseGPD (trusted bytes)
-                                , hpCompiler = compilerInfo compiler
+                                , spCompiler = compilerInfo compiler
                                 }
 
-                    let pkgCount = Map.size (hpVersions hp)
+                    let pkgCount = Map.size (spVersions hp)
                     logMsg @Text ("\ESC[2m  " <> T.pack (show pkgCount) <> " packages indexed\ESC[0m")
                     act hp
   where

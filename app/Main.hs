@@ -26,7 +26,7 @@ import qualified Hackage.Security.Client.Formats as Sec
 import           Hackage.Security.Unlifted       (getCachedIndex,
                                                   getModificationTime)
 import           Hackage.Security.Util.Path      (fromFilePath, makeAbsolute)
-import           HackageProvider                 (withHackageProvider)
+import           InstalledDbProvider             (mkInstalledDbProvider)
 import           Network.HTTP.Client             (defaultManagerSettings,
                                                   newManager)
 import           Options.Applicative             (Parser, ParserInfo, argument,
@@ -34,10 +34,10 @@ import           Options.Applicative             (Parser, ParserInfo, argument,
                                                   fullDesc, help, helper, info,
                                                   long, metavar, optional,
                                                   progDesc, strOption, (<**>))
-import           PackageDbProvider               (mkPackageDbProvider)
 import           Provider                        (Combined (..))
 import qualified PubGrub.VersionSet              as VS
 import           Solver                          (runSolve)
+import           SourceProvider                  (withSourceProvider)
 import           UnliftIO                        (MonadIO (..))
 
 data Options = Options
@@ -95,8 +95,8 @@ main = do
             Right compiler -> do
                 let (target, targetRange) = optTarget opts
                     range = fromMaybe targetRange (optRange opts)
-                    db = mkPackageDbProvider (installedPackages compiler)
-                withHackageProvider cache manager compiler $ \hp -> do
+                    db = mkInstalledDbProvider (installedPackages compiler)
+                withSourceProvider cache manager compiler $ \hp -> do
                     let combined =
                             Combined
                                 { cDb = db

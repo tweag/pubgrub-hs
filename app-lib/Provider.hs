@@ -6,8 +6,8 @@
 {-# LANGUAGE UndecidableInstances  #-}
 
 -- | The combined installed and source dependency provider. It resolves over
--- 'ChoiceSet', the product of the installed world (@Pow UnitId@, from a
--- 'PackageDbProvider') and the source world ('VersionSet').
+-- 'ChoiceSet', the product of the installed world (@Pow UnitId@, from an
+-- 'InstalledDbProvider') and the source world ('VersionSet').
 --
 -- The policy prefers installed: when the constraint admits an installed
 -- instance, it commits to it and pins its dependencies to exact unit-ids.
@@ -18,7 +18,7 @@ module Provider (Combined (..)) where
 import qualified Data.Map.Strict                as Map
 import           Distribution.Types.PackageName (PackageName)
 import           Distribution.Version           (mkVersion)
-import           PackageDbProvider              (PackageDbProvider,
+import           InstalledDbProvider            (InstalledDbProvider,
                                                  installedInRange)
 import           Pkg                            (Pkg (..))
 import           PubGrub.Choice                 (ChoiceSet (..),
@@ -31,7 +31,7 @@ import           PubGrub.VersionSet             (VersionSet)
 -- | @cTarget@ and @cRange@ are the root's single dependency: the package
 -- being solved for, and its range.
 data Combined src = Combined
-    { cDb     :: PackageDbProvider
+    { cDb     :: InstalledDbProvider
     , cSource :: src
     , cTarget :: PackageName
     , cRange  :: VersionSet

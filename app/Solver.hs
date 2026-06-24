@@ -18,7 +18,6 @@ import           Data.Text            (Text)
 import qualified Data.Text            as T
 import           Distribution.Pretty  (prettyShow)
 import           Distribution.Version (mkVersion)
-import           HackageProvider      (HackageProvider, ResolveError (..))
 import           Pkg                  (Pkg (..))
 import           Provider             (Combined)
 import           PubGrub.Choice       (Choice, ChoiceSet, pattern Source)
@@ -27,6 +26,7 @@ import           PubGrub.Report       (ReportEnv (..), reportConflictWith)
 import           PubGrub.Solver       (SolveError (..), SolverMsg (..), solve)
 import           PubGrub.Term         (Term (..))
 import           PubGrub.Types        (incompTerms)
+import           SourceProvider       (ResolveError (..), SourceProvider)
 import           UnliftIO             (MonadUnliftIO, try)
 
 renderSolverMsg :: SolverMsg Pkg ChoiceSet -> Text
@@ -56,7 +56,7 @@ rootChoice = Source (mkVersion [0])
 runSolve
     :: forall m env
      . (MonadUnliftIO m, WithLog env Text m)
-    => Combined HackageProvider -> m ()
+    => Combined SourceProvider -> m ()
 runSolve combined = do
     outcome <- do
         try (usingLoggerT (LogAction $ logMsg . renderSolverMsg) (solve combined Root rootChoice))

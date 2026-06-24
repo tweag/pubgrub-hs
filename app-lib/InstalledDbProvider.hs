@@ -7,9 +7,9 @@
 -- installed unit-ids, and a cofinite set is never expanded. 'expand' commits to
 -- the newest instance in the set and reports its dependencies, which are
 -- themselves exact installed unit-ids.
-module PackageDbProvider (
-    PackageDbProvider,
-    mkPackageDbProvider,
+module InstalledDbProvider (
+    InstalledDbProvider,
+    mkInstalledDbProvider,
     installedInRange,
 ) where
 
@@ -32,14 +32,14 @@ import qualified PubGrub.VersionSet             as VS
 
 -- | An index over one package db: each installed unit-id mapped to its record,
 -- and each package name to its unit-ids.
-data PackageDbProvider = PackageDbProvider
+data InstalledDbProvider = InstalledDbProvider
     { pdbById   :: Map UnitId InstalledPkg
     , pdbByName :: Map PackageName (NonEmpty UnitId)
     }
 
-mkPackageDbProvider :: [InstalledPkg] -> PackageDbProvider
-mkPackageDbProvider pkgs =
-    PackageDbProvider
+mkInstalledDbProvider :: [InstalledPkg] -> InstalledDbProvider
+mkInstalledDbProvider pkgs =
+    InstalledDbProvider
         { pdbById = Map.fromList [(ipUnitId p, p) | p <- pkgs]
         , pdbByName =
             Map.fromList
@@ -49,7 +49,7 @@ mkPackageDbProvider pkgs =
         }
 
 -- | The installed unit-ids of @name@ whose version lies in @range@.
-installedInRange :: PackageDbProvider -> PackageName -> VersionSet -> Pow UnitId
+installedInRange :: InstalledDbProvider -> PackageName -> VersionSet -> Pow UnitId
 installedInRange pdb name range =
     Incl
         ( Set.fromList
@@ -60,7 +60,7 @@ installedInRange pdb name range =
             ]
         )
 
-instance (Monad m) => DependencyProvider PackageDbProvider Pkg (Pow UnitId) m where
+instance (Monad m) => DependencyProvider InstalledDbProvider Pkg (Pow UnitId) m where
     expand _ Root _ = pure Nothing
     expand pdb (Pkg _) sel = pure $ case sel of
         Incl uids ->

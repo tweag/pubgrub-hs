@@ -42,7 +42,7 @@ library cabal-bridge
         PubGrub.Cabal.Boot
         PubGrub.Cabal.Compiler
         PubGrub.Cabal.InstalledDb
-        PackageDbProvider
+        InstalledDbProvider
         Pkg
         Provider
     build-depends:
@@ -64,7 +64,7 @@ executable pubgrub-hs
     other-modules:
         Compiler
         Database
-        HackageProvider
+        SourceProvider
         Hackage
         Hackage.Security.Unlifted
         HttpClient
@@ -118,7 +118,7 @@ test-suite pubgrub-hs-test
         PrettySpec
         ChoiceSetSpec
         InstalledDbSpec
-        PackageDbProviderSpec
+        InstalledDbProviderSpec
         ProviderSpec
     build-depends:
         , pubgrub-hs

@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module PackageDbProviderSpec (tests) where
+module InstalledDbProviderSpec (tests) where
 
 import           Data.Functor.Identity          (runIdentity)
 import qualified Data.Map.Strict                as Map
@@ -8,9 +8,9 @@ import qualified Data.Set                       as Set
 import           Distribution.Types.PackageName (mkPackageName)
 import           Distribution.Types.UnitId      (UnitId, mkUnitId)
 import           Distribution.Version           (mkVersion)
-import           PackageDbProvider              (PackageDbProvider,
+import           InstalledDbProvider            (InstalledDbProvider,
                                                  installedInRange,
-                                                 mkPackageDbProvider)
+                                                 mkInstalledDbProvider)
 import           Pkg                            (Pkg (..))
 import           PubGrub.Cabal.InstalledDb      (InstalledPkg (..))
 import           PubGrub.Lattice                (singleton)
@@ -24,9 +24,9 @@ ip :: String -> String -> [Int] -> [String] -> InstalledPkg
 ip uid nm v deps =
     InstalledPkg (mkUnitId uid) (mkPackageName nm) (mkVersion v) (map mkUnitId deps)
 
-db :: PackageDbProvider
+db :: InstalledDbProvider
 db =
-    mkPackageDbProvider
+    mkInstalledDbProvider
         [ ip "ghc-prim-0.11-a" "ghc-prim" [0, 11] []
         , ip "base-4.21-b" "base" [4, 21] ["ghc-prim-0.11-a"]
         , ip "base-4.20-c" "base" [4, 20] ["ghc-prim-0.11-a"]
@@ -35,7 +35,7 @@ db =
 tests :: TestTree
 tests =
     testGroup
-        "PackageDbProvider"
+        "InstalledDbProvider"
         [ testCase "installedInRange returns matching unit-ids" $
             installedInRange db (mkPackageName "base") VS.full
                 @?= Incl (Set.fromList [mkUnitId "base-4.21-b", mkUnitId "base-4.20-c"])
