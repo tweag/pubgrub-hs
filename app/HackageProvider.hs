@@ -21,6 +21,7 @@ import           Data.Binary                            (decodeFileOrFail,
                                                          encodeFile)
 import qualified Data.ByteString.Lazy                   as BSL
 import           Data.List                              (sortBy)
+import           Data.List.NonEmpty                     (NonEmpty)
 import qualified Data.List.NonEmpty                     as NE
 import           Data.Map.Strict                        (Map)
 import qualified Data.Map.Strict                        as Map
@@ -81,7 +82,7 @@ instance Exception ResolveError
 -- package's available versions; @hpLookupCabal@ reads and parses one version's
 -- .cabal file when its dependencies are asked for.
 data HackageProvider = HackageProvider
-  { hpVersions :: Map PackageName [Version],
+  { hpVersions :: Map PackageName (NonEmpty Version),
     hpLookupCabal :: PackageIdentifier -> IO (Either ParseError GenericPackageDescription),
     hpBoot :: Map PackageName Version,
     hpCompiler :: CompilerInfo,
@@ -118,7 +119,7 @@ instance (MonadIO m) => DependencyProvider HackageProvider Pkg m where
                 (comparing Down)
                 ( filter
                     (VS.contains range)
-                    (Map.findWithDefault [] n (hpVersions hp))
+                    (maybe [] NE.toList (Map.lookup n (hpVersions hp)))
                 )
             )
 
@@ -197,11 +198,11 @@ withHackageProvider cache manager compiler target range act =
 -- the encoding written by 'updateCache' changes, so caches from older builds
 -- are rebuilt instead of being misread.
 cacheFormatVersion :: Int
-cacheFormatVersion = 1
+cacheFormatVersion = 2
 
 -- | Read the version cache, returning 'Nothing' if the file is corrupt or was
 -- written by a different 'cacheFormatVersion'.
-readVersionCache :: FilePath -> IO (Maybe (Map PackageName [Version]))
+readVersionCache :: FilePath -> IO (Maybe (Map PackageName (NonEmpty Version)))
 readVersionCache path = do
   result <- decodeFileOrFail path
   pure $ case result of
@@ -227,7 +228,7 @@ updateCache cacheFile IndexCallbacks {indexDirectory} = do
             let pkgName = fst (NE.head g),
             let versions = NE.map snd g
           ]
-  liftIO $ encodeFile (toFilePath cacheFile) (cacheFormatVersion, Map.map NE.toList index)
+  liftIO $ encodeFile (toFilePath cacheFile) (cacheFormatVersion, index)
 
 parseGPD :: BSL.ByteString -> Either ParseError GenericPackageDescription
 parseGPD bs =
