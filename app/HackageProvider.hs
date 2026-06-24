@@ -35,7 +35,6 @@ import           Distribution.PackageDescription        (GenericPackageDescripti
                                                          PackageName)
 import           Distribution.PackageDescription.Parsec (parseGenericPackageDescription,
                                                          runParseResult)
-import           Distribution.Pretty                    (prettyShow)
 import           Distribution.System                    (Arch (..), OS (..),
                                                          Platform (..))
 import           Distribution.Version                   (Version, mkVersion)

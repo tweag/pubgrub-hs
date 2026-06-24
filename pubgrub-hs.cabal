@@ -43,6 +43,8 @@ library cabal-bridge
         PubGrub.Cabal.Boot
         PubGrub.Cabal.Compiler
         PubGrub.Cabal.InstalledDb
+        PackageDbProvider
+        Pkg
     build-depends:
         , base
         , bytestring
@@ -51,6 +53,7 @@ library cabal-bridge
         , Cabal-syntax
         , pubgrub-hs
         , filepath
+        , text
     hs-source-dirs:   app-lib
     default-language: GHC2021
 
@@ -64,7 +67,6 @@ executable pubgrub-hs
         Hackage
         Hackage.Security.Unlifted
         HttpClient
-        Pkg
         Solver
         Utils
     build-depends:
@@ -115,6 +117,7 @@ test-suite pubgrub-hs-test
         PrettySpec
         ChoiceSetSpec
         InstalledDbSpec
+        PackageDbProviderSpec
     build-depends:
         , pubgrub-hs
         , pubgrub-hs:cabal-bridge
