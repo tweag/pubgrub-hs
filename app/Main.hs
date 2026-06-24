@@ -7,7 +7,8 @@ module Main where
 
 import           Colog                           (logMsg, logTextStdout)
 import           Colog.Monad                     (usingLoggerT)
-import           Compiler                        (CompilerError (..),
+import           Compiler                        (Compiler (..),
+                                                  CompilerError (..),
                                                   resolveCompiler)
 import           Control.Exception               (try)
 import           Data.Maybe                      (fromMaybe)
@@ -33,6 +34,9 @@ import           Options.Applicative             (Parser, ParserInfo, argument,
                                                   fullDesc, help, helper, info,
                                                   long, metavar, optional,
                                                   progDesc, strOption, (<**>))
+import           PackageDbProvider               (mkPackageDbProvider)
+import           Provider                        (Combined (..))
+import           PubGrub.Compiler                (PackageDb (..))
 import qualified PubGrub.VersionSet              as VS
 import           Solver                          (runSolve)
 import           UnliftIO                        (MonadIO (..))
@@ -92,7 +96,15 @@ main = do
             Right compiler -> do
                 let (target, targetRange) = optTarget opts
                     range = fromMaybe targetRange (optRange opts)
-                withHackageProvider cache manager compiler target range $ \hp -> do
+                    db = mkPackageDbProvider GlobalDb (installedPackages compiler)
+                withHackageProvider cache manager compiler $ \hp -> do
+                    let combined =
+                            Combined
+                                { cDb = db
+                                , cSource = hp
+                                , cTarget = target
+                                , cRange = range
+                                }
                     idx <- liftIO $ getCachedIndex cache Sec.FGz
                     case idx of
                         Nothing -> logMsg @Text "error: cached index not found after update"
@@ -109,4 +121,4 @@ main = do
                                     <> ")\ESC[0m"
                                 )
 
-                            runSolve hp
+                            runSolve combined

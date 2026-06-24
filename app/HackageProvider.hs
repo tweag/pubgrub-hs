@@ -37,7 +37,7 @@ import           Distribution.PackageDescription.Parsec (parseGenericPackageDesc
                                                          runParseResult)
 import           Distribution.System                    (Arch (..), OS (..),
                                                          Platform (..))
-import           Distribution.Version                   (Version, mkVersion)
+import           Distribution.Version                   (Version)
 import           Hackage                                (indexOlderThan,
                                                          parseURI)
 import           Hackage.Security.Client                (Directory (..),
@@ -69,16 +69,14 @@ instance Exception ResolveError
 
 
 
--- | A dependency provider backed by the Hackage index. @hpVersions@ lists each
--- package's available versions; @hpLookupCabal@ reads and parses one version's
--- .cabal file when its dependencies are asked for.
+-- | A source dependency provider backed by the Hackage index. @hpVersions@ lists
+-- each package's available versions; @hpLookupCabal@ reads and parses one
+-- version's .cabal file when its dependencies are asked for. The solve target,
+-- its range and the installed packages belong to 'Provider.Combined'.
 data HackageProvider = HackageProvider
     { hpVersions :: Map PackageName (NonEmpty Version)
     , hpLookupCabal :: PackageIdentifier -> IO (Either ParseError GenericPackageDescription)
-    , hpBoot :: Map PackageName Version
     , hpCompiler :: CompilerInfo
-    , hpTarget :: PackageName
-    , hpRange :: VersionSet
     }
 
 thePlatform :: Platform
@@ -91,24 +89,18 @@ instance (MonadIO m) => DependencyProvider HackageProvider Pkg VersionSet m wher
         -> Pkg
         -> VersionSet
         -> m (Maybe (Version, Map Pkg VersionSet))
-    expand hp pkg range = case pkg of
-        Root ->
-            pure (Just (mkVersion [0], Map.singleton (Pkg (hpTarget hp)) (hpRange hp)))
-        Pkg n
-            -- A boot package is pinned to the version the compiler ships, and has no
-            -- dependencies: the compiler provides the boot packages as a consistent set.
-            | Just bv <- Map.lookup n (hpBoot hp) ->
-                pure (if VS.contains range bv then Just (bv, Map.empty) else Nothing)
-            | otherwise ->
-                case Map.lookup n (hpVersions hp) >>= filterInRange of
-                    Nothing -> pure Nothing
-                    Just neVs -> do
-                        let v = Foldable1.maximum neVs
-                        res <- liftIO (hpLookupCabal hp (PackageIdentifier n v))
-                        case res of
-                            Right gpd ->
-                                pure (Just (v, Map.mapKeys Pkg (flattenDeps thePlatform (hpCompiler hp) gpd)))
-                            Left _ -> liftIO (throwIO (ResolveError n v))
+    -- The combiner owns the synthetic root; a source provider never expands it.
+    expand _ Root _ = pure Nothing
+    expand hp (Pkg n) range =
+        case Map.lookup n (hpVersions hp) >>= filterInRange of
+            Nothing -> pure Nothing
+            Just neVs -> do
+                let v = Foldable1.maximum neVs
+                res <- liftIO (hpLookupCabal hp (PackageIdentifier n v))
+                case res of
+                    Right gpd ->
+                        pure (Just (v, Map.mapKeys Pkg (flattenDeps thePlatform (hpCompiler hp) gpd)))
+                    Left _ -> liftIO (throwIO (ResolveError n v))
       where
         filterInRange = NE.nonEmpty . NE.filter (VS.contains range)
 
@@ -117,11 +109,9 @@ withHackageProvider
     => Sec.Cache
     -> Manager
     -> Compiler
-    -> PackageName
-    -> VersionSet
     -> (HackageProvider -> m a)
     -> m a
-withHackageProvider cache manager compiler target range act =
+withHackageProvider cache manager compiler act =
     withClient manager $ \httpLib ->
         withRepository httpLib [uri] cache logger $ \repository -> do
             uncheckClientErrors $ do
@@ -158,17 +148,13 @@ withHackageProvider cache manager compiler target range act =
                                 pure
                                 rebuilt
 
-                    let boot = bootPackages compiler
                     let hp =
                             HackageProvider
                                 { hpVersions = indexVersions
                                 , hpLookupCabal = \pkgId -> do
                                     bytes <- uncheckClientErrors $ indexLookupCabal indexCallbacks pkgId
                                     return $ parseGPD (trusted bytes)
-                                , hpBoot = boot
                                 , hpCompiler = compilerInfo compiler
-                                , hpTarget = target
-                                , hpRange = range
                                 }
 
                     let pkgCount = Map.size (hpVersions hp)

@@ -11,27 +11,26 @@ where
 
 import           Control.Exception              (Exception, IOException,
                                                  throwIO, try)
-import           Data.Map.Strict                (Map)
-import qualified Data.Map.Strict                as Map
+import qualified Data.ByteString.Char8          as BS8
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Compiler          (AbiTag (NoAbiTag),
                                                  CompilerFlavor (GHC),
                                                  CompilerId (..), CompilerInfo,
                                                  unknownCompilerInfo)
-import           Distribution.Types.PackageName (PackageName, mkPackageName)
-import           Distribution.Version           (Version)
-import           PubGrub.Cabal.Boot             (parseBootList)
+import           Distribution.Types.PackageName (mkPackageName)
 import           PubGrub.Cabal.Compiler         (ghcPkgFromLibdir,
                                                  parseCompilerVersion)
+import           PubGrub.Cabal.InstalledDb      (InstalledPkg (..),
+                                                 parseGhcPkgDump)
 import           System.Process                 (readProcess)
 
 -- | Everything the resolver needs to know about one GHC: the compiler info
--- that decides @impl(ghc)@ conditionals, and the versions of the boot
--- packages in its global database, which resolution must take as installed.
+-- that decides @impl(ghc)@ conditionals, and the installed packages in its
+-- global package database.
 data Compiler = Compiler
-  { compilerInfo :: CompilerInfo,
-    bootPackages :: Map PackageName Version
+  { compilerInfo      :: CompilerInfo,
+    installedPackages :: [InstalledPkg]
   }
 
 -- | A GHC executable could not be queried (not found, not a GHC, or
@@ -62,7 +61,8 @@ runTool label exe args = do
 
 -- | Resolve a GHC executable (a name on @PATH@ like @ghc@/@ghc-9.8.3@, or an
 -- absolute path) into its 'Compiler': version-derived 'CompilerInfo' and the
--- boot-package set from the version-matched @ghc-pkg@.
+-- installed packages from the global database of the version-matched
+-- @ghc-pkg@.
 resolveCompiler :: FilePath -> IO Compiler
 resolveCompiler ghcExe = do
   libdir <- trim <$> runTool "compiler" ghcExe ["--print-libdir"]
@@ -72,13 +72,18 @@ resolveCompiler ghcExe = do
     Left msg ->
       throwIO (CompilerError ("compiler '" <> T.pack ghcExe <> "': " <> T.pack msg))
   let ghcPkg = ghcPkgFromLibdir libdir
-  boot <- parseBootList <$> runTool "ghc-pkg" ghcPkg ["list", "--global", "--simple-output"]
-  if Map.member (mkPackageName "base") boot
+  dumpOut <- runTool "ghc-pkg" ghcPkg ["dump", "--global"]
+  installed <- case parseGhcPkgDump (BS8.pack dumpOut) of
+    Right pkgs -> pure pkgs
+    Left msg ->
+      throwIO
+        (CompilerError ("ghc-pkg '" <> T.pack ghcPkg <> "': could not parse dump: " <> T.pack msg))
+  if any ((== mkPackageName "base") . ipName) installed
     then
       pure
         Compiler
           { compilerInfo = unknownCompilerInfo (CompilerId GHC version) NoAbiTag,
-            bootPackages = boot
+            installedPackages = installed
           }
     else
       throwIO
