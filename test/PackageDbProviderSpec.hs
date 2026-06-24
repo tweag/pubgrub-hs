@@ -13,7 +13,6 @@ import           PackageDbProvider              (PackageDbProvider,
                                                  mkPackageDbProvider)
 import           Pkg                            (Pkg (..))
 import           PubGrub.Cabal.InstalledDb      (InstalledPkg (..))
-import           PubGrub.Compiler               (PackageDb (..))
 import           PubGrub.Lattice                (singleton)
 import           PubGrub.Pow                    (Pow (..))
 import           PubGrub.Solver                 (expand)
@@ -28,7 +27,6 @@ ip uid nm v deps =
 db :: PackageDbProvider
 db =
     mkPackageDbProvider
-        GlobalDb
         [ ip "ghc-prim-0.11-a" "ghc-prim" [0, 11] []
         , ip "base-4.21-b" "base" [4, 21] ["ghc-prim-0.11-a"]
         , ip "base-4.20-c" "base" [4, 20] ["ghc-prim-0.11-a"]

@@ -36,7 +36,6 @@ import           Options.Applicative             (Parser, ParserInfo, argument,
                                                   progDesc, strOption, (<**>))
 import           PackageDbProvider               (mkPackageDbProvider)
 import           Provider                        (Combined (..))
-import           PubGrub.Compiler                (PackageDb (..))
 import qualified PubGrub.VersionSet              as VS
 import           Solver                          (runSolve)
 import           UnliftIO                        (MonadIO (..))
@@ -96,7 +95,7 @@ main = do
             Right compiler -> do
                 let (target, targetRange) = optTarget opts
                     range = fromMaybe targetRange (optRange opts)
-                    db = mkPackageDbProvider GlobalDb (installedPackages compiler)
+                    db = mkPackageDbProvider (installedPackages compiler)
                 withHackageProvider cache manager compiler $ \hp -> do
                     let combined =
                             Combined

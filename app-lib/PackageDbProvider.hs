@@ -11,7 +11,6 @@ module PackageDbProvider (
     PackageDbProvider,
     mkPackageDbProvider,
     installedInRange,
-    installedChoice,
 ) where
 
 import           Data.List                      (maximumBy)
@@ -25,8 +24,6 @@ import           Distribution.Types.PackageName (PackageName)
 import           Distribution.Types.UnitId      (UnitId)
 import           Pkg                            (Pkg (..))
 import           PubGrub.Cabal.InstalledDb      (InstalledPkg (..))
-import           PubGrub.Choice                 (ChoiceInstalled (..))
-import           PubGrub.Compiler               (PackageDb)
 import           PubGrub.Lattice                (singleton, (\/))
 import           PubGrub.Pow                    (Pow (..))
 import           PubGrub.Solver                 (DependencyProvider (..))
@@ -34,19 +31,16 @@ import           PubGrub.VersionSet             (VersionSet)
 import qualified PubGrub.VersionSet             as VS
 
 -- | An index over one package db: each installed unit-id mapped to its record,
--- and each package name to its unit-ids. @pdbKind@ is the db they came from,
--- recorded in every 'ChoiceInstalled'.
+-- and each package name to its unit-ids.
 data PackageDbProvider = PackageDbProvider
-    { pdbKind   :: PackageDb
-    , pdbById   :: Map UnitId InstalledPkg
+    { pdbById   :: Map UnitId InstalledPkg
     , pdbByName :: Map PackageName (NonEmpty UnitId)
     }
 
-mkPackageDbProvider :: PackageDb -> [InstalledPkg] -> PackageDbProvider
-mkPackageDbProvider kind pkgs =
+mkPackageDbProvider :: [InstalledPkg] -> PackageDbProvider
+mkPackageDbProvider pkgs =
     PackageDbProvider
-        { pdbKind = kind
-        , pdbById = Map.fromList [(ipUnitId p, p) | p <- pkgs]
+        { pdbById = Map.fromList [(ipUnitId p, p) | p <- pkgs]
         , pdbByName =
             Map.fromList
                 [ (ipName (NE.head g), NE.map ipUnitId g)
@@ -65,13 +59,6 @@ installedInRange pdb name range =
             , VS.contains range (ipVersion p)
             ]
         )
-
--- | Recover the 'ChoiceInstalled' for a unit-id, if it is in this db.
-installedChoice :: PackageDbProvider -> UnitId -> Maybe ChoiceInstalled
-installedChoice pdb uid =
-    fmap
-        (\p -> ChoiceInstalled (ipName p) (ipVersion p) (pdbKind pdb) (ipUnitId p))
-        (Map.lookup uid (pdbById pdb))
 
 instance (Monad m) => DependencyProvider PackageDbProvider Pkg (Pow UnitId) m where
     expand _ Root _ = pure Nothing

@@ -21,7 +21,6 @@ import           Pkg                            (Pkg (..))
 import           Provider                       (Combined (..))
 import           PubGrub.Cabal.InstalledDb      (InstalledPkg (..))
 import           PubGrub.Choice                 (Choice (..), ChoiceSet (..))
-import           PubGrub.Compiler               (PackageDb (..))
 import           PubGrub.Lattice                (bottom)
 import           PubGrub.Solver                 (DependencyProvider (..))
 import           PubGrub.VersionSet             (VersionSet)
@@ -56,12 +55,11 @@ ip uid nm ver deps =
 db :: PackageDbProvider
 db =
     mkPackageDbProvider
-        GlobalDb
         [ ip "base-4.21-x" "base" [4, 21] []
         ]
 
 emptyDb :: PackageDbProvider
-emptyDb = mkPackageDbProvider GlobalDb []
+emptyDb = mkPackageDbProvider []
 
 -- | Source registry: base at {4.21, 4.22}, no deps.
 src :: Src

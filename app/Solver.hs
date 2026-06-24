@@ -9,35 +9,29 @@ module Solver (
 )
 where
 
-import           Colog                          (LogAction (..), WithLog,
-                                                 logMsg, usingLoggerT)
-import           Data.Foldable                  (for_)
-import qualified Data.Map.Strict                as Map
-import           Data.Text                      (Text)
-import qualified Data.Text                      as T
-import           Distribution.Pretty            (prettyShow)
-import           Distribution.Types.PackageName (mkPackageName)
-import           Distribution.Version           (mkVersion)
-import           HackageProvider                (HackageProvider,
-                                                 ResolveError (..))
-import           Pkg                            (Pkg (..))
-import           Provider                       (Combined)
-import           PubGrub.Choice                 (Choice (..), ChoiceSet,
-                                                 ChoiceSource (..),
-                                                 Repository (..))
-import qualified PubGrub.Pretty                 as P
-import           PubGrub.Report                 (ReportEnv (..),
-                                                 reportConflictWith)
-import           PubGrub.Solver                 (SolveError (..),
-                                                 SolverMsg (..), solve)
-import           PubGrub.Term                   (Term (..))
-import           PubGrub.Types                  (incompTerms)
-import           UnliftIO                       (MonadUnliftIO, try)
+import           Colog                (LogAction (..), WithLog, logMsg,
+                                       usingLoggerT)
+import           Data.Foldable        (for_)
+import qualified Data.Map.Strict      as Map
+import           Data.Text            (Text)
+import qualified Data.Text            as T
+import           Distribution.Pretty  (prettyShow)
+import           Distribution.Version (mkVersion)
+import           HackageProvider      (HackageProvider, ResolveError (..))
+import           Pkg                  (Pkg (..))
+import           Provider             (Combined)
+import           PubGrub.Choice       (Choice (..), ChoiceSet)
+import qualified PubGrub.Pretty       as P
+import           PubGrub.Report       (ReportEnv (..), reportConflictWith)
+import           PubGrub.Solver       (SolveError (..), SolverMsg (..), solve)
+import           PubGrub.Term         (Term (..))
+import           PubGrub.Types        (incompTerms)
+import           UnliftIO             (MonadUnliftIO, try)
 
 renderSolverMsg :: SolverMsg Pkg ChoiceSet -> Text
 renderSolverMsg msg = case msg of
     Deciding (Pkg n) r -> "\ESC[2mdeciding " <> name n <> " " <> P.pretty r <> "\ESC[0m"
-    Chose (Pkg n) v -> "  \ESC[32m\x2713\ESC[0m " <> name n <> "-" <> P.pretty v
+    Chose (Pkg n) v -> "  \ESC[32m\x2713\ESC[0m " <> name n <> " => " <> P.pretty v
     NoVersionFor (Pkg n) r -> "  \ESC[31m\x2717\ESC[0m no version for " <> name n <> " in " <> P.pretty r
     Conflict i -> "  \ESC[33m\x26A0\ESC[0m conflict: " <> renderIncompat i
     Backtracked n -> "  \ESC[2m\x21A9 backtracking to level " <> T.pack (show n) <> "\ESC[0m"
@@ -54,7 +48,7 @@ renderSolverMsg msg = case msg of
 -- choices is by version, so this value need only live in the source world at
 -- version 0 for the term logic to line up.
 rootChoice :: Choice
-rootChoice = Source (ChoiceSource (mkPackageName "root") (mkVersion [0]) Hackage)
+rootChoice = Source (mkVersion [0])
 
 -- | Resolve the dependency closure of the combined provider's target, printing
 -- phase notes to stderr and the plan to stdout.

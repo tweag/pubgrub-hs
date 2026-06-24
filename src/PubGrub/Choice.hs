@@ -1,71 +1,40 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies      #-}
 
--- | The concrete element and set types for choosing between installed and
--- source instances of a package: 'Choice', one realisation of a package, and
--- 'ChoiceSet', a set of them. 'ChoiceSet' is a 'PubGrub.Lattice.Sets'
--- instance, so the solver can resolve over it, and both types have
--- 'PubGrub.Pretty.Pretty' instances for rendering.
+-- | The element and set types for choosing between installed and source
+-- instances of a package.
+--
+-- A 'Choice' is the minimal identity of one realisation of a package: an
+-- installed instance is its package-db key (a 'UnitId'), a source release is its
+-- 'Version'. It carries nothing more. A choice's name, database and repository
+-- belong to whatever supplies the choices, and are recovered from there.
+--
+-- 'ChoiceSet' is the product of the two worlds and a 'PubGrub.Lattice.Sets'
+-- instance, so the solver resolves over it directly.
 module PubGrub.Choice (
     Choice (..),
-    ChoiceInstalled (..),
-    ChoiceSource (..),
-    Repository (..),
     ChoiceSet (..),
-    version,
-    name,
 ) where
 
-import qualified Data.Set                       as Set
-import qualified Data.Text                      as T
-import           Distribution.Types.PackageName (PackageName)
-import           Distribution.Types.UnitId      (UnitId)
-import           Distribution.Types.Version     (Version)
-import           PubGrub.Compiler               (PackageDb)
+import qualified Data.Set                   as Set
+import qualified Data.Text                  as T
+import           Distribution.Pretty        (prettyShow)
+import           Distribution.Types.UnitId  (UnitId)
+import           Distribution.Types.Version (Version)
 import           PubGrub.Lattice
-import           PubGrub.Pow                    (Pow (..))
-import           PubGrub.Pretty                 (Pretty (..))
-import           PubGrub.VersionSet             (VersionSet)
+import           PubGrub.Pow                (Pow (..))
+import           PubGrub.Pretty             (Pretty (..))
+import           PubGrub.VersionSet         (VersionSet)
 
--- | One concrete realisation of a package: a pre-installed instance or a
--- buildable source release. A decision commits to one, and it is the element
--- type of 'ChoiceSet'.
-data Choice = Installed ChoiceInstalled | Source ChoiceSource
-
--- | A pre-installed package, identified by its package-db key ('ciUnitId').
--- Its dependencies are already fixed (to specific installed unit-ids).
-data ChoiceInstalled = ChoiceInstalled
-    { ciName      :: PackageName
-    , ciVersion   :: Version
-    , ciPackageDB :: PackageDb
-    , ciUnitId    :: UnitId
-    -- ^ the identity: distinguishes instances that share name and version
-    }
-
--- | A buildable source release. Its dependencies are version ranges.
-data ChoiceSource = ChoiceSource
-    { csName       :: PackageName
-    , csVersion    :: Version
-    , csRepository :: Repository
-    }
-
--- | Where a source release comes from.
-data Repository = Hackage
-
--- | The version of a choice, regardless of how it is realised.
-version :: Choice -> Version
-version (Installed ci) = ciVersion ci
-version (Source cs)    = csVersion cs
-
--- | The package name of a choice.
-name :: Choice -> PackageName
-name (Installed ci) = ciName ci
-name (Source cs)    = csName cs
+-- | One realisation of a package: a pre-installed instance, identified by its
+-- package-db 'UnitId'; or a source release, identified by its 'Version'.
+data Choice = Installed UnitId | Source Version
+    deriving (Eq, Show)
 
 -- | A set of choices: a product of the two worlds. The installed world is keyed
--- by 'UnitId', so instances sharing name and version stay distinct; the source
--- world is keyed by version. As a product of two Boolean algebras it is itself
--- one, with every operation taken componentwise.
+-- by 'UnitId', so instances sharing a version stay distinct; the source world is
+-- keyed by version. As a product of two Boolean algebras it is itself one, with
+-- every operation taken componentwise.
 data ChoiceSet = ChoiceSet
     { csetInstalled :: Pow UnitId
     , csetSource    :: VersionSet
@@ -88,15 +57,19 @@ instance Boolean ChoiceSet where
 -- the two are distinct even at the same version.
 instance Sets ChoiceSet where
     type Elem ChoiceSet = Choice
-    singleton (Installed ci) = ChoiceSet (singleton (ciUnitId ci)) bottom
-    singleton (Source cs)    = ChoiceSet bottom (singleton (csVersion cs))
-    member (Installed ci) (ChoiceSet i _) = member (ciUnitId ci) i
-    member (Source cs) (ChoiceSet _ s)    = member (csVersion cs) s
+    singleton (Installed uid) = ChoiceSet (singleton uid) bottom
+    singleton (Source v)      = ChoiceSet bottom (singleton v)
+    member (Installed uid) (ChoiceSet i _) = member uid i
+    member (Source v) (ChoiceSet _ s)      = member v s
 
+-- | A source choice renders as its version; an installed one as its unit-id
+-- (which already encodes name, version, and hash) plus an @(installed)@ marker.
 instance Pretty Choice where
-    pretty (Installed ci) = pretty (ciVersion ci) <> " (installed)"
-    pretty (Source cs)    = pretty (csVersion cs)
+    pretty (Installed uid) = T.pack (prettyShow uid) <> " (installed)"
+    pretty (Source v)      = pretty v
 
+-- | A choice set renders as its source range, followed by the number of
+-- installed instances it admits when that set is finite and non-empty.
 instance Pretty ChoiceSet where
     pretty (ChoiceSet i s) = pretty s <> installedNote i
       where

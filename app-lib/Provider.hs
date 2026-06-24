@@ -18,12 +18,9 @@ import qualified Data.Map.Strict                as Map
 import           Distribution.Types.PackageName (PackageName)
 import           Distribution.Version           (mkVersion)
 import           PackageDbProvider              (PackageDbProvider,
-                                                 installedChoice,
                                                  installedInRange)
 import           Pkg                            (Pkg (..))
-import           PubGrub.Choice                 (Choice (..), ChoiceSet (..),
-                                                 ChoiceSource (..),
-                                                 Repository (..))
+import           PubGrub.Choice                 (Choice (..), ChoiceSet (..))
 import           PubGrub.Lattice                (bottom)
 import           PubGrub.Solver                 (DependencyProvider (..))
 import           PubGrub.VersionSet             (VersionSet)
@@ -47,23 +44,22 @@ instance
                 ChoiceSet
                     (installedInRange (cDb c) (cTarget c) (cRange c))
                     (cRange c)
-            root = Source (ChoiceSource (cTarget c) (mkVersion [0]) Hackage)
+            root = Source (mkVersion [0])
          in pure (Just (root, Map.singleton (Pkg (cTarget c)) dep))
-    expand c p@(Pkg n) (ChoiceSet inst src) = do
+    expand c p (ChoiceSet inst src) = do
         mi <- expand (cDb c) p inst -- Maybe (UnitId, Map Pkg (Pow UnitId))
         case mi of
-            Just (uid, ideps)
-                | Just ci <- installedChoice (cDb c) uid ->
-                    -- An installed instance's dependencies are exact unit-ids,
-                    -- with no source half.
-                    pure (Just (Installed ci, fmap installedDep ideps))
-            _ -> do
+            Just (uid, ideps) ->
+                -- An installed instance's dependencies are exact unit-ids,
+                -- with no source half.
+                pure (Just (Installed uid, fmap installedDep ideps))
+            Nothing -> do
                 ms <- expand (cSource c) p src -- Maybe (Version, Map Pkg VersionSet)
                 pure (fmap sourceResult ms)
       where
         installedDep i = ChoiceSet i bottom
         sourceResult (v, sdeps) =
-            ( Source (ChoiceSource n v Hackage)
+            ( Source v
             , Map.mapWithKey liftSourceDep sdeps
             )
         -- A source dependency spans both worlds: its range, plus any installed
