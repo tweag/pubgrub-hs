@@ -22,6 +22,8 @@ library
         PubGrub.Solver
         PubGrub.Report
         PubGrub.Lattice
+        PubGrub.Choice
+        PubGrub.Compiler
         PubGrub.Pow
         PubGrub.Pretty
     build-depends:
