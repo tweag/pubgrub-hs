@@ -75,6 +75,14 @@ without reworking the core.
   the kind; the provider may use richer types internally and inject into the plain
   sum at the boundary.
 
+- **Installed packages are a separate provider, combined as a product.** The
+  compiler + its package db(s) form a `PackageDbProvider` over `Pow UnitId`,
+  independent of `HackageProvider` over `VersionSet`. Both are instances of the
+  same generic `DependencyProvider`; the combined provider is their product over
+  `ChoiceSet`. A provider's "key" is just its `Elem s` and never reaches the solver
+  — so no `Key p` is needed in the interface. The boot-package special-case
+  collapses into "the db provider restricted to the global db".
+
 ## Design
 
 ### The lattice/set abstraction (`PubGrub.Lattice`)
@@ -238,6 +246,59 @@ This is where the product earns its place:
 *which components are populated* — no special-casing in the solver. The db→unit-id
 enumeration lives entirely in the provider, keeping the set algebra universe-free.
 
+### Provider architecture: two providers, combined as a product
+
+The compiler and its package db(s) are an **independent source of choices** from
+Hackage, so they become a separate provider. The generic `DependencyProvider`
+class makes both fall out as instances *at different set types* — each provider's
+"key" is simply its `Elem s`, and it never leaks past the provider boundary (the
+solver only ever sees `(p, ChoiceSet, Choice)`):
+
+| provider | `s` | `Elem s` (its key) | deps returned |
+|---|---|---|---|
+| `HackageProvider` (source) | `VersionSet` | `Version` (≈ `PackageId`) | `Map p VersionSet` |
+| `PackageDbProvider` (installed) | `Pow UnitId` | `UnitId` (≈ `InstalledPackageId`) | `Map p (Pow UnitId)` |
+
+So `expand` takes a *set* (constraint) and returns *one key* plus dependencies *as
+sets* — the chosen instance is a key, its dependencies are sets. This is why two
+different key types coexist without a `Key p` in the solver interface: it is
+subsumed by `Elem s`.
+
+```haskell
+-- built from a Compiler + the package dbs it exposes
+data PackageDbProvider = PackageDbProvider
+  { pdbByName :: Map PackageName (Map UnitId InstalledPackageInfo) }  -- the index
+
+data Toolchain = Toolchain
+  { tcCompiler :: Compiler, tcPlatform :: Platform, tcPackageDb :: PackageDbProvider }
+```
+
+**Indexing.** Both providers key their data by package name. `HackageProvider`
+already does this (`hpVersions :: Map PackageName (NonEmpty Version)`);
+`PackageDbProvider` needs the installed analogue — turning the flat
+`[(PackageName, Version, InstalledPackageInfo)]` into `Map PackageName (Map UnitId …)`
+so it can answer "all installed instances of `bar`". An installed package's
+`depends :: [UnitId]` is likewise grouped through this index into
+`Map p (Pow UnitId)`.
+
+**Combined provider.** Over `ChoiceSet = Pow UnitId × VersionSet`, the combined
+provider is a *product of the two*, dispatching each component to its sub-provider:
+
+```haskell
+expandCombined p (ChoiceSet inst src) = do
+  mi <- expand pdb     p inst   -- Maybe (UnitId,  Map p (Pow UnitId))
+  ms <- expand hackage p src    -- Maybe (Version, Map p VersionSet)
+  -- choose a winner by policy (prefer installed reuse, else newest source),
+  -- then lift its deps into ChoiceSet.
+```
+
+**Cross-world lookup lives in the combiner.** The one place the worlds touch: a
+source dependency `(bar, R)` may also be satisfied by an installed `bar` in range
+`R`. The combiner holds the db and fills the installed component when lifting a
+source dep into `ChoiceSet`; the sub-providers stay pure to their own world. (The
+existing boot-package pinning becomes "the db provider restricted to the global
+db" — the `hpBoot`/`hpCompiler` special-cases in `HackageProvider` go away.)
+
 ### Reporting (a core goal — must not regress)
 
 Conflict reporting is a primary feature, so generalisation must not weaken it.
@@ -288,20 +349,27 @@ unsatisfied set). Open detail for implementation: the exact annotation key set
 
 Each phase keeps the test suite green before the next begins.
 
+Chosen ordering: **generalise first, then split providers**. Each phase keeps the
+test suite green before the next begins.
+
 - **Phase 0** — add `BoundedLattice`/`Heyting`/`Sets` to `PubGrub.Lattice`; make
-  `VersionSet` an instance; keep its named API as thin wrappers. Behaviour
-  unchanged.
-- **Phase 1** — parameterise `PubGrub.Types` and `PubGrub.Solver` over `s`/`Elem s`,
-  with `VersionSet` still the only instance (`Elem = Version`). Add the `Pretty`
-  class and convert reporting to it + the generalised `ReportEnv` annotations.
-  **Behaviour-preserving**; existing tests prove identical report output. This is
-  the large mechanical refactor (type-param churn through every signature).
-- **Phase 2** — add `Pow a` (with tests) and `PubGrub.Choice` with
-  `Choice`/`ChoiceSet` and their derived instances; unit-test the `ChoiceSet`
-  algebra (product laws, membership, multiple installed instances per name+version).
-- **Phase 3** — `HackageProvider` emits `Choice`/`ChoiceSet`; introduce an
-  installed-package-DB source (enumerating unit-ids); fold the existing
-  boot-package pinning into the general installed-package mechanism.
+  `VersionSet` an instance (keep its named API as thin wrappers); add `Pow a` as a
+  second primitive instance, with tests. Behaviour unchanged.
+- **Phase 1** — parameterise `PubGrub.Types`, `PubGrub.Solver`, **and the
+  `DependencyProvider` class** over `s`/`Elem s`, with `VersionSet` still the only
+  instance in use (`Elem = Version`). Add the `Pretty` class and convert reporting
+  to it + the generalised `ReportEnv` annotations. **Behaviour-preserving**;
+  existing tests prove identical report output. This is the large mechanical
+  refactor (type-param churn through every signature).
+- **Phase 2** — add `PubGrub.Choice` with `Choice`/`ChoiceSet` and their derived
+  instances (unit-test the algebra: product laws, membership, multiple installed
+  instances per name+version). Extract `PackageDbProvider`/`Toolchain` from
+  `Compiler` + package dbs (with the package-name index); `HackageProvider` becomes
+  the source provider over `VersionSet`, `PackageDbProvider` the installed provider
+  over `Pow UnitId` — each a clean instance of the generic class.
+- **Phase 3** — the combined provider over `ChoiceSet` (product of the two,
+  cross-world lookup in the combiner); fold the existing boot-package pinning into
+  the db provider (the global db); wire into `Main`.
 
 ## Out of scope
 
