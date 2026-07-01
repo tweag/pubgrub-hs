@@ -40,7 +40,9 @@ tests =
             installedInRange db (mkPackageName "base") VS.full
                 @?= Incl (Set.fromList [mkUnitId "base-4.21-b", mkUnitId "base-4.20-c"])
         , testCase "installedInRange filters by version" $
-            installedInRange db (mkPackageName "base")
+            installedInRange
+                db
+                (mkPackageName "base")
                 (VS.singleton (mkVersion [4, 20]))
                 @?= Incl (Set.singleton (mkUnitId "base-4.20-c"))
         , testCase "expand picks the newest in-set unit-id" $

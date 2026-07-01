@@ -16,10 +16,6 @@ module PubGrub.VersionSet (
     union,
     intersection,
     contains,
-    isEmpty,
-    isFull,
-    PubGrub.VersionSet.subsetOf,
-    isDisjoint,
     intervals,
 ) where
 
@@ -97,20 +93,6 @@ contains (VersionSet is) v = any inside is
     upperOk NoUpperBound                  = True
     upperOk (UpperBound w InclusiveBound) = v <= w
     upperOk (UpperBound w ExclusiveBound) = v < w
-
-isEmpty :: VersionSet -> Bool
-isEmpty (VersionSet is) = null is
-
-isFull :: VersionSet -> Bool
-isFull = (== full)
-
--- | @a `subsetOf` b@ iff every version in @a@ is in @b@ (a ∩ ¬b = ∅).
-subsetOf :: VersionSet -> VersionSet -> Bool
-subsetOf a b = isEmpty (intersection a (complement b))
-
--- | Two sets are disjoint iff their intersection is empty.
-isDisjoint :: VersionSet -> VersionSet -> Bool
-isDisjoint a b = isEmpty (intersection a b)
 
 instance Lattice VersionSet where
     (\/) = union

@@ -4,6 +4,7 @@
 module VersionSetSpec (tests) where
 
 import           Distribution.Version  (Version, mkVersion, orLaterVersion)
+import           PubGrub.Lattice       (subsetOf)
 import           PubGrub.VersionSet    (VersionSet)
 import qualified PubGrub.VersionSet    as VS
 import           Test.Tasty            (TestTree, testGroup)
@@ -69,7 +70,7 @@ tests =
                             else VS.contains (VS.singleton v) w === False
                     )
         , testProperty "subsetOf agrees with intersection" $ \(a :: VersionSet) (b :: VersionSet) ->
-            VS.subsetOf a b === (VS.intersection a b == a)
+            subsetOf a b === (VS.intersection a b == a)
         , testGroup
             "Lattice laws"
             [ testProperty "union commutative" $ \(a :: VersionSet) b -> VS.union a b === VS.union b a
@@ -80,7 +81,7 @@ tests =
             ]
         ]
   where
-    conjoinV f = foldr (.&&.) (property True) (map f sampleVersions)
+    conjoinV f = foldr ((.&&.) . f) (property True) sampleVersions
 
 newtype NonEmptyVer = NonEmptyVer Version deriving Show
 instance Arbitrary NonEmptyVer where

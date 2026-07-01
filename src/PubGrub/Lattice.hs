@@ -1,17 +1,14 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE TypeFamilies    #-}
+{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE TypeFamilies      #-}
 
 module PubGrub.Lattice (
     Lattice (..),
-    joinLeq,
-    meetLeq,
     BoundedLattice (..),
     Boolean (..),
     Sets (..),
-    isBottom,
-    isTop,
     subsetOf,
     disjoint,
+    intersects,
 ) where
 
 infixr 6 /\ -- This comment needed because of CPP
@@ -56,43 +53,45 @@ class Lattice a where
     -- | Meet: the greatest lower bound.
     (/\) :: a -> a -> a
 
--- | The partial ordering induced by the join-semilattice structure
-joinLeq :: (Eq a, Lattice a) => a -> a -> Bool
-joinLeq x y = (x \/ y) == y
-
-meetLeq :: (Eq a, Lattice a) => a -> a -> Bool
-meetLeq x y = (x /\ y) == x
-
--- | A bounded lattice: least ('bottom') and greatest ('top') elements.
+-- | A lattice with least and greatest elements. 'isBottom' and 'isTop'
+-- default to comparing with '==', and a type without a usable 'Eq' defines
+-- them itself.
 class Lattice a => BoundedLattice a where
     bottom :: a
     top :: a
 
-isBottom :: (Eq a, BoundedLattice a) => a -> Bool
-isBottom = (== bottom)
+    isBottom :: a -> Bool
+    default isBottom :: (Eq a) => a -> Bool
+    isBottom = (== bottom)
 
-isTop :: (Eq a, BoundedLattice a) => a -> Bool
-isTop = (== top)
+    isTop :: a -> Bool
+    default isTop :: (Eq a) => a -> Bool
+    isTop = (== top)
 
 -- | A Boolean algebra: a bounded lattice with a complement 'neg', where
 -- @a '\/' neg a == top@, @a '/\' neg a == bottom@ and @neg (neg a) == a@.
--- Implication is derivable as @neg a '\/' b@, so it is not a method.
 class BoundedLattice a => Boolean a where
     neg :: a -> a
 
 -- | Whether the first element is below the second in the lattice order.
-subsetOf :: (Eq a, Boolean a) => a -> a -> Bool
+subsetOf :: Boolean a => a -> a -> Bool
 subsetOf a b = isBottom (a /\ neg b)
 
 -- | Two elements are disjoint iff their meet is 'bottom'.
-disjoint :: (Eq a, Boolean a) => a -> a -> Bool
+disjoint :: Boolean a => a -> a -> Bool
 disjoint a b = isBottom (a /\ b)
 
--- | A Boolean algebra of sets over an element type, with membership kept
--- apart from the lattice structure.
+intersects :: Boolean a => a -> a -> Bool
+intersects a b = not (disjoint a b)
+
+-- | A Boolean algebra whose values denote sets of @'Elem' a@.
 class Boolean a => Sets a where
     type Elem a
+
+    -- | The singleton set containing exactly this element.
     singleton :: Elem a -> a
+
+    -- | Whether the element is in the set that the value denotes.
     member :: Elem a -> a -> Bool
 
 -- The product of two of each structure, taken componentwise. A pair of sets is
@@ -108,6 +107,9 @@ instance (BoundedLattice a, BoundedLattice b) => BoundedLattice (a, b) where
     bottom = (bottom, bottom)
     top = (top, top)
 
+    isTop (a, b) = isTop a && isTop b
+    isBottom (a, b) = isBottom a && isBottom b
+
 instance (Boolean a, Boolean b) => Boolean (a, b) where
     neg (a, b) = (neg a, neg b)
 
@@ -115,5 +117,6 @@ instance (Sets a, Sets b) => Sets (a, b) where
     type Elem (a, b) = Either (Elem a) (Elem b)
     singleton (Left x)  = (singleton x, bottom)
     singleton (Right y) = (bottom, singleton y)
+
     member (Left x) (a, _)  = member x a
     member (Right y) (_, b) = member y b
