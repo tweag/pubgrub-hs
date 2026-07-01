@@ -9,15 +9,9 @@ import qualified Data.Text                      as T
 import           Distribution.Pretty            (prettyShow)
 import           Distribution.Types.PackageName (PackageName)
 import           PubGrub.Pretty                 (Pretty (..))
-import           PubGrub.Types                  (Package (..))
 
 data Pkg = Root | Pkg PackageName
     deriving (Eq, Ord, Show)
-
-instance Package Pkg where
-    type Key Pkg = PackageName
-    prettyPackage Root    = "root"
-    prettyPackage (Pkg n) = T.pack (prettyShow n)
 
 instance Pretty Pkg where
     pretty Root    = "root"

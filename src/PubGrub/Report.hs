@@ -12,14 +12,14 @@ module PubGrub.Report (
     reportConflictWith,
 ) where
 
-import qualified Data.Map.Strict as Map
-import           Data.Text       (Text)
-import qualified Data.Text       as T
-import           PubGrub.Lattice (Sets (Elem))
-import           PubGrub.Pretty  (Pretty (..))
-import           PubGrub.Term    (Term (..))
-import           PubGrub.Types   (IncompatCause (..), Incompatibility (..),
-                                  Package (..))
+import qualified Data.Map.Strict         as Map
+import           Data.Text               (Text)
+import qualified Data.Text               as T
+import           PubGrub.Incompatibility (IncompatCause (..),
+                                          Incompatibility (..))
+import           PubGrub.Lattice         (Sets (Elem))
+import           PubGrub.Pretty          (Pretty (..))
+import           PubGrub.Term            (Term (..))
 
 -- | Caller-supplied context for rendering a conflict. The solver is generic
 -- over the package type, but a good report needs facts only the caller knows:
@@ -40,7 +40,7 @@ defaultReportEnv :: ReportEnv p s
 defaultReportEnv = ReportEnv{rePinned = const Nothing, reIsRoot = const False}
 
 -- | 'reportConflictWith' using 'defaultReportEnv'.
-reportConflict :: (Package p, Pretty s, Pretty (Elem s)) => Incompatibility p s -> Text
+reportConflict :: (Pretty s, Pretty (Elem s), Pretty p) => Incompatibility p s -> Text
 reportConflict = reportConflictWith defaultReportEnv
 
 -- | Render an incompatibility and its derivation as a human-readable proof.
@@ -51,7 +51,7 @@ reportConflict = reportConflictWith defaultReportEnv
 -- A sub-derivation that two steps share is rendered once for each.
 reportConflictWith
     :: forall p s
-     . (Package p, Pretty s, Pretty (Elem s))
+     . (Pretty s, Pretty (Elem s), Pretty p)
     => ReportEnv p s -> Incompatibility p s -> Text
 reportConflictWith env root = case incompCause root of
     DerivedFrom c1 c2 ->
@@ -82,12 +82,12 @@ reportConflictWith env root = case incompCause root of
     leaf c = case incompCause c of
         NoVersions p s -> case rePinned env p of
             Just v ->
-                prettyPackage p
+                pretty p
                     <> " is provided by the compiler as "
                     <> pretty v
                     <> ", which does not satisfy "
                     <> pretty s
-            Nothing -> "no version for " <> prettyPackage p <> " " <> pretty s
+            Nothing -> "no version for " <> pretty p <> " " <> pretty s
         _ -> summary c
 
     -- The final line of the proof. A lone positive term here is the root being
@@ -98,8 +98,8 @@ reportConflictWith env root = case incompCause root of
 
     summary c = case Map.toList (incompTerms c) of
         [] -> "version solving failed"
-        [(p, Positive r)] -> prettyPackage p <> " " <> pretty r <> " is forbidden"
-        [(p, Negative r)] -> prettyPackage p <> " " <> pretty r <> " is required"
+        [(p, Positive r)] -> pretty p <> " " <> pretty r <> " is forbidden"
+        [(p, Negative r)] -> pretty p <> " " <> pretty r <> " is required"
         [(p1, Positive r1), (p2, Negative r2)] -> dep p1 r1 p2 r2
         [(p2, Negative r2), (p1, Positive r1)] -> dep p1 r1 p2 r2
         terms -> T.intercalate " and " [showTerm p t | (p, t) <- terms] <> " are incompatible"
@@ -108,8 +108,8 @@ reportConflictWith env root = case incompCause root of
     -- ("assoc ==1.0.2 depends on …" vs "assoc >=1.0.2 && <1.1 depends on …"),
     -- but omit it for the root, whose synthetic version means nothing.
     dep p1 r1 p2 r2 =
-        prettyPackage p1 <> depender r1 <> " depends on " <> prettyPackage p2 <> " " <> pretty r2
+        pretty p1 <> depender r1 <> " depends on " <> pretty p2 <> " " <> pretty r2
       where
         depender r = if reIsRoot env p1 then "" else " " <> pretty r
-    showTerm p (Positive r) = prettyPackage p <> " " <> pretty r
-    showTerm p (Negative r) = prettyPackage p <> " not " <> pretty r
+    showTerm p (Positive r) = pretty p <> " " <> pretty r
+    showTerm p (Negative r) = pretty p <> " not " <> pretty r

@@ -2,7 +2,6 @@
 module PubGrub (
     module PubGrub.VersionSet,
     module PubGrub.Term,
-    module PubGrub.Types,
     module PubGrub.Solver,
     module PubGrub.Report,
 ) where
@@ -10,5 +9,4 @@ module PubGrub (
 import           PubGrub.Report
 import           PubGrub.Solver
 import           PubGrub.Term
-import           PubGrub.Types
 import           PubGrub.VersionSet

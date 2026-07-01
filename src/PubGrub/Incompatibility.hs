@@ -2,10 +2,7 @@
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module PubGrub.Types (
-    -- * Packages
-    Package (..),
-
+module PubGrub.Incompatibility (
     -- * Incompatibilities
     IncompatCause (..),
     Incompatibility (..),
@@ -17,24 +14,14 @@ module PubGrub.Types (
     incompRelation,
     isTerminal,
     priorCause,
-) where
+)
+where
 
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import           Data.Text       (Text)
 import           PubGrub.Lattice (Boolean, BoundedLattice (..), Sets (..),
                                   isBottom)
 import           PubGrub.Term
-
--- | A package is anything with equality, ordering, and a human-readable name.
-class (Eq p, Ord p, Show p) => Package p where
-    -- | A provider's identifying key for a package (e.g. @PackageName@). The
-    -- solver does not use it.
-    type Key p
-
-    -- | Render the package name for conflict reports. Unlike 'show', this is
-    -- meant for end users (e.g. @lens@ rather than @Pkg (PackageName "lens")@).
-    prettyPackage :: p -> Text
 
 -- | Why an incompatibility exists (drives error reporting).
 data IncompatCause p s

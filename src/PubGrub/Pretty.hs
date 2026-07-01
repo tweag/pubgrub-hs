@@ -1,6 +1,5 @@
 -- | Lightweight rendering to 'Text' for conflict reports. Distinct from Cabal's
--- 'Distribution.Pretty.Pretty' (which targets 'Doc'/'String'). 'Package' keeps
--- its own 'prettyPackage' for the package type.
+-- 'Distribution.Pretty.Pretty' (which targets 'Doc'/'String').
 module PubGrub.Pretty (Pretty (..)) where
 
 import           Data.Text            (Text)

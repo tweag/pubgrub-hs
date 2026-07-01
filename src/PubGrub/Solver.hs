@@ -38,19 +38,23 @@ module PubGrub.Solver (
 )
 where
 
-import           Colog           (WithLog, logMsg)
-import           Data.Foldable   (maximumBy)
-import           Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
-import           Data.Maybe      (fromMaybe, mapMaybe)
-import           Data.Ord        (comparing)
+import           Colog                   (WithLog, logMsg)
+import           Data.Foldable           (maximumBy)
+import           Data.Map.Strict         (Map)
+import qualified Data.Map.Strict         as Map
+import           Data.Maybe              (fromMaybe, mapMaybe)
+import           Data.Ord                (comparing)
+import           PubGrub.Incompatibility (IncompatRelation (..),
+                                          Incompatibility (incompTerms),
+                                          fromDependency, incompGet,
+                                          incompRelation, isTerminal,
+                                          noVersions, notRoot, priorCause)
 import           PubGrub.Lattice
 import           PubGrub.Term
-import           PubGrub.Types
 
 -- | The oracle the solver consults whenever it needs to make a decision.
 -- Effects (e.g. lazy index loading) run in the monad @m@.
-class (Package p, Monad m) => DependencyProvider dp p s m | dp -> p s where
+class (Monad m) => DependencyProvider dp p s m | dp -> p s where
     -- | Pick an element of @p@ (e.g. a version) and report that element's
     -- dependencies.
     --
@@ -334,6 +338,7 @@ solve
        , Eq s
        , Sets s
        , WithLog env (SolverMsg p s) m
+       , Ord p
        )
     => dp
     -> p

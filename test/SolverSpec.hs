@@ -5,29 +5,29 @@
 
 module SolverSpec (tests) where
 
-import           Colog                 (LogAction (..), usingLoggerT)
-import           Data.Functor.Identity (Identity, runIdentity)
-import           Data.IORef            (modifyIORef', newIORef, readIORef)
-import           Data.List             (sortBy)
-import           Data.Map.Strict       (Map)
-import qualified Data.Map.Strict       as Map
-import           Data.Maybe            (listToMaybe)
-import           Data.Ord              (Down (..), comparing)
-import qualified Data.Text             as T
-import           Distribution.Version  (Version, mkVersion)
+import           Colog                   (LogAction (..), usingLoggerT)
+import           Data.Functor.Identity   (Identity, runIdentity)
+import           Data.IORef              (modifyIORef', newIORef, readIORef)
+import           Data.List               (sortBy)
+import           Data.Map.Strict         (Map)
+import qualified Data.Map.Strict         as Map
+import           Data.Maybe              (listToMaybe)
+import           Data.Ord                (Down (..), comparing)
+import qualified Data.Text               as T
+import           Distribution.Version    (Version, mkVersion)
 import qualified Distribution.Version
-import           PubGrub.Report        (reportConflict)
+import           PubGrub.Incompatibility
+import           PubGrub.Pretty          (Pretty (..))
+import           PubGrub.Report          (reportConflict)
 import           PubGrub.Solver
 import           PubGrub.Term
-import           PubGrub.Types
-import           PubGrub.VersionSet    (VersionSet)
-import qualified PubGrub.VersionSet    as VS
-import           Test.Tasty            (TestTree, testGroup)
-import           Test.Tasty.HUnit      (assertBool, testCase, (@?=))
+import           PubGrub.VersionSet      (VersionSet)
+import qualified PubGrub.VersionSet      as VS
+import           Test.Tasty              (TestTree, testGroup)
+import           Test.Tasty.HUnit        (assertBool, testCase, (@?=))
 
-instance Package String where
-    type Key String = String
-    prettyPackage = T.pack
+instance Pretty String where
+    pretty = T.pack
 
 -- | An in-memory registry: package -> version -> its dependencies.
 newtype Registry = Registry (Map String (Map Version (Map String VersionSet)))

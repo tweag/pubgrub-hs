@@ -10,24 +10,25 @@ module Solver (
 )
 where
 
-import           Colog                (LogAction (..), WithLog, logMsg,
-                                       usingLoggerT)
-import           Data.Foldable        (for_)
-import qualified Data.Map.Strict      as Map
-import           Data.Text            (Text)
-import qualified Data.Text            as T
-import           Distribution.Pretty  (prettyShow)
-import           Distribution.Version (mkVersion)
-import           Pkg                  (Pkg (..))
-import           Provider             (Combined)
-import           PubGrub.Choice       (Choice, ChoiceSet, pattern Source)
-import qualified PubGrub.Pretty       as P
-import           PubGrub.Report       (ReportEnv (..), reportConflictWith)
-import           PubGrub.Solver       (SolveError (..), SolverMsg (..), solve)
-import           PubGrub.Term         (Term (..))
-import           PubGrub.Types        (incompTerms)
-import           SourceProvider       (ResolveError (..), SourceProvider)
-import           UnliftIO             (MonadUnliftIO, try)
+import           Colog                   (LogAction (..), WithLog, logMsg,
+                                          usingLoggerT)
+import           Data.Foldable           (for_)
+import qualified Data.Map.Strict         as Map
+import           Data.Text               (Text)
+import qualified Data.Text               as T
+import           Distribution.Pretty     (prettyShow)
+import           Distribution.Version    (mkVersion)
+import           Pkg                     (Pkg (..))
+import           Provider                (Combined)
+import           PubGrub.Choice          (Choice, ChoiceSet, pattern Source)
+import           PubGrub.Incompatibility (incompTerms)
+import qualified PubGrub.Pretty          as P
+import           PubGrub.Report          (ReportEnv (..), reportConflictWith)
+import           PubGrub.Solver          (SolveError (..), SolverMsg (..),
+                                          solve)
+import           PubGrub.Term            (Term (..))
+import           SourceProvider          (ResolveError (..), SourceProvider)
+import           UnliftIO                (MonadUnliftIO, try)
 
 renderSolverMsg :: SolverMsg Pkg ChoiceSet -> Text
 renderSolverMsg msg = case msg of
