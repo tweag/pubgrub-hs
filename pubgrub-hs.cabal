@@ -20,6 +20,7 @@ library
         PubGrub.VersionSet
         PubGrub.Term
         PubGrub.Solver
+        PubGrub.SourceConfig
         PubGrub.Report
         PubGrub.Lattice
         PubGrub.Choice
@@ -117,6 +118,7 @@ test-suite pubgrub-hs-test
         PowSpec
         PrettySpec
         ChoiceSetSpec
+        SourceConfigSpec
         InstalledDbSpec
         InstalledDbProviderSpec
         ProviderSpec

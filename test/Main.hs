@@ -11,6 +11,7 @@ import qualified PowSpec
 import qualified PrettySpec
 import qualified ProviderSpec
 import qualified SolverSpec
+import qualified SourceConfigSpec
 import           Test.Tasty              (defaultMain, testGroup)
 import qualified VersionSetSpec
 
@@ -24,6 +25,7 @@ main =
             , PowSpec.tests
             , PrettySpec.tests
             , ChoiceSetSpec.tests
+            , SourceConfigSpec.tests
             , SolverSpec.tests
             , FlattenSpec.tests
             , BootSpec.tests
