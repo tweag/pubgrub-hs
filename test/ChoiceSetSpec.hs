@@ -6,6 +6,7 @@ import           Distribution.Types.UnitId (mkUnitId)
 import           Distribution.Version      (Version, mkVersion)
 import           PubGrub.Choice
 import           PubGrub.Lattice
+import           PubGrub.SourceConfig      (SourceConfig (..))
 import           Test.Tasty                (TestTree, testGroup)
 import           Test.Tasty.HUnit          (testCase, (@?=))
 
@@ -16,7 +17,7 @@ inst :: String -> Choice
 inst uid = Installed (mkUnitId uid)
 
 src :: [Int] -> Choice
-src v = Source (ver v)
+src v = Source (SourceConfig (ver v) mempty)
 
 tests :: TestTree
 tests =

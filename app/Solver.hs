@@ -26,6 +26,7 @@ import qualified PubGrub.Pretty          as P
 import           PubGrub.Report          (ReportEnv (..), reportConflictWith)
 import           PubGrub.Solver          (SolveError (..), SolverMsg (..),
                                           solve)
+import           PubGrub.SourceConfig    (SourceConfig (..))
 import           PubGrub.Term            (Term (..))
 import           SourceProvider          (ResolveError (..), SourceProvider)
 import           UnliftIO                (MonadUnliftIO, try)
@@ -50,7 +51,7 @@ renderSolverMsg msg = case msg of
 -- choices is by version, so this value need only live in the source world at
 -- version 0 for the term logic to line up.
 rootChoice :: Choice
-rootChoice = Source (mkVersion [0])
+rootChoice = Source (SourceConfig (mkVersion [0]) mempty)
 
 -- | Resolve the dependency closure of the combined provider's target, printing
 -- phase notes to stderr and the plan to stdout.

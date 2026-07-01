@@ -8,12 +8,11 @@
 -- instances of a package, as the product of the two worlds.
 --
 -- A 'Choice' is one realisation of a package, an installed instance (its
--- package-db 'UnitId') or a source release (its 'Version'): the disjoint union
--- of the two worlds' keys. A 'ChoiceSet' is the product of their set types,
--- @Pow UnitId@ × 'VersionSet'. Both are thin wrappers over the generic products
--- (the @(a, b)@ instances in "PubGrub.Lattice"), and carry nothing more: a
--- choice's name, database and repository belong to whatever supplies the
--- choices.
+-- package-db 'UnitId') or a source release (its 'SourceConfig': a version and a
+-- flag assignment): the disjoint union of the two worlds' keys. A 'ChoiceSet' is
+-- the product of their set types, @Pow UnitId@ × 'SourceConfigSet'. Both are
+-- thin wrappers over the generic products (the @(a, b)@ instances in
+-- "PubGrub.Lattice").
 module PubGrub.Choice (
     Choice,
     pattern Installed,
@@ -21,19 +20,18 @@ module PubGrub.Choice (
     ChoiceSet (..),
 ) where
 
-import qualified Data.Set                   as Set
-import qualified Data.Text                  as T
-import           Distribution.Pretty        (prettyShow)
-import           Distribution.Types.UnitId  (UnitId)
-import           Distribution.Types.Version (Version)
+import qualified Data.Set                  as Set
+import qualified Data.Text                 as T
+import           Distribution.Pretty       (prettyShow)
+import           Distribution.Types.UnitId (UnitId)
 import           PubGrub.Lattice
-import           PubGrub.Pow                (Pow (..))
-import           PubGrub.Pretty             (Pretty (..))
-import           PubGrub.VersionSet         (VersionSet)
+import           PubGrub.Pow               (Pow (..))
+import           PubGrub.Pretty            (Pretty (..))
+import           PubGrub.SourceConfig      (SourceConfig, SourceConfigSet)
 
 -- | One realisation of a package: an installed instance keyed by 'UnitId', or a
--- source release keyed by 'Version'.
-newtype Choice = Choice (Either UnitId Version)
+-- source release keyed by its 'SourceConfig' (a version and a flag assignment).
+newtype Choice = Choice (Either UnitId SourceConfig)
     deriving stock (Eq, Show)
 
 -- | An installed choice (the first/left world).
@@ -41,15 +39,15 @@ pattern Installed :: UnitId -> Choice
 pattern Installed u = Choice (Left u)
 
 -- | A source choice (the second/right world).
-pattern Source :: Version -> Choice
+pattern Source :: SourceConfig -> Choice
 pattern Source v = Choice (Right v)
 
 {-# COMPLETE Installed, Source #-}
 
 -- | A set of choices: the product of the installed world (@Pow UnitId@) and the
--- source world ('VersionSet'), with every Boolean operation taken
+-- source world ('SourceConfigSet'), with every Boolean operation taken
 -- componentwise. Its elements are 'Choice'.
-newtype ChoiceSet = ChoiceSet (Pow UnitId, VersionSet)
+newtype ChoiceSet = ChoiceSet (Pow UnitId, SourceConfigSet)
     deriving stock (Eq, Show)
     deriving (Lattice, BoundedLattice, Boolean)
 

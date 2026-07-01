@@ -26,6 +26,7 @@ import           PubGrub.Choice                 (ChoiceSet (..),
                                                  pattern Source)
 import           PubGrub.Lattice                (bottom)
 import           PubGrub.Solver                 (DependencyProvider (..))
+import           PubGrub.SourceConfig           (fcTop, mkCell)
 import           PubGrub.VersionSet             (VersionSet)
 import qualified PubGrub.VersionSet             as VS
 import           Test.Tasty                     (TestTree, testGroup)
@@ -92,7 +93,7 @@ tests =
                 sel =
                     ChoiceSet
                         ( installedInRange db (mkPackageName "base") VS.full
-                        , sourceVersions
+                        , mkCell sourceVersions fcTop
                         )
              in case runIdentity (expand combined basePkg sel) of
                     Just (Installed _, _) -> pure ()
@@ -100,7 +101,7 @@ tests =
                     Nothing -> assertFailure "expand returned Nothing unexpectedly"
         , testCase "source fallback: returns a Source choice when nothing installed" $
             let combined = Combined emptyDb src (mkPackageName "base") VS.full
-                sel = ChoiceSet (bottom, sourceVersions)
+                sel = ChoiceSet (bottom, mkCell sourceVersions fcTop)
              in case runIdentity (expand combined basePkg sel) of
                     Just (Source _, _) -> pure ()
                     Just (Installed _, _) -> assertFailure "expected Source, got Installed"
