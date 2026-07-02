@@ -2,15 +2,19 @@
 -- 'Distribution.Pretty.Pretty' (which targets 'Doc'/'String').
 module PubGrub.Pretty (Pretty (..)) where
 
-import           Data.Text            (Text)
-import qualified Data.Text            as T
-import           Distribution.Pretty  (prettyShow)
-import           Distribution.Version (Version)
-import           PubGrub.VersionSet   (VersionSet)
-import qualified PubGrub.VersionSet   as VS
+import           Data.Text                      (Text)
+import qualified Data.Text                      as T
+import           Distribution.Pretty            (prettyShow)
+import           Distribution.Types.PackageName (PackageName)
+import           Distribution.Version           (Version)
+import           PubGrub.VersionSet             (VersionSet)
+import qualified PubGrub.VersionSet             as VS
 
 class Pretty a where
     pretty :: a -> Text
+
+instance Pretty PackageName where
+    pretty = T.pack . prettyShow
 
 instance Pretty Version where
     pretty = T.pack . prettyShow

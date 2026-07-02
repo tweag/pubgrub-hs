@@ -1,10 +1,10 @@
 -- | Pure helpers for locating a GHC's tooling and parsing its output, kept
 -- out of the executable so the test-suite can reach them. The executable's
 -- @Compiler@ module runs them and assembles the compiler description.
-module PubGrub.Cabal.Compiler
-  ( ghcPkgFromLibdir,
+module PubGrub.Cabal.Compiler (
+    ghcPkgFromLibdir,
     parseCompilerVersion,
-  )
+)
 where
 
 import           Data.Char            (isSpace)
@@ -22,8 +22,8 @@ ghcPkgFromLibdir libdir = takeDirectory libdir </> "bin" </> "ghc-pkg"
 -- whitespace. The 'Left' message quotes the string that failed to parse.
 parseCompilerVersion :: String -> Either String Version
 parseCompilerVersion raw =
-  case eitherParsec trimmed :: Either String Version of
-    Right v  -> Right v
-    Left err -> Left ("could not parse version '" <> trimmed <> "': " <> err)
+    case eitherParsec trimmed :: Either String Version of
+        Right v -> Right v
+        Left err -> Left ("could not parse version '" <> trimmed <> "': " <> err)
   where
     trimmed = dropWhileEnd isSpace (dropWhile isSpace raw)

@@ -3,13 +3,11 @@
 
 module Database where
 
+import           Control.Exception               (SomeException)
 import           Data.List.NonEmpty              (NonEmpty)
-import           Data.Maybe                      (maybeToList)
-
 import           Data.Map                        (Map)
 import qualified Data.Map.Strict                 as M
-
-import           Control.Exception               (SomeException)
+import           Data.Maybe                      (maybeToList)
 import           Distribution.Fields
 import           Distribution.PackageDescription
 import qualified Distribution.Types.Lens         as L

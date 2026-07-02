@@ -54,7 +54,6 @@ import qualified Hackage.Security.Unlifted              as Sec hiding
 import           Hackage.Security.Util.Pretty           as Hackage (pretty)
 import           Hackage.Security.Util.Some             (Some (..))
 import           HttpClient                             (Manager)
-import           Pkg                                    (Pkg (..))
 import           PubGrub.Cabal.Flatten                  (flattenDeps)
 import           PubGrub.Solver                         (DependencyProvider (..))
 import           PubGrub.VersionSet                     (VersionSet)
@@ -80,16 +79,14 @@ data SourceProvider = SourceProvider
 thePlatform :: Platform
 thePlatform = Platform X86_64 Linux
 
-instance (MonadIO m) => DependencyProvider SourceProvider Pkg VersionSet m where
+instance (MonadIO m) => DependencyProvider SourceProvider PackageName VersionSet m where
     expand
         :: (MonadIO m)
         => SourceProvider
-        -> Pkg
+        -> PackageName
         -> VersionSet
-        -> m (Maybe (Version, Map Pkg VersionSet))
-    -- The combiner owns the synthetic root; a source provider never expands it.
-    expand _ Root _ = pure Nothing
-    expand hp (Pkg n) range =
+        -> m (Maybe (Version, Map PackageName VersionSet))
+    expand hp n range =
         case Map.lookup n (spVersions hp) >>= filterInRange of
             Nothing -> pure Nothing
             Just neVs -> do
@@ -97,7 +94,7 @@ instance (MonadIO m) => DependencyProvider SourceProvider Pkg VersionSet m where
                 res <- liftIO (spLookupCabal hp (PackageIdentifier n v))
                 case res of
                     Right gpd ->
-                        pure (Just (v, Map.mapKeys Pkg (flattenDeps thePlatform (spCompiler hp) gpd)))
+                        pure (Just (v, flattenDeps thePlatform (spCompiler hp) gpd))
                     Left _ -> liftIO (throwIO (ResolveError n v))
       where
         filterInRange = NE.nonEmpty . NE.filter (VS.contains range)

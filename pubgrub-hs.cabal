@@ -44,7 +44,6 @@ library cabal-bridge
         PubGrub.Cabal.Compiler
         PubGrub.Cabal.InstalledDb
         InstalledDbProvider
-        Pkg
         Provider
     build-depends:
         , base

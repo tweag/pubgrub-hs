@@ -22,7 +22,6 @@ import           Data.Ord                       (comparing)
 import qualified Data.Set                       as Set
 import           Distribution.Types.PackageName (PackageName)
 import           Distribution.Types.UnitId      (UnitId)
-import           Pkg                            (Pkg (..))
 import           PubGrub.Cabal.InstalledDb      (InstalledPkg (..))
 import           PubGrub.Lattice                (singleton, (\/))
 import           PubGrub.Pow                    (Pow (..))
@@ -60,9 +59,8 @@ installedInRange pdb name range =
             ]
         )
 
-instance (Monad m) => DependencyProvider InstalledDbProvider Pkg (Pow UnitId) m where
-    expand _ Root _ = pure Nothing
-    expand pdb (Pkg _) sel = pure $ case sel of
+instance (Monad m) => DependencyProvider InstalledDbProvider PackageName (Pow UnitId) m where
+    expand pdb _name sel = pure $ case sel of
         Incl uids ->
             let inDb = Set.filter (`Map.member` pdbById pdb) uids
                 pairs = [(uid, ipVersion p) | uid <- Set.toList inDb, Just p <- [Map.lookup uid (pdbById pdb)]]
@@ -76,7 +74,7 @@ instance (Monad m) => DependencyProvider InstalledDbProvider Pkg (Pow UnitId) m 
         depsOf uid =
             Map.fromListWith
                 (\/)
-                [ (Pkg (ipName dep), singleton duid)
+                [ (ipName dep, singleton duid)
                 | duid <- maybe [] ipDepends (Map.lookup uid (pdbById pdb))
                 , Just dep <- [Map.lookup duid (pdbById pdb)]
                 ]

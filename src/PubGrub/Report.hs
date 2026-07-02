@@ -25,19 +25,16 @@ import           PubGrub.Term            (Term (..))
 -- over the package type, but a good report needs facts only the caller knows:
 -- which packages are the synthetic root, and which are fixed by the compiler
 -- (boot packages) rather than chosen from a range.
-data ReportEnv p s = ReportEnv
+newtype ReportEnv p s = ReportEnv
     { rePinned :: p -> Maybe (Elem s)
     -- ^ The element a package is pinned to by the compiler, if it is a boot
     -- package. Used to explain an empty range as "provided by the compiler as
     -- X" instead of the misleading "no version for …".
-    , reIsRoot :: p -> Bool
-    -- ^ Whether a package is the synthetic root. Its chosen element carries no
-    -- meaning to the user, so it is omitted when it appears as a depender.
     }
 
 -- | A context in which no package is pinned and none is the synthetic root.
 defaultReportEnv :: ReportEnv p s
-defaultReportEnv = ReportEnv{rePinned = const Nothing, reIsRoot = const False}
+defaultReportEnv = ReportEnv{rePinned = const Nothing}
 
 -- | 'reportConflictWith' using 'defaultReportEnv'.
 reportConflict :: (Pretty s, Pretty (Elem s), Pretty p) => Incompatibility p s -> Text
@@ -108,8 +105,6 @@ reportConflictWith env root = case incompCause root of
     -- ("assoc ==1.0.2 depends on …" vs "assoc >=1.0.2 && <1.1 depends on …"),
     -- but omit it for the root, whose synthetic version means nothing.
     dep p1 r1 p2 r2 =
-        pretty p1 <> depender r1 <> " depends on " <> pretty p2 <> " " <> pretty r2
-      where
-        depender r = if reIsRoot env p1 then "" else " " <> pretty r
+        pretty p1 <> pretty r1 <> " depends on " <> pretty p2 <> " " <> pretty r2
     showTerm p (Positive r) = pretty p <> " " <> pretty r
     showTerm p (Negative r) = pretty p <> " not " <> pretty r

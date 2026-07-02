@@ -2,6 +2,7 @@
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE PatternSynonyms     #-}
 
 module Main where
 
@@ -15,12 +16,12 @@ import           Data.Maybe                      (fromMaybe)
 import           Data.Text                       (Text)
 import qualified Data.Text                       as T
 import           Data.Time                       (defaultTimeLocale, formatTime)
-import           Distribution.PackageDescription (PackageName, mkPackageName)
+import           Distribution.PackageDescription (PackageName)
 import           Distribution.Parsec             (eitherParsec)
 import           Distribution.Pretty             (prettyShow)
 import           Distribution.Types.PackageId    (PackageIdentifier (..))
 import           Distribution.Types.VersionRange (VersionRange)
-import           Distribution.Version            (versionNumbers)
+import           Distribution.Version            (Version)
 import           Hackage                         (mkCache)
 import qualified Hackage.Security.Client.Formats as Sec
 import           Hackage.Security.Unlifted       (getCachedIndex,
@@ -35,6 +36,8 @@ import           Options.Applicative             (Parser, ParserInfo, argument,
                                                   long, metavar, optional,
                                                   progDesc, strOption, (<**>))
 import           Provider                        (Combined (..))
+import           PubGrub.Choice                  (pattern Source)
+import           PubGrub.SourceConfig            (SourceConfig (..))
 import qualified PubGrub.VersionSet              as VS
 import           Solver                          (runSolve)
 import           SourceProvider                  (withSourceProvider)
@@ -42,20 +45,17 @@ import           UnliftIO                        (MonadIO (..))
 
 data Options = Options
     { optWithCompiler :: Maybe FilePath
-    , optTarget       :: (PackageName, VS.VersionSet)
+    , optTarget       :: (PackageName, Version)
     , optRange        :: Maybe VS.VersionSet
     }
 
-{- | Parse a @<package>[-<version>]@ argument. A bare name means any version;
-@name-version@ means @== version@.
--}
-readTarget :: String -> Either String (PackageName, VS.VersionSet)
+-- | Parse a @<package>-<version>@ argument. The target is solved at exactly
+-- that version.
+readTarget :: String -> Either String (PackageName, Version)
 readTarget s =
     case eitherParsec s :: Either String PackageIdentifier of
-        Right (PackageIdentifier n v)
-            | null (versionNumbers v) -> Right (n, VS.full)
-            | otherwise -> Right (n, VS.singleton v)
-        Left _ -> Right (mkPackageName s, VS.full)
+        Right (PackageIdentifier n v) -> Right (n, v)
+        Left e -> Left ("invalid package identifier: " <> e)
 
 readRange :: String -> Either String VS.VersionSet
 readRange s =
@@ -93,16 +93,13 @@ main = do
         case ecompiler of
             Left (CompilerError msg) -> logMsg @Text ("error: " <> msg)
             Right compiler -> do
-                let (target, targetRange) = optTarget opts
-                    range = fromMaybe targetRange (optRange opts)
+                let (target, targetVersion) = optTarget opts
                     db = mkInstalledDbProvider (installedPackages compiler)
                 withSourceProvider cache manager compiler $ \hp -> do
                     let combined =
                             Combined
                                 { cDb = db
                                 , cSource = hp
-                                , cTarget = target
-                                , cRange = range
                                 }
                     idx <- liftIO $ getCachedIndex cache Sec.FGz
                     case idx of
@@ -114,10 +111,10 @@ main = do
                                 ( "\ESC[1mSolving for "
                                     <> T.pack (prettyShow target)
                                     <> " "
-                                    <> T.pack (prettyShow (VS.toVersionRange range))
+                                    <> T.pack (prettyShow targetVersion)
                                     <> " (index from "
                                     <> T.pack (formatTime defaultTimeLocale "%Y-%m-%d %H:%M UTC" idxTime)
                                     <> ")\ESC[0m"
                                 )
 
-                            runSolve combined
+                            runSolve combined target (Source (SourceConfig targetVersion mempty))
