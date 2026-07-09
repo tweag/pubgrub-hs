@@ -1,103 +1,135 @@
-{-# LANGUAGE DerivingStrategies   #-}
-{-# LANGUAGE TypeFamilies         #-}
-{-# LANGUAGE UndecidableInstances #-}
+-- | Incompatibilities: the solver's unit of knowledge.
+module PubGrub.Incompatibility
+    ( PackageTerm (..)
+    , Incompatibility (..)
+    , anyTerm
+    , incompGet
+    , notRoot
+    , noInstances
+    , fromDependency
+    , IncompatRelation (..)
+    , incompRelation
+    , isTerminal
+    , priorCause
+    ) where
 
-module PubGrub.Incompatibility (
-    -- * Incompatibilities
-    IncompatCause (..),
-    Incompatibility (..),
-    notRoot,
-    noVersions,
-    fromDependency,
-    incompGet,
-    IncompatRelation (..),
-    incompRelation,
-    isTerminal,
-    priorCause,
-)
-where
+import           Data.Map.Strict     (Map)
+import qualified Data.Map.Strict     as Map
+import           PubGrub.InstanceSet (Instance, InstanceSet, PackageName,
+                                      emptyInstanceSet, memberInstance,
+                                      singletonInstance)
+import           PubGrub.Relation    (Relation (..), relation)
+import           PubGrub.Term        (Term (..), intersectTerm, isTopTerm,
+                                      unionTerm)
 
-import           Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
-import           PubGrub.Lattice (Boolean, BoundedLattice (..), Sets (..),
-                                  isBottom)
-import           PubGrub.Term
+-- --------------------------------------------------------------------------
+-- PackageTerm
+-- --------------------------------------------------------------------------
 
--- | Why an incompatibility exists (drives error reporting).
-data IncompatCause p s
-    = NotRoot p (Elem s)
-    | NoVersions p s
-    | FromDependencyOf p s p s
-    | DerivedFrom (Incompatibility p s) (Incompatibility p s)
-
-deriving stock instance (Eq p, Eq s, Eq (Elem s)) => Eq (IncompatCause p s)
-deriving stock instance (Show p, Show s, Show (Elem s)) => Show (IncompatCause p s)
-
--- | A set of terms (at most one per package) that can never all hold.
-data Incompatibility p s = Incompatibility
-    { incompTerms :: Map p (Term s)
-    , incompCause :: IncompatCause p s
+-- | One term about one package — an /assignment/, the unit the partial
+-- solution records. A decision is the special case where the term is
+-- @Positive@ of a singleton 'InstanceSet'.
+--
+-- Contrast 'Incompatibility', which also pairs packages with terms but makes
+-- the opposite judgement: an assignment /asserts/ its term, an
+-- incompatibility forbids its terms from all holding at once.
+data PackageTerm = PackageTerm
+    { termPackage   :: PackageName
+    , termInstances :: Term InstanceSet
     }
+    deriving (Show, Eq, Ord)
 
-deriving stock instance (Eq p, Eq s, Eq (Elem s)) => Eq (Incompatibility p s)
-deriving stock instance (Show p, Show s, Show (Elem s)) => Show (Incompatibility p s)
+-- | The always-true term ⊤ over instances: "absent, or any instance".
+-- The identity used when a package is missing from an incompatibility's map.
+anyTerm :: Term InstanceSet
+anyTerm = Negative emptyInstanceSet
 
--- | The root seed: it is impossible for @root@ to NOT be @version@.
-notRoot :: Sets s => p -> Elem s -> Incompatibility p s
-notRoot p v =
-    Incompatibility
-        { incompTerms = Map.singleton p (Negative (singleton v))
-        , incompCause = NotRoot p v
-        }
+-- --------------------------------------------------------------------------
+-- Incompatibility
+-- --------------------------------------------------------------------------
 
--- | No version of the package in this set is available, so none of them can
---   be selected.
-noVersions :: Sets s => p -> s -> Incompatibility p s
-noVersions p s =
-    Incompatibility
-        { incompTerms = Map.singleton p (Positive s)
-        , incompCause = NoVersions p s
-        }
+-- | An incompatibility is a set of package terms that cannot /all/ hold
+-- simultaneously:
+--
+-- @
+-- Incompatibility m  ≡  ¬ (⋀ over (pkg, term) in m: term holds of pkg)
+-- @
+--
+-- Equivalently (De Morgan) it is a /disjunction/ of negated terms — the only
+-- place disjunction lives in this design. Reading it as an implication gives
+-- the familiar dependency shape:
+--
+-- @
+-- ¬(app ∈ {app-1} ∧ ¬(lib ∈ {lib-2,lib-3}))    -- "if app is instance app-1, lib is 2 or 3"
+-- @
+--
+-- Canonical-form corollaries: an entry that is ⊤ ('PubGrub.Term.isTopTerm')
+-- says nothing and must be dropped from the map; an entry that is ⊥
+-- ('PubGrub.Term.isBottomTerm') makes the conjunction unsatisfiable, so the
+-- whole incompatibility is vacuously true — it should not be emitted at all.
+-- An incompatibility with an /empty/ map is ¬⊤ = always violated: the shape
+-- of "no solution exists".
+--
+-- TODO: an incompatibility carries no cause, so 'priorCause' forgets its
+-- parents and "PubGrub.Report" cannot render a failed resolution as a
+-- numbered proof.
+newtype Incompatibility = Incompatibility (Map PackageName (Term InstanceSet))
+    deriving (Eq, Show)
 
--- | Dependency incompatibility: @package@ in @versions@ requires @dep@ in @depSet@.
---   Encoded as @{ package: Positive versions, dep: Negative depSet }@.
---   If @depSet@ is empty the dependency is unsatisfiable, leaving a unit term.
-fromDependency :: (Ord p, Eq s, BoundedLattice s) => p -> s -> (p, s) -> Incompatibility p s
-fromDependency package versions (dep, depSet) =
-    Incompatibility
-        { incompTerms =
-            if isBottom depSet
-                then Map.singleton package (Positive versions)
-                else Map.fromList [(package, Positive versions), (dep, Negative depSet)]
-        , incompCause = FromDependencyOf package versions dep depSet
-        }
+-- | The term an incompatibility states about @p@, if any.
+incompGet :: PackageName -> Incompatibility -> Maybe (Term InstanceSet)
+incompGet p (Incompatibility m) = Map.lookup p m
 
-incompGet :: Ord p => p -> Incompatibility p s -> Maybe (Term s)
-incompGet p i = Map.lookup p (incompTerms i)
+-- Constructors ---------------------------------------------------------------
+
+-- | The root seed: it is impossible for the root package to NOT be the
+-- requested instance.
+notRoot :: PackageName -> Instance -> Incompatibility
+notRoot p i = Incompatibility (Map.singleton p (Negative (singletonInstance i)))
+
+-- | The provider has nothing to offer in this instance set of the package, so
+-- none of it can be selected.
+noInstances :: PackageName -> InstanceSet -> Incompatibility
+noInstances p s = Incompatibility (Map.singleton p (Positive s))
+
+-- | Dependency incompatibility: @package@ in @instances@ requires @dep@ in
+-- @depSet@ — encoded @{ package: Positive instances, dep: Negative depSet }@.
+-- The instance sets are minted by the provider (a 'PubGrub.InstanceSet.Dependency'
+-- constrains versions; the provider widens that to instances). If @depSet@ is
+-- empty the dependency is unsatisfiable and the entry would be ⊤, so it is
+-- dropped, leaving a unit ban on @package@.
+fromDependency :: PackageName -> InstanceSet -> (PackageName, InstanceSet) -> Incompatibility
+fromDependency package instances (dep, depSet) =
+    Incompatibility $
+        if isTopTerm (Negative depSet :: Term InstanceSet)
+            then Map.singleton package (Positive instances)
+            else Map.fromList [(package, Positive instances), (dep, Negative depSet)]
+
+-- Judging against the partial solution -----------------------------------------
 
 -- | How an incompatibility relates to the partial solution.
-data IncompatRelation p
+data IncompatRelation
     = ISatisfied
-    | IContradicted p
-    | -- | all terms satisfied but one (the named package)
-      IAlmostSatisfied p
+    | IContradicted PackageName
+    | -- | all terms satisfied but one (the named package): the unit case
+      IAlmostSatisfied PackageName
     | IInconclusive
-    deriving stock (Eq, Show)
+    deriving (Eq, Show)
 
--- | @lookupTerm p@ returns the accumulated term for @p@ in the partial
---   solution, or Nothing if @p@ is absent (treated as the any-term).
+-- | Judge an incompatibility against the partial solution. @lookupTerm p@ is
+-- the accumulated term the partial solution holds for @p@, or 'Nothing' if
+-- @p@ is unmentioned (equivalent to 'anyTerm', and always inconclusive).
 incompRelation
-    :: (Ord p, Eq s, Boolean s)
-    => (p -> Maybe (Term s))
-    -> Incompatibility p s
-    -> IncompatRelation p
-incompRelation lookupTerm i = go ISatisfied (Map.toList (incompTerms i))
+    :: (PackageName -> Maybe (Term InstanceSet))
+    -> Incompatibility
+    -> IncompatRelation
+incompRelation lookupTerm (Incompatibility m) = go ISatisfied (Map.toList m)
   where
     go acc [] = acc
     go acc ((p, it) : rest) =
         case lookupTerm p of
             Just term ->
-                case relationWith it term of
+                case relation term it of
                     Satisfied    -> go acc rest
                     Contradicted -> IContradicted p
                     Inconclusive -> almost p acc rest
@@ -107,39 +139,40 @@ incompRelation lookupTerm i = go ISatisfied (Map.toList (incompTerms i))
     almost _ _ _             = IInconclusive
 
 -- | Does this incompatibility end the solve: is it empty, or does it forbid
---   the root version?
-isTerminal :: (Ord p, Sets s) => p -> Elem s -> Incompatibility p s -> Bool
-isTerminal rootPkg rootV i =
-    case Map.toList (incompTerms i) of
+-- the root instance?
+isTerminal :: PackageName -> Instance -> Incompatibility -> Bool
+isTerminal rootPkg rootI (Incompatibility m) =
+    case Map.toList m of
         []          -> True
-        [(p, term)] -> p == rootPkg && termContains term rootV
+        [(p, term)] -> p == rootPkg && termContains term rootI
         _           -> False
+  where
+    termContains (Positive s) i = i `memberInstance` s
+    termContains (Negative s) i = not (i `memberInstance` s)
 
 -- | Rule of Resolution. From the current incompatibility and the cause of the
---   satisfier (sharing @package@), derive their resolvent: union the shared
---   term, intersect every other package's terms, drop the shared term if it
---   becomes always-true.
+-- satisfier (sharing @package@), derive their resolvent: union the shared
+-- package's terms, intersect every other package's terms, and drop the shared
+-- entry if the union becomes ⊤.
 priorCause
-    :: (Ord p, Eq s, Boolean s)
-    => Incompatibility p s
+    :: Incompatibility
     -- ^ current incompatibility
-    -> Incompatibility p s
+    -> Incompatibility
     -- ^ satisfier's cause
-    -> p
+    -> PackageName
     -- ^ shared (pivot) package
-    -> Incompatibility p s
-priorCause cur sat package =
-    Incompatibility
-        { incompTerms = finalTerms
-        , incompCause = DerivedFrom cur sat
-        }
+    -> Incompatibility
+priorCause (Incompatibility cur) (Incompatibility sat) package =
+    Incompatibility finalTerms
   where
-    curTerms = Map.delete package (incompTerms cur)
-    satTerms = Map.delete package (incompTerms sat)
-    merged = Map.unionWith intersectTerms curTerms satTerms
-    t1 = Map.findWithDefault anyTerm package (incompTerms cur)
-    t2 = Map.findWithDefault anyTerm package (incompTerms sat)
-    unioned = unionTerms t1 t2
+    merged =
+        Map.unionWith
+            intersectTerm
+            (Map.delete package cur)
+            (Map.delete package sat)
+    t1 = Map.findWithDefault anyTerm package cur
+    t2 = Map.findWithDefault anyTerm package sat
+    unioned = unionTerm t1 t2
     finalTerms
-        | unioned == anyTerm = merged
+        | isTopTerm unioned = merged
         | otherwise = Map.insert package unioned merged

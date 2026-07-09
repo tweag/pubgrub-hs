@@ -19,89 +19,19 @@ library
         PubGrub.Incompatibility
         PubGrub.VersionSet
         PubGrub.Term
+        PubGrub.Relation
+        PubGrub.InstanceSet
         PubGrub.Solver
-        PubGrub.SourceConfig
         PubGrub.Report
-        PubGrub.Lattice
-        PubGrub.Choice
-        PubGrub.Pow
         PubGrub.Pretty
     build-depends:
         , base ^>=4.21.0.0
         , containers
         , Cabal-syntax
         , text
-        , co-log
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions: ImportQualifiedPost
-
-library cabal-bridge
-    import:           warnings
-    exposed-modules:
-        PubGrub.Cabal.Flatten
-        PubGrub.Cabal.Boot
-        PubGrub.Cabal.Compiler
-        PubGrub.Cabal.InstalledDb
-        InstalledDbProvider
-        Provider
-    build-depends:
-        , base
-        , bytestring
-        , containers
-        , Cabal
-        , Cabal-syntax
-        , pubgrub-hs
-        , filepath
-        , text
-    hs-source-dirs:   app-lib
-    default-language: GHC2021
-    default-extensions: ImportQualifiedPost
-
-executable pubgrub-hs
-    import:           warnings
-    main-is:          Main.hs
-    other-modules:
-        Compiler
-        Database
-        SourceProvider
-        Hackage
-        Hackage.Security.Unlifted
-        HttpClient
-        Solver
-        Utils
-    build-depends:
-        , pubgrub-hs
-        , pubgrub-hs:cabal-bridge
-        , process
-        , Cabal
-        , Cabal-syntax
-        , base
-        , binary
-        , bytestring
-        , text
-        , microlens
-        , mtl
-        , stm
-        , tar
-        , time
-        , containers
-        , optparse-applicative
-        , optparse-generic
-        , hackage-security
-        , http-client
-        , http-types
-        , network-uri
-        , async
-        , unliftio
-        , co-log
-        , scheduler
-        , concurrent-output
-        , lmdb-simple
-        , serialise
-
-    hs-source-dirs:   app
-    default-language: GHC2021
 
 test-suite pubgrub-hs-test
     import:           warnings
@@ -109,29 +39,11 @@ test-suite pubgrub-hs-test
     main-is:          Main.hs
     other-modules:
         VersionSetSpec
-        SolverSpec
-        FlattenSpec
-        BootSpec
-        CompilerSpec
-        LatticeSpec
-        PowSpec
-        PrettySpec
-        ChoiceSetSpec
-        SourceConfigSpec
-        InstalledDbSpec
-        InstalledDbProviderSpec
-        ProviderSpec
     build-depends:
         , pubgrub-hs
-        , pubgrub-hs:cabal-bridge
-        , bytestring
         , base
-        , containers
         , Cabal-syntax
         , tasty
         , tasty-quickcheck
-        , tasty-hunit
-        , co-log
-        , text
     hs-source-dirs:   test
     default-language: GHC2021

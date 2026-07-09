@@ -1,117 +1,193 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE TypeFamilies       #-}
 
--- | Terms: constraints on the single element a package may have selected, and
--- the Boolean operations on them. 'Term' gives the meaning of the two
--- constructors.
-module PubGrub.Term (
-    -- * Terms
-    Term (..),
-    anyTerm,
-    emptyTerm,
-    exactTerm,
-    isPositive,
-    negateTerm,
-    termContains,
-    intersectTerms,
-    unionTerms,
-    termSubsetOf,
-    termIsDisjoint,
-    termIsEmpty,
+-- | Terms: propositions about the single instance a package may have
+-- selected, and the Boolean operations on them. See 'Term' for the meaning of
+-- the two constructors, and 'SetOps' for the payload algebra the operations
+-- are built from.
+module PubGrub.Term where
 
-    -- * Term relation
-    TermRelation (..),
-    relationWith,
-) where
+import           Data.Set (Set)
+import qualified Data.Set as Set
 
-import           PubGrub.Lattice (Boolean (..), BoundedLattice (..),
-                                  Lattice (..), Sets (..), disjoint, isBottom,
-                                  isTop, subsetOf)
+-- ---------------------------------------------------------------------------
+-- SetOps
+-- ---------------------------------------------------------------------------
 
--- | A constraint on the /single/ element a package may have selected. A package
--- is assigned at most one element (e.g. one version), so a 'Term' is a predicate
--- on that optional choice — not a set of simultaneously-allowed elements.
--- 'Negative' is the logical negation of 'Positive', not a set complement:
+-- | The operations the solver needs from a set of values: intersection,
+-- union, difference and an emptiness test. This is a /ring of sets/, not a
+-- Boolean algebra.
 --
---   * @Positive s@ — the package is assigned and its element is in @s@.
---   * @Negative s@ — @not (Positive s)@: the assigned element is /not/ in @s@,
---     /or/ the package has no assignment yet.
+-- There is deliberately no @complement@, which would need a universe of
+-- values. The only negation the solver needs is in 'Term', where it is a
+-- polarity flip that costs nothing: the one-point extension turns this ring
+-- into a Boolean algebra.
+class SetOps a where
+    intersect   :: a -> a -> a
+    union       :: a -> a -> a
+    difference  :: a -> a -> a
+    isEmpty     :: a -> Bool
+
+-- | @a ⊆ b@ iff removing @b@ from @a@ leaves nothing.
 --
--- So @Negative (singleton 3)@ reads \"3 is not the selected element\" (which also
--- holds when nothing is selected) — /not/ \"every element except 3 is selected\".
-data Term s
-    = Positive s
-    | Negative s
-    deriving (Eq, Show)
+-- >>> Set.fromList [3,4] `isSubsetOf` Set.fromList [1..9]
+-- True
+--
+-- >>> Set.fromList [1..9] `isSubsetOf` Set.fromList [3,4]
+-- False
+isSubsetOf :: SetOps a => a -> a -> Bool
+isSubsetOf a b = isEmpty (a `difference` b)
 
--- | The always-true term, @not (Positive bottom)@: imposes no constraint (an
--- unassigned package trivially satisfies it).
-anyTerm :: BoundedLattice s => Term s
-anyTerm = Negative bottom
+-- | @a ∩ b = ∅@.
+--
+-- >>> Set.fromList [1,2] `isDisjoint` Set.fromList [3,4]
+-- True
+--
+-- >>> Set.fromList [1,2,3] `isDisjoint` Set.fromList [3,4]
+-- False
+isDisjoint :: SetOps a => a -> a -> Bool
+isDisjoint xs ys = isEmpty (xs `intersect` ys)
 
--- | The never-true term, @Positive bottom@: demands an element from the empty
--- set, so nothing can satisfy it.
-emptyTerm :: BoundedLattice s => Term s
-emptyTerm = Positive bottom
+equivalent :: SetOps s => s -> s -> Bool
+equivalent x y = x `isSubsetOf` y && y `isSubsetOf` x
 
--- | Positive singleton term for a concrete element.
-exactTerm :: Sets s => Elem s -> Term s
-exactTerm = Positive . singleton
+instance Ord a => SetOps (Set a) where
+    intersect = Set.intersection
+    union = Set.union
+    difference = Set.difference
+    isEmpty = Set.null
 
-isPositive :: Term s -> Bool
-isPositive (Positive _) = True
-isPositive (Negative _) = False
+-- ---------------------------------------------------------------------------
+-- Term
+-- ---------------------------------------------------------------------------
 
-negateTerm :: Term s -> Term s
+-- | A term is a proposition about one package, judged against a (possibly
+-- partial) solution.
+--
+-- * @Positive s@ — the package is selected, as an instance in @s@.
+-- * @Negative s@ — the package is not selected, or its instance lies outside @s@.
+--
+-- The solver instantiates @a@ at 'PubGrub.InstanceSet.InstanceSet', and the
+-- doctests use small @'Set' Int@ payloads. Nothing below depends on which.
+--
+-- @Negative s@ is exactly the negation of @Positive s@, so it is satisfied
+-- when the package is absent from the solution. It is /not/ the same as
+-- @Positive (complement s)@, which would still require the package to be
+-- selected.
+--
+-- A term carries no uncertainty: "not yet determined" is
+-- 'PubGrub.Relation.relation' returning 'PubGrub.Relation.Inconclusive' when
+-- a term is judged against the partial solution.
+--
+-- The /absent/ state separates the polarities: a positive term is always a
+-- subset of ⊤ = @Negative ∅@ ("anything, or absent"), but ⊤ is never a subset
+-- of a positive term, because absence escapes it:
+--
+-- >>> Positive (Set.fromList [1,2]) `isSubsetOf` (Negative Set.empty :: Term (Set Int))
+-- True
+--
+-- >>> (Negative Set.empty :: Term (Set Int)) `isSubsetOf` Positive (Set.fromList [1,2])
+-- False
+--
+-- Semantically, @Term a@ is the powerset algebra over the payload's value
+-- domain /extended by one point/, the absent state. Positives are exactly the
+-- subsets that exclude it and negatives exactly those that include it, so
+-- every subset of states is representable, exactly once.
+data Term a
+    = Positive a
+    | Negative a
+    deriving (Eq, Ord, Show)
+
+-- | Negation is a polarity flip — the payload is untouched. This is where the
+-- complement 'SetOps' deliberately lacks comes from.
+negateTerm :: Term a -> Term a
 negateTerm (Positive s) = Negative s
 negateTerm (Negative s) = Positive s
 
--- | Does a concrete chosen element satisfy this term?
-termContains :: Sets s => Term s -> Elem s -> Bool
-termContains (Positive s) v = member v s
-termContains (Negative s) v = not (member v s)
+intersectTerm :: SetOps s => Term s -> Term s -> Term s
+intersectTerm (Positive x) (Positive y) = Positive (x `intersect` y)
+intersectTerm (Positive x) (Negative y) = Positive (x `difference` y)
+intersectTerm (Negative x) (Positive y) = Positive (y `difference` x)
+intersectTerm (Negative x) (Negative y) = Negative (x `union` y)
 
--- | Logical AND of two terms (over the same package).
-intersectTerms :: Boolean s => Term s -> Term s -> Term s
-intersectTerms (Positive r1) (Positive r2) = Positive (r1 /\ r2)
-intersectTerms (Positive p) (Negative n)   = Positive (p /\ neg n)
-intersectTerms (Negative n) (Positive p)   = Positive (p /\ neg n)
-intersectTerms (Negative r1) (Negative r2) = Negative (r1 \/ r2)
+unionTerm :: SetOps s => Term s -> Term s -> Term s
+unionTerm (Positive x) (Positive y) = Positive (x `union` y)
+unionTerm (Positive x) (Negative y) = Negative (y `difference` x)
+unionTerm (Negative x) (Positive y) = Negative (x `difference` y)
+unionTerm (Negative x) (Negative y) = Negative (x `intersect` y)
 
--- | Logical OR of two terms (over the same package).
-unionTerms :: Boolean s => Term s -> Term s -> Term s
-unionTerms (Positive r1) (Positive r2) = Positive (r1 \/ r2)
-unionTerms (Positive p) (Negative n)   = Negative (neg p /\ n)
-unionTerms (Negative n) (Positive p)   = Negative (neg p /\ n)
-unionTerms (Negative r1) (Negative r2) = Negative (r1 /\ r2)
+differenceTerm :: SetOps s => Term s -> Term s -> Term s
+differenceTerm x y =
+    x `intersectTerm` negateTerm y
 
--- | @t1 `termSubsetOf` t2@ iff t1 ∩ t2 = t1.
-termSubsetOf :: (Boolean s, Eq s) => Term s -> Term s -> Bool
-termSubsetOf (Positive r1) (Positive r2) = subsetOf r1 r2
-termSubsetOf (Positive r1) (Negative r2) = disjoint r1 r2
-termSubsetOf (Negative _) (Positive _)   = False
-termSubsetOf (Negative r1) (Negative r2) = subsetOf r2 r1
+isEmptyTerm :: SetOps s => Term s -> Bool
+isEmptyTerm (Positive s) = isEmpty s
+isEmptyTerm (Negative _) = False
 
--- | Are two terms mutually exclusive (intersection is the empty term)?
-termIsDisjoint :: (Boolean s, Eq s) => Term s -> Term s -> Bool
-termIsDisjoint (Positive r1) (Positive r2) = disjoint r1 r2
-termIsDisjoint (Negative _) (Negative _)   = False
-termIsDisjoint (Positive p) (Negative n)   = subsetOf p n
-termIsDisjoint (Negative n) (Positive p)   = subsetOf p n
+-- The term can never be true.
+termIsImpossible :: SetOps s => Term s -> Bool
+termIsImpossible (Positive s) = isEmpty s
+termIsImpossible (Negative _) = False
 
--- | Is this the never-true term?
-termIsEmpty :: (Eq s, BoundedLattice s) => Term s -> Bool
-termIsEmpty (Positive s) = isTop s
-termIsEmpty (Negative s) = isBottom s
+-- The term is always true.
+termIsUniversal :: SetOps s => Term s -> Bool
+termIsUniversal (Positive _) = False
+termIsUniversal (Negative s) = isEmpty s
 
--- | Relation of a term to an accumulated set of terms (their intersection).
-data TermRelation = Satisfied | Contradicted | Inconclusive
-    deriving stock (Eq, Show)
 
--- | @relationWith t acc@: how the accumulated term @acc@ relates to @t@.
---   Satisfied iff acc ⊆ t; Contradicted iff acc ∩ t = ∅; else Inconclusive.
-relationWith :: (Boolean s, Eq s) => Term s -> Term s -> TermRelation
-relationWith t acc
-    | acc `termSubsetOf` t = Satisfied
-    | termIsDisjoint t acc = Contradicted
-    | otherwise = Inconclusive
+-- | The Boolean algebra on terms, through the state-set denotations above.
+-- The payload only ever needs 'intersect', 'union' and 'difference' — never a
+-- complement: each right-hand side is forced by De Morgan once you track
+-- whether the absent state is in or out.
+--
+-- >>> Positive (Set.fromList [2,3,4]) `intersect` Negative (Set.fromList [4,5])
+-- Positive (fromList [2,3])
+--
+-- >>> Negative (Set.fromList [2]) `intersect` Negative (Set.fromList [4])
+-- Negative (fromList [2,4])
+--
+-- A union of prohibitions only forbids what both prohibit:
+--
+-- >>> Negative (Set.fromList [5,6]) `union` Negative (Set.fromList [6,7])
+-- Negative (fromList [6])
+--
+-- Subtracting a negative term removes the /absent/ state, so the result is positive:
+--
+-- >>> Negative (Set.fromList [1]) `difference` Negative (Set.fromList [0,1,2])
+-- Positive (fromList [0,2])
+--
+-- Only a positive term over the empty payload is empty; a negative term always
+-- admits the absent state:
+--
+-- >>> isEmpty (Negative Set.empty :: Term (Set Int))
+-- False
+instance SetOps a => SetOps (Term a) where
+    intersect = intersectTerm
+    union = unionTerm
+    difference = differenceTerm
+    isEmpty = isEmptyTerm
+
+-- | The always-true term: "absent, or any value". This is the ⊤ an
+-- 'PubGrub.Incompatibility.Incompatibility' never stores — such an entry says
+-- nothing, so it is dropped from the map instead.
+--
+-- >>> isTopTerm (Negative Set.empty :: Term (Set Int))
+-- True
+isTopTerm :: SetOps a => Term a -> Bool
+isTopTerm (Negative s) = isEmpty s
+isTopTerm (Positive _) = False
+
+-- | The never-true term: "selected, with a value in ∅". Note the bottom is
+-- /positive/: it is the only unsatisfiable shape, because a negative term is
+-- always satisfied by absence. In particular @Negative ⟨universe⟩@ ("the
+-- package is absent") is satisfiable and NOT a bottom — mistaking it for one
+-- would turn conflicts into "just don't pick this package":
+--
+-- >>> isBottomTerm (Positive Set.empty :: Term (Set Int))
+-- True
+--
+-- >>> isBottomTerm (Negative (Set.fromList [1,2]) :: Term (Set Int))
+-- False
+isBottomTerm :: SetOps a => Term a -> Bool
+isBottomTerm (Positive s) = isEmpty s
+isBottomTerm (Negative _) = False

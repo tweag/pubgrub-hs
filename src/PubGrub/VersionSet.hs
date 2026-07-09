@@ -19,6 +19,7 @@ module PubGrub.VersionSet (
     intervals,
 ) where
 
+import           Data.Ord                           (comparing)
 import           Distribution.Types.VersionInterval (Bound (..),
                                                      LowerBound (..),
                                                      UpperBound (..),
@@ -34,10 +35,22 @@ import           Distribution.Version               (Version, VersionRange,
                                                      orLaterVersion,
                                                      thisVersion,
                                                      unionVersionRanges)
-import           PubGrub.Lattice
+import qualified PubGrub.Term                       as T
 
 newtype VersionSet = VersionSet [VersionInterval]
     deriving stock (Eq, Show)
+
+-- | Cabal's 'VersionInterval' has no 'Ord', so order by the canonical
+-- interval list mapped onto orderable keys. The particular order is
+-- arbitrary; it only has to be total, lawful, and consistent with 'Eq'
+-- (it is: the representation is canonical and the key is injective).
+instance Ord VersionSet where
+    compare = comparing (map key . intervals)
+      where
+        key (VersionInterval (LowerBound lv lb) ub) =
+            (lv, lb == InclusiveBound, upperKey ub)
+        upperKey NoUpperBound       = Nothing
+        upperKey (UpperBound uv ub) = Just (uv, ub == InclusiveBound)
 
 -- | The raw canonical interval list (for testing / reporting).
 intervals :: VersionSet -> [VersionInterval]
@@ -84,6 +97,14 @@ complement (VersionSet is) =
     aboveUpper (UpperBound v InclusiveBound) = laterVersion v -- > v
     aboveUpper (UpperBound v ExclusiveBound) = orLaterVersion v -- >= v
 
+-- | The class asks for no complement, because not every payload has one.
+-- Version ranges do, so 'difference' is computed through it here.
+instance T.SetOps VersionSet where
+    intersect = intersection
+    union = union
+    difference a b = intersection a (complement b)
+    isEmpty = null . intervals
+
 contains :: VersionSet -> Version -> Bool
 contains (VersionSet is) v = any inside is
   where
@@ -93,19 +114,3 @@ contains (VersionSet is) v = any inside is
     upperOk NoUpperBound                  = True
     upperOk (UpperBound w InclusiveBound) = v <= w
     upperOk (UpperBound w ExclusiveBound) = v < w
-
-instance Lattice VersionSet where
-    (\/) = union
-    (/\) = intersection
-
-instance BoundedLattice VersionSet where
-    bottom = empty
-    top = full
-
-instance Boolean VersionSet where
-    neg = complement
-
-instance Sets VersionSet where
-    type Elem VersionSet = Version
-    singleton = PubGrub.VersionSet.singleton
-    member = flip contains
