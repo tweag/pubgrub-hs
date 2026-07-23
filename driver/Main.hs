@@ -13,14 +13,11 @@
 -- and 'SolverMsg' (the solver's search trace) — both rendered to stdout.
 module Main (main) where
 
-import           Bridge.Compiler                 (CompilerError (..),
-                                                  resolveCompiler)
 import           Bridge.Hackage                  (mkCache, withHackageIndex)
 import           Bridge.Provider                 (mkProvider, rootName,
                                                   syntheticRoot)
 import           Colog                           (HasLog (..), LogAction (..),
                                                   cmap, logMsg)
-import           Control.Exception               (try)
 import           Control.Monad.Reader            (MonadReader, ReaderT,
                                                   runReaderT)
 import           Data.Map.Strict                 (Map)
@@ -30,7 +27,6 @@ import qualified Data.Text                       as T
 import qualified Data.Text.IO                    as TIO
 import           Distribution.Parsec             (eitherParsec)
 import           Distribution.Pretty             (prettyShow)
-import           Distribution.System             (buildPlatform)
 import           Distribution.Types.PackageName  (PackageName)
 import           Distribution.Types.VersionRange (VersionRange)
 import           Hackage.Security.Util.Path      (fromFilePath, makeAbsolute)
@@ -100,16 +96,13 @@ main = do
         Right (target, range) -> do
             cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
             manager <- newManager defaultManagerSettings
-            ecompiler <- try (resolveCompiler "ghc")
-            case ecompiler of
-                Left (CompilerError msg) -> TIO.putStrLn (T.pack "error: " <> msg)
-                Right compiler ->
-                    runApp $
-                        withHackageIndex cache manager compiler $ \handle -> do
-                            logMsg (T.pack ("Solving for " ++ prettyShow target))
-                            let provider = mkProvider compiler buildPlatform handle
-                            result <- solve provider rootName (syntheticRoot [(target, range)])
-                            report result
+            runApp $
+                withHackageIndex cache manager $ \handle -> do
+                    logMsg (T.pack ("Solving for " ++ prettyShow target))
+                    provider <- mkProvider handle
+                    result <- solve provider rootName (syntheticRoot [(target, range)])
+                    report result
+
 
 report :: Either SolveError (Map PackageName Instance) -> App ()
 report (Left err) =

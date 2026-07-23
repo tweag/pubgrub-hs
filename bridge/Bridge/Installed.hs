@@ -11,12 +11,12 @@ module Bridge.Installed
     , unitInstance
     ) where
 
-import           Bridge.Cabal.InstalledDb       (InstalledPkg (..))
+import           Bridge.Cabal.InstalledPkg      (InstalledPkg (..))
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Distribution.Types.PackageName (PackageName)
 import           Distribution.Types.UnitId      (UnitId)
-import           PubGrub.InstanceSet            (Instance (UsePreInstalled),
+import           PubGrub.InstanceSet            (Instance (..),
                                                  PreInstalledPackage (..))
 
 data InstalledDb = InstalledDb

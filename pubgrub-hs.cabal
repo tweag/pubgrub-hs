@@ -41,21 +41,20 @@ library bridge
     visibility:         private
     hs-source-dirs:     bridge
     exposed-modules:
-        Bridge.Compiler
         Bridge.Hackage
         Bridge.Hackage.HttpClient
         Bridge.Hackage.Unlifted
         Bridge.Instances
         Bridge.Provider
     other-modules:
-        Bridge.Cabal.Compiler
         Bridge.Cabal.Flatten
-        Bridge.Cabal.InstalledDb
+        Bridge.Cabal.InstalledPkg
         Bridge.Installed
     build-depends:
         , base
         , binary
         , bytestring
+        , Cabal
         , Cabal-syntax
         , containers
         , co-log

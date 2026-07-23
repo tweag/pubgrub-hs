@@ -1,8 +1,6 @@
 {-# LANGUAGE GADTs #-}
 module Bridge.Hackage where
 
-import           Bridge.Compiler                              (Compiler)
-
 import           Colog                                        (WithLog, logMsg)
 import           Control.Monad                                (when)
 import           Data.Binary                                  (decodeFileOrFail,
@@ -74,8 +72,8 @@ data IndexHandle = IndexHandle
 -- it touches rather than all of Hackage.
 withHackageIndex
     :: (MonadUnliftIO m, WithLog env Text m)
-    => Sec.Cache -> Manager -> Compiler -> (IndexHandle -> m a) -> m a
-withHackageIndex cache manager _compiler act =
+    => Sec.Cache -> Manager -> (IndexHandle -> m a) -> m a
+withHackageIndex cache manager act =
     U.withClient manager $ \httpLib ->
         U.withRepository httpLib [uri] cache logger $ \repository -> do
             U.uncheckClientErrors $ do

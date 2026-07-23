@@ -16,7 +16,7 @@ module Bridge.Provider
     , syntheticRoot
     ) where
 
-import           Bridge.Compiler                (Compiler (..))
+import           Bridge.Cabal.InstalledPkg      (getInstalledPackages)
 import           Bridge.Hackage                 (IndexHandle (..))
 import           Bridge.Installed               (installedInstancesOf,
                                                  mkInstalledDb, unitInstance)
@@ -25,16 +25,21 @@ import           Colog                          (WithLog, logMsg)
 import           Data.List                      (maximumBy)
 import qualified Data.List.NonEmpty             as NE
 import qualified Data.Map.Strict                as Map
+import           Data.Maybe                     (fromMaybe)
 import           Data.Ord                       (comparing)
 import qualified Data.Set                       as Set
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Pretty            (prettyShow)
-import           Distribution.System            (Platform)
+import           Distribution.Simple.Compiler   (compilerInfo)
+import           Distribution.Simple.GHC        (configure)
+import           Distribution.Simple.Program.Db (defaultProgramDb)
+import           Distribution.System            (buildPlatform)
 import           Distribution.Types.Condition   (Condition (..))
 import           Distribution.Types.Flag        (mkFlagAssignment)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.Version     (Version, mkVersion)
+import qualified Distribution.Verbosity         as Verbosity
 import           PubGrub.Incompatibility        (Incompatibility,
                                                  fromDependency, noInstances)
 import           PubGrub.InstanceSet            (Dependency (..),
@@ -73,76 +78,80 @@ sourceInstance v = BuildSource (SourcePackage v [] [] (Lit True)) (mkFlagAssignm
 -- the 'withHackageIndex' bracket.
 mkProvider
     :: (MonadIO m, WithLog env Text m)
-    => Compiler -> Platform -> IndexHandle -> Provider m
-mkProvider compiler platform handle = Provider expand'
-  where
-    installedDb = mkInstalledDb (installedPackages compiler)
-    cInfo = compilerInfo compiler
+    => IndexHandle -> m (Provider m)
+mkProvider handle = do
+    (compiler, mPlatform, programDb) <-
+        liftIO $ configure Verbosity.normal Nothing Nothing defaultProgramDb
+    iidx <- liftIO $ getInstalledPackages Verbosity.normal compiler programDb
+    let installedDb = mkInstalledDb iidx
+        cInfo = compilerInfo compiler
+        platform = fromMaybe buildPlatform mPlatform
 
-    expand' p (InstanceSet s)
-        | Set.null s = pure Nothing
-        | otherwise = do
-            let chosen = preferInstalled (Set.toList s)
-            incs <- consequencesOf p chosen
-            pure (Just (chosen, incs))
+        expand' p (InstanceSet s)
+            | Set.null s = pure Nothing
+            | otherwise = do
+                let chosen = preferInstalled (Set.toList s)
+                incs <- consequencesOf p chosen
+                pure (Just (chosen, incs))
 
-    preferInstalled instances =
-        case [i | i@(UsePreInstalled _) <- instances] of
-            []        -> maximumBy (comparing version) instances
-            installed -> maximumBy (comparing version) installed
+        preferInstalled instances =
+            case [i | i@(UsePreInstalled _) <- instances] of
+                []        -> maximumBy (comparing version) instances
+                installed -> maximumBy (comparing version) installed
 
-    consequencesOf p chosen = case chosen of
-        -- Installed unit: its dependencies name exact units, each pinning its
-        -- package to that one instance.
-        UsePreInstalled pip ->
-            pure
-                [ fromDependency p (singletonInstance chosen) (depName, singletonInstance depInst)
-                | uid <- pipDependencies pip
-                , Just (depName, depInst) <- [unitInstance installedDb uid]
-                ]
-        -- Synthetic root: dependencies are baked into the instance.
-        BuildSource sp _
-            | p == rootName -> pure (depIncs p chosen (sourcePackageDeps sp))
-        -- Source release: read and flatten its .cabal on demand.
-        BuildSource _ _ -> do
-            result <- liftIO (ihLookupGPD handle p (version chosen))
-            case result of
-                Right gpd ->
-                    pure (depIncs p chosen (sourcePackageDeps (toSourcePackage platform cInfo gpd)))
-                -- A .cabal that fails to parse: warn, and ban just this
-                -- instance so the solver backtracks to another version.
-                Left err -> do
-                    logMsg
-                        ( T.pack
-                            ( "warning: ignoring "
-                                ++ prettyShow p
-                                ++ "-"
-                                ++ prettyShow (version chosen)
-                                ++ " (unparseable .cabal: "
-                                ++ show err
-                                ++ ")"
+        consequencesOf p chosen = case chosen of
+            -- Installed unit: its dependencies name exact units, each pinning
+            -- its package to that one instance.
+            UsePreInstalled pip ->
+                pure
+                    [ fromDependency p (singletonInstance chosen) (depName, singletonInstance depInst)
+                    | uid <- pipDependencies pip
+                    , Just (depName, depInst) <- [unitInstance installedDb uid]
+                    ]
+            -- Synthetic root: dependencies are baked into the instance.
+            BuildSource sp _
+                | p == rootName -> pure (depIncs p chosen (sourcePackageDeps sp))
+            -- Source release: read and flatten its .cabal on demand.
+            BuildSource _ _ -> do
+                result <- liftIO (ihLookupGPD handle p (version chosen))
+                case result of
+                    Right gpd ->
+                        pure (depIncs p chosen (sourcePackageDeps (toSourcePackage platform cInfo gpd)))
+                    -- A .cabal that fails to parse: warn, and ban just this
+                    -- instance so the solver backtracks to another version.
+                    Left err -> do
+                        logMsg
+                            ( T.pack
+                                ( "warning: ignoring "
+                                    ++ prettyShow p
+                                    ++ "-"
+                                    ++ prettyShow (version chosen)
+                                    ++ " (unparseable .cabal: "
+                                    ++ show err
+                                    ++ ")"
+                                )
                             )
-                        )
-                    pure [noInstances p (singletonInstance chosen)]
+                        pure [noInstances p (singletonInstance chosen)]
 
-    depIncs :: PackageName -> Instance -> [(PackageName, VersionSet)] -> [Incompatibility]
-    depIncs p chosen deps =
-        [ fromDependency p (singletonInstance chosen) (d, widen d vs)
-        | (d, vs) <- deps
-        ]
+        depIncs :: PackageName -> Instance -> [(PackageName, VersionSet)] -> [Incompatibility]
+        depIncs p chosen deps =
+            [ fromDependency p (singletonInstance chosen) (d, widen d vs)
+            | (d, vs) <- deps
+            ]
 
-    -- Widen a dependency's version range into the set of that package's
-    -- instances in range: installed units (from the db) plus source releases
-    -- (from the in-memory version map, no .cabal parsing).
-    widen d vs =
-        InstanceSet
-            ( Set.fromList
-                ( [i | i <- installedInstancesOf installedDb d, contains vs (version i)]
-                    ++ [sourceInstance v | v <- versionsOf d, contains vs v]
+        -- Widen a dependency's version range into the set of that package's
+        -- instances in range: installed units (from the db) plus source
+        -- releases (from the in-memory version map, no .cabal parsing).
+        widen d vs =
+            InstanceSet
+                ( Set.fromList
+                    ( [i | i <- installedInstancesOf installedDb d, contains vs (version i)]
+                        ++ [sourceInstance v | v <- versionsOf d, contains vs v]
+                    )
                 )
-            )
 
-    versionsOf d = maybe [] NE.toList (Map.lookup d (ihVersions handle))
+        versionsOf d = maybe [] NE.toList (Map.lookup d (ihVersions handle))
+    pure (Provider expand')
 
 -- | The (name, range) dependencies of a source package. Their conditions are
 -- ignored: 'toSourcePackage' makes every dependency unconditional.
