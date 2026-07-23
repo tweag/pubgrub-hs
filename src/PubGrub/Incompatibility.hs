@@ -75,7 +75,9 @@ anyTerm = Negative emptyInstanceSet
 -- TODO: an incompatibility carries no cause, so 'priorCause' forgets its
 -- parents and "PubGrub.Report" cannot render a failed resolution as a
 -- numbered proof.
-newtype Incompatibility = Incompatibility (Map PackageName (Term InstanceSet))
+newtype Incompatibility = Incompatibility {
+    incompTerms :: Map PackageName (Term InstanceSet)
+    }
     deriving (Eq, Show)
 
 -- | The term an incompatibility states about @p@, if any.

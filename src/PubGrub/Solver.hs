@@ -1,10 +1,7 @@
 -- | The PubGrub solving loop, over whole package instances.
 --
--- Only the storage layer — 'Assignment', 'PartialSolution' and their queries —
--- is implemented. 'unitPropagation', 'conflictResolution' and 'solve' are typed
--- stubs that call 'error'. The previous implementation, over a generic set
--- algebra, is commented out at the bottom of this file as the reference to
--- port from.
+-- The previous implementation, over a generic set algebra, is commented out
+-- at the bottom of this file as the reference this one was ported from.
 module PubGrub.Solver
     ( -- * Provider
       Provider (..)
@@ -31,45 +28,24 @@ module PubGrub.Solver
     , solve
     ) where
 
+import           Data.Foldable                  (maximumBy)
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
-import           Data.Maybe                     (mapMaybe)
+import           Data.Maybe                     (fromMaybe, mapMaybe)
+import           Data.Ord                       (comparing)
 import           Distribution.Types.PackageName
-import           Distribution.Types.Version     (Version)
-import           PubGrub.Incompatibility        (IncompatRelation,
-                                                 Incompatibility,
+import           PubGrub.Incompatibility        (IncompatRelation (..),
+                                                 Incompatibility (..),
                                                  PackageTerm (..), anyTerm,
-                                                 incompGet, incompRelation)
+                                                 incompGet, incompRelation,
+                                                 isTerminal, noInstances,
+                                                 notRoot, priorCause)
 import           PubGrub.InstanceSet            (Instance, InstanceSet,
                                                  singletonInstance)
-import           PubGrub.Term                   (Term (..), intersectTerm,
-                                                 negateTerm)
-import           PubGrub.VersionSet             (VersionSet)
+import           PubGrub.Provider               (Provider (..))
+import           PubGrub.Term                   (SetOps (..), Term (..),
+                                                 intersectTerm, negateTerm)
 
--- --------------------------------------------------------------------------
--- Provider
--- --------------------------------------------------------------------------
-
--- | The seam between the Cabal domain ('PubGrub.InstanceSet.Index',
--- 'PubGrub.InstanceSet.SourcePackage', …) and the solver, which only ever sees
--- package names, instances and incompatibilities. The provider owns the
--- instance domain: it enumerates each package's instances from the index (one
--- per pre-installed unit, one per buildable total flag assignment of each
--- source version), evaluates the conditional dependencies under each
--- instance's flag assignment, and translates the results — plus user
--- constraints — into incompatibilities over instance sets. Data flows one way:
--- the provider /writes/ incompatibilities and never reads the solver's store.
---
--- The fields still take a 'Version' where the model needs an 'Instance'. The
--- decision preference is meant to fold "newest", "prefer installed" and flag
--- defaults into one preference over instances.
-data Provider = Provider
-    { preferredVersion :: PackageName -> VersionSet -> Maybe Version
-    , -- decision preference
-      consequences     :: PackageName -> Version -> [Incompatibility]
-      -- clauses entailed by a decision: the instance's dependencies, already
-      -- unconditional. Solver calls once per decision.
-    }
 
 -- --------------------------------------------------------------------------
 -- Partial solution
@@ -188,6 +164,54 @@ packageHistory PartialSolution{psAssignments} p =
 -- The algorithm (stubs)
 -- --------------------------------------------------------------------------
 
+-- | Result of searching for the satisfier of a conflict incompatibility.
+data SatisfierSearch
+    = DifferentDecisionLevels !Int
+      -- ^ backtrack to this level
+    | SameDecisionLevels Incompatibility
+      -- ^ satisfier's cause
+
+-- | Earliest assignment of @p@ whose running accumulated term becomes disjoint
+-- from @startTerm@.
+-- Precondition: such an assignment exists (guaranteed during conflict resolution).
+satisfierOf
+    :: PartialSolution
+    -> PackageName
+    -> Term InstanceSet
+    -> Assignment
+satisfierOf ps p startTerm = go anyTerm (packageHistory ps p)
+  where
+    go _ [] = error "satisfierOf: no satisfier (precondition violated)"
+    go acc (a : as) =
+        let acc' = intersect acc (assignmentTerm a)
+         in if isEmpty (intersectTerm acc' startTerm) then a else go acc' as
+
+-- | The satisfier of an incompatibility is the latest of its terms' satisfiers.
+-- When the satisfier is a derivation and the previous satisfier sits at its
+-- level, resolution continues with the satisfier's cause; otherwise it
+-- backtracks to the previous satisfier's level (at least 1).
+satisfierSearch
+    :: PartialSolution
+    -> Incompatibility
+    -> (PackageName, SatisfierSearch)
+satisfierSearch ps i =
+    let satMap =
+            [ (p, satisfierOf ps p (negateTerm it))
+            | (p, it) <- Map.toList (incompTerms i)
+            ]
+        (satPkg, satAssign) = maximumBy (comparing (aIndex . snd)) satMap
+        satLevel = aLevel satAssign
+        it_s = fromMaybe anyTerm (incompGet satPkg i)
+        startTerm' = intersect (assignmentTerm satAssign) (negateTerm it_s)
+        prevForSat = satisfierOf ps satPkg startTerm'
+        satMap' = [(p, if p == satPkg then prevForSat else a) | (p, a) <- satMap]
+        prevLevel = max 1 (aLevel (snd (maximumBy (comparing (aIndex . snd)) satMap')))
+     in case satAssign of
+            Derivation{aCause}
+                | prevLevel >= satLevel -> (satPkg, SameDecisionLevels aCause)
+            _ -> (satPkg, DifferentDecisionLevels prevLevel)
+
+
 -- | Propagate the incompatibilities to a fixpoint: judge each with
 -- 'psRelation'; on @IAlmostSatisfied p@ derive (¬ its term for @p@) via
 -- 'addDerivation'; on @ISatisfied@ hand off to 'conflictResolution'. Returns
@@ -199,8 +223,30 @@ unitPropagation
     -> [Incompatibility]
     -> PartialSolution
     -> Either Incompatibility ([Incompatibility], PartialSolution)
-unitPropagation _rootPkg _rootI _incompats _ps =
-    error "TODO: unitPropagation"
+unitPropagation rootPkg rootI = scan
+  where
+    scan :: [Incompatibility]
+         -> PartialSolution
+         -> Either Incompatibility ([Incompatibility], PartialSolution)
+    scan incompats ps = step incompats ps incompats
+
+    -- Walk the worklist of incompatibilities once; on any action, restart scan.
+    step :: [Incompatibility]
+         -> PartialSolution
+         -> [Incompatibility]
+         -> Either Incompatibility ([Incompatibility], PartialSolution)
+    step incompats ps [] = Right (incompats, ps)
+    step incompats ps (i : rest) =
+        case psRelation ps i of
+            ISatisfied ->
+                case conflictResolution rootPkg rootI i ps of
+                    Left terminal -> Left terminal
+                    Right (almostPkg, rootCause, ps') ->
+                        scan (rootCause : incompats) (addDerivation almostPkg rootCause ps')
+            IAlmostSatisfied q ->
+                scan incompats (addDerivation q i ps)
+            _ -> step incompats ps rest
+
 
 -- | Conflict resolution: satisfier search over 'packageHistory', 'priorCause'
 -- while satisfier and previous satisfier share a decision level, then
@@ -212,8 +258,17 @@ conflictResolution
     -> Incompatibility
     -> PartialSolution
     -> Either Incompatibility (PackageName, Incompatibility, PartialSolution)
-conflictResolution _rootPkg _rootI _conflict _ps =
-    error "TODO: conflictResolution"
+conflictResolution rootPkg rootV = loop
+  where
+    loop current ps
+        | isTerminal rootPkg rootV current = Left current
+        | otherwise =
+            case satisfierSearch ps current of
+                (satPkg, DifferentDecisionLevels prevLevel) ->
+                    Right (satPkg, current, backtrack prevLevel ps)
+                (satPkg, SameDecisionLevels satCause) ->
+                    loop (priorCause current satCause satPkg) ps
+
 
 -- | Failure: no solution; carries the terminal incompatibility (the root of
 -- the derivation tree, for reporting).
@@ -221,15 +276,30 @@ newtype SolveError = NoSolution Incompatibility
     deriving (Eq, Show)
 
 -- | Solve for a root package pinned to a root instance: alternate
--- 'unitPropagation' with decisions ('undecidedPositive', then ask the
--- 'Provider' for a preferred instance in range and its consequences).
+-- 'unitPropagation' with decisions — take the first 'undecidedPositive'
+-- package and ask the 'Provider' to 'expand' its range into an instance and
+-- the incompatibilities that instance entails.
 solve
     :: Provider
     -> PackageName
     -> Instance
     -> Either SolveError (Map PackageName Instance)
-solve _provider _rootPkg _rootI =
-    error "TODO: solve"
+solve provider rootPkg rootV =
+    go [notRoot rootPkg rootV] emptyPS
+    where
+        go incompats ps =
+            case unitPropagation rootPkg rootV incompats ps of
+                Left terminal -> Left (NoSolution terminal)
+                Right (incompats', ps') ->
+                    case undecidedPositive ps' of
+                        [] -> Right (extractSolution ps')
+                        ((p, range) : _) ->
+                            case expand provider p range of
+                                Nothing ->
+                                    go (noInstances p range : incompats') ps'
+                                Just (i, depIncs) ->
+                                    go (depIncs ++ incompats') (addDecision p i ps')
+
 
 -- ===========================================================================
 -- Old generic implementation (pre-instance model), kept as porting reference.

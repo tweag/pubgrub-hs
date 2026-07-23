@@ -17,13 +17,14 @@ library
     exposed-modules:
         PubGrub
         PubGrub.Incompatibility
-        PubGrub.VersionSet
-        PubGrub.Term
-        PubGrub.Relation
         PubGrub.InstanceSet
-        PubGrub.Solver
-        PubGrub.Report
         PubGrub.Pretty
+        PubGrub.Provider
+        PubGrub.Relation
+        PubGrub.Report
+        PubGrub.Solver
+        PubGrub.Term
+        PubGrub.VersionSet
     build-depends:
         , base ^>=4.21.0.0
         , containers
