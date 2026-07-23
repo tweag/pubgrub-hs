@@ -39,12 +39,15 @@ test-suite pubgrub-hs-test
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
     other-modules:
+        SolverSpec
         VersionSetSpec
     build-depends:
         , pubgrub-hs
         , base
         , Cabal-syntax
+        , containers
         , tasty
+        , tasty-hunit
         , tasty-quickcheck
     hs-source-dirs:   test
     default-language: GHC2021
