@@ -51,6 +51,7 @@ library bridge
         Bridge.Cabal.Compiler
         Bridge.Cabal.Flatten
         Bridge.Cabal.InstalledDb
+        Bridge.Installed
     build-depends:
         , base
         , binary

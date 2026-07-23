@@ -1,9 +1,12 @@
--- | The real 'Provider', backed by a Hackage 'IndexHandle'. Like the toy
--- provider in @test\/PaperSpec.hs@ it picks the newest instance in range.
--- A package's versions come from the handle's disk-cached version map
--- ('ihVersions'), and a decided release's dependencies are read from its
--- @.cabal@ through 'ihLookupGPD' on demand, so a solve parses only the
--- packages it explores.
+-- | The real 'Provider', backed by a Hackage 'IndexHandle' and the compiler's
+-- installed (boot) package database.
+--
+-- A package's instances are its installed units ('UsePreInstalled') and its
+-- Hackage source releases. Installed units are strictly preferred: if the
+-- range admits one, the provider commits to the newest such and pins its
+-- dependencies to their exact installed units. Otherwise it picks the newest
+-- source release and reads its dependencies from its @.cabal@, widened to the
+-- instances in range, installed and source.
 --
 -- 'ihLookupGPD' is valid only while the index bracket is open, so a
 -- 'Provider' from 'mkProvider' must be used inside 'withHackageIndex'.
@@ -13,7 +16,10 @@ module Bridge.Provider
     , syntheticRoot
     ) where
 
+import           Bridge.Compiler                (Compiler (..))
 import           Bridge.Hackage                 (IndexHandle (..))
+import           Bridge.Installed               (installedInstancesOf,
+                                                 mkInstalledDb, unitInstance)
 import           Bridge.Instances               (toSourcePackage)
 import           Colog                          (WithLog, logMsg)
 import           Data.List                      (maximumBy)
@@ -23,7 +29,6 @@ import           Data.Ord                       (comparing)
 import qualified Data.Set                       as Set
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
-import           Distribution.Compiler          (CompilerInfo)
 import           Distribution.Pretty            (prettyShow)
 import           Distribution.System            (Platform)
 import           Distribution.Types.Condition   (Condition (..))
@@ -35,6 +40,7 @@ import           PubGrub.Incompatibility        (Incompatibility,
 import           PubGrub.InstanceSet            (Dependency (..),
                                                  HasVersion (..), Instance (..),
                                                  InstanceSet (..),
+                                                 PreInstalledPackage (..),
                                                  SourcePackage (..),
                                                  singletonInstance)
 import           PubGrub.Provider               (Provider (..))
@@ -62,29 +68,47 @@ syntheticRoot targets =
 sourceInstance :: Version -> Instance
 sourceInstance v = BuildSource (SourcePackage v [] [] (Lit True)) (mkFlagAssignment [])
 
--- | A 'Provider' backed by a Hackage 'IndexHandle'. It reads the index, so it
--- must be used inside the 'withHackageIndex' bracket.
+-- | A 'Provider' backed by a Hackage 'IndexHandle' and the compiler's
+-- installed package database. It reads the index, so it must be used inside
+-- the 'withHackageIndex' bracket.
 mkProvider
     :: (MonadIO m, WithLog env Text m)
-    => Platform -> CompilerInfo -> IndexHandle -> Provider m
-mkProvider platform compiler handle = Provider expand'
+    => Compiler -> Platform -> IndexHandle -> Provider m
+mkProvider compiler platform handle = Provider expand'
   where
+    installedDb = mkInstalledDb (installedPackages compiler)
+    cInfo = compilerInfo compiler
+
     expand' p (InstanceSet s)
         | Set.null s = pure Nothing
         | otherwise = do
-            let chosen = maximumBy (comparing version) (Set.toList s)
+            let chosen = preferInstalled (Set.toList s)
             incs <- consequencesOf p chosen
             pure (Just (chosen, incs))
 
-    -- The synthetic root carries its dependencies; every real package's are
-    -- read lazily from its .cabal via the handle.
-    consequencesOf p chosen
-        | p == rootName = pure (depIncs p chosen (instanceDeps chosen))
-        | otherwise = do
+    preferInstalled instances =
+        case [i | i@(UsePreInstalled _) <- instances] of
+            []        -> maximumBy (comparing version) instances
+            installed -> maximumBy (comparing version) installed
+
+    consequencesOf p chosen = case chosen of
+        -- Installed unit: its dependencies name exact units, each pinning its
+        -- package to that one instance.
+        UsePreInstalled pip ->
+            pure
+                [ fromDependency p (singletonInstance chosen) (depName, singletonInstance depInst)
+                | uid <- pipDependencies pip
+                , Just (depName, depInst) <- [unitInstance installedDb uid]
+                ]
+        -- Synthetic root: dependencies are baked into the instance.
+        BuildSource sp _
+            | p == rootName -> pure (depIncs p chosen (sourcePackageDeps sp))
+        -- Source release: read and flatten its .cabal on demand.
+        BuildSource _ _ -> do
             result <- liftIO (ihLookupGPD handle p (version chosen))
             case result of
                 Right gpd ->
-                    pure (depIncs p chosen (sourcePackageDeps (toSourcePackage platform compiler gpd)))
+                    pure (depIncs p chosen (sourcePackageDeps (toSourcePackage platform cInfo gpd)))
                 -- A .cabal that fails to parse: warn, and ban just this
                 -- instance so the solver backtracks to another version.
                 Left err -> do
@@ -108,16 +132,17 @@ mkProvider platform compiler handle = Provider expand'
         ]
 
     -- Widen a dependency's version range into the set of that package's
-    -- instances, using only the in-memory version map (no .cabal parsing).
+    -- instances in range: installed units (from the db) plus source releases
+    -- (from the in-memory version map, no .cabal parsing).
     widen d vs =
-        InstanceSet (Set.fromList [sourceInstance v | v <- versionsOf d, contains vs v])
+        InstanceSet
+            ( Set.fromList
+                ( [i | i <- installedInstancesOf installedDb d, contains vs (version i)]
+                    ++ [sourceInstance v | v <- versionsOf d, contains vs v]
+                )
+            )
 
     versionsOf d = maybe [] NE.toList (Map.lookup d (ihVersions handle))
-
--- | The (name, range) dependencies of an instance's source package.
-instanceDeps :: Instance -> [(PackageName, VersionSet)]
-instanceDeps (BuildSource sp _) = sourcePackageDeps sp
-instanceDeps _                  = []
 
 -- | The (name, range) dependencies of a source package. Their conditions are
 -- ignored: 'toSourcePackage' makes every dependency unconditional.

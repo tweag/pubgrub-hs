@@ -13,8 +13,7 @@
 -- and 'SolverMsg' (the solver's search trace) — both rendered to stdout.
 module Main (main) where
 
-import           Bridge.Compiler                 (Compiler (..),
-                                                  CompilerError (..),
+import           Bridge.Compiler                 (CompilerError (..),
                                                   resolveCompiler)
 import           Bridge.Hackage                  (mkCache, withHackageIndex)
 import           Bridge.Provider                 (mkProvider, rootName,
@@ -108,7 +107,7 @@ main = do
                     runApp $
                         withHackageIndex cache manager compiler $ \handle -> do
                             logMsg (T.pack ("Solving for " ++ prettyShow target))
-                            let provider = mkProvider buildPlatform (compilerInfo compiler) handle
+                            let provider = mkProvider compiler buildPlatform handle
                             result <- solve provider rootName (syntheticRoot [(target, range)])
                             report result
 
