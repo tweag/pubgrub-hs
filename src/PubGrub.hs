@@ -15,4 +15,4 @@ import           PubGrub.Relation
 import           PubGrub.Report
 import           PubGrub.Solver
 import           PubGrub.Term
-import           PubGrub.VersionSet      hiding (intersection, union)
+import           PubGrub.VersionSet

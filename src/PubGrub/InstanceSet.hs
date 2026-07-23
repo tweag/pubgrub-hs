@@ -10,7 +10,7 @@ import           Distribution.Types.Flag        (FlagAssignment, FlagName,
 import           Distribution.Types.PackageName
 import           Distribution.Types.UnitId
 import           Distribution.Types.Version     (Version)
-import           PubGrub.Term                   (SetOps)
+import           PubGrub.SetOps                 (SetOps)
 import           PubGrub.VersionSet             (VersionSet)
 
 -- | Both kinds of index entries carry a version, and so does an 'Instance' —

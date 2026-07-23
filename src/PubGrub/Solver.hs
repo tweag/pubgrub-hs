@@ -45,8 +45,9 @@ import           PubGrub.Incompatibility        (IncompatRelation (..),
 import           PubGrub.InstanceSet            (Instance, InstanceSet,
                                                  singletonInstance)
 import           PubGrub.Provider               (Provider (..))
-import           PubGrub.Term                   (SetOps (..), Term (..),
-                                                 intersectTerm, negateTerm)
+import           PubGrub.SetOps                 (SetOps (..))
+import           PubGrub.Term                   (Term (..), intersectTerm,
+                                                 negateTerm)
 
 
 -- --------------------------------------------------------------------------

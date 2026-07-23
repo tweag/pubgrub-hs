@@ -7,14 +7,14 @@
 module PubGrub.VersionSet (
     -- The constructor is hidden so that every 'VersionSet' stays canonical.
     VersionSet,
-    empty,
-    full,
-    PubGrub.VersionSet.singleton,
+    emptyVersionSet,
+    fullVersionSet,
+    singletonVersionSet,
     fromVersionRange,
     toVersionRange,
-    complement,
-    union,
-    intersection,
+    complementVersionSet,
+    unionVersionSet,
+    intersectionVersionSet,
     contains,
     intervals,
 ) where
@@ -35,7 +35,7 @@ import           Distribution.Version               (Version, VersionRange,
                                                      orLaterVersion,
                                                      thisVersion,
                                                      unionVersionRanges)
-import qualified PubGrub.Term                       as T
+import           PubGrub.SetOps                     (SetOps (..))
 
 newtype VersionSet = VersionSet [VersionInterval]
     deriving stock (Eq, Show)
@@ -68,25 +68,25 @@ toVersionRange :: VersionSet -> VersionRange
 toVersionRange (VersionSet is) =
     maybe noVersion fromVersionIntervals (mkVersionIntervals is)
 
-empty :: VersionSet
-empty = VersionSet []
+emptyVersionSet :: VersionSet
+emptyVersionSet = VersionSet []
 
-full :: VersionSet
-full = fromVersionRange anyVersion
+fullVersionSet :: VersionSet
+fullVersionSet = fromVersionRange anyVersion
 
 -- | The set containing exactly one version.
-singleton :: Version -> VersionSet
-singleton = fromVersionRange . thisVersion
+singletonVersionSet :: Version -> VersionSet
+singletonVersionSet = fromVersionRange . thisVersion
 
-union :: VersionSet -> VersionSet -> VersionSet
-union a b = fromVersionRange (unionVersionRanges (toVersionRange a) (toVersionRange b))
+unionVersionSet :: VersionSet -> VersionSet -> VersionSet
+unionVersionSet a b = fromVersionRange (unionVersionRanges (toVersionRange a) (toVersionRange b))
 
-intersection :: VersionSet -> VersionSet -> VersionSet
-intersection a b = fromVersionRange (intersectVersionRanges (toVersionRange a) (toVersionRange b))
+intersectionVersionSet :: VersionSet -> VersionSet -> VersionSet
+intersectionVersionSet a b = fromVersionRange (intersectVersionRanges (toVersionRange a) (toVersionRange b))
 
 -- | The versions not in the set.
-complement :: VersionSet -> VersionSet
-complement (VersionSet is) =
+complementVersionSet :: VersionSet -> VersionSet
+complementVersionSet (VersionSet is) =
     fromVersionRange (foldr (intersectVersionRanges . complementInterval) anyVersion is)
   where
     complementInterval (VersionInterval lo hi) =
@@ -99,10 +99,10 @@ complement (VersionSet is) =
 
 -- | The class asks for no complement, because not every payload has one.
 -- Version ranges do, so 'difference' is computed through it here.
-instance T.SetOps VersionSet where
-    intersect = intersection
-    union = union
-    difference a b = intersection a (complement b)
+instance SetOps VersionSet where
+    intersect = intersectionVersionSet
+    union = unionVersionSet
+    difference a b = intersectionVersionSet a (complementVersionSet b)
     isEmpty = null . intervals
 
 contains :: VersionSet -> Version -> Bool

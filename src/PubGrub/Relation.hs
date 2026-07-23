@@ -3,7 +3,8 @@ module PubGrub.Relation
     , relation
     ) where
 
-import           PubGrub.Term (SetOps, Term, isDisjoint, isSubsetOf)
+import           PubGrub.SetOps (SetOps, isDisjoint, isSubsetOf)
+import           PubGrub.Term   (Term (..))
 
 
 -- | How a term stands relative to a reference term (both about the same

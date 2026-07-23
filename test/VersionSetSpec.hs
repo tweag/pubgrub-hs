@@ -4,9 +4,8 @@
 module VersionSetSpec (tests) where
 
 import           Distribution.Version  (Version, mkVersion, orLaterVersion)
-import           PubGrub.Term          (isSubsetOf)
-import           PubGrub.VersionSet    (VersionSet)
-import qualified PubGrub.VersionSet    as VS
+import           PubGrub.SetOps        (isSubsetOf)
+import           PubGrub.VersionSet
 import           Test.Tasty            (TestTree, testGroup)
 import           Test.Tasty.QuickCheck (Arbitrary (..), Gen, choose, elements,
                                         listOf, property, testProperty, (.&&.),
@@ -25,7 +24,7 @@ genVersion = do
 instance Arbitrary VersionSet where
     arbitrary = do
         pieces <- listOf genPiece
-        pure (foldr VS.union VS.empty pieces)
+        pure (foldr unionVersionSet emptyVersionSet pieces)
       where
         genPiece = do
             kind <- elements [0 :: Int, 1, 2]
@@ -33,12 +32,12 @@ instance Arbitrary VersionSet where
             b <- genVersion
             let lo = min a b; hi = max a b
             pure $ case kind of
-                0 -> VS.singleton a
-                1 -> VS.fromVersionRange (orLaterVersion lo)
+                0 -> singletonVersionSet a
+                1 -> fromVersionRange (orLaterVersion lo)
                 _ ->
-                    VS.intersection
-                        (VS.fromVersionRange (orLaterVersion lo))
-                        (VS.complement (VS.fromVersionRange (orLaterVersion hi)))
+                    intersectionVersionSet
+                        (fromVersionRange (orLaterVersion lo))
+                        (complementVersionSet (fromVersionRange (orLaterVersion hi)))
 
 sampleVersions :: [Version]
 sampleVersions = [mkVersion [a, b] | a <- [0 .. 3], b <- [0 .. 3]]
@@ -48,36 +47,36 @@ tests =
     testGroup
         "VersionSet"
         [ testProperty "complement is involutive" $ \(s :: VersionSet) ->
-            VS.complement (VS.complement s) === s
+            complementVersionSet (complementVersionSet s) === s
         , testProperty "De Morgan (union)" $ \(a :: VersionSet) (b :: VersionSet) ->
-            VS.complement (VS.union a b) === VS.intersection (VS.complement a) (VS.complement b)
+            complementVersionSet (unionVersionSet a b) === intersectionVersionSet (complementVersionSet a) (complementVersionSet b)
         , testProperty "De Morgan (intersection)" $ \(a :: VersionSet) (b :: VersionSet) ->
-            VS.complement (VS.intersection a b) === VS.union (VS.complement a) (VS.complement b)
+            complementVersionSet (intersectionVersionSet a b) === unionVersionSet (complementVersionSet a) (complementVersionSet b)
         , testProperty "intersection membership" $ \(a :: VersionSet) (b :: VersionSet) ->
             conjoinV $ \v ->
-                VS.contains (VS.intersection a b) v === (VS.contains a v && VS.contains b v)
+                contains (intersectionVersionSet a b) v === (contains a v && contains b v)
         , testProperty "union membership" $ \(a :: VersionSet) (b :: VersionSet) ->
             conjoinV $ \v ->
-                VS.contains (VS.union a b) v === (VS.contains a v || VS.contains b v)
+                contains (unionVersionSet a b) v === (contains a v || contains b v)
         , testProperty "complement membership" $ \(a :: VersionSet) ->
-            conjoinV $ \v -> VS.contains (VS.complement a) v === not (VS.contains a v)
+            conjoinV $ \v -> contains (complementVersionSet a) v === not (contains a v)
         , testProperty "singleton contains exactly its version" $ \(NonEmptyVer v) ->
-            VS.contains (VS.singleton v) v
+            contains (singletonVersionSet v) v
                 .&&. conjoinV
                     ( \w ->
                         if w == v
                             then property True
-                            else VS.contains (VS.singleton v) w === False
+                            else contains (singletonVersionSet v) w === False
                     )
         , testProperty "isSubsetOf agrees with intersection" $ \(a :: VersionSet) (b :: VersionSet) ->
-            isSubsetOf a b === (VS.intersection a b == a)
+            isSubsetOf a b === (intersectionVersionSet a b == a)
         , testGroup
             "Lattice laws"
-            [ testProperty "union commutative" $ \(a :: VersionSet) b -> VS.union a b === VS.union b a
-            , testProperty "intersection commutative" $ \(a :: VersionSet) b -> VS.intersection a b === VS.intersection b a
-            , testProperty "union idempotent" $ \(a :: VersionSet) -> VS.union a a === a
+            [ testProperty "union commutative" $ \(a :: VersionSet) b -> unionVersionSet a b === unionVersionSet b a
+            , testProperty "intersection commutative" $ \(a :: VersionSet) b -> intersectionVersionSet a b === intersectionVersionSet b a
+            , testProperty "union idempotent" $ \(a :: VersionSet) -> unionVersionSet a a === a
             , testProperty "absorption" $ \(a :: VersionSet) b ->
-                VS.union a (VS.intersection a b) === a
+                unionVersionSet a (intersectionVersionSet a b) === a
             ]
         ]
   where
