@@ -15,12 +15,16 @@ module Bridge.Provider
 
 import           Bridge.Hackage                 (IndexHandle (..))
 import           Bridge.Instances               (toSourcePackage)
+import           Colog                          (WithLog, logMsg)
 import           Data.List                      (maximumBy)
 import qualified Data.List.NonEmpty             as NE
 import qualified Data.Map.Strict                as Map
 import           Data.Ord                       (comparing)
 import qualified Data.Set                       as Set
+import           Data.Text                      (Text)
+import qualified Data.Text                      as T
 import           Distribution.Compiler          (CompilerInfo)
+import           Distribution.Pretty            (prettyShow)
 import           Distribution.System            (Platform)
 import           Distribution.Types.Condition   (Condition (..))
 import           Distribution.Types.Flag        (mkFlagAssignment)
@@ -60,7 +64,9 @@ sourceInstance v = BuildSource (SourcePackage v [] [] (Lit True)) (mkFlagAssignm
 
 -- | A 'Provider' backed by a Hackage 'IndexHandle'. It reads the index, so it
 -- must be used inside the 'withHackageIndex' bracket.
-mkProvider :: MonadIO m => Platform -> CompilerInfo -> IndexHandle -> Provider m
+mkProvider
+    :: (MonadIO m, WithLog env Text m)
+    => Platform -> CompilerInfo -> IndexHandle -> Provider m
 mkProvider platform compiler handle = Provider expand'
   where
     expand' p (InstanceSet s)
@@ -76,12 +82,24 @@ mkProvider platform compiler handle = Provider expand'
         | p == rootName = pure (depIncs p chosen (instanceDeps chosen))
         | otherwise = do
             result <- liftIO (ihLookupGPD handle p (version chosen))
-            pure $ case result of
-                Right gpd -> depIncs p chosen (sourcePackageDeps (toSourcePackage platform compiler gpd))
-                -- A .cabal that fails to parse: ban just this instance so the
-                -- solver backtracks to another version.
-                -- TODO: surface the parse error (needs a WithLog constraint).
-                Left _err -> [noInstances p (singletonInstance chosen)]
+            case result of
+                Right gpd ->
+                    pure (depIncs p chosen (sourcePackageDeps (toSourcePackage platform compiler gpd)))
+                -- A .cabal that fails to parse: warn, and ban just this
+                -- instance so the solver backtracks to another version.
+                Left err -> do
+                    logMsg
+                        ( T.pack
+                            ( "warning: ignoring "
+                                ++ prettyShow p
+                                ++ "-"
+                                ++ prettyShow (version chosen)
+                                ++ " (unparseable .cabal: "
+                                ++ show err
+                                ++ ")"
+                            )
+                        )
+                    pure [noInstances p (singletonInstance chosen)]
 
     depIncs :: PackageName -> Instance -> [(PackageName, VersionSet)] -> [Incompatibility]
     depIncs p chosen deps =

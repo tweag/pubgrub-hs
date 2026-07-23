@@ -71,6 +71,25 @@ library bridge
     default-language:   GHC2021
     default-extensions: ImportQualifiedPost
 
+executable pubgrub
+    import:             warnings
+    hs-source-dirs:     driver
+    main-is:            Main.hs
+    build-depends:
+        , base
+        , Cabal-syntax
+        , co-log
+        , containers
+        , hackage-security
+        , http-client
+        , mtl
+        , pubgrub-hs
+        , pubgrub-hs:bridge
+        , text
+        , unliftio
+    default-language:   GHC2021
+    default-extensions: ImportQualifiedPost
+
 test-suite pubgrub-hs-test
     import:           warnings
     type:             exitcode-stdio-1.0
