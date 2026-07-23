@@ -28,11 +28,47 @@ library
         PubGrub.VersionSet
     build-depends:
         , base ^>=4.21.0.0
+        , co-log
         , containers
         , Cabal-syntax
         , text
     hs-source-dirs:   src
     default-language: GHC2021
+    default-extensions: ImportQualifiedPost
+
+library bridge
+    import:             warnings
+    visibility:         private
+    hs-source-dirs:     bridge
+    exposed-modules:
+        Bridge.Compiler
+        Bridge.Hackage
+        Bridge.Hackage.HttpClient
+        Bridge.Hackage.Unlifted
+        Bridge.Instances
+        Bridge.Provider
+    other-modules:
+        Bridge.Cabal.Compiler
+        Bridge.Cabal.Flatten
+        Bridge.Cabal.InstalledDb
+    build-depends:
+        , base
+        , binary
+        , bytestring
+        , Cabal-syntax
+        , containers
+        , co-log
+        , filepath
+        , hackage-security
+        , http-client
+        , http-types
+        , network-uri
+        , pubgrub-hs
+        , process
+        , text
+        , time
+        , unliftio
+    default-language:   GHC2021
     default-extensions: ImportQualifiedPost
 
 test-suite pubgrub-hs-test
@@ -47,6 +83,7 @@ test-suite pubgrub-hs-test
         , pubgrub-hs
         , base
         , Cabal-syntax
+        , co-log
         , containers
         , tasty
         , tasty-hunit

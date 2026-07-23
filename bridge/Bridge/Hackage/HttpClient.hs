@@ -3,7 +3,7 @@
 
 {- HLINT ignore "Eta reduce" -}
 
-module HttpClient (
+module Bridge.Hackage.HttpClient (
     withClient,
 
     -- ** Re-exports
@@ -13,19 +13,18 @@ module HttpClient (
 
 import           Control.Exception
 import           Control.Monad                              (void)
+import           Control.Monad.IO.Class                     (MonadIO (..))
 import           Data.ByteString                            (ByteString)
 import qualified Data.ByteString                            as BS
 import qualified Data.ByteString.Char8                      as BS.C8
+import           Hackage.Security.Client                    hiding (Header)
+import           Hackage.Security.Client.Repository.HttpLib
+import           Hackage.Security.Util.Checked
 import           Network.HTTP.Client                        (Manager)
 import qualified Network.HTTP.Client                        as HttpClient
 import qualified Network.HTTP.Client.Internal               as HttpClient
 import qualified Network.HTTP.Types                         as HttpClient
 import           Network.URI
-
-import           Control.Monad.IO.Class                     (MonadIO (..))
-import           Hackage.Security.Client                    hiding (Header)
-import           Hackage.Security.Client.Repository.HttpLib
-import           Hackage.Security.Util.Checked
 
 {-------------------------------------------------------------------------------
   Top-level API

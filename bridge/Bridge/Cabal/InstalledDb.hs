@@ -1,7 +1,7 @@
 -- | Parse the output of @ghc-pkg dump@ into a flat list of installed packages.
 -- Each record is an 'InstalledPackageInfo' in the @.conf@ field format; records
 -- are separated by lines containing exactly @---@.
-module PubGrub.Cabal.InstalledDb (
+module Bridge.Cabal.InstalledDb (
     InstalledPkg (..),
     parseGhcPkgDump,
 ) where

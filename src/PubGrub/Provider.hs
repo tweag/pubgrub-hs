@@ -20,8 +20,8 @@ import           PubGrub.InstanceSet            (Instance, InstanceSet)
 -- 'expand' makes the choice ("newest", "prefer installed", flag defaults) and
 -- reports its consequences in one step, so the solver never holds one without
 -- the other.
-newtype Provider = Provider
-    { expand :: PackageName -> InstanceSet -> Maybe (Instance, [Incompatibility])
+newtype Provider m = Provider
+    { expand :: PackageName -> InstanceSet -> m (Maybe (Instance, [Incompatibility]))
       -- ^ Pick one instance of the package to commit to, together with the
       -- clauses it entails.
       --

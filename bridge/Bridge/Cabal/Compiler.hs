@@ -1,7 +1,7 @@
 -- | Pure helpers for locating a GHC's tooling and parsing its output, kept
 -- out of the executable so the test-suite can reach them. The executable's
 -- @Compiler@ module runs them and assembles the compiler description.
-module PubGrub.Cabal.Compiler (
+module Bridge.Cabal.Compiler (
     ghcPkgFromLibdir,
     parseCompilerVersion,
 )

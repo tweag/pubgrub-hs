@@ -8,7 +8,7 @@
 -- @(flag guard, deps)@ groups — with the fixed environment (operating system,
 -- architecture, compiler) already resolved and only flag conditions left
 -- symbolic. 'depsAt' then evaluates those guards at a concrete flag assignment.
-module PubGrub.Cabal.Flatten (
+module Bridge.Cabal.Flatten (
     GuardedDeps,
     componentDeps,
     depsAt,
@@ -102,7 +102,7 @@ componentDeps platform compiler gpd =
 depsAt :: Map FlagName Bool -> GuardedDeps -> Map PackageName VersionSet
 depsAt flags guarded =
     Map.fromListWith
-        VS.intersection
+        VS.intersectionVersionSet
         [ (depPkgName d, VS.fromVersionRange (depVerRange d))
         | (guard, deps) <- guarded
         , evalCond flags guard

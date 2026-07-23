@@ -4,7 +4,9 @@
 -- conflict resolution and backtracking without a Cabal index.
 module SolverSpec (tests) where
 
+import           Colog                          (LoggerT, usingLoggerT)
 import           Data.Either                    (isLeft)
+import           Data.Functor.Identity          (Identity, runIdentity)
 import           Data.List                      (maximumBy)
 import qualified Data.Map.Strict                as Map
 import           Data.Ord                       (comparing)
@@ -20,7 +22,7 @@ import           PubGrub.InstanceSet            (HasVersion (version),
                                                  SourcePackage (..),
                                                  singletonInstance)
 import           PubGrub.Provider               (Provider (Provider))
-import           PubGrub.Solver                 (solve)
+import           PubGrub.Solver                 (SolveError, SolverMsg, solve)
 import           Test.Tasty                     (TestTree, testGroup)
 import           Test.Tasty.HUnit               (assertBool, testCase, (@?=))
 
@@ -40,18 +42,26 @@ setOf = InstanceSet . Set.fromList
 -- | Build a provider from a dependency table. @expand p range@ commits to the
 -- newest instance in @range@ (the "newest wins" preference) and turns that
 -- instance's table entry into dependency incompatibilities.
-mkProvider :: (Instance -> [(PackageName, [Instance])]) -> Provider
+mkProvider :: Applicative m => (Instance -> [(PackageName, [Instance])]) -> Provider m
 mkProvider deps = Provider expand'
   where
     expand' p (InstanceSet s)
-        | Set.null s = Nothing
+        | Set.null s = pure Nothing
         | otherwise =
             let chosen = maximumBy (comparing version) (Set.toList s)
                 incs =
                     [ fromDependency p (singletonInstance chosen) (d, setOf ds)
                     | (d, ds) <- deps chosen
                     ]
-             in Just (chosen, incs)
+             in pure (Just (chosen, incs))
+
+-- | Run the solver purely, discarding the solver's log trace.
+runSolve
+    :: Provider (LoggerT SolverMsg Identity)
+    -> PackageName
+    -> Instance
+    -> Either SolveError (Map.Map PackageName Instance)
+runSolve provider p i = runIdentity (usingLoggerT mempty (solve provider p i))
 
 root, foo, bar :: PackageName
 root = mkPackageName "root"
@@ -81,11 +91,11 @@ tests =
                     if i == rootI
                         then [(foo, [foo1, foo2])]
                         else [(bar, [bar1]) | i == foo2]
-             in solve provider root rootI
+             in runSolve provider root rootI
                     @?= Right (Map.fromList [(root, rootI), (foo, foo2), (bar, bar1)])
         , testCase "unsat: dependency with no satisfying instance" $
             let provider = mkProvider $ \i -> [(foo, []) | i == rootI]
-             in assertBool "expected NoSolution" (isLeft (solve provider root rootI))
+             in assertBool "expected NoSolution" (isLeft (runSolve provider root rootI))
         , testCase "backtrack: newest foo fails, solver recovers with older foo" $
             -- root needs foo; the newest (foo2) depends on an unsatisfiable
             -- bar, so the solver must backtrack and settle on foo1.
@@ -93,6 +103,6 @@ tests =
                     if i == rootI
                         then [(foo, [foo1, foo2])]
                         else [(bar, []) | i == foo2]
-             in solve provider root rootI
+             in runSolve provider root rootI
                     @?= Right (Map.fromList [(root, rootI), (foo, foo1)])
         ]

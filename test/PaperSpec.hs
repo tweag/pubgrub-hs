@@ -12,7 +12,9 @@
 -- a derivation graph yet, they assert only that solving fails.
 module PaperSpec (tests) where
 
+import           Colog                          (LoggerT, usingLoggerT)
 import           Data.Either                    (isLeft)
+import           Data.Functor.Identity          (Identity, runIdentity)
 import           Data.List                      (maximumBy)
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
@@ -32,7 +34,7 @@ import           PubGrub.InstanceSet            (Dependency (..),
                                                  SourcePackage (..),
                                                  singletonInstance)
 import           PubGrub.Provider               (Provider (Provider))
-import           PubGrub.Solver                 (solve)
+import           PubGrub.Solver                 (SolveError, SolverMsg, solve)
 import           PubGrub.VersionSet             (VersionSet, contains,
                                                  fromVersionRange)
 import           Test.Tasty                     (TestTree, testGroup)
@@ -87,7 +89,7 @@ instanceOf world p v =
 -- | The provider for a world: pick the newest instance in the range the
 -- solver offers, and widen the chosen release's dependency ranges into
 -- instance sets against the world's universe.
-mkProvider :: World -> Provider
+mkProvider :: Applicative m => World -> Provider m
 mkProvider world = Provider expand'
   where
     universe :: PackageName -> [Instance]
@@ -97,7 +99,7 @@ mkProvider world = Provider expand'
     widen d vs = InstanceSet (Set.fromList [i | i <- universe d, contains vs (version i)])
 
     expand' p (InstanceSet s)
-        | Set.null s = Nothing
+        | Set.null s = pure Nothing
         | otherwise =
             let chosen = maximumBy (comparing version) (Set.toList s)
                 deps = case chosen of
@@ -107,13 +109,21 @@ mkProvider world = Provider expand'
                     [ fromDependency p (singletonInstance chosen) (d, widen d vs)
                     | Dependency d vs _ <- deps
                     ]
-             in Just (chosen, incs)
+             in pure (Just (chosen, incs))
+
+-- | Run the solver purely, discarding the solver's log trace.
+runSolve
+    :: Provider (LoggerT SolverMsg Identity)
+    -> PackageName
+    -> Instance
+    -> Either SolveError (Map PackageName Instance)
+runSolve provider p i = runIdentity (usingLoggerT mempty (solve provider p i))
 
 -- | Run the solver against a world, rooted at @root 1.0.0@.
 solveWorld :: World -> Either String (Map PackageName Instance)
 solveWorld world =
     either (Left . show) Right $
-        solve (mkProvider world) (mkPackageName "root") (instanceOf world (mkPackageName "root") [1, 0, 0])
+        runSolve (mkProvider world) (mkPackageName "root") (instanceOf world (mkPackageName "root") [1, 0, 0])
 
 -- | The expected solution as a map, from (name, version) pairs.
 expected :: World -> [(String, [Int])] -> Map PackageName Instance

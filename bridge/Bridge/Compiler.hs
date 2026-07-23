@@ -2,13 +2,17 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module Compiler
+module Bridge.Compiler
   ( Compiler (..),
     CompilerError (..),
     resolveCompiler,
   )
 where
 
+import           Bridge.Cabal.Compiler          (ghcPkgFromLibdir,
+                                                 parseCompilerVersion)
+import           Bridge.Cabal.InstalledDb       (InstalledPkg (..),
+                                                 parseGhcPkgDump)
 import           Control.Exception              (Exception, IOException,
                                                  throwIO, try)
 import qualified Data.ByteString.Char8          as BS8
@@ -19,10 +23,6 @@ import           Distribution.Compiler          (AbiTag (NoAbiTag),
                                                  CompilerId (..), CompilerInfo,
                                                  unknownCompilerInfo)
 import           Distribution.Types.PackageName (mkPackageName)
-import           PubGrub.Cabal.Compiler         (ghcPkgFromLibdir,
-                                                 parseCompilerVersion)
-import           PubGrub.Cabal.InstalledDb      (InstalledPkg (..),
-                                                 parseGhcPkgDump)
 import           System.Process                 (readProcess)
 
 -- | Everything the resolver needs to know about one GHC: the compiler info
