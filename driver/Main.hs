@@ -13,9 +13,9 @@
 -- and 'SolverMsg' (the solver's search trace) — both rendered to stdout.
 module Main (main) where
 
-import           Bridge.Hackage                  (mkCache, withHackageIndex)
-import           Bridge.Provider                 (mkProvider, rootName,
-                                                  syntheticRoot)
+import           Bridge.Hackage                  (mkCache)
+import           Bridge.Provider                 (rootName, syntheticRoot,
+                                                  withProvider)
 import           Colog                           (HasLog (..), LogAction (..),
                                                   cmap, logMsg)
 import           Control.Monad.Reader            (MonadReader, ReaderT,
@@ -97,9 +97,8 @@ main = do
             cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
             manager <- newManager defaultManagerSettings
             runApp $
-                withHackageIndex cache manager $ \handle -> do
+                withProvider cache manager $ \provider -> do
                     logMsg (T.pack ("Solving for " ++ prettyShow target))
-                    provider <- mkProvider handle
                     result <- solve provider rootName (syntheticRoot [(target, range)])
                     report result
 
