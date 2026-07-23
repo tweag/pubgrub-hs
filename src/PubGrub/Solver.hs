@@ -28,11 +28,13 @@ module PubGrub.Solver
     , solve
     ) where
 
-import           Data.Foldable                  (maximumBy)
+import           Data.Foldable                  (Foldable (..), maximumBy)
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Data.Maybe                     (fromMaybe, mapMaybe)
 import           Data.Ord                       (comparing)
+import           Data.Sequence                  (Seq)
+import qualified Data.Sequence                  as Seq
 import           Distribution.Types.PackageName
 import           PubGrub.Incompatibility        (IncompatRelation (..),
                                                  Incompatibility (..),
@@ -80,23 +82,25 @@ assignmentTerm Derivation{aTerm}   = aTerm
 assignmentPackageTerm :: Assignment -> PackageTerm
 assignmentPackageTerm a = PackageTerm (aPackage a) (assignmentTerm a)
 
--- | Assignments are stored newest-first; @psLevel@ is the current decision
--- level; @psNextIndex@ is a monotone counter giving chronological order.
+-- | Assignments are stored oldest-first (chronological), so the satisfier
+-- search reads them in order without reversing; @psLevel@ is the current
+-- decision level; @psNextIndex@ is a monotone counter giving chronological
+-- order.
 data PartialSolution = PartialSolution
-    { psAssignments :: [Assignment]
+    { psAssignments :: Seq Assignment
     , psLevel       :: !Int
     , psNextIndex   :: !Int
     }
     deriving (Eq, Show)
 
 emptyPS :: PartialSolution
-emptyPS = PartialSolution{psAssignments = [], psLevel = 0, psNextIndex = 0}
+emptyPS = PartialSolution{psAssignments = Seq.empty, psLevel = 0, psNextIndex = 0}
 
 -- | Record a decision (a guess); increments the decision level.
 addDecision :: PackageName -> Instance -> PartialSolution -> PartialSolution
 addDecision p i ps@PartialSolution{psAssignments, psLevel, psNextIndex} =
     ps
-        { psAssignments = Decision psNextIndex (psLevel + 1) p i : psAssignments
+        { psAssignments = psAssignments Seq.|> Decision psNextIndex (psLevel + 1) p i
         , psLevel = psLevel + 1
         , psNextIndex = psNextIndex + 1
         }
@@ -107,7 +111,7 @@ addDerivation :: PackageName -> Incompatibility -> PartialSolution -> PartialSol
 addDerivation p cause ps@PartialSolution{psAssignments, psLevel, psNextIndex} =
     let term = maybe anyTerm negateTerm (incompGet p cause)
      in ps
-            { psAssignments = Derivation psNextIndex psLevel p term cause : psAssignments
+            { psAssignments = psAssignments Seq.|> Derivation psNextIndex psLevel p term cause
             , psNextIndex = psNextIndex + 1
             }
 
@@ -115,7 +119,7 @@ addDerivation p cause ps@PartialSolution{psAssignments, psLevel, psNextIndex} =
 backtrack :: Int -> PartialSolution -> PartialSolution
 backtrack level ps@PartialSolution{psAssignments} =
     ps
-        { psAssignments = filter ((<= level) . aLevel) psAssignments
+        { psAssignments = Seq.filter ((<= level) . aLevel) psAssignments
         , psLevel = level
         }
 
@@ -123,9 +127,9 @@ backtrack level ps@PartialSolution{psAssignments} =
 -- package is unmentioned, which judges as 'anyTerm' = ⊤).
 termIntersectionForPackage :: PartialSolution -> PackageName -> Maybe (Term InstanceSet)
 termIntersectionForPackage PartialSolution{psAssignments} p =
-    case [assignmentTerm a | a <- psAssignments, aPackage a == p] of
-        []       -> Nothing
-        (t : ts) -> Just (foldl' intersectTerm t ts)
+    case assignmentTerm <$> Seq.filter ((== p) . aPackage) psAssignments of
+        Seq.Empty    -> Nothing
+        t Seq.:<| ts -> Just (foldl' intersectTerm t ts)
 
 -- | Relation of the whole partial solution to an incompatibility.
 psRelation :: PartialSolution -> Incompatibility -> IncompatRelation
@@ -134,14 +138,15 @@ psRelation ps = incompRelation (termIntersectionForPackage ps)
 -- | The decisions, as a solution map.
 extractSolution :: PartialSolution -> Map PackageName Instance
 extractSolution PartialSolution{psAssignments} =
-    Map.fromList [(aPackage a, aInstance a) | a@Decision{} <- psAssignments]
+    Map.fromList [(aPackage a, aInstance a) | a@Decision{} <- toList psAssignments]
 
 -- | Packages that have a positive accumulated term but no decision yet, with
 -- that positive instance set. Chronological (oldest first) for determinism.
 undecidedPositive :: PartialSolution -> [(PackageName, InstanceSet)]
 undecidedPositive ps@PartialSolution{psAssignments} =
-    let decided = [aPackage a | a@Decision{} <- psAssignments]
-        pkgs = uniqueOldestFirst [aPackage a | a <- reverse psAssignments]
+    let assigns = toList psAssignments -- oldest-first
+        decided = [aPackage a | a@Decision{} <- assigns]
+        pkgs = uniqueOldestFirst [aPackage a | a <- assigns]
      in mapMaybe positive (filter (`notElem` decided) pkgs)
   where
     positive p = case termIntersectionForPackage ps p of
@@ -158,7 +163,7 @@ undecidedPositive ps@PartialSolution{psAssignments} =
 -- this list.
 packageHistory :: PartialSolution -> PackageName -> [Assignment]
 packageHistory PartialSolution{psAssignments} p =
-    reverse [a | a <- psAssignments, aPackage a == p]
+    toList (Seq.filter ((== p) . aPackage) psAssignments)
 
 -- --------------------------------------------------------------------------
 -- The algorithm (stubs)
