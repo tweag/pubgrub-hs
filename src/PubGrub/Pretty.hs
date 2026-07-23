@@ -14,6 +14,7 @@ import qualified Data.Set                       as Set
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Pretty            (prettyShow)
+import           Distribution.Types.Flag        (FlagName, unFlagName)
 import           Distribution.Types.PackageName (PackageName)
 import           Distribution.Version           (Version)
 import           PubGrub.VersionSet             (VersionSet)
@@ -30,6 +31,9 @@ instance Pretty a => Show (AsPretty a) where
 
 instance Pretty PackageName where
     pretty = T.pack . prettyShow
+
+instance Pretty FlagName where
+    pretty = T.pack . unFlagName
 
 instance Pretty Version where
     pretty = T.pack . prettyShow

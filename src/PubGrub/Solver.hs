@@ -31,18 +31,20 @@ module PubGrub.Solver
     , solve
     ) where
 
-import           Data.Map.Strict            (Map)
-import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (mapMaybe)
-import           Distribution.Types.Version (Version)
-import           PubGrub.Incompatibility    (IncompatRelation, Incompatibility,
-                                             PackageTerm (..), anyTerm,
-                                             incompGet, incompRelation)
-import           PubGrub.InstanceSet        (Instance, InstanceSet, PackageName,
-                                             singletonInstance)
-import           PubGrub.Term               (Term (..), intersectTerm,
-                                             negateTerm)
-import           PubGrub.VersionSet         (VersionSet)
+import           Data.Map.Strict                (Map)
+import qualified Data.Map.Strict                as Map
+import           Data.Maybe                     (mapMaybe)
+import           Distribution.Types.PackageName
+import           Distribution.Types.Version     (Version)
+import           PubGrub.Incompatibility        (IncompatRelation,
+                                                 Incompatibility,
+                                                 PackageTerm (..), anyTerm,
+                                                 incompGet, incompRelation)
+import           PubGrub.InstanceSet            (Instance, InstanceSet,
+                                                 singletonInstance)
+import           PubGrub.Term                   (Term (..), intersectTerm,
+                                                 negateTerm)
+import           PubGrub.VersionSet             (VersionSet)
 
 -- --------------------------------------------------------------------------
 -- Provider

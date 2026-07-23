@@ -1,24 +1,17 @@
 {-# LANGUAGE DerivingVia #-}
 module PubGrub.InstanceSet where
-import           Data.Map.Strict            (Map)
-import           Data.Set                   (Set)
-import qualified Data.Set                   as Set
-import           Data.String                (IsString (..))
-import           Distribution.Types.Version (Version)
-import           PubGrub.Pretty             (Pretty (..))
-import           PubGrub.Term               (SetOps)
-import           PubGrub.VersionSet         (VersionSet)
-
--- ---------------------------------------------------------------------------
--- Packages and dependencies
--- ---------------------------------------------------------------------------
-
-newtype PackageName = PackageName String deriving (Eq, Ord, Show)
-
-instance Pretty PackageName where
-    pretty (PackageName n) = fromString n
-
-newtype UnitId = UnitId Int deriving (Eq, Ord, Show)
+import           Data.Map.Strict                (Map)
+import           Data.Ord                       (comparing)
+import           Data.Set                       (Set)
+import qualified Data.Set                       as Set
+import           Distribution.Types.Condition
+import           Distribution.Types.Flag        (FlagAssignment, FlagName,
+                                                 PackageFlag (..))
+import           Distribution.Types.PackageName
+import           Distribution.Types.UnitId
+import           Distribution.Types.Version     (Version)
+import           PubGrub.Term                   (SetOps)
+import           PubGrub.VersionSet             (VersionSet)
 
 -- | Both kinds of index entries carry a version, and so does an 'Instance' —
 -- this is what lets the 'Provider' turn a 'Dependency'\'s 'VersionSet' into
@@ -41,35 +34,6 @@ data PreInstalledPackage
 instance HasVersion PreInstalledPackage where
     version = pipVersion
 
--- | The name of a flag, as a package declares it.
-newtype FlagName = FlagName String
-    deriving (Eq, Ord, Show)
-
-instance Pretty FlagName where
-    pretty (FlagName n) = fromString n
-
--- | A flag is a named boolean option that can be set to @True@ or @False@.
--- Each flag has a default value, which is used when the flag is not explicitly set.
--- A manual flag may only be set by the user; an automatic flag may also be
--- flipped freely by the solver to resolve conflicts.
-data Flag = Flag
-    { flagName    :: FlagName
-    , flagDefault :: Bool
-    , flagManual  :: Bool
-    }
-    deriving (Eq, Ord, Show)
-
-newtype FlagAssignment = FlagAssignment (Map FlagName Bool)
-    deriving (Eq, Ord, Show)
-
-data Condition a
-    = Var a
-    | Lit Bool
-    | CNot (Condition a)
-    | CAnd (Condition a) (Condition a)
-    | COr (Condition a) (Condition a)
-    deriving (Show, Eq, Ord)
-
 -- | The dependencies expressed by a source package. Each dependency is a
 -- package, a version set, and a condition over the package's own flags that
 -- must hold for the dependency to be active (@'Lit' True@ = unconditional).
@@ -79,7 +43,7 @@ data Condition a
 -- flags). The 'Provider' widens the version set into the instance set
 -- @{i | 'version' i ∈ vs}@.
 data Dependency = Dependency PackageName VersionSet (Condition FlagName)
-    deriving (Show, Eq, Ord)
+    deriving (Show, Eq)
 
 -- | A source package is a package that can be built from source: a version,
 -- the flags it declares, its (conditional) dependencies, and a buildability
@@ -89,11 +53,27 @@ data Dependency = Dependency PackageName VersionSet (Condition FlagName)
 data SourcePackage
     = SourcePackage
     { spVersion      :: Version
-    , spFlags        :: [Flag]
+    , spFlags        :: [PackageFlag]
     , spDependencies :: [Dependency]
     , spBuildable    :: Condition FlagName
     }
-    deriving (Show, Eq, Ord)
+    deriving (Show, Eq)
+
+-- | Arbitrary but total order, needed only so instances can live in a 'Set'.
+-- Cabal's 'PackageFlag' and 'Condition' have no 'Ord', so those leaves fall
+-- back to their (injective) 'Show'; the cheap 'Version' is compared first, so
+-- the 'Show' work is only forced when versions tie. Consistent with the derived
+-- 'Eq', which is all a 'Set' needs.
+instance Ord SourcePackage where
+    compare = comparing key
+      where
+        key sp =
+            ( spVersion sp
+            , map show (spFlags sp)
+            , map depKey (spDependencies sp)
+            , show (spBuildable sp)
+            )
+        depKey (Dependency pn vs cond) = (pn, vs, show cond)
 
 instance HasVersion SourcePackage where
     version = spVersion

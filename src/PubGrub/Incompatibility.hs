@@ -13,14 +13,16 @@ module PubGrub.Incompatibility
     , priorCause
     ) where
 
-import           Data.Map.Strict     (Map)
-import qualified Data.Map.Strict     as Map
-import           PubGrub.InstanceSet (Instance, InstanceSet, PackageName,
-                                      emptyInstanceSet, memberInstance,
-                                      singletonInstance)
-import           PubGrub.Relation    (Relation (..), relation)
-import           PubGrub.Term        (Term (..), intersectTerm, isTopTerm,
-                                      unionTerm)
+import           Data.Map.Strict                (Map)
+import qualified Data.Map.Strict                as Map
+import           Distribution.Types.PackageName
+import           PubGrub.InstanceSet            (Instance, InstanceSet,
+                                                 emptyInstanceSet,
+                                                 memberInstance,
+                                                 singletonInstance)
+import           PubGrub.Relation               (Relation (..), relation)
+import           PubGrub.Term                   (Term (..), intersectTerm,
+                                                 isTopTerm, unionTerm)
 
 -- --------------------------------------------------------------------------
 -- PackageTerm
