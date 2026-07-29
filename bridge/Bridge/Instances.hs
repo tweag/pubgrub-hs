@@ -17,8 +17,8 @@ import           Distribution.Types.GenericPackageDescription (GenericPackageDes
                                                                packageDescription)
 import           Distribution.Types.PackageDescription        (package)
 import           Distribution.Types.PackageId                 (pkgVersion)
-import           PubGrub.InstanceSet                          (Dependency (Dependency),
-                                                               SourcePackage (SourcePackage))
+import           PubGrub.Index.SourcePackage                  (Dependency (..),
+                                                               SourcePackage (..))
 
 -- | Translate a Cabal 'GenericPackageDescription' into our 'SourcePackage'.
 --

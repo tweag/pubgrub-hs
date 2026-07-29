@@ -1,5 +1,6 @@
 module Main (main) where
 
+import qualified InstanceSetSpec
 import qualified PaperSpec
 import qualified SolverSpec
 import           Test.Tasty     (defaultMain, testGroup)
@@ -11,6 +12,7 @@ main =
         testGroup
             "pubgrub-hs"
             [ VersionSetSpec.tests
+            , InstanceSetSpec.tests
             , SolverSpec.tests
             , PaperSpec.tests
             ]

@@ -53,13 +53,16 @@ import           Network.HTTP.Client                      (Manager)
 import           PubGrub.Incompatibility                  (Incompatibility,
                                                            fromDependency,
                                                            noInstances)
-import           PubGrub.InstanceSet                      (Dependency (..),
-                                                           HasVersion (..),
+import           PubGrub.Index.PreInstalled               (PreInstalledPackage (..))
+import           PubGrub.InstanceSet                      (HasVersion (..),
                                                            Instance (..),
                                                            InstanceSet (..),
-                                                           PreInstalledPackage (..),
-                                                           SourcePackage (..),
+                                                           memberInstance,
                                                            singletonInstance)
+import           PubGrub.InstanceSet.SourceCell           (SourceCell (..))
+
+import           PubGrub.Index.SourcePackage              (Dependency (..),
+                                                           SourcePackage (..))
 import           PubGrub.Provider                         (Provider (..))
 import           PubGrub.VersionSet                       (VersionSet, contains)
 import           UnliftIO                                 (MonadIO,
@@ -68,10 +71,14 @@ import           UnliftIO                                 (MonadIO,
 
 -- | Open the Hackage index and the compiler's installed world, build a
 -- 'Provider', and run @act@ with it. The whole solve must run inside @act@.
+--
+-- It takes the root instance ('syntheticRoot') because the solver asks the
+-- provider to expand the root like any other package, and the root is not in
+-- the index.
 withProvider
     :: (MonadUnliftIO m, WithLog env Text m)
-    => Cache -> Manager -> (Provider m -> m a) -> m a
-withProvider cache manager act =
+    => Cache -> Manager -> Instance -> (Provider m -> m a) -> m a
+withProvider cache manager root act =
     withHackageIndex cache manager $ \handle -> do
         (compiler, mPlatform, programDb) <-
             liftIO $ configure Verbosity.normal Nothing Nothing defaultProgramDb
@@ -83,6 +90,7 @@ withProvider cache manager act =
                         (fromMaybe buildPlatform mPlatform)
                         (compilerInfo compiler)
                         handle
+                        root
                     )
         act provider
 
@@ -114,17 +122,34 @@ mkExpand
     -> Platform
     -> CompilerInfo
     -> IndexHandle
+    -> Instance
+    -- ^ the synthetic root instance, which is not in the index
     -> PackageName
     -> InstanceSet
     -> m (Maybe (Instance, [Incompatibility]))
-mkExpand installedDb platform cInfo handle = expand'
+mkExpand installedDb platform cInfo handle root = expand'
   where
-    expand' p (InstanceSet s)
-        | Set.null s = pure Nothing
-        | otherwise = do
-            let chosen = preferInstalled (Set.toList s)
-            incs <- consequencesOf p chosen
-            pure (Just (chosen, incs))
+    -- An 'InstanceSet' is a symbolic description (version ranges plus flag
+    -- pins), not a container: membership is decidable but it cannot be
+    -- enumerated. So enumerate the package's own instances — cheaply, from the
+    -- installed db and the index's version map, without parsing any @.cabal@ —
+    -- and keep those the offered set admits.
+    expand' p range =
+        case filter (`memberInstance` range) (universeOf p) of
+            [] -> pure Nothing
+            candidates -> do
+                let chosen = preferInstalled candidates
+                incs <- consequencesOf p chosen
+                pure (Just (chosen, incs))
+
+    -- Every instance of @p@ we could commit to. The root is the one package with
+    -- no index entry: it has exactly one instance, which carries its own
+    -- dependencies.
+    universeOf p
+        | p == rootName = [root]
+        | otherwise =
+            installedInstancesOf installedDb p
+                ++ map sourceInstance (versionsOf p)
 
     preferInstalled instances =
         case [i | i@(UsePreInstalled _) <- instances] of
@@ -171,16 +196,28 @@ mkExpand installedDb platform cInfo handle = expand'
         | (d, vs) <- deps
         ]
 
-    -- Widen a dependency's version range into the set of that package's
-    -- instances in range: installed units (from the db) plus source releases
-    -- (from the in-memory version map, no .cabal parsing).
+    -- Widen a dependency's version range into an instance set. The installed
+    -- half is extensional: the compiler's database is small and fully known.
+    -- The source half is a single cell carrying the declared range, not one
+    -- entry per version in range. That keeps the cell count per dependency
+    -- constant, which matters because 'difference' multiplies cell counts, and
+    -- it keeps the range in the incompatibility, so a conflict report can say
+    -- @>=1.0 && <2@ instead of listing versions.
+    --
+    -- The cell admits versions the index does not have. That is harmless: the
+    -- set algebra never needs the instance universe, and 'expand'' enumerates
+    -- candidates from the index, so an unsatisfiable dependency surfaces as
+    -- @Nothing@ from 'expand'' rather than as an empty widening.
     widen d vs =
         InstanceSet
-            ( Set.fromList
-                ( [i | i <- installedInstancesOf installedDb d, contains vs (version i)]
-                    ++ [sourceInstance v | v <- versionsOf d, contains vs v]
-                )
-            )
+            { isInstalled =
+                Set.fromList
+                    [ pip
+                    | UsePreInstalled pip <- installedInstancesOf installedDb d
+                    , contains vs (version pip)
+                    ]
+            , isSource = [SourceCell vs Map.empty]
+            }
 
     versionsOf d = maybe [] NE.toList (Map.lookup d (ihVersions handle))
 

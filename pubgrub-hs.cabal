@@ -17,7 +17,11 @@ library
     exposed-modules:
         PubGrub
         PubGrub.Incompatibility
+        PubGrub.Index
+        PubGrub.Index.PreInstalled
+        PubGrub.Index.SourcePackage
         PubGrub.InstanceSet
+        PubGrub.InstanceSet.SourceCell
         PubGrub.Pretty
         PubGrub.Provider
         PubGrub.Relation
@@ -95,6 +99,7 @@ test-suite pubgrub-hs-test
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
     other-modules:
+        InstanceSetSpec
         PaperSpec
         SolverSpec
         VersionSetSpec
@@ -107,5 +112,6 @@ test-suite pubgrub-hs-test
         , tasty
         , tasty-hunit
         , tasty-quickcheck
+        , text
     hs-source-dirs:   test
     default-language: GHC2021

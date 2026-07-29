@@ -2,6 +2,7 @@
 module PubGrub.Incompatibility
     ( PackageTerm (..)
     , Incompatibility (..)
+    , IncompatCause (..)
     , anyTerm
     , incompGet
     , notRoot
@@ -39,7 +40,6 @@ data PackageTerm = PackageTerm
     { termPackage   :: PackageName
     , termInstances :: Term InstanceSet
     }
-    deriving (Show, Eq, Ord)
 
 -- | The always-true term ⊤ over instances: "absent, or any instance".
 -- The identity used when a package is missing from an incompatibility's map.
@@ -72,29 +72,36 @@ anyTerm = Negative emptyInstanceSet
 -- An incompatibility with an /empty/ map is ¬⊤ = always violated: the shape
 -- of "no solution exists".
 --
--- TODO: an incompatibility carries no cause, so 'priorCause' forgets its
--- parents and "PubGrub.Report" cannot render a failed resolution as a
--- numbered proof.
-newtype Incompatibility = Incompatibility {
-    incompTerms :: Map PackageName (Term InstanceSet)
+-- Alongside its terms, every incompatibility records /why/ it holds
+-- ('IncompatCause'), which is what lets a failed resolution be rendered as a
+-- numbered proof ("PubGrub.Report"). The cause is provenance only: no solver
+-- decision consults it, and it never affects what an incompatibility means.
+data Incompatibility = Incompatibility
+    { incompTerms :: Map PackageName (Term InstanceSet)
+    , incompCause :: IncompatCause
     }
-    deriving (Eq, Show)
+
+data IncompatCause
+    = CauseRoot PackageName Instance                              -- notRoot
+    | CauseNoInstances PackageName InstanceSet                    -- noInstances
+    | CauseDependency PackageName InstanceSet (PackageName, InstanceSet)  -- fromDependency
+    | CauseDerivedFrom Incompatibility Incompatibility            -- priorCause
 
 -- | The term an incompatibility states about @p@, if any.
 incompGet :: PackageName -> Incompatibility -> Maybe (Term InstanceSet)
-incompGet p (Incompatibility m) = Map.lookup p m
+incompGet p (Incompatibility m _ ) = Map.lookup p m
 
 -- Constructors ---------------------------------------------------------------
 
 -- | The root seed: it is impossible for the root package to NOT be the
 -- requested instance.
 notRoot :: PackageName -> Instance -> Incompatibility
-notRoot p i = Incompatibility (Map.singleton p (Negative (singletonInstance i)))
+notRoot p i = Incompatibility (Map.singleton p (Negative (singletonInstance i))) (CauseRoot p i)
 
 -- | The provider has nothing to offer in this instance set of the package, so
 -- none of it can be selected.
 noInstances :: PackageName -> InstanceSet -> Incompatibility
-noInstances p s = Incompatibility (Map.singleton p (Positive s))
+noInstances p s = Incompatibility (Map.singleton p (Positive s)) (CauseNoInstances p s)
 
 -- | Dependency incompatibility: @package@ in @instances@ requires @dep@ in
 -- @depSet@ — encoded @{ package: Positive instances, dep: Negative depSet }@.
@@ -104,10 +111,11 @@ noInstances p s = Incompatibility (Map.singleton p (Positive s))
 -- dropped, leaving a unit ban on @package@.
 fromDependency :: PackageName -> InstanceSet -> (PackageName, InstanceSet) -> Incompatibility
 fromDependency package instances (dep, depSet) =
-    Incompatibility $
-        if isTopTerm (Negative depSet :: Term InstanceSet)
+    Incompatibility
+        (if isTopTerm (Negative depSet)
             then Map.singleton package (Positive instances)
-            else Map.fromList [(package, Positive instances), (dep, Negative depSet)]
+            else Map.fromList [(package, Positive instances), (dep, Negative depSet)])
+        (CauseDependency package instances (dep, depSet))
 
 -- Judging against the partial solution -----------------------------------------
 
@@ -127,7 +135,7 @@ incompRelation
     :: (PackageName -> Maybe (Term InstanceSet))
     -> Incompatibility
     -> IncompatRelation
-incompRelation lookupTerm (Incompatibility m) = go ISatisfied (Map.toList m)
+incompRelation lookupTerm (Incompatibility m _) = go ISatisfied (Map.toList m)
   where
     go acc [] = acc
     go acc ((p, it) : rest) =
@@ -145,7 +153,7 @@ incompRelation lookupTerm (Incompatibility m) = go ISatisfied (Map.toList m)
 -- | Does this incompatibility end the solve: is it empty, or does it forbid
 -- the root instance?
 isTerminal :: PackageName -> Instance -> Incompatibility -> Bool
-isTerminal rootPkg rootI (Incompatibility m) =
+isTerminal rootPkg rootI (Incompatibility m _) =
     case Map.toList m of
         []          -> True
         [(p, term)] -> p == rootPkg && termContains term rootI
@@ -166,8 +174,8 @@ priorCause
     -> PackageName
     -- ^ shared (pivot) package
     -> Incompatibility
-priorCause (Incompatibility cur) (Incompatibility sat) package =
-    Incompatibility finalTerms
+priorCause current@(Incompatibility cur _) satCause@(Incompatibility sat _) package =
+    Incompatibility finalTerms (CauseDerivedFrom current satCause)
   where
     merged =
         Map.unionWith

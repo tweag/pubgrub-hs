@@ -16,6 +16,7 @@ import qualified Data.Text                      as T
 import           Distribution.Pretty            (prettyShow)
 import           Distribution.Types.Flag        (FlagName, unFlagName)
 import           Distribution.Types.PackageName (PackageName)
+import           Distribution.Types.UnitId      (UnitId)
 import           Distribution.Version           (Version)
 import           PubGrub.VersionSet             (VersionSet)
 import qualified PubGrub.VersionSet             as VS
@@ -34,6 +35,9 @@ instance Pretty PackageName where
 
 instance Pretty FlagName where
     pretty = T.pack . unFlagName
+
+instance Pretty UnitId where
+    pretty = T.pack . prettyShow
 
 instance Pretty Version where
     pretty = T.pack . prettyShow

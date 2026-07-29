@@ -10,19 +10,23 @@ import           Data.Functor.Identity          (Identity, runIdentity)
 import           Data.List                      (maximumBy)
 import qualified Data.Map.Strict                as Map
 import           Data.Ord                       (comparing)
-import qualified Data.Set                       as Set
-import           Distribution.Types.Condition   (Condition (Lit))
+import           Data.Text                      (Text)
+import           Distribution.Types.Condition   (Condition (..))
 import           Distribution.Types.Flag        (mkFlagAssignment)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.Version     (mkVersion)
 import           PubGrub.Incompatibility        (fromDependency)
+import           PubGrub.Index.SourcePackage    (SourcePackage (..))
 import           PubGrub.InstanceSet            (HasVersion (version),
-                                                 Instance (BuildSource),
-                                                 InstanceSet (InstanceSet),
-                                                 SourcePackage (..),
+                                                 Instance (..), InstanceSet,
+                                                 emptyInstanceSet,
+                                                 memberInstance,
                                                  singletonInstance)
-import           PubGrub.Provider               (Provider (Provider))
-import           PubGrub.Solver                 (SolveError, SolverMsg, solve)
+import           PubGrub.SetOps                 (union)
+import           PubGrub.Provider               (Provider (..))
+import           PubGrub.Report                 (reportConflict)
+import           PubGrub.Solver                 (SolveError (..), SolverMsg,
+                                                 solve)
 import           Test.Tasty                     (TestTree, testGroup)
 import           Test.Tasty.HUnit               (assertBool, testCase, (@?=))
 
@@ -37,7 +41,13 @@ inst :: [Int] -> Instance
 inst ver = BuildSource (SourcePackage (mkVersion ver) [] [] (Lit True)) (mkFlagAssignment [])
 
 setOf :: [Instance] -> InstanceSet
-setOf = InstanceSet . Set.fromList
+setOf = foldr (union . singletonInstance) emptyInstanceSet
+
+-- | Every instance these toy worlds mention. An 'InstanceSet' cannot be
+-- enumerated, so the provider enumerates these candidates and keeps the ones
+-- the offered set admits, as the real bridge does.
+allInstances :: [Instance]
+allInstances = [rootI, foo1, foo2, bar1]
 
 -- | Build a provider from a dependency table. @expand p range@ commits to the
 -- newest instance in @range@ (the "newest wins" preference) and turns that
@@ -45,23 +55,30 @@ setOf = InstanceSet . Set.fromList
 mkProvider :: Applicative m => (Instance -> [(PackageName, [Instance])]) -> Provider m
 mkProvider deps = Provider expand'
   where
-    expand' p (InstanceSet s)
-        | Set.null s = pure Nothing
-        | otherwise =
-            let chosen = maximumBy (comparing version) (Set.toList s)
-                incs =
-                    [ fromDependency p (singletonInstance chosen) (d, setOf ds)
-                    | (d, ds) <- deps chosen
-                    ]
-             in pure (Just (chosen, incs))
+    expand' p range =
+        case filter (`memberInstance` range) allInstances of
+            [] -> pure Nothing
+            candidates ->
+                let chosen = maximumBy (comparing version) candidates
+                    incs =
+                        [ fromDependency p (singletonInstance chosen) (d, setOf ds)
+                        | (d, ds) <- deps chosen
+                        ]
+                 in pure (Just (chosen, incs))
 
--- | Run the solver purely, discarding the solver's log trace.
+-- | Run the solver purely, discarding the solver's log trace. A failure is kept
+-- as its rendered report rather than 'show'n: the derived 'Show' would expand
+-- the whole derivation DAG as a tree.
 runSolve
     :: Provider (LoggerT SolverMsg Identity)
     -> PackageName
     -> Instance
-    -> Either SolveError (Map.Map PackageName Instance)
-runSolve provider p i = runIdentity (usingLoggerT mempty (solve provider p i))
+    -> Either Text (Map.Map PackageName Instance)
+runSolve provider p i =
+    either (Left . renderFailure) Right (runIdentity (usingLoggerT mempty (solve provider p i)))
+
+renderFailure :: SolveError -> Text
+renderFailure (NoSolution i) = reportConflict i
 
 root, foo, bar :: PackageName
 root = mkPackageName "root"

@@ -72,7 +72,6 @@ data Assignment
         , aTerm    :: Term InstanceSet
         , aCause   :: Incompatibility
         }
-    deriving (Eq, Show)
 
 -- | The term contributed by an assignment; for a decision, @Positive@ of the
 -- singleton.
@@ -93,7 +92,6 @@ data PartialSolution = PartialSolution
     , psLevel       :: !Int
     , psNextIndex   :: !Int
     }
-    deriving (Eq, Show)
 
 emptyPS :: PartialSolution
 emptyPS = PartialSolution{psAssignments = Seq.empty, psLevel = 0, psNextIndex = 0}
@@ -275,7 +273,6 @@ conflictResolution rootPkg rootV = loop
 -- | Failure: no solution; carries the terminal incompatibility (the root of
 -- the derivation tree, for reporting).
 newtype SolveError = NoSolution Incompatibility
-    deriving (Eq, Show)
 
 -- | Structured progress events emitted during resolution.
 data SolverMsg
@@ -289,7 +286,6 @@ data SolverMsg
       Conflict Incompatibility
     | -- | backtracked to this decision level
       Backtracked Int
-    deriving (Eq, Show)
 
 -- | Solve for a root package pinned to a root instance: alternate
 -- 'unitPropagation' with decisions — take the first 'undecidedPositive'

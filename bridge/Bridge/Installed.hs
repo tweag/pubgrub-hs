@@ -16,8 +16,8 @@ import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Distribution.Types.PackageName (PackageName)
 import           Distribution.Types.UnitId      (UnitId)
-import           PubGrub.InstanceSet            (Instance (..),
-                                                 PreInstalledPackage (..))
+import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
+import           PubGrub.InstanceSet            (Instance (..))
 
 data InstalledDb = InstalledDb
     { idbById   :: Map UnitId InstalledPkg

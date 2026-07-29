@@ -1,17 +1,23 @@
-{-# LANGUAGE DerivingVia #-}
 module PubGrub.InstanceSet where
+
 import           Data.Map.Strict                (Map)
-import           Data.Ord                       (comparing)
+import qualified Data.Map.Strict                as Map
 import           Data.Set                       (Set)
 import qualified Data.Set                       as Set
-import           Distribution.Types.Condition
+import qualified Data.Text                      as T
 import           Distribution.Types.Flag        (FlagAssignment, FlagName,
-                                                 PackageFlag (..))
-import           Distribution.Types.PackageName
-import           Distribution.Types.UnitId
+                                                 showFlagAssignment,
+                                                 unFlagAssignment)
 import           Distribution.Types.Version     (Version)
-import           PubGrub.SetOps                 (SetOps)
-import           PubGrub.VersionSet             (VersionSet)
+import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
+import           PubGrub.Index.SourcePackage    (SourcePackage (..))
+import           PubGrub.InstanceSet.SourceCell (SourceCell (..),
+                                                 differenceCell, intersectCell,
+                                                 mergeCells, nullCell,
+                                                 singletonCell)
+import           PubGrub.Pretty                 (Pretty (..))
+import           PubGrub.SetOps                 (SetOps (..))
+import qualified PubGrub.VersionSet             as VersionSet
 
 -- | Both kinds of index entries carry a version, and so does an 'Instance' —
 -- this is what lets the 'Provider' turn a 'Dependency'\'s 'VersionSet' into
@@ -19,72 +25,11 @@ import           PubGrub.VersionSet             (VersionSet)
 class HasVersion a where
     version :: a -> Version
 
--- | A package already present in the environment: a unit ID, a version, and
--- dependencies on other pre-installed units. The 'UnitId' distinguishes
--- different builds of the same package — even two builds of the same version
--- are distinct instances, since they may depend on different units.
-data PreInstalledPackage
-    = PreInstalledPackage
-    { pipUnitId       :: UnitId
-    , pipVersion      :: Version
-    , pipDependencies :: [UnitId]
-    }
-    deriving (Eq, Ord, Show)
-
 instance HasVersion PreInstalledPackage where
     version = pipVersion
 
--- | The dependencies expressed by a source package. Each dependency is a
--- package, a version set, and a condition over the package's own flags that
--- must hold for the dependency to be active (@'Lit' True@ = unconditional).
---
--- Note the /target/ of a dependency is constrained by version only — a
--- dependency cannot demand how the dependee is provided (which unit, which
--- flags). The 'Provider' widens the version set into the instance set
--- @{i | 'version' i ∈ vs}@.
-data Dependency = Dependency PackageName VersionSet (Condition FlagName)
-    deriving (Show, Eq)
-
--- | A source package is a package that can be built from source: a version,
--- the flags it declares, its (conditional) dependencies, and a buildability
--- condition over its flags. Flags /determine/ the dependencies — that is why
--- a flag assignment is part of a 'BuildSource' instance: fixing the instance
--- fixes the dependencies.
-data SourcePackage
-    = SourcePackage
-    { spVersion      :: Version
-    , spFlags        :: [PackageFlag]
-    , spDependencies :: [Dependency]
-    , spBuildable    :: Condition FlagName
-    }
-    deriving (Show, Eq)
-
--- | Arbitrary but total order, needed only so instances can live in a 'Set'.
--- Cabal's 'PackageFlag' and 'Condition' have no 'Ord', so those leaves fall
--- back to their (injective) 'Show'; the cheap 'Version' is compared first, so
--- the 'Show' work is only forced when versions tie. Consistent with the derived
--- 'Eq', which is all a 'Set' needs.
-instance Ord SourcePackage where
-    compare = comparing key
-      where
-        key sp =
-            ( spVersion sp
-            , map show (spFlags sp)
-            , map depKey (spDependencies sp)
-            , show (spBuildable sp)
-            )
-        depKey (Dependency pn vs cond) = (pn, vs, show cond)
-
 instance HasVersion SourcePackage where
     version = spVersion
-
--- Package Index ---------------------------------------------------------------
-
-newtype IndexPackage = IndexPackage (Either PreInstalledPackage SourcePackage)
-    deriving (Show)
-
-newtype Index = Index (Map PackageName [IndexPackage])
-    deriving (Show)
 
 -- Package Instance ------------------------------------------------------------
 
@@ -96,31 +41,85 @@ newtype Index = Index (Map PackageName [IndexPackage])
 data Instance
     = UsePreInstalled PreInstalledPackage
     | BuildSource SourcePackage FlagAssignment
-    deriving (Show, Eq, Ord)
+    deriving (Show, Eq)
 
 instance HasVersion Instance where
     version (UsePreInstalled pip) = version pip
     version (BuildSource sp _)    = version sp
 
--- | A set of instances, stored explicitly. Per package the universe is finite
--- and known — whatever the 'Index' enumerates — which is what makes the
--- explicit representation workable. It also hides behind 'SetOps': if the
--- 2^flags blow-up ever hurts, a symbolic representation can replace this one
--- without the algorithm noticing.
-newtype InstanceSet = InstanceSet (Set Instance)
-    deriving (Show, Eq, Ord)
+instance Pretty Instance where
+    pretty (UsePreInstalled pip) = T.pack "installed:" <> pretty (pipUnitId pip)
+    pretty (BuildSource sp fa)   = pretty (spVersion sp) <> T.pack (showFlagAssignment fa)
 
-deriving via Set Instance instance SetOps InstanceSet
+-- | A set of instances in two halves: the pre-installed units, listed
+-- explicitly, and the source instances, as a union of 'SourceCell's. A cell
+-- keeps the version range it was built from, so a report can still be phrased
+-- in ranges after the set algebra has run.
+data InstanceSet = InstanceSet
+    { isInstalled :: Set PreInstalledPackage
+    -- ^ The pre-installed units in the set.
+    , isSource    :: [SourceCell]
+    }
+
+instance SetOps InstanceSet where
+    union lhs rhs  =
+        InstanceSet
+            { isInstalled = isInstalled lhs `Set.union` isInstalled rhs
+            , isSource    = mergeCells (isSource lhs <> isSource rhs)
+            }
+    intersect lhs rhs =
+        InstanceSet
+            { isInstalled = isInstalled lhs `Set.intersection` isInstalled rhs
+            , isSource    =
+                [ cell
+                | x <- isSource lhs
+                , y <- isSource rhs
+                , Just cell <- [intersectCell x y]   -- drops contradictory flag pins
+                , not (nullCell cell)
+                ]
+            }
+    difference lhs rhs
+        = InstanceSet
+            { isInstalled = isInstalled lhs `Set.difference` isInstalled rhs
+            , isSource    = foldl' (\xs y -> concatMap (`differenceCell` y) xs) (isSource lhs) (isSource rhs)
+            }
+    isEmpty is = Set.null (isInstalled is) && all nullCell (isSource is)
 
 -- | The empty instance set. @Negative emptyInstanceSet@ is the always-true
 -- term ⊤; @Positive emptyInstanceSet@ is the never-true term ⊥.
 emptyInstanceSet :: InstanceSet
-emptyInstanceSet = InstanceSet Set.empty
+emptyInstanceSet = InstanceSet { isInstalled = Set.empty, isSource = [] }
 
 -- | The set containing exactly one instance — the shape of a decision.
+-- @singletonInstance (BuildSource sp fa)@ is a cell pinning every flag in @fa@,
+-- so it is a singleton only if @fa@ is total over the package's declared flags:
+-- a cell denotes every value of a flag it leaves unpinned.
 singletonInstance :: Instance -> InstanceSet
-singletonInstance = InstanceSet . Set.singleton
+singletonInstance (UsePreInstalled pip) = InstanceSet { isInstalled = Set.singleton pip, isSource = [] }
+singletonInstance (BuildSource sp flags) = InstanceSet { isInstalled = Set.empty, isSource = [singletonCell sp flags] }
 
 -- | Does the set contain this instance?
 memberInstance :: Instance -> InstanceSet -> Bool
-memberInstance i (InstanceSet s) = Set.member i s
+memberInstance (UsePreInstalled pip) is =
+    Set.member pip (isInstalled is)
+memberInstance (BuildSource sp fa) is = any inCell (isSource is)
+    where
+        inCell (SourceCell vs flags) =
+            vs `VersionSet.contains` version sp
+            && flags `memberFlagAssignment` fa
+
+-- | Does an assignment satisfy a cell's pins? Every pin must be met; flags the
+-- cell leaves free are unconstrained — which is exactly "the pins are a submap
+-- of the assignment".
+--
+-- Note the direction. Quantifying over the /assignment/ instead would demand
+-- that every assigned flag also be pinned, so an unpinned cell would contain
+-- nothing rather than everything.
+memberFlagAssignment :: Map FlagName Bool -> FlagAssignment -> Bool
+memberFlagAssignment flags fa = flags `Map.isSubmapOf` Map.fromList (unFlagAssignment fa)
+
+instance Pretty InstanceSet where
+    pretty is =
+        T.intercalate (T.pack " or ")
+            ( map (pretty . pipUnitId) (Set.toList (isInstalled is)) <> map pretty (isSource is)
+            )

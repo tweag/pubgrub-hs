@@ -27,6 +27,7 @@ import qualified Data.Text                       as T
 import qualified Data.Text.IO                    as TIO
 import           Distribution.Parsec             (eitherParsec)
 import           Distribution.Pretty             (prettyShow)
+import           PubGrub.Pretty                  (Pretty (pretty))
 import           Distribution.Types.PackageName  (PackageName)
 import           Distribution.Types.VersionRange (VersionRange)
 import           Hackage.Security.Util.Path      (fromFilePath, makeAbsolute)
@@ -34,8 +35,9 @@ import           Network.HTTP.Client             (defaultManagerSettings,
                                                   newManager)
 import           PubGrub.InstanceSet             (HasVersion (version),
                                                   Instance)
-import           PubGrub.Solver                  (SolveError, SolverMsg (..),
-                                                  solve)
+import           PubGrub.Report                  (reportConflict)
+import           PubGrub.Solver                  (SolveError (..),
+                                                  SolverMsg (..), solve)
 import           PubGrub.VersionSet              (VersionSet, fromVersionRange,
                                                   fullVersionSet)
 import           System.Environment              (getArgs)
@@ -73,12 +75,13 @@ runApp app = runReaderT (unApp app) env
             , envSolver = cmap renderSolverMsg toStdout
             }
 
-    renderSolverMsg :: SolverMsg -> Text
-    renderSolverMsg (Deciding pn is) = T.pack ("Deciding " <> prettyShow pn <> " among " <> show is)
-    renderSolverMsg (Chose pn is) = T.pack ("Chose " <> prettyShow pn <> " as " <> show is)
-    renderSolverMsg (Conflict incompatibility) = T.pack ("Conflict " <> show incompatibility)
-    renderSolverMsg (Backtracked pn) = T.pack ("Backtracked " <> prettyShow pn)
-    renderSolverMsg (NoVersionFor pn is) = T.pack ("No version available for " <> prettyShow pn <> " in " <> show is)
+renderSolverMsg :: SolverMsg -> Text
+renderSolverMsg (Deciding pn is) = T.pack "Deciding " <> pretty pn <> T.pack " among " <> pretty is
+renderSolverMsg (Chose pn i) = T.pack "Chose " <> pretty pn <> T.pack " as " <> pretty i
+renderSolverMsg (Conflict _incompatibility) = T.pack "Conflict ..."
+renderSolverMsg (Backtracked level) = T.pack ("Backtracked to level " <> show level)
+renderSolverMsg (NoVersionFor pn is) =
+    T.pack "No version available for " <> pretty pn <> T.pack " in " <> pretty is
 
 -- --------------------------------------------------------------------------
 -- Argument parsing
@@ -104,16 +107,20 @@ main = do
         Right (target, range) -> do
             cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
             manager <- newManager defaultManagerSettings
+            -- The provider needs the root instance up front: it is asked to
+            -- expand the root like any other package, but has no index entry
+            -- for it.
+            let root = syntheticRoot [(target, range)]
             runApp $
-                withProvider cache manager $ \provider -> do
+                withProvider cache manager root $ \provider -> do
                     logMsg (T.pack ("Solving for " ++ prettyShow target))
-                    result <- solve provider rootName (syntheticRoot [(target, range)])
+                    result <- solve provider rootName root
                     report result
 
 
 report :: Either SolveError (Map PackageName Instance) -> App ()
-report (Left err) =
-    logMsg (T.pack ("No solution found: " ++ show err))
+report (Left (NoSolution incompat)) =
+    logMsg (reportConflict incompat)
 report (Right solution) = do
     logMsg (T.pack "Solution:")
     mapM_
