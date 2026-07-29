@@ -73,7 +73,7 @@ library bridge
 
 executable pubgrub
     import:             warnings
-    hs-source-dirs:     driver
+    hs-source-dirs:     app
     main-is:            Main.hs
     build-depends:
         , base

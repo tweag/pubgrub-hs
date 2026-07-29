@@ -1,120 +1,121 @@
-{-# LANGUAGE DerivingVia         #-}
-{-# LANGUAGE GADTs               #-}
-{-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE PatternSynonyms     #-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
 
-module Main where
+-- | A minimal end-to-end driver: resolve a Hackage package's dependency
+-- closure with the native PubGrub solver, over a real (lazily read) index.
+--
+-- @cabal run pubgrub -- aeson@  (optionally a version range: @... aeson '>=2'@)
+--
+-- Everything runs in one 'App' monad whose environment carries two co-log
+-- channels — @Text@ (the bridge's own messages and the provider's warnings)
+-- and 'SolverMsg' (the solver's search trace) — both rendered to stdout.
+module Main (main) where
 
-import           Colog                           (logMsg, logTextStdout)
-import           Colog.Monad                     (usingLoggerT)
-import           Compiler                        (Compiler (..),
-                                                  CompilerError (..),
-                                                  resolveCompiler)
-import           Control.Exception               (try)
-import           Data.Maybe                      (fromMaybe)
+import           Bridge.Hackage                  (mkCache)
+import           Bridge.Provider                 (rootName, syntheticRoot,
+                                                  withProvider)
+import           Colog                           (HasLog (..), LogAction (..),
+                                                  cmap, logMsg)
+import           Control.Monad.Reader            (MonadReader, ReaderT,
+                                                  runReaderT)
+import           Data.Map.Strict                 (Map)
+import qualified Data.Map.Strict                 as Map
 import           Data.Text                       (Text)
 import qualified Data.Text                       as T
-import           Data.Time                       (defaultTimeLocale, formatTime)
-import           Distribution.PackageDescription (PackageName)
+import qualified Data.Text.IO                    as TIO
 import           Distribution.Parsec             (eitherParsec)
 import           Distribution.Pretty             (prettyShow)
-import           Distribution.Types.PackageId    (PackageIdentifier (..))
+import           Distribution.Types.PackageName  (PackageName)
 import           Distribution.Types.VersionRange (VersionRange)
-import           Distribution.Version            (Version)
-import           Hackage                         (mkCache)
-import qualified Hackage.Security.Client.Formats as Sec
-import           Hackage.Security.Unlifted       (getCachedIndex,
-                                                  getModificationTime)
 import           Hackage.Security.Util.Path      (fromFilePath, makeAbsolute)
-import           InstalledDbProvider             (mkInstalledDbProvider)
 import           Network.HTTP.Client             (defaultManagerSettings,
                                                   newManager)
-import           Options.Applicative             (Parser, ParserInfo, argument,
-                                                  eitherReader, execParser,
-                                                  fullDesc, help, helper, info,
-                                                  long, metavar, optional,
-                                                  progDesc, strOption, (<**>))
-import           Provider                        (Combined (..))
-import           PubGrub.Choice                  (pattern Source)
-import           PubGrub.SourceConfig            (SourceConfig (..))
-import qualified PubGrub.VersionSet              as VS
-import           Solver                          (runSolve)
-import           SourceProvider                  (withSourceProvider)
-import           UnliftIO                        (MonadIO (..))
+import           PubGrub.InstanceSet             (HasVersion (version),
+                                                  Instance)
+import           PubGrub.Solver                  (SolveError, SolverMsg (..),
+                                                  solve)
+import           PubGrub.VersionSet              (VersionSet, fromVersionRange,
+                                                  fullVersionSet)
+import           System.Environment              (getArgs)
+import           UnliftIO                        (MonadIO (liftIO),
+                                                  MonadUnliftIO)
 
-data Options = Options
-    { optWithCompiler :: Maybe FilePath
-    , optTarget       :: (PackageName, Version)
-    , optRange        :: Maybe VS.VersionSet
+-- --------------------------------------------------------------------------
+-- The application monad: two log channels rendered to stdout
+-- --------------------------------------------------------------------------
+
+data Env = Env
+    { envText   :: LogAction App Text
+    , envSolver :: LogAction App SolverMsg
     }
 
--- | Parse a @<package>-<version>@ argument. The target is solved at exactly
--- that version.
-readTarget :: String -> Either String (PackageName, Version)
-readTarget s =
-    case eitherParsec s :: Either String PackageIdentifier of
-        Right (PackageIdentifier n v) -> Right (n, v)
-        Left e -> Left ("invalid package identifier: " <> e)
+newtype App a = App {unApp :: ReaderT Env IO a}
+    deriving newtype (Functor, Applicative, Monad, MonadIO, MonadUnliftIO, MonadReader Env)
 
-readRange :: String -> Either String VS.VersionSet
-readRange s =
-    case eitherParsec s :: Either String VersionRange of
-        Right vr -> Right (VS.fromVersionRange vr)
-        Left err -> Left ("invalid version range: " <> err)
+instance HasLog Env Text App where
+    getLogAction = envText
+    setLogAction a e = e {envText = a}
 
-optionsParser :: Parser Options
-optionsParser =
-    Options
-        <$> optional
-            ( strOption
-                ( long "with-compiler"
-                    <> metavar "PATH"
-                    <> help "GHC executable to use for boot packages and impl(ghc) conditionals (default: ghc on PATH)"
-                )
-            )
-        <*> argument (eitherReader readTarget) (metavar "TARGET")
-        <*> optional (argument (eitherReader readRange) (metavar "VERSION-RANGE"))
+instance HasLog Env SolverMsg App where
+    getLogAction = envSolver
+    setLogAction a e = e {envSolver = a}
 
-optionsInfo :: ParserInfo Options
-optionsInfo =
-    info
-        (optionsParser <**> helper)
-        (fullDesc <> progDesc "Resolve a Hackage package's dependency closure with PubGrub")
+runApp :: App a -> IO a
+runApp app = runReaderT (unApp app) env
+  where
+    toStdout :: LogAction App Text
+    toStdout = LogAction (liftIO . TIO.putStrLn)
+    env =
+        Env
+            { envText = toStdout
+            , envSolver = cmap renderSolverMsg toStdout
+            }
+
+    renderSolverMsg :: SolverMsg -> Text
+    renderSolverMsg (Deciding pn is) = T.pack ("Deciding " <> prettyShow pn <> " among " <> show is)
+    renderSolverMsg (Chose pn is) = T.pack ("Chose " <> prettyShow pn <> " as " <> show is)
+    renderSolverMsg (Conflict incompatibility) = T.pack ("Conflict " <> show incompatibility)
+    renderSolverMsg (Backtracked pn) = T.pack ("Backtracked " <> prettyShow pn)
+    renderSolverMsg (NoVersionFor pn is) = T.pack ("No version available for " <> prettyShow pn <> " in " <> show is)
+
+-- --------------------------------------------------------------------------
+-- Argument parsing
+-- --------------------------------------------------------------------------
+
+parseArgs :: [String] -> Either String (PackageName, VersionSet)
+parseArgs [name] = (\p -> (p, fullVersionSet)) <$> eitherParsec name
+parseArgs [name, range] = do
+    p <- eitherParsec name
+    vr <- eitherParsec range :: Either String VersionRange
+    pure (p, fromVersionRange vr)
+parseArgs _ = Left "usage: pubgrub <package> [version-range]"
+
+-- --------------------------------------------------------------------------
+-- Driver
+-- --------------------------------------------------------------------------
 
 main :: IO ()
 main = do
-    cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
-    opts <- execParser optionsInfo
+    args <- getArgs
+    case parseArgs args of
+        Left err -> putStrLn ("error: " ++ err)
+        Right (target, range) -> do
+            cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
+            manager <- newManager defaultManagerSettings
+            runApp $
+                withProvider cache manager $ \provider -> do
+                    logMsg (T.pack ("Solving for " ++ prettyShow target))
+                    result <- solve provider rootName (syntheticRoot [(target, range)])
+                    report result
 
-    usingLoggerT logTextStdout $ do
-        manager <- liftIO $ newManager defaultManagerSettings
-        ecompiler <- liftIO (try (resolveCompiler (fromMaybe "ghc" (optWithCompiler opts))))
-        case ecompiler of
-            Left (CompilerError msg) -> logMsg @Text ("error: " <> msg)
-            Right compiler -> do
-                let (target, targetVersion) = optTarget opts
-                    db = mkInstalledDbProvider (installedPackages compiler)
-                withSourceProvider cache manager compiler $ \hp -> do
-                    let combined =
-                            Combined
-                                { cDb = db
-                                , cSource = hp
-                                }
-                    idx <- liftIO $ getCachedIndex cache Sec.FGz
-                    case idx of
-                        Nothing -> logMsg @Text "error: cached index not found after update"
-                        Just idxPath -> do
-                            idxTime <- liftIO (getModificationTime idxPath)
 
-                            logMsg @Text
-                                ( "\ESC[1mSolving for "
-                                    <> T.pack (prettyShow target)
-                                    <> " "
-                                    <> T.pack (prettyShow targetVersion)
-                                    <> " (index from "
-                                    <> T.pack (formatTime defaultTimeLocale "%Y-%m-%d %H:%M UTC" idxTime)
-                                    <> ")\ESC[0m"
-                                )
-
-                            runSolve combined target (Source (SourceConfig targetVersion mempty))
+report :: Either SolveError (Map PackageName Instance) -> App ()
+report (Left err) =
+    logMsg (T.pack ("No solution found: " ++ show err))
+report (Right solution) = do
+    logMsg (T.pack "Solution:")
+    mapM_
+        (\(p, i) -> logMsg (T.pack ("  " ++ prettyShow p ++ " " ++ prettyShow (version i))))
+        (Map.toList solution)
