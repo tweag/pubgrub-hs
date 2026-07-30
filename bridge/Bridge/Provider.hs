@@ -27,11 +27,11 @@ import           Bridge.Installed                         (InstalledDb,
                                                            unitInstance)
 import           Bridge.Instances                         (toSourcePackage)
 import           Colog                                    (WithLog, logMsg)
-import           Data.List                                (maximumBy)
+import           Data.List                                (sortOn)
 import qualified Data.List.NonEmpty                       as NE
 import qualified Data.Map.Strict                          as Map
 import           Data.Maybe                               (fromMaybe)
-import           Data.Ord                                 (comparing)
+import           Data.Ord                                 (Down (..))
 import qualified Data.Set                                 as Set
 import           Data.Text                                (Text)
 import qualified Data.Text                                as T
@@ -137,24 +137,19 @@ mkExpand installedDb platform cInfo handle root = expand'
     expand' p range =
         case filter (`memberInstance` range) (universeOf p) of
             [] -> pure Nothing
-            candidates -> do
-                let chosen = preferInstalled candidates
+            chosen : _ -> do
                 incs <- consequencesOf p chosen
                 pure (Just (chosen, incs))
 
-    -- Every instance of @p@ we could commit to. The root is the one package with
-    -- no index entry: it has exactly one instance, which carries its own
-    -- dependencies.
+    -- Candidates for @p@, best first: installed units newest first, then source
+    -- releases newest first. Ordering within each group rather than by version
+    -- overall keeps the installed world pinned: Hackage can carry a newer
+    -- @base@ than the compiler's own, and the compiler cannot build it.
     universeOf p
         | p == rootName = [root]
         | otherwise =
-            installedInstancesOf installedDb p
-                ++ map sourceInstance (versionsOf p)
-
-    preferInstalled instances =
-        case [i | i@(UsePreInstalled _) <- instances] of
-            []        -> maximumBy (comparing version) instances
-            installed -> maximumBy (comparing version) installed
+             sortOn (Down . version) (installedInstancesOf installedDb p)
+                ++ sortOn (Down . version) (map sourceInstance (versionsOf p))
 
     consequencesOf p chosen = case chosen of
         -- Installed unit: its dependencies name exact units, each pinning its

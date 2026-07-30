@@ -27,7 +27,6 @@ import qualified Data.Text                       as T
 import qualified Data.Text.IO                    as TIO
 import           Distribution.Parsec             (eitherParsec)
 import           Distribution.Pretty             (prettyShow)
-import           PubGrub.Pretty                  (Pretty (pretty))
 import           Distribution.Types.PackageName  (PackageName)
 import           Distribution.Types.VersionRange (VersionRange)
 import           Hackage.Security.Util.Path      (fromFilePath, makeAbsolute)
@@ -35,6 +34,7 @@ import           Network.HTTP.Client             (defaultManagerSettings,
                                                   newManager)
 import           PubGrub.InstanceSet             (HasVersion (version),
                                                   Instance)
+import           PubGrub.Pretty                  (Pretty (pretty))
 import           PubGrub.Report                  (reportConflict)
 import           PubGrub.Solver                  (SolveError (..),
                                                   SolverMsg (..), solve)
