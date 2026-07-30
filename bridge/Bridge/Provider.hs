@@ -117,7 +117,8 @@ sourceInstance v = BuildSource (SourcePackage v [] [] (Lit True)) (mkFlagAssignm
 
 -- | The provider's @expand@.
 mkExpand
-    :: (MonadIO m, WithLog env Text m)
+    :: forall m env
+     . (MonadIO m, WithLog env Text m)
     => InstalledDb
     -> Platform
     -> CompilerInfo
@@ -134,48 +135,49 @@ mkExpand installedDb platform cInfo handle root = expand'
     -- enumerated. So enumerate the package's own instances — cheaply, from the
     -- installed db and the index's version map, without parsing any @.cabal@ —
     -- and keep those the offered set admits.
-    expand' p range =
-        case filter (`memberInstance` range) (universeOf p) of
+    expand' pn range =
+        case filter (`memberInstance` range) (universeOf pn) of
             [] -> pure Nothing
             chosen : _ -> do
-                incs <- consequencesOf p chosen
+                incs <- consequencesOf pn chosen
                 pure (Just (chosen, incs))
 
     -- Candidates for @p@, best first: installed units newest first, then source
     -- releases newest first. Ordering within each group rather than by version
     -- overall keeps the installed world pinned: Hackage can carry a newer
     -- @base@ than the compiler's own, and the compiler cannot build it.
-    universeOf p
-        | p == rootName = [root]
+    universeOf pn
+        | pn == rootName = [root]
         | otherwise =
-             sortOn (Down . version) (installedInstancesOf installedDb p)
-                ++ sortOn (Down . version) (map sourceInstance (versionsOf p))
+             sortOn (Down . version) (installedInstancesOf installedDb pn)
+                ++ sortOn (Down . version) (map sourceInstance (versionsOf pn))
 
-    consequencesOf p chosen = case chosen of
+    consequencesOf :: PackageName -> Instance -> m [Incompatibility]
+    consequencesOf pn chosen = case chosen of
         -- Installed unit: its dependencies name exact units, each pinning its
         -- package to that one instance.
         UsePreInstalled pip ->
             pure
-                [ fromDependency p (singletonInstance chosen) (depName, singletonInstance depInst)
+                [ fromDependency pn (singletonInstance chosen) (depName, singletonInstance depInst)
                 | uid <- pipDependencies pip
                 , Just (depName, depInst) <- [unitInstance installedDb uid]
                 ]
         -- Synthetic root: dependencies are baked into the instance.
         BuildSource sp _
-            | p == rootName -> pure (depIncs p chosen (sourcePackageDeps sp))
+            | pn == rootName -> pure (depIncs pn chosen (sourcePackageDeps sp))
         -- Source release: read and flatten its .cabal on demand.
         BuildSource _ _ -> do
-            result <- liftIO (ihLookupGPD handle p (version chosen))
+            result <- liftIO (ihLookupGPD handle pn (version chosen))
             case result of
                 Right gpd ->
-                    pure (depIncs p chosen (sourcePackageDeps (toSourcePackage platform cInfo gpd)))
+                    pure (depIncs pn chosen (sourcePackageDeps (toSourcePackage platform cInfo gpd)))
                 -- A .cabal that fails to parse: warn, and ban just this
                 -- instance so the solver backtracks to another version.
                 Left err -> do
                     logMsg
                         ( T.pack
                             ( "warning: ignoring "
-                                ++ prettyShow p
+                                ++ prettyShow pn
                                 ++ "-"
                                 ++ prettyShow (version chosen)
                                 ++ " (unparseable .cabal: "
@@ -183,11 +185,11 @@ mkExpand installedDb platform cInfo handle root = expand'
                                 ++ ")"
                             )
                         )
-                    pure [noInstances p (singletonInstance chosen)]
+                    pure [noInstances pn (singletonInstance chosen)]
 
     depIncs :: PackageName -> Instance -> [(PackageName, VersionSet)] -> [Incompatibility]
-    depIncs p chosen deps =
-        [ fromDependency p (singletonInstance chosen) (d, widen d vs)
+    depIncs pn chosen deps =
+        [ fromDependency pn (singletonInstance chosen) (d, widen d vs)
         | (d, vs) <- deps
         ]
 
