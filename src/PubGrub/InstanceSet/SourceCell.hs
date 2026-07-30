@@ -8,7 +8,7 @@ import           Distribution.Types.Flag     (FlagAssignment, FlagName,
                                               mkFlagAssignment,
                                               showFlagAssignment,
                                               unFlagAssignment)
-import           PubGrub.Index.SourcePackage (SourcePackage (..))
+import           Distribution.Types.Version  (Version)
 import           PubGrub.Pretty              (Pretty (..))
 import           PubGrub.SetOps              (SetOps (..))
 import           PubGrub.VersionSet          (VersionSet)
@@ -100,10 +100,10 @@ mergeCells cells =
     | (flags, vs) <- Map.toList (Map.fromListWith union [(scFlags c, scVersionSet c) | c <- cells])
     ]
 
-singletonCell :: SourcePackage -> FlagAssignment -> SourceCell
-singletonCell sp flags =
+singletonCell :: Version -> FlagAssignment -> SourceCell
+singletonCell v flags =
   SourceCell
-      { scVersionSet = VersionSet.singletonVersionSet (spVersion sp)
+      { scVersionSet = VersionSet.singletonVersionSet v
       , scFlags = Map.fromList (unFlagAssignment flags)
       }
 

@@ -21,15 +21,12 @@ import qualified Data.Map.Strict                as Map
 import qualified Data.Set                       as Set
 import           Data.Ord                       (comparing)
 import           Data.Text                      (Text)
-import           Distribution.Types.Condition   (Condition (Lit))
 import           Distribution.Types.Flag        (mkFlagAssignment)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Version           (earlierVersion,
                                                  intersectVersionRanges,
                                                  mkVersion, orLaterVersion)
 import           PubGrub.Incompatibility        (fromDependency)
-import           PubGrub.Index.SourcePackage    (Dependency (..),
-                                                 SourcePackage (..))
 import           PubGrub.InstanceSet            (HasVersion (version),
                                                  Instance (BuildSource),
                                                  InstanceSet (..),
@@ -72,15 +69,12 @@ gte v = fromVersionRange (orLaterVersion (mkVersion v))
 lt :: [Int] -> VersionSet -- <1.2.3
 lt v = fromVersionRange (earlierVersion (mkVersion v))
 
--- | A release as a solver 'Instance'. The instance carries its own
--- dependencies, all unconditional, as the whole-instance model intends.
+-- | A release as a solver 'Instance': its version under the default (empty)
+-- flag assignment. An 'Instance' only identifies a release, so the dependencies
+-- stay in the world and the provider looks them up — exactly as the real bridge
+-- reads them from the index.
 releaseInstance :: Release -> Instance
-releaseInstance r =
-    BuildSource
-        (SourcePackage (mkVersion (relVersion r)) [] deps (Lit True))
-        (mkFlagAssignment [])
-  where
-    deps = [Dependency d vs (Lit True) | (d, vs) <- relDeps r]
+releaseInstance r = BuildSource (mkVersion (relVersion r)) (mkFlagAssignment [])
 
 -- | The instance for a specific package version in the world (for asserting
 -- expected solutions). Errors only if the test names a version not in @world@.
@@ -108,19 +102,28 @@ mkProvider world = Provider expand'
     widen :: PackageName -> VersionSet -> InstanceSet
     widen _d vs = InstanceSet Set.empty [SourceCell vs Map.empty]
 
-    -- An 'InstanceSet' is symbolic and cannot be enumerated, so pick the
-    -- candidates out of the world and keep those the offered set admits.
+    -- The dependencies the world records for the chosen release.
+    --
+    -- An 'InstanceSet' is symbolic and cannot be enumerated, so expand' picks
+    -- the candidates out of the world and keeps those the offered set admits.
+    depsOf :: PackageName -> Instance -> [(PackageName, VersionSet)]
+    depsOf p chosen =
+        concat
+            [ relDeps r
+            | (q, rs) <- world
+            , q == p
+            , r <- rs
+            , mkVersion (relVersion r) == version chosen
+            ]
+
     expand' p range =
         case filter (`memberInstance` range) (universe p) of
             [] -> pure Nothing
             candidates ->
                 let chosen = maximumBy (comparing version) candidates
-                    deps = case chosen of
-                        BuildSource sp _ -> spDependencies sp
-                        _                -> []
                     incs =
                         [ fromDependency p (singletonInstance chosen) (d, widen d vs)
-                        | Dependency d vs _ <- deps
+                        | (d, vs) <- depsOf p chosen
                         ]
                  in pure (Just (chosen, incs))
 

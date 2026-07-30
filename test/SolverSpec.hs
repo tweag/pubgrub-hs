@@ -11,12 +11,10 @@ import           Data.List                      (maximumBy)
 import qualified Data.Map.Strict                as Map
 import           Data.Ord                       (comparing)
 import           Data.Text                      (Text)
-import           Distribution.Types.Condition   (Condition (..))
 import           Distribution.Types.Flag        (mkFlagAssignment)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.Version     (mkVersion)
 import           PubGrub.Incompatibility        (fromDependency)
-import           PubGrub.Index.SourcePackage    (SourcePackage (..))
 import           PubGrub.InstanceSet            (HasVersion (version),
                                                  Instance (..), InstanceSet,
                                                  emptyInstanceSet,
@@ -34,11 +32,10 @@ import           Test.Tasty.HUnit               (assertBool, testCase, (@?=))
 -- Toy world helpers
 -- --------------------------------------------------------------------------
 
--- | A source instance identified purely by its version; the toy worlds carry
--- their own dependency table, so the package's own dependency fields are left
--- empty.
+-- | A source instance identified purely by its version, under the default
+-- (empty) flag assignment; the toy worlds carry their own dependency table.
 inst :: [Int] -> Instance
-inst ver = BuildSource (SourcePackage (mkVersion ver) [] [] (Lit True)) (mkFlagAssignment [])
+inst ver = BuildSource (mkVersion ver) (mkFlagAssignment [])
 
 setOf :: [Instance] -> InstanceSet
 setOf = foldr (union . singletonInstance) emptyInstanceSet

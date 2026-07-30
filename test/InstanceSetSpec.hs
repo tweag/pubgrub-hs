@@ -28,16 +28,13 @@ import           Data.Map.Strict              (Map)
 import qualified Data.Map.Strict              as Map
 import           Data.Maybe                   (catMaybes)
 import qualified Data.Text                    as T
-import           Distribution.Types.Condition (Condition (Lit))
 import           Distribution.Types.Flag      (FlagAssignment, FlagName,
-                                               PackageFlag (MkPackageFlag),
                                                lookupFlagAssignment,
                                                mkFlagAssignment, mkFlagName)
 import           Distribution.Types.UnitId    (mkUnitId)
 import           Distribution.Version         (Version, earlierVersion,
                                                mkVersion, orLaterVersion)
 import           PubGrub.Index.PreInstalled   (PreInstalledPackage (..))
-import           PubGrub.Index.SourcePackage  (SourcePackage (..))
 import           PubGrub.InstanceSet          (Instance (..), InstanceSet,
                                                emptyInstanceSet, memberInstance,
                                                singletonInstance)
@@ -76,8 +73,8 @@ sourceInstances vs pins =
     unionAll
         [ singletonInstance i
         | i <- sourceUniverse
-        , BuildSource sp fa <- [i]
-        , contains vs (spVersion sp)
+        , BuildSource v fa <- [i]
+        , contains vs v
         , agrees fa
         ]
   where
@@ -97,25 +94,11 @@ unionAll = foldr union emptyInstanceSet
 versions :: [Version]
 versions = [mkVersion [1, 0], mkVersion [1, 1], mkVersion [2, 0]]
 
+-- | The two declared flags of every source package in this universe, so a
+-- total assignment fixes both.
 flagA, flagB :: FlagName
 flagA = mkFlagName "a"
 flagB = mkFlagName "b"
-
--- | Both flags are declared, so a total assignment fixes both.
-declaredFlags :: [PackageFlag]
-declaredFlags =
-    [ MkPackageFlag flagA "" False False
-    , MkPackageFlag flagB "" False False
-    ]
-
-sourcePackageAt :: Version -> SourcePackage
-sourcePackageAt v =
-    SourcePackage
-        { spVersion = v
-        , spFlags = declaredFlags
-        , spDependencies = []
-        , spBuildable = Lit True
-        }
 
 -- | Every /total/ assignment over the two declared flags.
 totalAssignments :: [FlagAssignment]
@@ -127,7 +110,7 @@ totalAssignments =
 
 sourceUniverse :: [Instance]
 sourceUniverse =
-    [ BuildSource (sourcePackageAt v) fa
+    [ BuildSource v fa
     | v <- versions
     , fa <- totalAssignments
     ]

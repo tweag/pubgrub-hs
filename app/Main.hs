@@ -14,8 +14,8 @@
 module Main (main) where
 
 import           Bridge.Hackage                  (mkCache)
-import           Bridge.Provider                 (rootName, syntheticRoot,
-                                                  withProvider)
+import           Bridge.Provider                 (rootInstance, rootName,
+                                                  syntheticRoot, withProvider)
 import           Colog                           (HasLog (..), LogAction (..),
                                                   cmap, logMsg)
 import           Control.Monad.Reader            (MonadReader, ReaderT,
@@ -107,14 +107,14 @@ main = do
         Right (target, range) -> do
             cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
             manager <- newManager defaultManagerSettings
-            -- The provider needs the root instance up front: it is asked to
+            -- The provider needs the root package up front: it is asked to
             -- expand the root like any other package, but has no index entry
-            -- for it.
+            -- to look its dependencies up in.
             let root = syntheticRoot [(target, range)]
             runApp $
                 withProvider cache manager root $ \provider -> do
                     logMsg (T.pack ("Solving for " ++ prettyShow target))
-                    result <- solve provider rootName root
+                    result <- solve provider rootName rootInstance
                     report result
 
 

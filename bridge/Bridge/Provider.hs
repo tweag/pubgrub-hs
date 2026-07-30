@@ -15,6 +15,7 @@
 module Bridge.Provider
     ( withProvider
     , rootName
+    , rootInstance
     , syntheticRoot
     ) where
 
@@ -72,12 +73,12 @@ import           UnliftIO                                 (MonadIO,
 -- | Open the Hackage index and the compiler's installed world, build a
 -- 'Provider', and run @act@ with it. The whole solve must run inside @act@.
 --
--- It takes the root instance ('syntheticRoot') because the solver asks the
--- provider to expand the root like any other package, and the root is not in
--- the index.
+-- It takes the root's 'SourcePackage' ('syntheticRoot') because the solver
+-- asks the provider to expand the root like any other package, and the root
+-- has no index entry to read its dependencies from.
 withProvider
     :: (MonadUnliftIO m, WithLog env Text m)
-    => Cache -> Manager -> Instance -> (Provider m -> m a) -> m a
+    => Cache -> Manager -> SourcePackage -> (Provider m -> m a) -> m a
 withProvider cache manager root act =
     withHackageIndex cache manager $ \handle -> do
         (compiler, mPlatform, programDb) <-
@@ -99,21 +100,27 @@ withProvider cache manager root act =
 rootName :: PackageName
 rootName = mkPackageName "\0root"
 
--- | Build the root instance from target constraints ("solve for these packages
--- in these ranges"). Its dependencies are baked in — it isn't in the index —
--- so 'mkExpand' reads them from the instance rather than looking them up. Pair
--- it with 'rootName' when calling 'PubGrub.Solver.solve'.
-syntheticRoot :: [(PackageName, VersionSet)] -> Instance
-syntheticRoot targets =
-    BuildSource
-        (SourcePackage (mkVersion [0]) [] [Dependency n vs (Lit True) | (n, vs) <- targets] (Lit True))
-        (mkFlagAssignment [])
+-- | The synthetic root's sole instance. Pair it with 'rootName' when calling
+-- 'PubGrub.Solver.solve'.
+rootInstance :: Instance
+rootInstance = sourceInstance (mkVersion [0])
 
--- | A lightweight source instance: version only, no stored dependencies and
--- the default (empty) flag assignment. Dependencies are looked up on demand in
--- 'mkExpand', so enumerating a package's instances never parses a @.cabal@.
+-- | The root package built from target constraints ("solve for these packages
+-- in these ranges"). It has no index entry, so 'mkExpand' answers for it from
+-- this record rather than looking it up; hand it to 'withProvider'.
+syntheticRoot :: [(PackageName, VersionSet)] -> SourcePackage
+syntheticRoot targets =
+    SourcePackage
+        (version rootInstance)
+        []
+        [Dependency n vs (Lit True) | (n, vs) <- targets]
+        (Lit True)
+
+-- | A source instance: a version under the default (empty) flag assignment.
+-- Dependencies are not carried — 'mkExpand' looks them up on demand — so
+-- enumerating a package's instances never parses a @.cabal@.
 sourceInstance :: Version -> Instance
-sourceInstance v = BuildSource (SourcePackage v [] [] (Lit True)) (mkFlagAssignment [])
+sourceInstance v = BuildSource v (mkFlagAssignment [])
 
 -- | The provider's @expand@.
 mkExpand
@@ -123,8 +130,8 @@ mkExpand
     -> Platform
     -> CompilerInfo
     -> IndexHandle
-    -> Instance
-    -- ^ the synthetic root instance, which is not in the index
+    -> SourcePackage
+    -- ^ the synthetic root, which is not in the index
     -> PackageName
     -> InstanceSet
     -> m (Maybe (Instance, [Incompatibility]))
@@ -147,7 +154,7 @@ mkExpand installedDb platform cInfo handle root = expand'
     -- overall keeps the installed world pinned: Hackage can carry a newer
     -- @base@ than the compiler's own, and the compiler cannot build it.
     universeOf pn
-        | pn == rootName = [root]
+        | pn == rootName = [rootInstance]
         | otherwise =
              sortOn (Down . version) (installedInstancesOf installedDb pn)
                 ++ sortOn (Down . version) (map sourceInstance (versionsOf pn))
@@ -162,9 +169,10 @@ mkExpand installedDb platform cInfo handle root = expand'
                 | uid <- pipDependencies pip
                 , Just (depName, depInst) <- [unitInstance installedDb uid]
                 ]
-        -- Synthetic root: dependencies are baked into the instance.
-        BuildSource sp _
-            | pn == rootName -> pure (depIncs pn chosen (sourcePackageDeps sp))
+        -- Synthetic root: the one package whose dependencies come from the
+        -- caller instead of from the index.
+        BuildSource _ _
+            | pn == rootName -> pure (depIncs pn chosen (sourcePackageDeps root))
         -- Source release: read and flatten its .cabal on demand.
         BuildSource _ _ -> do
             result <- liftIO (ihLookupGPD handle pn (version chosen))

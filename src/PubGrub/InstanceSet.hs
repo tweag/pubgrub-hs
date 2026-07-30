@@ -35,21 +35,34 @@ instance HasVersion SourcePackage where
 
 -- | The value domain of a solver variable: one concrete, fully-determined way
 -- of having a package — use a specific pre-installed unit, or build a source
--- package under a flag assignment. The assignment must be /total/ over the
+-- release under a flag assignment. The assignment must be /total/ over the
 -- package's declared flags (a 'Provider' invariant, not enforced here), so an
--- instance has no conditionals left: its dependencies are plain facts.
+-- instance has no conditionals left.
+--
+-- An 'Instance' /identifies/ a way of having a package; it does not describe
+-- one, and carries no dependencies. Those come from the 'Provider', which owns
+-- the index the identifier points into, so enumerating a package's instances
+-- parses no @.cabal@ file, and no instance has to stand for dependencies it
+-- does not know.
+--
+-- The two identifiers differ in shape because the two halves of an
+-- 'InstanceSet' do. A unit ID is global and the installed half is an explicit
+-- set, so identity is all it needs. A source release is identified only
+-- /relative to its package name/, and stays structured because the source half
+-- is symbolic: membership tests the version against a range and the assignment
+-- against pinned flags.
 data Instance
     = UsePreInstalled PreInstalledPackage
-    | BuildSource SourcePackage FlagAssignment
+    | BuildSource Version FlagAssignment
     deriving (Show, Eq)
 
 instance HasVersion Instance where
     version (UsePreInstalled pip) = version pip
-    version (BuildSource sp _)    = version sp
+    version (BuildSource v _)     = v
 
 instance Pretty Instance where
     pretty (UsePreInstalled pip) = T.pack "installed:" <> pretty (pipUnitId pip)
-    pretty (BuildSource sp fa)   = pretty (spVersion sp) <> T.pack (showFlagAssignment fa)
+    pretty (BuildSource v fa)    = pretty v <> T.pack (showFlagAssignment fa)
 
 -- | A set of instances in two halves: the pre-installed units, listed
 -- explicitly, and the source instances, as a union of 'SourceCell's. A cell
@@ -91,21 +104,23 @@ emptyInstanceSet :: InstanceSet
 emptyInstanceSet = InstanceSet { isInstalled = Set.empty, isSource = [] }
 
 -- | The set containing exactly one instance — the shape of a decision.
--- @singletonInstance (BuildSource sp fa)@ is a cell pinning every flag in @fa@,
+-- @singletonInstance (BuildSource v fa)@ is a cell pinning every flag in @fa@,
 -- so it is a singleton only if @fa@ is total over the package's declared flags:
 -- a cell denotes every value of a flag it leaves unpinned.
 singletonInstance :: Instance -> InstanceSet
-singletonInstance (UsePreInstalled pip) = InstanceSet { isInstalled = Set.singleton pip, isSource = [] }
-singletonInstance (BuildSource sp flags) = InstanceSet { isInstalled = Set.empty, isSource = [singletonCell sp flags] }
+singletonInstance (UsePreInstalled pip) =
+    InstanceSet { isInstalled = Set.singleton pip, isSource = [] }
+singletonInstance (BuildSource v flags) =
+    InstanceSet { isInstalled = Set.empty, isSource = [singletonCell v flags] }
 
 -- | Does the set contain this instance?
 memberInstance :: Instance -> InstanceSet -> Bool
 memberInstance (UsePreInstalled pip) is =
     Set.member pip (isInstalled is)
-memberInstance (BuildSource sp fa) is = any inCell (isSource is)
+memberInstance (BuildSource v fa) is = any inCell (isSource is)
     where
         inCell (SourceCell vs flags) =
-            vs `VersionSet.contains` version sp
+            vs `VersionSet.contains` v
             && flags `memberFlagAssignment` fa
 
 -- | Does an assignment satisfy a cell's pins? Every pin must be met; flags the
