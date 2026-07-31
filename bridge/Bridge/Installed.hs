@@ -5,10 +5,11 @@
 -- and the instance for a specific 'UnitId' (an installed unit's dependencies
 -- name exact units, which pin their packages).
 module Bridge.Installed
-    ( InstalledDb
+    ( InstalledDb(..)
     , mkInstalledDb
     , installedInstancesOf
     , unitInstance
+    , toPreInstalled
     ) where
 
 import           Bridge.Cabal.InstalledPkg      (InstalledPkg (..))

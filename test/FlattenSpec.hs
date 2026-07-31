@@ -1,0 +1,399 @@
+-- | Tests for 'Bridge.Cabal.Flatten': turning a @.cabal@ file's conditional
+-- dependency tree into flag-guarded groups, and evaluating those guards at a
+-- concrete flag assignment.
+--
+-- The inputs are real @.cabal@ sources parsed by Cabal-syntax, so the tests
+-- exercise the same 'CondTree' shapes Hackage produces (in particular @else@
+-- branches, which the parser desugars into a second sub-tree rather than a
+-- negated guard).
+--
+-- Two things are being pinned down: that the /environment/ (OS, arch, compiler)
+-- is resolved away at flatten time, and that /flags/ stay symbolic until
+-- 'depsAt' is given an assignment.
+module FlattenSpec (tests) where
+
+import           Bridge.Cabal.Flatten                         (componentDeps,
+                                                               defaultFlags,
+                                                               depsAt,
+                                                               flattenDeps)
+import           Data.ByteString.Char8                        (pack)
+import qualified Data.Map.Strict                              as Map
+import           Distribution.Compiler                        (AbiTag (NoAbiTag),
+                                                               CompilerFlavor (GHC),
+                                                               CompilerId (..),
+                                                               CompilerInfo,
+                                                               unknownCompilerInfo)
+import           Distribution.PackageDescription.Parsec       (parseGenericPackageDescription,
+                                                               runParseResult)
+import           Distribution.System                          (Arch (X86_64),
+                                                               OS (Linux),
+                                                               Platform (..))
+import           Distribution.Types.Condition                 (Condition (..))
+import           Distribution.Types.Flag                      (FlagAssignment,
+                                                               mkFlagAssignment,
+                                                               mkFlagName)
+import           Distribution.Types.GenericPackageDescription (GenericPackageDescription)
+import           Distribution.Types.PackageName               (unPackageName)
+import           Distribution.Version                         (earlierVersion,
+                                                               intersectVersionRanges,
+                                                               mkVersion,
+                                                               orLaterVersion)
+import           PubGrub.VersionSet                           (VersionSet,
+                                                               fromVersionRange)
+import           Test.Tasty                                   (TestTree,
+                                                               testGroup)
+import           Test.Tasty.HUnit                             (assertFailure,
+                                                               testCase, (@?=))
+
+-- --------------------------------------------------------------------------
+-- Fixtures
+-- --------------------------------------------------------------------------
+
+-- | The fixed environment the guards are resolved against. Deliberately not
+-- the build platform: the tests must not change answer on a Windows machine.
+testPlatform :: Platform
+testPlatform = Platform X86_64 Linux
+
+testCompiler :: CompilerInfo
+testCompiler = unknownCompilerInfo (CompilerId GHC (mkVersion [9, 12, 2])) NoAbiTag
+
+-- | Parse a @.cabal@ source, failing the test on a parse error.
+gpdOf :: String -> IO GenericPackageDescription
+gpdOf src = case snd (runParseResult (parseGenericPackageDescription (pack src))) of
+    Right gpd -> pure gpd
+    Left err  -> assertFailure ("test fixture failed to parse: " ++ show err)
+
+-- | A minimal package stanza with the given body appended.
+pkg :: String -> String
+pkg body =
+    unlines
+        [ "cabal-version: 3.0"
+        , "name: fixture"
+        , "version: 1.0"
+        , "build-type: Simple"
+        , ""
+        ]
+        ++ body
+
+flag :: String -> Bool -> String
+flag name def =
+    unlines
+        [ "flag " ++ name
+        , "  default: " ++ show def
+        , "  manual: True"
+        , ""
+        ]
+
+-- | Flatten then evaluate at an assignment — the two primitives, composed the
+-- way callers do. Deliberately not via 'flattenDeps': that convenience pins the
+-- assignment to the declared defaults, which is the one thing some of these
+-- tests need to vary.
+depsAtSrc :: FlagAssignment -> String -> IO [(String, VersionSet)]
+depsAtSrc flags src = do
+    gpd <- gpdOf src
+    pure
+        [ (unPackageName n, vs)
+        | (n, vs) <- Map.toList (depsAt flags (componentDeps testPlatform testCompiler gpd))
+        ]
+
+-- | The names of the dependencies active at an assignment, sorted.
+namesAt :: FlagAssignment -> String -> IO [String]
+namesAt flags src = map fst <$> depsAtSrc flags src
+
+assign :: [(String, Bool)] -> FlagAssignment
+assign fs = mkFlagAssignment [(mkFlagName n, b) | (n, b) <- fs]
+
+-- --------------------------------------------------------------------------
+-- Tests
+-- --------------------------------------------------------------------------
+
+tests :: TestTree
+tests =
+    testGroup
+        "Bridge.Cabal.Flatten"
+        [ testGroup "components" componentTests
+        , testGroup "environment (resolved at flatten time)" envTests
+        , testGroup "flags (resolved at depsAt time)" flagTests
+        , testGroup "merging" mergeTests
+        ]
+
+componentTests :: [TestTree]
+componentTests =
+    [ testCase "unconditional library deps" $ do
+        names <-
+            namesAt (assign []) . pkg $
+                unlines
+                    [ "library"
+                    , "  build-depends: base, containers"
+                    ]
+        names @?= ["base", "containers"]
+    , testCase "sub-libraries and executables contribute" $ do
+        names <-
+            namesAt (assign []) . pkg $
+                unlines
+                    [ "library"
+                    , "  build-depends: from-lib"
+                    , ""
+                    , "library internal"
+                    , "  build-depends: from-sublib"
+                    , ""
+                    , "executable exe"
+                    , "  main-is: Main.hs"
+                    , "  build-depends: from-exe"
+                    ]
+        names @?= ["from-exe", "from-lib", "from-sublib"]
+    , -- componentDeps documents test-suites, benchmarks and foreign libraries as
+      -- intentionally excluded: a solve for a build plan should not drag in a
+      -- package's own test dependencies.
+      testCase "test-suites and benchmarks do not contribute" $ do
+        names <-
+            namesAt (assign []) . pkg $
+                unlines
+                    [ "library"
+                    , "  build-depends: from-lib"
+                    , ""
+                    , "test-suite spec"
+                    , "  type: exitcode-stdio-1.0"
+                    , "  main-is: Spec.hs"
+                    , "  build-depends: from-test"
+                    , ""
+                    , "benchmark bench"
+                    , "  type: exitcode-stdio-1.0"
+                    , "  main-is: Bench.hs"
+                    , "  build-depends: from-bench"
+                    ]
+        names @?= ["from-lib"]
+    , testCase "a package with no components has no deps" $ do
+        names <- namesAt (assign []) (pkg "")
+        names @?= []
+    ]
+
+envTests :: [TestTree]
+envTests =
+    [ testCase "os() is resolved against the platform" $ do
+        names <-
+            namesAt (assign []) . pkg $
+                unlines
+                    [ "library"
+                    , "  build-depends: base"
+                    , "  if os(windows)"
+                    , "    build-depends: Win32"
+                    , "  else"
+                    , "    build-depends: unix"
+                    ]
+        names @?= ["base", "unix"]
+    , testCase "arch() is resolved against the platform" $ do
+        names <-
+            namesAt (assign []) . pkg $
+                unlines
+                    [ "library"
+                    , "  if arch(x86_64)"
+                    , "    build-depends: wide"
+                    , "  else"
+                    , "    build-depends: narrow"
+                    ]
+        names @?= ["wide"]
+    , testCase "impl() is resolved against the compiler version" $ do
+        names <-
+            namesAt (assign []) . pkg $
+                unlines
+                    [ "library"
+                    , "  if impl(ghc >= 9.0)"
+                    , "    build-depends: modern"
+                    , "  if impl(ghc < 9.0)"
+                    , "    build-depends: ancient"
+                    , "  if impl(ghcjs)"
+                    , "    build-depends: jsbits"
+                    ]
+        names @?= ["modern"]
+    , -- The point of resolving the environment at flatten time: nothing but
+      -- flags survives into a guard, so 'depsAt' needs no platform or compiler.
+      testCase "environment guards leave no free variables behind" $ do
+        gpd <-
+            gpdOf . pkg $
+                unlines
+                    [ "library"
+                    , "  build-depends: base"
+                    , "  if os(windows) && arch(x86_64)"
+                    , "    build-depends: Win32"
+                    , "  else"
+                    , "    build-depends: unix"
+                    ]
+        map fst (componentDeps testPlatform testCompiler gpd)
+            @?= [Lit True, Lit False, Lit True]
+    ]
+
+flagTests :: [TestTree]
+flagTests =
+    [ testCase "a flag guard admits deps only when the flag is True" $ do
+        let src =
+                pkg $
+                    flag "fast" False
+                        ++ unlines
+                            [ "library"
+                            , "  build-depends: base"
+                            , "  if flag(fast)"
+                            , "    build-depends: speedy"
+                            ]
+        onT <- namesAt (assign [("fast", True)]) src
+        onF <- namesAt (assign [("fast", False)]) src
+        onT @?= ["base", "speedy"]
+        onF @?= ["base"]
+    , testCase "the else branch is taken when the flag is False" $ do
+        let src =
+                pkg $
+                    flag "fast" False
+                        ++ unlines
+                            [ "library"
+                            , "  if flag(fast)"
+                            , "    build-depends: speedy"
+                            , "  else"
+                            , "    build-depends: slow"
+                            ]
+        onT <- namesAt (assign [("fast", True)]) src
+        onF <- namesAt (assign [("fast", False)]) src
+        onT @?= ["speedy"]
+        onF @?= ["slow"]
+    , testCase "nested guards conjoin: both flags must hold" $ do
+        let src =
+                pkg $
+                    flag "a" False
+                        ++ flag "b" False
+                        ++ unlines
+                            [ "library"
+                            , "  if flag(a)"
+                            , "    build-depends: outer"
+                            , "    if flag(b)"
+                            , "      build-depends: inner"
+                            ]
+        both <- namesAt (assign [("a", True), ("b", True)]) src
+        justA <- namesAt (assign [("a", True), ("b", False)]) src
+        justB <- namesAt (assign [("a", False), ("b", True)]) src
+        both @?= ["inner", "outer"]
+        justA @?= ["outer"]
+        justB @?= []
+    , testCase "a flag mixed with an environment condition still switches" $ do
+        let src =
+                pkg $
+                    flag "fast" False
+                        ++ unlines
+                            [ "library"
+                            , "  if flag(fast) && !os(windows)"
+                            , "    build-depends: speedy"
+                            ]
+        onT <- namesAt (assign [("fast", True)]) src
+        onF <- namesAt (assign [("fast", False)]) src
+        onT @?= ["speedy"]
+        onF @?= []
+    , -- 'depsAt' takes the assignment on trust: 'evalCond' reads an unassigned
+      -- flag as False rather than as its declared default, on the precondition
+      -- that the assignment is total over the declared flags. A partial map,
+      -- such as a cell's pins, would silently select the wrong branch.
+      testCase "depsAt takes the assignment on trust: unassigned reads False" $ do
+        let src =
+                pkg $
+                    flag "fast" True
+                        ++ unlines
+                            [ "library"
+                            , "  if flag(fast)"
+                            , "    build-depends: speedy"
+                            , "  else"
+                            , "    build-depends: slow"
+                            ]
+        partial <- namesAt (assign []) src -- NB: 'fast' defaults to True
+        total <- namesAt (assign [("fast", True)]) src
+        partial @?= ["slow"]
+        total @?= ["speedy"]
+    , -- Nothing in 'Flatten' completes a partial assignment — the caller does
+      -- (Bridge.Provider fills a cell's unpinned flags from the declared
+      -- defaults). 'defaultFlags' is the declared-default half of that rule, so
+      -- this pins the completion every caller has to agree with.
+      testCase "the declared defaults select the default branch" $ do
+        gpd <-
+            gpdOf . pkg $
+                flag "fast" True
+                    ++ unlines
+                        [ "library"
+                        , "  if flag(fast)"
+                        , "    build-depends: speedy"
+                        , "  else"
+                        , "    build-depends: slow"
+                        ]
+        let defaults = mkFlagAssignment (Map.toList (defaultFlags gpd))
+        map unPackageName (Map.keys (flattenDeps testPlatform testCompiler defaults gpd))
+            @?= ["speedy"]
+    , testCase "flags not mentioned by any guard are simply ignored" $ do
+        let src =
+                pkg $
+                    flag "unused" False
+                        ++ unlines
+                            [ "library"
+                            , "  build-depends: base"
+                            ]
+        names <- namesAt (assign [("unused", True)]) src
+        names @?= ["base"]
+    ]
+
+mergeTests :: [TestTree]
+mergeTests =
+    [ testCase "two constraints on one package intersect" $ do
+        deps <-
+            depsAtSrc (assign []) . pkg $
+                unlines
+                    [ "library"
+                    , "  build-depends: base >= 4"
+                    , ""
+                    , "executable exe"
+                    , "  main-is: Main.hs"
+                    , "  build-depends: base < 5"
+                    ]
+        deps
+            @?= [ ( "base"
+                  , fromVersionRange
+                        ( intersectVersionRanges
+                            (orLaterVersion (mkVersion [4]))
+                            (earlierVersion (mkVersion [5]))
+                        )
+                  )
+                ]
+    , testCase "a guarded constraint narrows the unguarded one" $ do
+        let src =
+                pkg $
+                    flag "strict" False
+                        ++ unlines
+                            [ "library"
+                            , "  build-depends: base >= 4"
+                            , "  if flag(strict)"
+                            , "    build-depends: base < 5"
+                            ]
+        loose <- depsAtSrc (assign [("strict", False)]) src
+        tight <- depsAtSrc (assign [("strict", True)]) src
+        loose @?= [("base", fromVersionRange (orLaterVersion (mkVersion [4])))]
+        tight
+            @?= [ ( "base"
+                  , fromVersionRange
+                        ( intersectVersionRanges
+                            (orLaterVersion (mkVersion [4]))
+                            (earlierVersion (mkVersion [5]))
+                        )
+                  )
+                ]
+    , -- 'componentDeps' is a pure flatten and 'depsAt' a pure evaluation, so
+      -- one flattened tree can be evaluated at many assignments, which a
+      -- solver that searches the flags needs.
+      testCase "one flatten, many assignments" $ do
+        gpd <-
+            gpdOf . pkg $
+                flag "a" False
+                    ++ unlines
+                        [ "library"
+                        , "  if flag(a)"
+                        , "    build-depends: yes-dep"
+                        , "  else"
+                        , "    build-depends: no-dep"
+                        ]
+        let guarded = componentDeps testPlatform testCompiler gpd
+            at fs = map unPackageName (Map.keys (depsAt (assign fs) guarded))
+        at [("a", True)] @?= ["yes-dep"]
+        at [("a", False)] @?= ["no-dep"]
+    ]

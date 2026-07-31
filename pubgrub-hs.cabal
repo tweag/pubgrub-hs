@@ -17,9 +17,7 @@ library
     exposed-modules:
         PubGrub
         PubGrub.Incompatibility
-        PubGrub.Index
         PubGrub.Index.PreInstalled
-        PubGrub.Index.SourcePackage
         PubGrub.InstanceSet
         PubGrub.InstanceSet.SourceCell
         PubGrub.Pretty
@@ -45,13 +43,12 @@ library bridge
     visibility:         private
     hs-source-dirs:     bridge
     exposed-modules:
+        Bridge.Cabal.Flatten
         Bridge.Hackage
         Bridge.Hackage.HttpClient
         Bridge.Hackage.Unlifted
-        Bridge.Instances
         Bridge.Provider
     other-modules:
-        Bridge.Cabal.Flatten
         Bridge.Cabal.InstalledPkg
         Bridge.Installed
     build-depends:
@@ -99,13 +96,16 @@ test-suite pubgrub-hs-test
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
     other-modules:
+        FlattenSpec
         InstanceSetSpec
         PaperSpec
         SolverSpec
         VersionSetSpec
     build-depends:
         , pubgrub-hs
+        , pubgrub-hs:bridge
         , base
+        , bytestring
         , Cabal-syntax
         , co-log
         , containers

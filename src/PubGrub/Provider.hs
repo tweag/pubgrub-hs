@@ -7,15 +7,21 @@ import           PubGrub.InstanceSet            (Instance, InstanceSet)
 
 
 
--- | The seam between the Cabal domain ('PubGrub.InstanceSet.Index',
--- 'PubGrub.InstanceSet.SourcePackage', …) and the solver, which only ever sees
--- package names, instances and incompatibilities. The provider owns the
--- instance domain: it enumerates each package's instances from the index (one
--- per pre-installed unit, one per buildable total flag assignment of each
--- source version), evaluates the conditional dependencies under each
--- instance's flag assignment, and translates the results — plus user
--- constraints — into incompatibilities over instance sets. Data flows one way:
--- the provider /writes/ incompatibilities and never reads the solver's store.
+-- | The seam between the Cabal domain (a package index, @.cabal@ files, flags)
+-- and the solver, which only ever sees package names, instances and
+-- incompatibilities. This callback /is/ the seam: there is deliberately no
+-- neutral problem type handed over up front, because materialising one would
+-- mean reading every candidate's @.cabal@ — including the all-but-one that get
+-- discarded.
+--
+-- The provider owns the instance domain, but cannot /enumerate/ it: an
+-- 'InstanceSet' is symbolic (version ranges × flag pins), and a package's
+-- source instances are one per total flag assignment of each version. So it
+-- works the other way round: from the offered set, pick one instance the set
+-- admits, evaluate that version's conditional dependencies under the
+-- assignment it fixes, and translate the results into incompatibilities over
+-- instance sets. Data flows one way: the provider /writes/ incompatibilities
+-- and never reads the solver's store.
 --
 -- 'expand' makes the choice ("newest", "prefer installed", flag defaults) and
 -- reports its consequences in one step, so the solver never holds one without

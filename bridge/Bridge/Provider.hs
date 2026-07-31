@@ -16,69 +16,73 @@ module Bridge.Provider
     ( withProvider
     , rootName
     , rootInstance
-    , syntheticRoot
     ) where
 
-import           Bridge.Cabal.InstalledPkg                (getInstalledPackages)
-import           Bridge.Hackage                           (IndexHandle (..),
-                                                           withHackageIndex)
-import           Bridge.Installed                         (InstalledDb,
-                                                           installedInstancesOf,
-                                                           mkInstalledDb,
-                                                           unitInstance)
-import           Bridge.Instances                         (toSourcePackage)
-import           Colog                                    (WithLog, logMsg)
-import           Data.List                                (sortOn)
-import qualified Data.List.NonEmpty                       as NE
-import qualified Data.Map.Strict                          as Map
-import           Data.Maybe                               (fromMaybe)
-import           Data.Ord                                 (Down (..))
-import qualified Data.Set                                 as Set
-import           Data.Text                                (Text)
-import qualified Data.Text                                as T
-import           Distribution.Compiler                    (CompilerInfo)
-import           Distribution.Pretty                      (prettyShow)
-import           Distribution.Simple.Compiler             (compilerInfo)
-import           Distribution.Simple.GHC                  (configure)
-import           Distribution.Simple.Program.Db           (defaultProgramDb)
-import           Distribution.System                      (Platform,
-                                                           buildPlatform)
-import           Distribution.Types.Condition             (Condition (..))
-import           Distribution.Types.Flag                  (mkFlagAssignment)
-import           Distribution.Types.PackageName           (PackageName,
-                                                           mkPackageName)
-import           Distribution.Types.Version               (Version, mkVersion)
-import qualified Distribution.Verbosity                   as Verbosity
-import           Hackage.Security.Client.Repository.Cache (Cache)
-import           Network.HTTP.Client                      (Manager)
-import           PubGrub.Incompatibility                  (Incompatibility,
-                                                           fromDependency,
-                                                           noInstances)
-import           PubGrub.Index.PreInstalled               (PreInstalledPackage (..))
-import           PubGrub.InstanceSet                      (HasVersion (..),
-                                                           Instance (..),
-                                                           InstanceSet (..),
-                                                           memberInstance,
-                                                           singletonInstance)
-import           PubGrub.InstanceSet.SourceCell           (SourceCell (..))
+import           Bridge.Cabal.Flatten                         (flattenDeps)
+import           Bridge.Cabal.InstalledPkg                    (getInstalledPackages)
+import           Bridge.Hackage                               (IndexHandle (..),
+                                                               withHackageIndex)
+import           Bridge.Installed                             (InstalledDb (..),
+                                                               installedInstancesOf,
+                                                               mkInstalledDb,
+                                                               toPreInstalled,
+                                                               unitInstance)
+import           Colog                                        (WithLog, logMsg)
+import           Data.List                                    (sortOn)
+import qualified Data.List.NonEmpty                           as NE
+import qualified Data.Map.Strict                              as Map
+import           Data.Maybe                                   (fromMaybe,
+                                                               listToMaybe)
+import           Data.Ord                                     (Down (..))
+import qualified Data.Set                                     as Set
+import           Data.Text                                    (Text)
+import qualified Data.Text                                    as T
+import           Distribution.Compiler                        (CompilerInfo)
+import           Distribution.Pretty                          (prettyShow)
+import           Distribution.Simple.Compiler                 (compilerInfo)
+import           Distribution.Simple.GHC                      (configure)
+import           Distribution.Simple.Program.Db               (defaultProgramDb)
+import           Distribution.System                          (Platform,
+                                                               buildPlatform)
+import           Distribution.Types.Flag                      (PackageFlag (..),
+                                                               mkFlagAssignment)
+import           Distribution.Types.PackageName               (PackageName,
+                                                               mkPackageName)
+import           Distribution.Types.Version                   (Version,
+                                                               mkVersion)
+import qualified Distribution.Verbosity                       as Verbosity
+import           Hackage.Security.Client.Repository.Cache     (Cache)
+import           Network.HTTP.Client                          (Manager)
+import           PubGrub.Incompatibility                      (Incompatibility,
+                                                               fromDependency)
+import           PubGrub.Index.PreInstalled                   (PreInstalledPackage (..))
+import           PubGrub.InstanceSet                          (HasVersion (..),
+                                                               Instance (..),
+                                                               InstanceSet (..),
+                                                               memberInstance,
+                                                               singletonInstance,
+                                                               singletonUsePreInstalled)
+import           PubGrub.InstanceSet.SourceCell               (SourceCell (..))
 
-import           PubGrub.Index.SourcePackage              (Dependency (..),
-                                                           SourcePackage (..))
-import           PubGrub.Provider                         (Provider (..))
-import           PubGrub.VersionSet                       (VersionSet, contains)
-import           UnliftIO                                 (MonadIO,
-                                                           MonadUnliftIO,
-                                                           liftIO)
+import           Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
+import           PubGrub.Provider                             (Provider (..))
+import           PubGrub.VersionSet                           (VersionSet,
+                                                               contains)
+import qualified PubGrub.VersionSet                           as VersionSet
+import           UnliftIO                                     (MonadIO,
+                                                               MonadUnliftIO,
+                                                               liftIO)
 
 -- | Open the Hackage index and the compiler's installed world, build a
 -- 'Provider', and run @act@ with it. The whole solve must run inside @act@.
 --
--- It takes the root's 'SourcePackage' ('syntheticRoot') because the solver
--- asks the provider to expand the root like any other package, and the root
--- has no index entry to read its dependencies from.
+-- It takes the root's target constraints ("solve for these packages in these
+-- ranges") because the solver asks the provider to expand the root like any
+-- other package, and the root has no index entry to read its dependencies
+-- from.
 withProvider
     :: (MonadUnliftIO m, WithLog env Text m)
-    => Cache -> Manager -> SourcePackage -> (Provider m -> m a) -> m a
+    => Cache -> Manager -> [(PackageName, VersionSet)] -> (Provider m -> m a) -> m a
 withProvider cache manager root act =
     withHackageIndex cache manager $ \handle -> do
         (compiler, mPlatform, programDb) <-
@@ -105,20 +109,7 @@ rootName = mkPackageName "\0root"
 rootInstance :: Instance
 rootInstance = sourceInstance (mkVersion [0])
 
--- | The root package built from target constraints ("solve for these packages
--- in these ranges"). It has no index entry, so 'mkExpand' answers for it from
--- this record rather than looking it up; hand it to 'withProvider'.
-syntheticRoot :: [(PackageName, VersionSet)] -> SourcePackage
-syntheticRoot targets =
-    SourcePackage
-        (version rootInstance)
-        []
-        [Dependency n vs (Lit True) | (n, vs) <- targets]
-        (Lit True)
-
 -- | A source instance: a version under the default (empty) flag assignment.
--- Dependencies are not carried — 'mkExpand' looks them up on demand — so
--- enumerating a package's instances never parses a @.cabal@.
 sourceInstance :: Version -> Instance
 sourceInstance v = BuildSource v (mkFlagAssignment [])
 
@@ -130,8 +121,8 @@ mkExpand
     -> Platform
     -> CompilerInfo
     -> IndexHandle
-    -> SourcePackage
-    -- ^ the synthetic root, which is not in the index
+    -> [(PackageName, VersionSet)]
+    -- ^ the synthetic root's targets, which are not in the index
     -> PackageName
     -> InstanceSet
     -> m (Maybe (Instance, [Incompatibility]))
@@ -139,61 +130,74 @@ mkExpand installedDb platform cInfo handle root = expand'
   where
     -- An 'InstanceSet' is a symbolic description (version ranges plus flag
     -- pins), not a container: membership is decidable but it cannot be
-    -- enumerated. So enumerate the package's own instances — cheaply, from the
-    -- installed db and the index's version map, without parsing any @.cabal@ —
-    -- and keep those the offered set admits.
-    expand' pn range =
-        case filter (`memberInstance` range) (universeOf pn) of
-            [] -> pure Nothing
-            chosen : _ -> do
-                incs <- consequencesOf pn chosen
-                pure (Just (chosen, incs))
+    -- enumerated. So walk the package's own candidates, installed units first
+    -- and then source (version, cell) pairs newest first, and commit to the
+    -- first the offered set admits. A source candidate's @.cabal@ is parsed
+    -- only when it is tried.
+    expand' :: PackageName -> InstanceSet -> m (Maybe (Instance, [Incompatibility]))
+    expand' pn range
+            | pn == rootName
+            , memberInstance rootInstance range
+            = let incs = depIncs pn rootInstance root
+            in pure (Just (rootInstance, incs))
+    expand' pn range = do
+        let installed = [toPreInstalled u | u <- Map.findWithDefault [] pn (idbByName installedDb)]
+            filtered = filter (`Set.member` isInstalled range) installed
+            sorted = sortOn (Down . version) filtered
+        case listToMaybe sorted of
+            Just chosen -> do
+                incs <- consequencesOfUsePreInstalled pn chosen
+                pure (Just (UsePreInstalled chosen, incs))
+            Nothing -> go filtered
 
-    -- Candidates for @p@, best first: installed units newest first, then source
-    -- releases newest first. Ordering within each group rather than by version
-    -- overall keeps the installed world pinned: Hackage can carry a newer
-    -- @base@ than the compiler's own, and the compiler cannot build it.
-    universeOf pn
-        | pn == rootName = [rootInstance]
-        | otherwise =
-             sortOn (Down . version) (installedInstancesOf installedDb pn)
-                ++ sortOn (Down . version) (map sourceInstance (versionsOf pn))
+                where
+                    filtered = [ (v, cell)
+                        | v <- sortOn Down (versionsOf pn)
+                        , cell <- filter (\c -> scVersionSet c `VersionSet.contains` v) (isSource range)
+                        ]
 
-    consequencesOf :: PackageName -> Instance -> m [Incompatibility]
-    consequencesOf pn chosen = case chosen of
-        -- Installed unit: its dependencies name exact units, each pinning its
-        -- package to that one instance.
-        UsePreInstalled pip ->
+                    go [] = pure Nothing
+                    go ((v, sc):rest) = do
+                        -- Source release: read and flatten its .cabal on demand.
+                        result <- liftIO (ihLookupGPD handle pn v)
+                        case result of
+                            -- A .cabal that fails to parse: warn and skip the
+                            -- version. If every candidate fails, the solver
+                            -- reports that no instance is left.
+                            Left err -> do
+                                logMsg
+                                    ( T.pack
+                                        ( "warning: ignoring "
+                                            ++ prettyShow pn
+                                            ++ "-"
+                                            ++ prettyShow v
+                                            ++ " (unparseable .cabal: "
+                                            ++ show err
+                                            ++ ")"
+                                        )
+                                    )
+                                go rest
+                            Right gpd -> do
+                                let packageFlags = genPackageFlags gpd
+                                    flags = mkFlagAssignment
+                                        [ (flagName f, Map.findWithDefault (flagDefault f) (flagName f) (scFlags sc))
+                                        | f <- packageFlags ]
+                                    inst = BuildSource v flags
+                                if memberInstance inst range
+                                -- The guards are evaluated at @flags@ — the same
+                                -- assignment @inst@ pins — so the decision and the
+                                -- incompatibilities it entails cannot disagree.
+                                then let incs = depIncs pn inst (Map.toList (flattenDeps platform cInfo flags gpd))
+                                     in pure $ Just (inst, incs)
+                                else
+                                    go rest
+
+    consequencesOfUsePreInstalled pn pip =
             pure
-                [ fromDependency pn (singletonInstance chosen) (depName, singletonInstance depInst)
+                [ fromDependency pn (singletonUsePreInstalled pip) (depName, singletonInstance depInst)
                 | uid <- pipDependencies pip
                 , Just (depName, depInst) <- [unitInstance installedDb uid]
                 ]
-        -- Synthetic root: the one package whose dependencies come from the
-        -- caller instead of from the index.
-        BuildSource _ _
-            | pn == rootName -> pure (depIncs pn chosen (sourcePackageDeps root))
-        -- Source release: read and flatten its .cabal on demand.
-        BuildSource _ _ -> do
-            result <- liftIO (ihLookupGPD handle pn (version chosen))
-            case result of
-                Right gpd ->
-                    pure (depIncs pn chosen (sourcePackageDeps (toSourcePackage platform cInfo gpd)))
-                -- A .cabal that fails to parse: warn, and ban just this
-                -- instance so the solver backtracks to another version.
-                Left err -> do
-                    logMsg
-                        ( T.pack
-                            ( "warning: ignoring "
-                                ++ prettyShow pn
-                                ++ "-"
-                                ++ prettyShow (version chosen)
-                                ++ " (unparseable .cabal: "
-                                ++ show err
-                                ++ ")"
-                            )
-                        )
-                    pure [noInstances pn (singletonInstance chosen)]
 
     depIncs :: PackageName -> Instance -> [(PackageName, VersionSet)] -> [Incompatibility]
     depIncs pn chosen deps =
@@ -225,8 +229,3 @@ mkExpand installedDb platform cInfo handle root = expand'
             }
 
     versionsOf d = maybe [] NE.toList (Map.lookup d (ihVersions handle))
-
--- | The (name, range) dependencies of a source package. Their conditions are
--- ignored: 'toSourcePackage' makes every dependency unconditional.
-sourcePackageDeps :: SourcePackage -> [(PackageName, VersionSet)]
-sourcePackageDeps sp = [(d, vs) | Dependency d vs _ <- spDependencies sp]

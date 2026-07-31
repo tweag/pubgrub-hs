@@ -19,7 +19,7 @@ module PubGrub.VersionSet (
     intervals,
 ) where
 
-import           Data.Ord                           (comparing)
+import           Data.Ord                           (Down (..), comparing)
 import           Distribution.Types.VersionInterval (Bound (..),
                                                      LowerBound (..),
                                                      UpperBound (..),
@@ -37,20 +37,53 @@ import           Distribution.Version               (Version, VersionRange,
                                                      unionVersionRanges)
 import           PubGrub.SetOps                     (SetOps (..))
 
+
+-- | How high a set reaches: the upper bound of its highest interval.
+-- 'Unbounded' is deliberately the /last/ constructor — a set with no upper
+-- bound reaches higher than any bounded one. This is why it is not just
+-- @Maybe (Version, Bool)@, which would sort unbounded lowest.
+data Reach
+    = ReachesTo Version Bool  -- ^ bound version, and whether it is inclusive
+    | Unbounded
+    deriving stock (Eq, Ord, Show)
+
+-- | Where a set starts: the lower bound of its lowest interval, ordered so
+-- that @>=1@ sits below @>1@. A /smaller/ 'Start' means a wider set.
+data Start = StartsAt Version Bool  -- ^ bound version, and whether it is exclusive
+    deriving stock (Eq, Ord, Show)
+
 newtype VersionSet = VersionSet [VersionInterval]
     deriving stock (Eq, Show)
 
--- | Cabal's 'VersionInterval' has no 'Ord', so order by the canonical
--- interval list mapped onto orderable keys. The particular order is
--- arbitrary; it only has to be total, lawful, and consistent with 'Eq'
--- (it is: the representation is canonical and the key is injective).
+-- | Order by how high the set reaches, then by how wide it is, then by the
+-- full interval list — the third coordinate is arbitrary and exists only to
+-- keep the order total and consistent with the derived 'Eq' (two distinct sets
+-- can share a reach and a start: @[1,2) ∪ [3,4)@ and @[1,4)@).
+--
+-- The empty set has neither reach nor start; @Nothing@ sorts below every
+-- @Just@, so it is the minimum.
 instance Ord VersionSet where
-    compare = comparing (map key . intervals)
+    compare = comparing sortKey
       where
-        key (VersionInterval (LowerBound lv lb) ub) =
-            (lv, lb == InclusiveBound, upperKey ub)
-        upperKey NoUpperBound       = Nothing
-        upperKey (UpperBound uv ub) = Just (uv, ub == InclusiveBound)
+        sortKey vs =
+            ( reachOf vs
+            , Down (startOf vs)               -- wider (lower start) ranks higher
+            , map shapeKey (intervals vs)
+            )
+
+        reachOf vs = case reverse (intervals vs) of
+            VersionInterval _ ub : _ -> Just (upperKey ub)
+            []                       -> Nothing
+
+        startOf vs = case intervals vs of
+            VersionInterval lb _ : _ -> Just (lowerKey lb)
+            []                       -> Nothing
+
+        upperKey NoUpperBound     = Unbounded
+        upperKey (UpperBound v b) = ReachesTo v (b == InclusiveBound)
+        lowerKey (LowerBound v b) = StartsAt v (b == ExclusiveBound)
+
+        shapeKey (VersionInterval lb ub) = (lowerKey lb, upperKey ub)
 
 -- | The raw canonical interval list (for testing / reporting).
 intervals :: VersionSet -> [VersionInterval]

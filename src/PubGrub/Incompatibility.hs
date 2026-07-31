@@ -105,7 +105,7 @@ noInstances p s = Incompatibility (Map.singleton p (Positive s)) (CauseNoInstanc
 
 -- | Dependency incompatibility: @package@ in @instances@ requires @dep@ in
 -- @depSet@ — encoded @{ package: Positive instances, dep: Negative depSet }@.
--- The instance sets are minted by the provider (a 'PubGrub.InstanceSet.Dependency'
+-- The instance sets are minted by the provider (a @.cabal@ dependency
 -- constrains versions; the provider widens that to instances). If @depSet@ is
 -- empty the dependency is unsatisfiable and the entry would be ⊤, so it is
 -- dropped, leaving a unit ban on @package@.

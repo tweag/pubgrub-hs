@@ -10,7 +10,6 @@ import           Distribution.Types.Flag        (FlagAssignment, FlagName,
                                                  unFlagAssignment)
 import           Distribution.Types.Version     (Version)
 import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
-import           PubGrub.Index.SourcePackage    (SourcePackage (..))
 import           PubGrub.InstanceSet.SourceCell (SourceCell (..),
                                                  differenceCell, intersectCell,
                                                  mergeCells, nullCell,
@@ -19,17 +18,14 @@ import           PubGrub.Pretty                 (Pretty (..))
 import           PubGrub.SetOps                 (SetOps (..))
 import qualified PubGrub.VersionSet             as VersionSet
 
--- | Both kinds of index entries carry a version, and so does an 'Instance' —
--- this is what lets the 'Provider' turn a 'Dependency'\'s 'VersionSet' into
--- the corresponding set of instances.
+-- | A pre-installed unit carries a version, and so does an 'Instance' — this is
+-- what lets the 'PubGrub.Provider.Provider' turn a @.cabal@ dependency's
+-- 'PubGrub.VersionSet.VersionSet' into the corresponding set of instances.
 class HasVersion a where
     version :: a -> Version
 
 instance HasVersion PreInstalledPackage where
     version = pipVersion
-
-instance HasVersion SourcePackage where
-    version = spVersion
 
 -- Package Instance ------------------------------------------------------------
 
@@ -108,9 +104,15 @@ emptyInstanceSet = InstanceSet { isInstalled = Set.empty, isSource = [] }
 -- so it is a singleton only if @fa@ is total over the package's declared flags:
 -- a cell denotes every value of a flag it leaves unpinned.
 singletonInstance :: Instance -> InstanceSet
-singletonInstance (UsePreInstalled pip) =
+singletonInstance (UsePreInstalled pip) = singletonUsePreInstalled pip
+singletonInstance (BuildSource v flags) = singletonBuildSource v flags
+
+singletonUsePreInstalled :: PreInstalledPackage -> InstanceSet
+singletonUsePreInstalled pip =
     InstanceSet { isInstalled = Set.singleton pip, isSource = [] }
-singletonInstance (BuildSource v flags) =
+
+singletonBuildSource :: Version -> FlagAssignment -> InstanceSet
+singletonBuildSource v flags =
     InstanceSet { isInstalled = Set.empty, isSource = [singletonCell v flags] }
 
 -- | Does the set contain this instance?

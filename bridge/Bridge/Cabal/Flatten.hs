@@ -13,11 +13,13 @@ module Bridge.Cabal.Flatten (
     componentDeps,
     depsAt,
     flattenDeps,
+    defaultFlags,
 ) where
 
 import           Data.Map.Strict                              (Map)
 import qualified Data.Map.Strict                              as Map
-import           Data.Maybe                                   (maybeToList)
+import           Data.Maybe                                   (fromMaybe,
+                                                               maybeToList)
 import           Distribution.Compiler                        (CompilerId (..),
                                                                CompilerInfo,
                                                                compilerInfoId)
@@ -31,9 +33,10 @@ import           Distribution.Types.ConfVar                   (ConfVar (..))
 import           Distribution.Types.Dependency                (Dependency,
                                                                depPkgName,
                                                                depVerRange)
-import           Distribution.Types.Flag                      (FlagName,
-                                                               flagDefault,
-                                                               flagName)
+import           Distribution.Types.Flag                      (FlagAssignment,
+                                                               FlagName,
+                                                               PackageFlag (..),
+                                                               lookupFlagAssignment)
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
 import           Distribution.Types.PackageName               (PackageName)
 import           Distribution.Version                         (withinRange)
@@ -59,10 +62,10 @@ envConfVar (Platform arch os) compiler = \case
 -- | Evaluate a flag-only condition. A flag not present in the assignment
 -- defaults to 'False' (guards only mention declared flags, so a total
 -- assignment always covers them).
-evalCond :: Map FlagName Bool -> Condition FlagName -> Bool
+evalCond :: FlagAssignment -> Condition FlagName -> Bool
 evalCond flags = go
   where
-    go (Var f)    = Map.findWithDefault False f flags
+    go (Var f)    = fromMaybe False (lookupFlagAssignment f flags)
     go (Lit b)    = b
     go (CNot c)   = not (go c)
     go (COr a b)  = go a || go b
@@ -99,7 +102,7 @@ componentDeps platform compiler gpd =
 
 -- | Evaluate the guards at a concrete flag assignment and merge the resulting
 -- dependency ranges (intersecting duplicate constraints on the same package).
-depsAt :: Map FlagName Bool -> GuardedDeps -> Map PackageName VersionSet
+depsAt :: FlagAssignment -> GuardedDeps -> Map PackageName VersionSet
 depsAt flags guarded =
     Map.fromListWith
         VS.intersectionVersionSet
@@ -115,6 +118,6 @@ defaultFlags gpd = Map.fromList [(flagName f, flagDefault f) | f <- genPackageFl
 
 -- | Dependencies of a package version at its /default/ flag values, as a
 -- version-set map. (Convenience: 'depsAt' the defaults over 'componentDeps'.)
-flattenDeps :: Platform -> CompilerInfo -> GenericPackageDescription -> Map PackageName VersionSet
-flattenDeps platform compiler gpd =
-    depsAt (defaultFlags gpd) (componentDeps platform compiler gpd)
+flattenDeps :: Platform -> CompilerInfo -> FlagAssignment -> GenericPackageDescription -> Map PackageName VersionSet
+flattenDeps platform compiler flags gpd =
+    depsAt flags (componentDeps platform compiler gpd)
