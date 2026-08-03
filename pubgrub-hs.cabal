@@ -74,6 +74,10 @@ library bridge
 
 executable pubgrub
     import:             warnings
+    -- -rtsopts so a run can be asked for GC statistics (+RTS -s) or a heap
+    -- profile without rebuilding; peak residency is one of the two things this
+    -- project exists to measure.
+    ghc-options:        -rtsopts
     hs-source-dirs:     app
     main-is:            Main.hs
     build-depends:

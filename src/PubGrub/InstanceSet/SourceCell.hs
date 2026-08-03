@@ -139,10 +139,16 @@ nullCell sc = isEmpty (scVersionSet sc)
 -- Sufficient, not necessary: @(V, ∅)@ is also covered by
 -- @(V, f↦True) ∨ (V, f↦False)@, but that is a property of the disjunction
 -- rather than of either cell, and 'pruneCells' does not look for it.
+--
+-- The pin test comes first deliberately: it is a submap check on maps of at most
+-- a handful of flags, while the version-set test is a 'difference' plus an
+-- emptiness check, and every 'VersionSet' operation currently round-trips through
+-- Cabal's 'Distribution.Types.VersionRange.VersionRange' syntax. 'pruneCells' runs
+-- this for every pair it keeps, so the order of the conjunction is not a detail.
 subsumes :: SourceCell -> SourceCell -> Bool
 subsumes a b =
-    scVersionSet b `isSubsetOf` scVersionSet a
-        && scFlags a `Map.isSubmapOf` scFlags b
+    scFlags a `Map.isSubmapOf` scFlags b
+        && scVersionSet b `isSubsetOf` scVersionSet a
 
 -- | Drop cells that another cell of the same disjunction already covers, and
 -- put what survives in a deterministic order.
