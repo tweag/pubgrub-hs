@@ -18,9 +18,12 @@ module Bridge.Provider
     , rootInstance
     ) where
 
-import           Bridge.Cabal.Flatten                         (flattenDeps)
+import           Bridge.Cabal.Flatten                         (GuardedDeps,
+                                                               componentDeps,
+                                                               depsAt)
 import           Bridge.Cabal.InstalledPkg                    (getInstalledPackages)
 import           Bridge.Hackage                               (IndexHandle (..),
+                                                               ParseError,
                                                                withHackageIndex)
 import           Bridge.Installed                             (InstalledDb (..),
                                                                installedInstancesOf,
@@ -28,6 +31,9 @@ import           Bridge.Installed                             (InstalledDb (..),
                                                                toPreInstalled,
                                                                unitInstance)
 import           Colog                                        (WithLog, logMsg)
+import           Data.IORef                                   (atomicModifyIORef',
+                                                               newIORef,
+                                                               readIORef)
 import           Data.List                                    (sortOn)
 import qualified Data.List.NonEmpty                           as NE
 import qualified Data.Map.Strict                              as Map
@@ -92,16 +98,29 @@ withProvider cache manager root act =
         (compiler, mPlatform, programDb) <-
             liftIO $ configure Verbosity.normal Nothing Nothing defaultProgramDb
         installed <- liftIO $ getInstalledPackages Verbosity.normal compiler programDb
+        let platform = fromMaybe buildPlatform mPlatform
+            cInfo = compilerInfo compiler
+        (readRelease, lookupStats) <- liftIO (releaseReader platform cInfo handle)
         let provider =
                 Provider
                     ( mkExpand
                         (mkInstalledDb installed)
-                        (fromMaybe buildPlatform mPlatform)
-                        (compilerInfo compiler)
+                        (\pn v -> liftIO (readRelease pn v))
                         handle
                         root
                     )
-        act provider
+        result <- act provider
+        (parsed, reused) <- liftIO lookupStats
+        logMsg
+            ( T.pack
+                ( "read "
+                    ++ show parsed
+                    ++ " .cabal files, served "
+                    ++ show reused
+                    ++ " repeat lookups from cache"
+                )
+            )
+        pure result
 
 -- | The synthetic root package name, chosen so it cannot collide with a real
 -- Hackage package.
@@ -117,20 +136,72 @@ rootInstance = sourceInstance (mkVersion [0])
 sourceInstance :: Version -> Instance
 sourceInstance v = BuildSource v (mkFlagAssignment [])
 
+-- | What the provider needs from a release's description — and all it keeps.
+--
+-- Both components are independent of the flag assignment: the declared flags with
+-- their defaults, and the dependencies as flag-guarded groups with the fixed
+-- environment already resolved. So they are derived once per release and reused
+-- for every assignment tried against it.
+data Release = Release
+    { relFlags   :: [(FlagName, Bool)]
+    , relGuarded :: GuardedDeps
+    }
+
+-- | A memoising reader for 'Release', with a @(parsed, reused)@ count.
+--
+-- Do not memoise the 'GenericPackageDescription' instead. Retaining every
+-- description a solve touches cost 27.2 s and 904 MB on @pandoc@, against
+-- 3.7 s and 83 MB with no cache: each parse tree pins its slice of the index,
+-- and every major collection copies that live data. A 'Release' is a few
+-- hundred bytes and keeps nothing else alive.
+--
+-- The memo covers 'componentDeps' too, which walks the whole conditional tree
+-- and depends only on the release and the environment. It is not measurably
+-- faster, because a tar read and a parse are cheap next to the search. It is
+-- here so that the repeat count can be seen, and so that splitting the
+-- provider into pick and consequences would not read every candidate's
+-- description twice (@docs\/flags-semantics.md@ §8).
+--
+-- Parse failures are cached too: a malformed description is a stable fact
+-- about the index.
+releaseReader
+    :: Platform
+    -> CompilerInfo
+    -> IndexHandle
+    -> IO (PackageName -> Version -> IO (Either ParseError Release), IO (Int, Int))
+releaseReader platform cInfo handle = do
+    ref <- newIORef (Map.empty, 0 :: Int, 0 :: Int)
+    let readRelease pn v = do
+            (entries, _, _) <- readIORef ref
+            case Map.lookup (pn, v) entries of
+                Just hit -> do
+                    atomicModifyIORef' ref (\(es, p, reused) -> ((es, p, reused + 1), ()))
+                    pure hit
+                Nothing -> do
+                    result <- fmap reduce <$> ihLookupGPD handle pn v
+                    atomicModifyIORef' ref $ \(es, p, reused) ->
+                        ((Map.insert (pn, v) result es, p + 1, reused), ())
+                    pure result
+        reduce gpd =
+            Release
+                { relFlags = [(flagName f, flagDefault f) | f <- genPackageFlags gpd]
+                , relGuarded = componentDeps platform cInfo gpd
+                }
+    pure (readRelease, (\(_, p, reused) -> (p, reused)) <$> readIORef ref)
+
 -- | The provider's @expand@.
 mkExpand
     :: forall m env
      . (MonadIO m, WithLog env Text m)
     => InstalledDb
-    -> Platform
-    -> CompilerInfo
+    -> (PackageName -> Version -> m (Either ParseError Release))
     -> IndexHandle
     -> [(PackageName, VersionSet)]
     -- ^ the synthetic root's targets, which are not in the index
     -> PackageName
     -> InstanceSet
     -> m (Maybe (Instance, [Incompatibility]))
-mkExpand installedDb platform cInfo handle root = expand'
+mkExpand installedDb readRelease handle root = expand'
   where
     -- An 'InstanceSet' is a symbolic description (version ranges plus flag
     -- pins), not a container: membership is decidable but it cannot be
@@ -159,7 +230,7 @@ mkExpand installedDb platform cInfo handle root = expand'
                     -- per candidate assignment.
                     firstUsable [] = pure Nothing
                     firstUsable (v:rest) = do
-                        result <- liftIO (ihLookupGPD handle pn v)
+                        result <- readRelease pn v
                         case result of
                             -- A .cabal that fails to parse: warn and skip. The
                             -- release then drops out of the universe the solve
@@ -179,8 +250,8 @@ mkExpand installedDb platform cInfo handle root = expand'
                                         )
                                     )
                                 firstUsable rest
-                            Right gpd ->
-                                case listToMaybe (usableAssignments v gpd) of
+                            Right release ->
+                                case listToMaybe (usableAssignments v release) of
                                     Nothing -> firstUsable rest
                                     Just flags ->
                                         -- The guards are evaluated at @flags@ — the
@@ -188,7 +259,7 @@ mkExpand installedDb platform cInfo handle root = expand'
                                         -- decision and the incompatibilities it
                                         -- entails cannot disagree.
                                         let inst = BuildSource v flags
-                                            deps = Map.toList (flattenDeps platform cInfo flags gpd)
+                                            deps = Map.toList (depsAt flags (relGuarded release))
                                         in pure (Just (inst, depIncs pn inst deps))
 
                     -- The assignments this release could be built under, in
@@ -200,13 +271,13 @@ mkExpand installedDb platform cInfo handle root = expand'
                     -- admissibility depends on the assignment (@buildable: False@
                     -- under some flags): that is the open completeness obligation
                     -- O6 in @docs/flags-semantics.md@.
-                    usableAssignments v gpd =
+                    usableAssignments v release =
                         [ flags
                         | flags <- preferDefaults declared (map (assignmentFrom declared) cells)
                         , memberInstance (BuildSource v flags) range
                         ]
                       where
-                        declared = [(flagName f, flagDefault f) | f <- genPackageFlags gpd]
+                        declared = relFlags release
                         cells =
                             filter (\c -> scVersionSet c `VersionSet.contains` v) (isSource range)
 

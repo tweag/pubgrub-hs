@@ -568,6 +568,50 @@ wrongly Satisfied or Contradicted, allowed to be Inconclusive.
   correctness one.
 - **Sub-library and component-level flags** interact with §4.1's "components in
   scope"; deferred with the rung that introduces them.
+- **Whether to split the provider back into "pick" and "consequences".** Design
+  item, not a decision. The interface was two functions before it was merged into
+  one `expand`, and the reference implementation still is: `choose_version`
+  (policy) plus `get_dependencies` returning `Available | Unavailable(reason)`,
+  where the rejection path adds the "never select this" fact and **loops back to
+  propagation without deciding** (`references/pubgrub/src/provider.rs:91,119` and
+  `solver.rs:212`; the spec-level statement is `references/pubgrub.md:476`).
+
+  What it would buy, in the order that matters:
+
+  1. **O6's completeness half largely dissolves.** It decomposes into "the picker
+     returns some member of the offered set if one exists" — which is the
+     cell-completion lemma, already proved — plus an `Unavailable` path where *the
+     solver's loop* does the searching over admissibility, terminating because each
+     rejection adds an incompatibility that strictly shrinks the set. The obligation
+     stops being a delicate property of provider-internal code.
+  2. **Propagation runs between candidate attempts.** A provider looping internally
+     iterates against a snapshot of the offered set that its own discovery has just
+     invalidated; the solver, told about it, can narrow other packages' terms or
+     surface a conflict immediately.
+  3. **The reason becomes first-class.** `Incompatibility::custom_version(p, v,
+     reason)` carries an explanation. We have no equivalent, so an unusable release
+     can only appear in a proof as "no instances in range" — which is a deliverable
+     #1 problem, not a cosmetic one. **Folded into this item:** an `IncompatCause`
+     variant carrying the reason, and the report wording for it (§4.3).
+
+  Note what the merge's stated rationale — "the choice and its consequences travel
+  together, so the solver never holds one without the other" — actually requires:
+  *ordering*, not merging. The decision is recorded only after `Available`.
+
+  Costs. Our picker needs a total flag assignment and therefore the declared flags,
+  so unlike `choose_version` it must read the package description, and
+  `consequences` would read it again. That prerequisite is **already in place**:
+  `Bridge.Provider.releaseReader` memoises the reduced form each release needs (its
+  declared flags, and its dependencies as flag-guarded groups) for the duration of
+  a solve. Note it memoises the *reduced* form deliberately — retaining parsed
+  descriptions instead cost 27.2 s / 904 MB on `pandoc` against 3.7 s / 83 MB with
+  no cache at all. And
+  `Unavailable` must not become a place to hide what the picker should have
+  avoided: preferring defaults is policy and belongs in the picker (§5); only
+  genuine unusability belongs in `Unavailable`.
+
+  Schedule it with the buildability work item in §10, which it makes smaller rather
+  than larger.
 
 ## 9. Worked example: learning that a flag must leave its default
 

@@ -80,7 +80,11 @@ Current layout (4 cabal components):
 - `bridge/` — private library `bridge`. `Bridge/{Hackage,Installed,Provider}.hs`
   plus `Bridge/Cabal/{Flatten,InstalledPkg}.hs`: index reader, installed-db
   reader, flag-parametric `GenericPackageDescription` flattening, and the real
-  `Provider`.
+  `Provider`. `Provider.releaseReader` memoises, per release, only the *reduced*
+  form the provider needs (declared flags + flag-guarded deps) — never the parsed
+  description. Retaining those instead cost 27.2s / 904MB on `pandoc` against
+  3.7s / 83MB uncached: ~170 parse trees pinning their slices of the index is
+  enough live data to make every major GC copy it.
 - `app/Main.hs` — executable `pubgrub`: the CLI driver.
 - `test/` — `{VersionSet,InstanceSet,Solver,Paper,Flatten,FlagSolve}Spec.hs`.
 
