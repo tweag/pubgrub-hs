@@ -369,15 +369,25 @@ happens to declare.
   The first does **not** imply the second, because intrinsic admissibility is
   assignment-dependent (§1.5): a release with `if flag(f) buildable: False` and
   `f` defaulting to `True` has an admissible instance in the unconstrained cell,
-  while the default completion of that cell is inadmissible. Discharging the
-  second therefore needs one of: admissibility intersected symbolically into the
-  constraint; a provider that keeps searching completions when the preferred one
-  is inadmissible; or — the option PubGrub already prescribes — emitting
-  "never select this instance" for the inadmissible completion
-  (`references/pubgrub.md:476`) and continuing, so propagation excludes it and
-  asks again. The last is preferred: it terminates (each rejection learns a new
-  incompatibility), and it keeps the reason in the proof instead of hiding it in a
-  search.
+  while the default completion of that cell is inadmissible.
+
+  So completeness is discharged by **searching**: the provider may not stop at one
+  completion per cell. There is no alternative to searching — but the search is
+  cheap and explicable because *the reason a completion is inadmissible is itself a
+  constraint*. "Unbuildable when `f` is on" is the constraint `not (f is on)`, and
+  it can be used twice over:
+
+  - **locally**, intersected into the set being searched, which removes the whole
+    inadmissible region rather than one completion at a time;
+  - **globally**, returned as an incompatibility, so propagation gets it and the
+    proof can say *why* — which is what PubGrub asks for at
+    `references/pubgrub.md:476` ("add an incompatibility indicating that it should
+    never be selected" **instead of adding its dependencies**).
+
+  Both are the same fact; neither replaces the search. Note what `:476` does *not*
+  say: nothing there requires the provider to decline to decide. A rejected
+  completion's incompatibility travels back with whatever instance the provider
+  does settle on (§10), so no interface case is needed for it.
 
   Also: the assignment offered must be total per §1.2; the dependencies reported
   must be those **at exactly the assignment the offered instance pins**; and
