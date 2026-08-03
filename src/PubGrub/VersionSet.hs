@@ -4,6 +4,13 @@
 -- | A version set: a canonical, sorted, disjoint, non-adjacent collection of
 -- version intervals. Backed by Cabal's 'VersionInterval' so that derived
 -- structural equality coincides with semantic equality.
+--
+-- Union, intersection and complement are computed /directly on the intervals/,
+-- as one pass of comparisons between bound positions. Going through
+-- 'VersionRange' syntax instead would build a syntax tree and re-canonicalise
+-- it with 'asVersionIntervals' on every operation. 'fromVersionRange' and
+-- 'toVersionRange' convert at the boundary, where declared ranges arrive and
+-- reports are rendered.
 module PubGrub.VersionSet (
     -- The constructor is hidden so that every 'VersionSet' stays canonical.
     VersionSet,
@@ -19,6 +26,7 @@ module PubGrub.VersionSet (
     intervals,
 ) where
 
+import           Data.Maybe                         (mapMaybe)
 import           Data.Ord                           (Down (..), comparing)
 import           Distribution.Types.VersionInterval (Bound (..),
                                                      LowerBound (..),
@@ -28,35 +36,66 @@ import           Distribution.Types.VersionInterval (Bound (..),
                                                      fromVersionIntervals,
                                                      mkVersionIntervals)
 import           Distribution.Version               (Version, VersionRange,
-                                                     anyVersion, earlierVersion,
-                                                     intersectVersionRanges,
-                                                     laterVersion, noVersion,
-                                                     orEarlierVersion,
-                                                     orLaterVersion,
-                                                     thisVersion,
-                                                     unionVersionRanges)
+                                                     anyVersion, noVersion,
+                                                     thisVersion, version0)
 import           PubGrub.SetOps                     (SetOps (..))
 
 
--- | How high a set reaches: the upper bound of its highest interval.
--- 'Unbounded' is deliberately the /last/ constructor — a set with no upper
--- bound reaches higher than any bounded one. This is why it is not just
--- @Maybe (Version, Bool)@, which would sort unbounded lowest.
-data Reach
-    = ReachesTo Version Bool  -- ^ bound version, and whether it is inclusive
+-- | A position on the version line, fine enough to tell "up to but not
+-- including @v@" from "up to and including @v@". Every interval bound is one of
+-- these, and every operation below is comparisons between them.
+--
+-- 'Unbounded' is deliberately the /last/ constructor, so the derived 'Ord' puts
+-- it above every position: a set with no upper bound reaches higher than any
+-- bounded one.
+data Cut
+    = Cut Version Side
     | Unbounded
     deriving stock (Eq, Ord, Show)
 
--- | Where a set starts: the lower bound of its lowest interval, ordered so
--- that @>=1@ sits below @>1@. A /smaller/ 'Start' means a wider set.
-data Start = StartsAt Version Bool  -- ^ bound version, and whether it is exclusive
+-- | Which side of its version a cut falls on. An interval /starting/ at
+-- @Before v@ contains @v@; one /ending/ there does not. @After v@ is the mirror
+-- image. This is the whole trick: inclusive and exclusive bounds become two
+-- neighbouring positions, so "does this interval touch that one" is @<=@.
+data Side = Before | After
     deriving stock (Eq, Ord, Show)
+
+lowerCut :: LowerBound -> Cut
+lowerCut (LowerBound v InclusiveBound) = Cut v Before
+lowerCut (LowerBound v ExclusiveBound) = Cut v After
+
+upperCut :: UpperBound -> Cut
+upperCut NoUpperBound                  = Unbounded
+upperCut (UpperBound v ExclusiveBound) = Cut v Before
+upperCut (UpperBound v InclusiveBound) = Cut v After
+
+-- | A set as the cut pairs bounding its intervals: sorted, disjoint, and
+-- separated by at least one position (that last part is what "non-adjacent"
+-- means here, and what every operation below has to preserve).
+cutsOf :: VersionSet -> [(Cut, Cut)]
+cutsOf = map (\(VersionInterval lo hi) -> (lowerCut lo, upperCut hi)) . intervals
+
+-- | Back from cut pairs, dropping the empty ones — which is where @>=2 && <2@
+-- and friends disappear. An interval is empty exactly when its bounds are the
+-- same position or crossed, so canonicalisation is a comparison.
+fromCuts :: [(Cut, Cut)] -> VersionSet
+fromCuts = VersionSet . mapMaybe interval
+  where
+    interval (lo, hi)
+        | lo >= hi = Nothing
+        | otherwise = case lo of
+            Unbounded -> Nothing -- a lower bound above every version: empty
+            Cut v Before -> Just (VersionInterval (LowerBound v InclusiveBound) (upper hi))
+            Cut v After -> Just (VersionInterval (LowerBound v ExclusiveBound) (upper hi))
+    upper Unbounded      = NoUpperBound
+    upper (Cut w Before) = UpperBound w ExclusiveBound
+    upper (Cut w After)  = UpperBound w InclusiveBound
 
 newtype VersionSet = VersionSet [VersionInterval]
     deriving stock (Eq, Show)
 
 -- | Order by how high the set reaches, then by how wide it is, then by the
--- full interval list — the third coordinate is arbitrary and exists only to
+-- full cut list — the third coordinate is arbitrary and exists only to
 -- keep the order total and consistent with the derived 'Eq' (two distinct sets
 -- can share a reach and a start: @[1,2) ∪ [3,4)@ and @[1,4)@).
 --
@@ -68,22 +107,16 @@ instance Ord VersionSet where
         sortKey vs =
             ( reachOf vs
             , Down (startOf vs)               -- wider (lower start) ranks higher
-            , map shapeKey (intervals vs)
+            , cutsOf vs
             )
 
-        reachOf vs = case reverse (intervals vs) of
-            VersionInterval _ ub : _ -> Just (upperKey ub)
-            []                       -> Nothing
+        reachOf vs = case reverse (cutsOf vs) of
+            (_, hi) : _ -> Just hi
+            []          -> Nothing
 
-        startOf vs = case intervals vs of
-            VersionInterval lb _ : _ -> Just (lowerKey lb)
-            []                       -> Nothing
-
-        upperKey NoUpperBound     = Unbounded
-        upperKey (UpperBound v b) = ReachesTo v (b == InclusiveBound)
-        lowerKey (LowerBound v b) = StartsAt v (b == ExclusiveBound)
-
-        shapeKey (VersionInterval lb ub) = (lowerKey lb, upperKey ub)
+        startOf vs = case cutsOf vs of
+            (lo, _) : _ -> Just lo
+            []          -> Nothing
 
 -- | The raw canonical interval list (for testing / reporting).
 intervals :: VersionSet -> [VersionInterval]
@@ -111,24 +144,50 @@ fullVersionSet = fromVersionRange anyVersion
 singletonVersionSet :: Version -> VersionSet
 singletonVersionSet = fromVersionRange . thisVersion
 
+-- | Merge two sorted interval lists, joining any that overlap or touch.
+--
+-- Touching is the case worth naming: @<2@ and @>=2@ share no version, yet their
+-- union is everything, so leaving them as two intervals would break canonicity
+-- (and with it the derived 'Eq'). In cut terms both are the position
+-- @Before 2@, so the test for "join these" is just @<=@.
 unionVersionSet :: VersionSet -> VersionSet -> VersionSet
-unionVersionSet a b = fromVersionRange (unionVersionRanges (toVersionRange a) (toVersionRange b))
-
-intersectionVersionSet :: VersionSet -> VersionSet -> VersionSet
-intersectionVersionSet a b = fromVersionRange (intersectVersionRanges (toVersionRange a) (toVersionRange b))
-
--- | The versions not in the set.
-complementVersionSet :: VersionSet -> VersionSet
-complementVersionSet (VersionSet is) =
-    fromVersionRange (foldr (intersectVersionRanges . complementInterval) anyVersion is)
+unionVersionSet a b = fromCuts (coalesce (merge (cutsOf a) (cutsOf b)))
   where
-    complementInterval (VersionInterval lo hi) =
-        unionVersionRanges (belowLower lo) (aboveUpper hi)
-    belowLower (LowerBound v InclusiveBound) = earlierVersion v -- < v
-    belowLower (LowerBound v ExclusiveBound) = orEarlierVersion v -- <= v
-    aboveUpper NoUpperBound                  = noVersion -- nothing above
-    aboveUpper (UpperBound v InclusiveBound) = laterVersion v -- > v
-    aboveUpper (UpperBound v ExclusiveBound) = orLaterVersion v -- >= v
+    merge [] ys = ys
+    merge xs [] = xs
+    merge (x : xs) (y : ys)
+        | fst x <= fst y = x : merge xs (y : ys)
+        | otherwise = y : merge (x : xs) ys
+
+    coalesce ((lo1, hi1) : (lo2, hi2) : rest)
+        | lo2 <= hi1 = coalesce ((lo1, max hi1 hi2) : rest)
+    coalesce (i : rest) = i : coalesce rest
+    coalesce [] = []
+
+-- | Sweep both lists together, taking the overlap of the pair in hand and
+-- advancing whichever interval ends first. Empty overlaps fall out in 'fromCuts'.
+intersectionVersionSet :: VersionSet -> VersionSet -> VersionSet
+intersectionVersionSet a b = fromCuts (go (cutsOf a) (cutsOf b))
+  where
+    go [] _ = []
+    go _ [] = []
+    go xs@((lo1, hi1) : xs') ys@((lo2, hi2) : ys')
+        | hi1 <= hi2 = overlap : go xs' ys
+        | otherwise = overlap : go xs ys'
+      where
+        overlap = (max lo1 lo2, min hi1 hi2)
+
+-- | Complement: the gaps between the intervals, plus the tails at either end.
+--
+-- Consecutive gaps are separated by the non-empty interval that lies between
+-- them, so the result is canonical without any coalescing pass.
+complementVersionSet :: VersionSet -> VersionSet
+complementVersionSet vs = fromCuts (go (Cut version0 Before) (cutsOf vs))
+  where
+    go prev []             = [(prev, Unbounded)]
+    go prev ((lo, hi) : rest)
+        | hi == Unbounded = [(prev, lo)]
+        | otherwise = (prev, lo) : go hi rest
 
 -- | The class asks for no complement, because not every payload has one.
 -- Version ranges do, so 'difference' is computed through it here.

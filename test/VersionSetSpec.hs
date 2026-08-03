@@ -3,13 +3,21 @@
 
 module VersionSetSpec (tests) where
 
-import           Distribution.Version  (Version, mkVersion, orLaterVersion)
+import           Distribution.Types.VersionInterval (Bound (..),
+                                                    LowerBound (..),
+                                                    UpperBound (..),
+                                                    VersionInterval (..))
+import           Distribution.Version  (Version, VersionRange, anyVersion,
+                                        earlierVersion, intersectVersionRanges,
+                                        laterVersion, mkVersion, noVersion,
+                                        orEarlierVersion, orLaterVersion,
+                                        thisVersion, unionVersionRanges)
 import           PubGrub.SetOps        (isSubsetOf)
 import           PubGrub.VersionSet
 import           Test.Tasty            (TestTree, testGroup)
 import           Test.Tasty.QuickCheck (Arbitrary (..), Gen, choose, elements,
-                                        listOf, property, testProperty, (.&&.),
-                                        (===))
+                                        forAll, listOf, oneof, property, sized,
+                                        testProperty, (.&&.), (===))
 
 -- Small bounded version universe: components drawn from 0..3, length 1..3.
 genVersion :: Gen Version
@@ -71,6 +79,31 @@ tests =
         , testProperty "isSubsetOf agrees with intersection" $ \(a :: VersionSet) (b :: VersionSet) ->
             isSubsetOf a b === (intersectionVersionSet a b == a)
         , testGroup
+            -- The operations work on the intervals directly. The reference is
+            -- Cabal's combinators on 'VersionRange' syntax followed by Cabal's
+            -- canonicaliser, and the operations must agree with it on the set and
+            -- on the canonical /representation/, since the derived 'Eq' is
+            -- semantic equality only while the form stays canonical.
+            --
+            -- Inputs come from 'genViaRange', which builds sets through Cabal's
+            -- canonicaliser alone, so a bug in our own union cannot hide by
+            -- producing agreeable inputs.
+            "agree with the VersionRange reference"
+            [ testProperty "union" $
+                forAll genViaRange $ \a -> forAll genViaRange $ \b ->
+                    unionVersionSet a b === viaRange2 unionVersionRanges a b
+            , testProperty "intersection" $
+                forAll genViaRange $ \a -> forAll genViaRange $ \b ->
+                    intersectionVersionSet a b === viaRange2 intersectVersionRanges a b
+            , testProperty "complement" $
+                forAll genViaRange $ \a ->
+                    complementVersionSet a === refComplement a
+            , testProperty "difference" $
+                forAll genViaRange $ \a -> forAll genViaRange $ \b ->
+                    intersectionVersionSet a (complementVersionSet b)
+                        === viaRange2 intersectVersionRanges a (refComplement b)
+            ]
+        , testGroup
             "Lattice laws"
             [ testProperty "union commutative" $ \(a :: VersionSet) b -> unionVersionSet a b === unionVersionSet b a
             , testProperty "intersection commutative" $ \(a :: VersionSet) b -> intersectionVersionSet a b === intersectionVersionSet b a
@@ -81,6 +114,48 @@ tests =
         ]
   where
     conjoinV f = foldr ((.&&.) . f) (property True) sampleVersions
+
+-- | Apply a Cabal range combinator by round-tripping through 'VersionRange'.
+viaRange2 :: (VersionRange -> VersionRange -> VersionRange) -> VersionSet -> VersionSet -> VersionSet
+viaRange2 f a b = fromVersionRange (f (toVersionRange a) (toVersionRange b))
+
+-- | The reference complement: intersect the complements of each interval, each
+-- built as a union of "below the lower bound" and "above the upper bound".
+refComplement :: VersionSet -> VersionSet
+refComplement vs =
+    fromVersionRange
+        (foldr (intersectVersionRanges . complementInterval) anyVersion (intervals vs))
+  where
+    complementInterval (VersionInterval lo hi) =
+        unionVersionRanges (belowLower lo) (aboveUpper hi)
+    belowLower (LowerBound v InclusiveBound) = earlierVersion v -- < v
+    belowLower (LowerBound v ExclusiveBound) = orEarlierVersion v -- <= v
+    aboveUpper NoUpperBound                  = noVersion -- nothing above
+    aboveUpper (UpperBound v InclusiveBound) = laterVersion v -- > v
+    aboveUpper (UpperBound v ExclusiveBound) = orLaterVersion v -- >= v
+
+-- | Sets built only by Cabal's canonicaliser, so they are independent of the
+-- implementation under test.
+genViaRange :: Gen VersionSet
+genViaRange = fromVersionRange <$> sized (\n -> genRange (min n 4))
+  where
+    genRange 0 = leaf
+    genRange n =
+        oneof
+            [ leaf
+            , unionVersionRanges <$> genRange (n `div` 2) <*> genRange (n `div` 2)
+            , intersectVersionRanges <$> genRange (n `div` 2) <*> genRange (n `div` 2)
+            ]
+    leaf =
+        oneof
+            [ pure anyVersion
+            , pure noVersion
+            , thisVersion <$> genVersion
+            , orLaterVersion <$> genVersion
+            , laterVersion <$> genVersion
+            , earlierVersion <$> genVersion
+            , orEarlierVersion <$> genVersion
+            ]
 
 newtype NonEmptyVer = NonEmptyVer Version deriving Show
 instance Arbitrary NonEmptyVer where
