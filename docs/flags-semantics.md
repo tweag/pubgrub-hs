@@ -7,8 +7,9 @@
 > algebra), `src/PubGrub/InstanceSet.hs` (membership), `bridge/Bridge/Provider.hs`
 > and `bridge/Bridge/Cabal/Flatten.hs` (the O6 provider obligations). The guards
 > for §3 and §6 are in `test/InstanceSetSpec.hs`; the end-to-end cases are in
-> `test/FlagSolveSpec.hs`. §1.5's manual-flag rule and §4.3's report wording are
-> the parts not yet implemented.
+> `test/FlagSolveSpec.hs`. **§10 records which obligations actually hold today**,
+> which are satisfied only accidentally, and what is coupled to what — check it
+> before relying on any of them.
 >
 > **Authority:** on the questions it answers, this file wins over
 > [flags-design.md](flags-design.md) (which chose a different rule — see §2.3)
@@ -693,3 +694,58 @@ rather than a change of model.
 **If `-simd` also failed**, the same machinery yields the failure report and the
 flag appears in both polarities, as separate causes. That shape is already
 observable today.
+
+## 10. What holds today
+
+A specification nobody has checked against the code is how the last round of
+confusion started, so: this is the state as of 2026-08-03, and it is expected to
+be edited whenever the tree moves.
+
+| obligation | status |
+|---|---|
+| O1 membership exact | holds |
+| O2 exact ∩ ∪ ∖ | holds (since the three-case pin); guarded by the model-homomorphism properties |
+| O3a / O3b one-sided emptiness | holds; guarded by "emptiness is one-sided" |
+| O4 imprecision ⇒ Inconclusive | **argued, not proved.** The single-query direction is guarded; the loop is not |
+| O5 progress | the provider's `{X}` case holds; the conflict-resolution loop is unproven (§6 owes the oracle) |
+| O6 soundness | holds |
+| O6 completeness | **latent — see below** |
+| O7 enumeration boundary | holds: the algebra never enumerates, the provider enumerates releases only |
+| §1.5 buildability | not implemented (`buildable:` is ignored) |
+| §1.5 manual flags | not implemented, and provisional as a rule |
+| §1.6 lenient user constraints | not implemented (no user flag constraints yet) |
+| §4.1 dependencies at the decided assignment | holds |
+| §4.2 per-fact collapsing | not implemented — dependers are single instances |
+| §4.3 report wording | partial: constraints render, the not-applicable wording is not aligned |
+| §5 choice policy | implemented (release-major, then fewest deviations) |
+| §6 non-uniform universe, one-sided properties | in place |
+| §6 verdict oracle | owed |
+
+Three couplings worth knowing before picking up any of it.
+
+**O6's completeness half is satisfied only by accident.** Nothing in the tree is
+*assignment-dependently* inadmissible yet: buildability is ignored, manual flags
+are undistinguished, user flag constraints do not exist. So the provider's
+one-completion-per-cell search cannot currently miss an admissible instance — the
+cell-completion lemma is enough on its own. The gap opens the moment §1.5 is
+implemented. Implement the two together, or the first correct-looking buildability
+patch introduces a wrong "no solution".
+
+**§6's required oracle case cannot be built before then either.** "A cell whose
+default completion is inadmissible while another completion of the same cell is
+admissible" is unconstructible while admissibility is assignment-independent. So
+the oracle, the O6 search, and buildability are one work item, not three.
+
+**The provider's interface cannot express O6's preferred remedy.** `expand` returns
+`Maybe (Instance, [Incompatibility])`, so it can answer "here is a decision and its
+consequences" or "nothing", but not "no decision, and here is what to learn" —
+which is exactly what emitting "never select this instance"
+(`references/pubgrub.md:476`) for an inadmissible completion requires. Either the
+return type grows a third case, or the provider must loop internally and lose the
+reason from the proof.
+
+Naming: the code calls the third case `NotDeclared`, which is accurate for source
+cells — pins only ever apply to the source side — while this document calls the
+case *not applicable*, because for an installed unit the reason differs (§2.2).
+They describe the same partition; if the divergence ever causes a
+misunderstanding, rename the constructor rather than the semantics.
