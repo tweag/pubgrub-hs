@@ -1,7 +1,9 @@
 # Bridge, problem model, and PInfo adapter
 
 Design notes from the 2026-07-23 planning session. This records *decisions and
-sketches*, not finished code. See `CLAUDE.md` for the one-paragraph version and
+sketches*, not finished code. Some type names here predate the reboot and no
+longer exist; flags, described below as "later", are implemented — see
+[flags-semantics.md](flags-semantics.md) for their specification. See `CLAUDE.md` for the one-paragraph version and
 the rung ladder.
 
 ## Goal recap

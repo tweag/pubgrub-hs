@@ -32,6 +32,11 @@ on the delivery path.)
   PubGrub or a choice of ours?", answer it by citing this file with a line number —
   not from our own haddocks or from this CLAUDE.md, both of which describe our
   encoding of the spec and have been wrong about which is which.
+- **Flag semantics: `docs/flags-semantics.md`.** Same role for flags that
+  `references/pubgrub.md` has for the algorithm: what must be *true*, with no
+  types in it. Cite it for any question about what a constraint mentioning a flag
+  means, what may be approximated, and in which direction. It overrules this file
+  and `docs/flags-design.md` (a pre-reboot design doc, superseded on semantics).
 - PubGrub internals guide: https://pubgrub-rs-guide.pages.dev/internals/intro
 - Reference Rust implementation: https://github.com/pubgrub-rs/pubgrub (a second
   implementation's choices, not a specification)
@@ -70,12 +75,14 @@ harness — runs both solvers, diffs verdicts, renders explanations side by side
 Current layout (4 cabal components):
 
 - `src/` — library. `PubGrub/{Term,VersionSet,SetOps,Relation,Incompatibility,Solver,Provider,Report,Pretty}.hs`,
-  plus `Index{,/PreInstalled,/SourcePackage}.hs` (the problem model) and
+  plus `Index/PreInstalled.hs` (the installed-unit model) and
   `InstanceSet{,/SourceCell}.hs` (the solver's set type).
-- `bridge/` — private library `bridge`. Hackage index reader, installed-db reader,
-  `GenericPackageDescription` flattening, and the real `Provider`.
+- `bridge/` — private library `bridge`. `Bridge/{Hackage,Installed,Provider}.hs`
+  plus `Bridge/Cabal/{Flatten,InstalledPkg}.hs`: index reader, installed-db
+  reader, flag-parametric `GenericPackageDescription` flattening, and the real
+  `Provider`.
 - `app/Main.hs` — executable `pubgrub`: the CLI driver.
-- `test/` — `{VersionSet,InstanceSet,Solver,Paper}Spec.hs`.
+- `test/` — `{VersionSet,InstanceSet,Solver,Paper,Flatten,FlagSolve}Spec.hs`.
 
 Note the diagram above still describes the *intended* end state. The cabal
 baseline and the harness do not exist yet: nothing in the tree depends on
@@ -96,7 +103,14 @@ time; each rung leaves a runnable solver and we measure both deliverables at eac
 
 - **Rung 0** — ✅ plumbing: own index reader running on real Hackage data. (No cabal baseline — see the caveat below.)
 - **Rung 1** — ✅ version ranges. Solver resolves real Hackage packages end to end.
-- **Rung 2** — ⏳ flags + conditional deps. The *representation* is ready (see below); the bridge still flattens under the default flag assignment only (`Bridge.Instances`, `sourcePackageDeps`), so no flag is yet a solver variable. Most important rung for the explanations question.
+- **Rung 2** — ✅ flags + conditional deps, as a search dimension. A decision is an
+  *instance* (version × total flag assignment); `Bridge.Cabal.Flatten` flattens the
+  conditional tree to flag-guarded groups and evaluates them at exactly the decided
+  assignment; a flag leaves its default only when conflict resolution forbids the
+  instance that used it. Semantics: `docs/flags-semantics.md`, with a worked trace
+  in its §9. Known cost, not yet paid down: a version rejected for a
+  flag-irrelevant reason is re-offered once per irrelevant assignment (2^k), which
+  is what depender-range collapsing fixes — see Reporting gap 1 below.
 - **Rung 3** — ✅ `base`/GHC pinning (installed db → `PreInstalled` instances, strict prefer-installed).
 - **Rung 4** — setup / build-tool deps (see reference's `SetupDeps.hs`).
 - **Rung 5** — public sublibraries.
@@ -124,7 +138,8 @@ data InstanceSet = InstanceSet
     { isInstalled :: Set PreInstalledPackage   -- extensional: the db is small and known
     , isSource    :: [SourceCell]              -- DNF, NOT canonicalised
     }
-data SourceCell = SourceCell VersionSet (Map FlagName Bool)   -- range × pinned flags
+data SourceCell = SourceCell VersionSet (Map FlagName FlagPin)  -- range × pinned flags
+data FlagPin    = PinnedTo Bool | NotDeclared
 ```
 
 It is **intensional on the source side**: a dependency's declared range becomes
@@ -139,9 +154,13 @@ things separating PubGrub from CDCL/answer-set solving (`references/pubgrub.md:1
 would not be a cheaper variant of PubGrub, it would be the encoding PubGrub
 exists to avoid. The awkward consequences (no lawful `Eq`, no enumeration) are
 the invoice for that, not for a choice of ours. What *is* ours is the second
-coordinate: flag assignments are only ∩-closed where `VersionSet` is closed
+coordinate: the flag axis is only ∩-closed *per cell* where `VersionSet` is closed
 under all of `∩ ∪ \`, and every `SourceCell` complication below follows from
-adding a coordinate whose own algebra is weaker.
+adding a coordinate whose own algebra is weaker. What that axis has to be able to
+say is fixed by `docs/flags-semantics.md` §2, not by convenience: three states per
+flag (`PinnedTo True`, `PinnedTo False`, `NotDeclared`) plus absence-from-the-map
+for unconstrained, because a two-state pin is not closed under negation and
+silently loses instances from a `difference`.
 
 Things worth knowing before touching it:
 
@@ -151,6 +170,13 @@ Things worth knowing before touching it:
   flip), **no `Eq`/`Ord`**, and per `PubGrub.Relation`, *no canonical form* — the
   solver only ever asks emptiness questions. So non-canonical DNF is correct by
   construction; pruning is purely a size optimisation.
+- **Emptiness is one-sided, by design.** `isEmpty` may answer "not empty" for a
+  set that is empty in fact — a cell can pin a flag no version in its range
+  declares, and seeing that needs the index. Claiming emptiness wrongly is
+  forbidden; failing to notice it is allowed. All the slack lands on
+  `Relation.Inconclusive`, which costs work and never a wrong verdict
+  (`docs/flags-semantics.md` O3, O4). Consequence for tests: assert
+  `isEmpty ⟹ model empty`, never `⟺`.
 - Do **not** add `Eq`/`Ord` to `InstanceSet`. A non-canonical representation has
   no lawful structural equality. Use `SetOps.equivalent` (mutual `isSubsetOf`)
   if you need semantic equality.
@@ -158,21 +184,36 @@ Things worth knowing before touching it:
   intersection but *not* under union or difference, so `SetOps` lives one layer
   up, at the DNF. `differenceCell` is disjunction-valued for exactly this reason.
 - **Size control is load-bearing.** `union` appends, `intersect` cross-products,
-  `difference` multiplies. Two prunings exist and both matter: `differenceCell`
-  drops null cells, and `union` calls `mergeCells` (join cells with identical
-  pins). Without the first, the property tests OOM. Subsumption pruning (drop
-  cells contained in another) is the next lever if real solves get slow.
+  `difference` multiplies — one cell into up to `1 + 2·|pins|`. Three prunings
+  exist and all matter: `differenceCell` drops null cells, `union` calls
+  `mergeCells` (join cells with identical pins), and every `SetOps` operation ends
+  in `pruneCells` (drop cells subsumed by another, then order deterministically).
+  Measured on 24 successive instance bans over 4 flags: **28293 cells with the
+  first two alone, 41 with all three**, for a denotation of 56 instances. Pruning
+  *between* operations is what bounds it; pruning at the end would be too late.
+  `test/InstanceSetSpec.hs`'s "size control" case is the guard.
+- `pruneCells` sorting also fixes the DNF's order (widest cell first, via the
+  `Ord` on `VersionSet`), which is what makes candidate selection in
+  `Bridge.Provider` deterministic — and, since a wider cell carries fewer pins,
+  makes it try assignments closest to the declared defaults first.
 - `widen` admits versions the index does not have. This is fine: the algebra
   never needs the instance universe, and `Bridge.Provider`'s `expand'` is the
   only place reality is consulted — it enumerates candidates from the index and
   filters by `memberInstance`. A symbolic set **cannot be enumerated**, which is
   why every provider must enumerate from its own index instead.
 
-`test/InstanceSetSpec.hs` is the guard: 38 differential properties comparing the
+`test/InstanceSetSpec.hs` is the guard: differential properties comparing the
 implementation against an extensional model over a small fixed universe, plus the
-`Term`-level laws. It found three real bugs when first run. Keep its ADAPTER
-pointed at the intensional constructor — with an extensional adapter the
-flag-splitting paths go untested *and* the suite OOMs.
+`Term`-level laws. It found three real bugs when first run, and a fourth when its
+universe was fixed. Two things about it are load-bearing, and both were once
+wrong:
+
+- keep its ADAPTER pointed at the **intensional** constructor — with an
+  extensional adapter the flag-splitting paths go untested *and* the suite OOMs;
+- keep its universe **non-uniform**: versions must differ in which flags they
+  declare, including one declaring none. A uniform universe cannot distinguish
+  the three possible readings of a pin, which is exactly how a wrong `difference`
+  passed these properties for weeks (`docs/flags-semantics.md` §6).
 
 ## Reporting
 
@@ -192,13 +233,23 @@ Known gaps, in the order worth fixing:
    (`references/pubgrub.md:456`). The same adjacency collapsing applies to
    unbuildable instances (`:476`).
 
-   We emit the per-version form the spec tells us not to: `Bridge.Provider` uses
-   `singletonInstance chosen` as the depender (`bridge/Bridge/Provider.hs:168,199`,
-   and `:195` for the `noInstances` path). This costs *both* deliverables — more
-   incompatibilities to propagate, and proof lines reading `foo 1.2.3 depends on …`
-   where the spec's own examples read `foo >=1.0 && <1.3 depends on …`.
-   `mergeCells` recovers some of it incidentally, but only after unions during
-   derivation, never at generation time, which is where the spec puts it.
+   We emit the per-version form the spec tells us not to: `Bridge.Provider.depIncs`
+   uses `singletonInstance chosen` as the depender
+   (`bridge/Bridge/Provider.hs:225`). ("No instances" is not affected — the solver
+   raises that itself from the provider's `Nothing`, `src/PubGrub/Solver.hs:317`.)
+   This costs *both* deliverables — more incompatibilities to propagate, and proof
+   lines reading `foo 1.2.3 depends on …` where the spec's own examples read
+   `foo >=1.0 && <1.3 depends on …`. `mergeCells` recovers some of it incidentally,
+   but only after unions during derivation, never at generation time, which is
+   where the spec puts it.
+
+   With flags in the value it is also the fix for a *performance* bug, not only a
+   wording one: because the depender is one instance, refuting a version teaches
+   the solver nothing about that version under a different assignment, so a
+   version rejected for a flag-irrelevant reason is re-offered once per irrelevant
+   flag assignment — 2^k. `test/FlagSolveSpec.hs` records the k=1 case (three
+   expansions of a package with one dead version), and
+   `docs/flags-semantics.md` §9 traces it.
 
    Fix at generation: group a package's instances by identical flattened
    dependency set, emit one incompatibility per group, with the depender widened

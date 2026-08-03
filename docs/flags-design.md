@@ -1,10 +1,23 @@
 # Design: Cabal flags in the solver
 
-> **Status:** design document, no code yet. The Haskell declarations below are
-> *design artifacts* — illustrative shapes to be implemented later, not committed code.
+> **Status:** historical design document, kept for its arguments rather than its
+> code. The Haskell declarations below are *design artifacts*, and they name types
+> and modules from before the reboot (`PubGrub.Lattice`, `PubGrub.Choice`,
+> `SourceConfigSet`) that no longer exist. What is implemented lives in
+> `src/PubGrub/InstanceSet{,/SourceCell}.hs`; §2's DNF-of-cells shape survives
+> under different names, its lenient-membership rule does not.
 >
 > **Scope:** how the solver comes to *choose* Cabal flags, in addition to versions and
-> installed unit-ids. Companion to [../TODO.md](../TODO.md), which states the problem.
+> installed unit-ids. It was written as a companion to a `TODO.md` that no longer
+> exists; the problem statement now lives in `CLAUDE.md` (rung 2) and the semantics
+> in [flags-semantics.md](flags-semantics.md).
+>
+> **Superseded on semantics:** what a constraint mentioning a flag some version does
+> not declare *means* is now specified in [flags-semantics.md](flags-semantics.md).
+> §2's "Domain-freedom principle" chose the lenient reading (an undeclared flag
+> vacuously satisfies a pin); that specification rejects both two-valued readings and
+> requires a third case, "not declared". The rest of §2 — DNF over cells, why not
+> `Map Version FlagAssignment`, why subsumption pruning is load-bearing — stands.
 
 ## 1. Problem and model
 
@@ -48,11 +61,39 @@ inside one element — it is not evidence that they are independent axes. Everyt
 solver is reused unchanged: the `Term` / `Lattice` / product-of-sets machinery already carries
 elements and sets generically, so a richer element and a richer set slot straight in.
 
-This was chosen over modelling flags as independent Boolean solver *variables*. The latter is
-closer to "pure" PubGrub but would force the solver's monomorphic package type `p` and set type
-`s` to become sums spanning versions, unit-ids **and** booleans — an invasive core rewrite. The
-fold model keeps **one decision per package name** and confines almost all change to the
-choice/lattice/provider layers.
+This was chosen over modelling flags as independent Boolean solver *variables*. The reason
+originally recorded here — that the alternative would force the package type `p` and set type `s`
+into sums spanning versions, unit-ids and booleans, an invasive core rewrite — does not hold up.
+It contradicts the paragraph above: a core that carries a richer *element* generically carries a
+richer *variable* just as generically, and under that substitution neither unit propagation nor
+conflict resolution nor backtracking changes a line. (A monomorphic core would touch every module,
+but that is a property of the code as written, not a reason for the model.)
+
+The real difference is that **the flag domain depends on the version**. As an independent variable,
+`foo:fast` exists only when the chosen version of `foo` declares `fast`, and PubGrub has no notion
+of a conditionally-existent variable — so the domain would have to be tied down with explicit
+incompatibilities ("if `foo 1.3` then `foo:fast` is absent", and so on), one per version × flag.
+That is precisely the class of bookkeeping PubGrub builds in for the version axis instead of
+encoding (implicit mutual exclusivity, `references/pubgrub.md:1193`; lazy formulas, `:1207`). The
+fold gets it for free, by absorbing the domain dependence into what an element *is*.
+
+Note what that argument does and does not claim. The fold does not remove the version-dependence
+of flag domains; it *relocates* it — out of explicit clauses and into the set algebra, which is
+where every flag bug so far has lived. The three-case flag atom required by
+[flags-semantics.md](flags-semantics.md) §2.3 is the bill for that relocation.
+
+And the alternative's advantage belongs on the record, since it was never written down. A clause
+`{foo 1.2, foo:fast, not vector >=0.12}` names the flag as a *literal*, so conflict resolution
+learns "`fast` is the problem" and that generalises across versions. Under the fold each
+`(version, assignment)` pair is its own atom, so a version rejected for a reason having nothing to
+do with a flag is retried once per irrelevant assignment — 2^k of them — and nothing learned about
+`+fast` on `1.2` transfers to `1.3`. Depender-range collapsing (`references/pubgrub.md:456`) is
+the fold's answer to that cost. "Closer to pure PubGrub" does no work in either direction:
+nothing in the spec requires variables to be package names, and a Boolean variable gets implicit
+mutual exclusivity exactly as a version does.
+
+The fold stands — **one decision per package name**, with change confined to the
+choice/lattice/provider layers — but on the strength of the domain argument, not the typing one.
 
 ### The binding constraint
 
@@ -374,7 +415,8 @@ expandInstalledPackage
 installed world's set type is already `Pow UnitId`, and a single-unit-id dependency already *is*
 `singleton uid = Incl (Set.singleton uid)`. A `SingletonSet` with no `Lattice`/`Sets` instances
 would only have to be re-embedded into `Pow UnitId` at the combiner — friction with no
-proportional safety. Recommend dropping that idea from [../TODO.md](../TODO.md).
+proportional safety. Recommend dropping that idea (it came from a `TODO.md` since
+removed).
 
 ### Source packages (flags decided here)
 

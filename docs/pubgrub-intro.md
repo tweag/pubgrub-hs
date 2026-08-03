@@ -496,7 +496,7 @@ PubGrub is also effectively depth-first — it commits to one version at a time 
 
 The modular solver handles two features of the Cabal dependency problem that the basic PubGrub specification does not:
 
-**Boolean flags.** Cabal `.cabal` files can declare conditional dependencies gated on boolean flags (e.g., `flag use-bytestring-builder`). The modular solver interleaves flag decisions (`FChoice` nodes) with package decisions. PubGrub as specified treats dependencies as unconditional; handling flags would require either pre-expanding all flag combinations or extending the term language.
+**Boolean flags.** Cabal `.cabal` files can declare conditional dependencies gated on boolean flags (e.g., `flag use-bytestring-builder`). The modular solver interleaves flag decisions (`FChoice` nodes) with package decisions. PubGrub as specified treats dependencies as unconditional; handling flags requires either pre-expanding all flag combinations or extending the value domain. This project does the latter — a solver variable's value is an *instance* (version × total flag assignment) rather than a version — and `docs/flags-semantics.md` specifies what that costs and requires.
 
 **Installed vs. new instances.** The modular solver distinguishes packages already installed in the GHC package database from new packages to be downloaded. It prefers installed instances to avoid unnecessary reinstalls. PubGrub's `chooseVersion` can implement this preference, but the distinction is not built into the algorithm.
 
