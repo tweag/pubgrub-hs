@@ -44,4 +44,12 @@ newtype Provider m = Provider
       -- The paired incompatibilities are the instance's dependencies, already
       -- unconditional (flags fixed by the instance) and widened from version
       -- ranges to instance sets.
+      --
+      -- They need not be /only/ that. The solver adds them to its store
+      -- unexamined and never requires them to mention the decided instance, and
+      -- an incompatibility holds in every context by construction, so a
+      -- provider that rejects candidates on the way to its answer (an
+      -- unbuildable flag assignment, say) may report those facts here too, and
+      -- they prune and explain like any other. What it must not do is /decide/
+      -- an instance it knows to be inadmissible.
     }

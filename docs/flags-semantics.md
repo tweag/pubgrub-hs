@@ -736,13 +736,27 @@ default completion is inadmissible while another completion of the same cell is
 admissible" is unconstructible while admissibility is assignment-independent. So
 the oracle, the O6 search, and buildability are one work item, not three.
 
-**The provider's interface cannot express O6's preferred remedy.** `expand` returns
-`Maybe (Instance, [Incompatibility])`, so it can answer "here is a decision and its
-consequences" or "nothing", but not "no decision, and here is what to learn" —
-which is exactly what emitting "never select this instance"
-(`references/pubgrub.md:476`) for an inadmissible completion requires. Either the
-return type grows a third case, or the provider must loop internally and lose the
-reason from the proof.
+**O6's preferred remedy needs no new interface case.** (An earlier draft of this
+section said it did. It does not.) `expand` returns
+`Maybe (Instance, [Incompatibility])`, and the solver adds those incompatibilities
+to its store unexamined — it never requires them to be *about* the instance just
+decided, and incompatibilities are context-independent by construction
+(`references/pubgrub.md:131`), so "`foo 1.2 +simd` is unbuildable" is a valid fact
+whatever was decided. A provider that skips inadmissible completions can therefore
+report what it learned on the way *alongside* the decision it settles on, and
+"never select this instance" (`:476`) rides along with a `Some`.
+
+There is no case where the provider needs to answer "no decision, and here is what
+to learn". The one situation that falls outside the above is "every candidate was
+inadmissible", where it answers `None` and the per-instance reasons are dropped in
+favour of the solver's set-level "no instances in `X`". That costs explanation
+quality only, and the fix belongs in the *cause* attached to that incompatibility,
+not in the return type.
+
+The tree already leans on the same reasoning for uninterpretable descriptions:
+they are skipped with a warning and no incompatibility, which §1.5 makes correct —
+a release outside the universe is not a fact to learn about, it is a release that
+does not exist for this solve.
 
 Naming: the code calls the third case `NotDeclared`, which is accurate for source
 cells — pins only ever apply to the source side — while this document calls the
