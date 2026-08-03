@@ -106,9 +106,10 @@ time; each rung leaves a runnable solver and we measure both deliverables at eac
 - **Rung 2** — ✅ flags + conditional deps, as a search dimension. A decision is an
   *instance* (version × total flag assignment); `Bridge.Cabal.Flatten` flattens the
   conditional tree to flag-guarded groups and evaluates them at exactly the decided
-  assignment; a flag leaves its default only when conflict resolution forbids the
-  instance that used it. Semantics: `docs/flags-semantics.md`, with a worked trace
-  in its §9. Known cost, not yet paid down: a version rejected for a
+  assignment; the provider tries the all-default assignment of a release first and
+  considers deviations only once the accumulated constraint excludes it, fewest
+  deviations first. Semantics: `docs/flags-semantics.md`, with a worked trace in
+  its §9. Known cost, not yet paid down: a version rejected for a
   flag-irrelevant reason is re-offered once per irrelevant assignment (2^k), which
   is what depender-range collapsing fixes — see Reporting gap 1 below.
 - **Rung 3** — ✅ `base`/GHC pinning (installed db → `PreInstalled` instances, strict prefer-installed).
@@ -192,10 +193,17 @@ Things worth knowing before touching it:
   first two alone, 41 with all three**, for a denotation of 56 instances. Pruning
   *between* operations is what bounds it; pruning at the end would be too late.
   `test/InstanceSetSpec.hs`'s "size control" case is the guard.
-- `pruneCells` sorting also fixes the DNF's order (widest cell first, via the
-  `Ord` on `VersionSet`), which is what makes candidate selection in
-  `Bridge.Provider` deterministic — and, since a wider cell carries fewer pins,
-  makes it try assignments closest to the declared defaults first.
+- `pruneCells` also makes the DNF's order **deterministic** — but note the order
+  is ascending (narrowest cell first): it sorts descending and then folds with a
+  prepend, which reverses it. Determinism is all it gives. It is *not* a
+  preference order, and an earlier version of this file claimed it implied
+  "assignments closest to the defaults first", which was false in both directions.
+  Flag preference is now stated and implemented explicitly, in
+  `Bridge.Provider.preferDefaults`: rank *completed assignments* by how many flags
+  deviate from the release's declared defaults (`docs/flags-semantics.md` §5).
+  Ranking cells by pin count is not the same thing and is wrong — a one-pin
+  `f = False` beats a two-pin `f = True, g = True` on pin count while being the
+  deviation rather than the default.
 - `widen` admits versions the index does not have. This is fine: the algebra
   never needs the instance universe, and `Bridge.Provider`'s `expand'` is the
   only place reality is consulted — it enumerates candidates from the index and

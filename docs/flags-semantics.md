@@ -32,8 +32,17 @@ here, and everything else is meant to follow from it.
 A `.cabal` file declares flags: each has a name, a default value, and a
 manual/automatic marking. Because a `.cabal` file belongs to one release,
 **the set of declared flags is a property of a `(package, version)` pair**, not
-of a package. Write it `D(p, v)`. Two versions of one package may declare
-different flags, and either may declare none.
+of a package. Two versions of one package may declare different flags, and either
+may declare none.
+
+Write it `D(ρ)`, where ρ is a **source release identity**: enough to fix one
+package description, which is the package name, the version, *and* whichever
+source or index revision the description was read from. `(p, v)` is not a
+sufficient key — the same name and version can come from different sources, and
+this project's index reader resolves `.cabal` revisions last-wins, so ρ is
+`(name, version, chosen revision)` in practice. The distinction is dormant while
+a solve reads one index, and stops being dormant the moment local packages or a
+second source enter.
 
 `D` is index data. Only the bridge can answer it; the core algebra cannot, and
 per the architecture boundary must not try.
@@ -79,13 +88,26 @@ sources").
 
 **What it costs.** The dependence is not removed, only relocated: out of explicit
 clauses and into the constraint language, which is what makes §2.3 a real
-question instead of a triviality. Under the alternative, a clause
-`{foo 1.2, foo:fast, not vector >=0.12}` names the flag as a literal, so conflict
-resolution generalises — it learns that `fast` is the problem, for every version.
-Here, each `(version, assignment)` pair is its own atom, so a version rejected
-for a reason unrelated to any flag is re-offered once per irrelevant assignment,
-and nothing learned about one version's `f` transfers to another's. The intended
-answer to that cost is dependency collapsing (§4.2), not a change of model.
+question instead of a triviality.
+
+The alternative's advantage is narrower than it first looks, and worth stating
+precisely. Under a clause `{foo 1.2, foo:fast, not vector >=0.12}` the flag is a
+literal, so **flags the failure does not involve never enter the clause at all** —
+that is the whole of the win. It is *not* "conflict resolution learns that `fast`
+is bad for every version": the clause still names `foo 1.2`, and a flag variable
+shared across versions would anyway impose exactly the cross-version identity §1.3
+denies, while a version-keyed one would not generalise either. The honest
+comparison is therefore: a shared flag variable may generalise more but imposes an
+identity Cabal does not have; a version-keyed one keeps the semantics and needs
+conditional-existence machinery.
+
+Here, each `(version, assignment)` pair is its own atom, so an irrelevant flag
+*does* enter the learned incompatibility, and a version rejected for a
+flag-irrelevant reason is re-offered once per irrelevant assignment. That is the
+price. It is recoverable **inside this model** — per-fact dependency collapsing
+(§4.2) keeps irrelevant flags out of the depender term, which is precisely the
+alternative's advantage — so the answer to the cost is collapsing, not a change of
+model.
 
 **Status.** Nothing in §2 or §3 depends on this choice being the right one; if
 the retry cost ever dominates, this is the decision to revisit, and §2.3 largely
@@ -100,19 +122,35 @@ versions is syntax, not identity.
 
 ### 1.5 Not every instance is admissible
 
-The universe of instances is smaller than the product of versions and
-assignments. An instance is **admissible** only if:
+Three notions have to be kept apart, because collapsing them means enforcing the
+same rule in two places and letting the two readings drift — which is how §1.6's
+question went wrong the first time:
 
-- it agrees with the user's explicit flag constraints, read leniently (§1.6);
-- every **manual** flag takes its declared default, unless the user set it
-  (see §8 — the precise cabal rule is unverified here);
-- the components in scope are buildable under α. A `buildable: False` reachable
-  only under some assignments makes exactly those instances inadmissible, and
-  PubGrub asks for that to be expressed as "never select this" rather than as
-  dependencies (`references/pubgrub.md:476`).
+1. **The universe** — the releases that exist *and could be interpreted*. A
+   release whose package description the bridge cannot parse is not in the
+   universe: it is skipped, and the skip must be **reported**, not silently
+   folded into "no such version" (§3, O6). Suppressing it can otherwise produce a
+   no-solution proof that is misleading rather than wrong.
+2. **Intrinsic admissibility** — a property of an instance alone, independent of
+   the partial solution:
+   - the components in scope are buildable under α. A `buildable: False`
+     reachable only under some assignments makes exactly those instances
+     inadmissible, and PubGrub asks for that to be expressed as "never select
+     this" rather than as dependencies (`references/pubgrub.md:476`);
+   - *(provisional, see §8)* every **manual** flag takes its declared default
+     unless the user set it. This is stated from memory and unverified against
+     `cabal-install-solver`; treat it as intended behaviour, not as settled
+     normative content.
+3. **Eligibility for a query** — intrinsic admissibility *plus* membership in the
+   accumulated constraint the solver is asking about.
 
-Admissibility depends on the index and on user input. It restricts what may be
-*chosen*; it is not a property the constraint algebra is expected to know.
+Note that intrinsic admissibility is **assignment-dependent**: whether an
+instance is buildable can depend on α. That is what makes O6's completeness
+obligation non-trivial rather than a corollary of the representation.
+
+User flag constraints are deliberately **not** on this list. They are input, not
+a property of a release: they are translated once into an initial solver
+constraint (§1.6), so the provider's universe stays independent of them.
 
 ### 1.6 User flag constraints are lenient
 
@@ -143,6 +181,10 @@ three-case atom (§2.3) both readings are expressible, so each boundary states t
 one it means, and a strict mode for user flags stays available if it is ever
 wanted.
 
+User input is translated **once**, at this boundary, and enforced only as a solver
+constraint — never re-checked inside the provider's notion of admissibility
+(§1.5). One owner, one reading.
+
 A package's own conditional branches are *not* affected by any of this: they are
 never solver-level flag constraints. They are evaluated at the chosen assignment
 (§4.1), where every declared flag has a value and the question does not arise.
@@ -167,13 +209,43 @@ atom:
 1. **version**: the version lies in a version range;
 2. **flag**: a statement about one flag name.
 
-A flag atom must be able to express all three mutually exclusive cases:
+A flag atom must be able to distinguish all three mutually exclusive
+**observational cases**:
 
-| atom | true of instance `(v, α)` when |
+| case | true of a source instance `(ρ, α)` when |
 |---|---|
 | `f` is on | `f ∈ dom α` and `α(f) = True` |
 | `f` is off | `f ∈ dom α` and `α(f) = False` |
-| `f` is not declared | `f ∉ dom α` |
+| `f` is not applicable | `f ∉ dom α` |
+
+Three *cases*, not necessarily three primitive atoms: predicates `declared(f)` and
+`value(f)` induce the same partition, and this specification does not choose a
+syntax. What it does require is that the partition be expressible, which is what
+§2.3 is about.
+
+**Pre-installed units.** An installed unit has no solver-controllable flags at
+all, so for it:
+
+| case | value |
+|---|---|
+| `f` is on | False |
+| `f` is off | False |
+| `f` is not applicable | True |
+
+"Not applicable" is the operational reading — *absent from this instance's
+solver-visible flag domain* — and is why the third case is not called "not
+declared" here: the source that produced an installed unit may well have declared
+`f`; what is absent is any assignment the solver could choose. If a report ever
+names this case for an installed unit it should say "not applicable", not "not
+declared".
+
+Note the consequence, since it is easy to mistake for a defect: a flag *request*
+cannot exclude an installed unit. That is correct — an installed unit's flags are
+already baked, so the request can be neither honoured nor violated — and it is
+what the lenient translation of §1.6 delivers, `(f is b) ∨ (f is not
+applicable)`. It also means a constraint carrying flag conditions must carry its
+installed instances as a separate disjunct; a representation that keeps the
+installed side extensional gets this structurally.
 
 ### 2.3 Why three cases, and not two
 
@@ -205,10 +277,10 @@ each of them:
   (§3, O4) but it is still not exact, and it makes two different constraints
   denote the same set for reasons no operation can see.
 
-The three-case atom is the Boolean closure of either reading. It is the only one
-under which every set operation is exact, and it needs no knowledge of `D`:
-whether `f ∈ dom α` is a question about the *instance*, and §1.2 guarantees the
-instance answers it.
+The three-case partition is the Boolean closure of either reading. It is the
+minimal one under which every set operation is exact, and it needs no knowledge of
+`D`: whether `f ∈ dom α` is a question about the *instance*, and §1.2 guarantees
+the instance answers it.
 
 What is rejected here is the lenient *atom*, not lenient *behaviour*. Both
 readings above remain expressible — strictly, as `f is b`; leniently, as
@@ -269,14 +341,53 @@ happens to declare.
   detected as satisfied — which it is, because that question reduces to
   `R ∖ R`, vacuously empty. Every derivation the solver performs on its own
   output must rest on vacuous emptiness, never on `D`.
-- **O6 — the provider is the only thing that knows reality.** It must offer only
-  admissible instances that the index really has; the assignment it offers must
-  be total per §1.2; it must report "none" rather than inventing one; and the
-  dependencies it reports must be the dependencies **at exactly the assignment
-  the offered instance pins**. Nothing else may consult `D`.
-- **O7 — no query may enumerate a package's instances.** Follows from §2.5, and
-  is why O6 is a provider obligation rather than something the algebra could do
-  for itself.
+- **O6 — the provider is the only thing that knows reality, and it must be both
+  sound and complete.** Writing `choose(p, X)` for the request "give me a value
+  for `p` from `X`", and `Adm(p)` for the intrinsically admissible instances of
+  `p` drawn from the universe (§1.5):
+
+      choose(p, X) = Some i   ⟹   i ∈ Adm(p) ∩ ⟦X⟧
+      choose(p, X) = None     ⟺   Adm(p) ∩ ⟦X⟧ = ∅
+
+  The `⟸` half of the second line is the easy one; the **`⟹` half is the
+  obligation that matters**, and it is not a formality. PubGrub turns "no
+  candidate" into the external incompatibility `{X}`, which forbids the entire
+  offered set — so a `None` that should have been a `Some` is a false external
+  fact, and yields a confident "no solution" for a solvable problem. Note it is
+  *stronger* than "the provider may test its preferred assignment": it must find a
+  satisfying admissible assignment if one exists.
+
+  Two lemmas are needed, and only the first is a property of the representation:
+
+  - **Cell completion.** If a fixed release has any instance in a conjunctive cell
+    `C`, then completing `C`'s free flags at their declared defaults yields an
+    instance in `C`. (Each flag is constrained independently, so any completion of
+    the free ones stays inside.)
+  - **Provider completeness.** If `Adm(p) ∩ ⟦X⟧ ≠ ∅` then `choose(p, X) ≠ None`.
+
+  The first does **not** imply the second, because intrinsic admissibility is
+  assignment-dependent (§1.5): a release with `if flag(f) buildable: False` and
+  `f` defaulting to `True` has an admissible instance in the unconstrained cell,
+  while the default completion of that cell is inadmissible. Discharging the
+  second therefore needs one of: admissibility intersected symbolically into the
+  constraint; a provider that keeps searching completions when the preferred one
+  is inadmissible; or — the option PubGrub already prescribes — emitting
+  "never select this instance" for the inadmissible completion
+  (`references/pubgrub.md:476`) and continuing, so propagation excludes it and
+  asks again. The last is preferred: it terminates (each rejection learns a new
+  incompatibility), and it keeps the reason in the proof instead of hiding it in a
+  search.
+
+  Also: the assignment offered must be total per §1.2; the dependencies reported
+  must be those **at exactly the assignment the offered instance pins**; and
+  nothing outside the provider may consult `D`.
+- **O7 — the algebra may not enumerate instances; the provider may enumerate
+  releases.** Precisely: no operation of the constraint algebra, and no
+  term-relation query, may enumerate a package's concrete instance universe. The
+  provider *may* enumerate available releases and construct assignments lazily,
+  but may not materialise the version × assignment product. This is what §2.5
+  requires and what candidate selection needs, and the earlier blanket wording
+  ("no query may enumerate a package's instances") wrongly forbade the latter.
 
 ## 4. Dependencies
 
@@ -296,30 +407,85 @@ incompatibility, with the depender's range running from the first version that
 has the dependency to the first that does not
 (`references/pubgrub.md:456`, and `:476` for the inadmissible case).
 
-Flags make the grouping two-dimensional: the same version under different
-assignments may have different dependencies, so the group is defined by the
-dependency set, and the depender constraint must be one that denotes exactly
-(or at most) that group. §2.3 is what makes the natural group expressible —
-"these versions with `f` off, together with the versions that never declared
-`f`" is a constraint, not an enumeration.
+**Per dependency fact, not per dependency set.** The unit is one *guarded
+dependency occurrence* `C ⇒ q ∈ R`, where `C` is the flag condition guarding it:
+
+> An incompatibility `{D, not q ∈ R}` is **sound** when every instance denoted by
+> `D` satisfies `C`, and therefore has that dependency fact. The instances' *other*
+> dependencies are irrelevant.
+
+Grouping by the whole dependency set instead would be a serious mistake, not a
+conservative one: two assignments that agree on `simd-utils` but differ on an
+unrelated documentation dependency would fail to group, so the depender term
+would still name the irrelevant flag — and the 2^k re-offer cost that collapsing
+exists to remove would survive it intact.
+
+Soundness and policy are separate, and only the first is a requirement:
+
+- *soundness*: every instance in `D` has the fact. A singleton `D` satisfies this,
+  which is why the per-instance form we emit today is correct but useless.
+- *policy*: make `D` as general as is practical, above all by **omitting flag
+  conditions the guard does not mention**. PubGrub describes collapsing as a
+  strategy rather than a logical prerequisite; for us it is the strategy that pays
+  for §1.4's price.
+
+What the guard does and does not buy. A `.cabal` file's conditional tree yields
+guarded occurrences directly, so **the flag component of `D` is the guard** — no
+enumeration of assignments, and no need to compute per-assignment dependency sets
+at all. Several occurrences may constrain the same `q` (an unconditional
+`q >=1`, a guarded `q <3`, a guarded `q /=2`); emit them as separate facts and let
+propagation intersect them, rather than computing one effective range per
+assignment, whose region would need a Boolean combination of guards. What remains
+genuinely to be done is the **version** axis: widening `D` across releases still
+requires inspecting the intervening ones — including checking whether each
+declares the flag the guard mentions at all, since where it does not, the guard is
+not merely false but inapplicable (§2.2).
 
 ### 4.3 Reports
 
 A depender constraint appears verbatim in the explanation, so it must render as
 something a user can act on: cabal range syntax plus a readable statement of the
-flag conditions. "Some flag is not declared" is part of the language and can
-appear in a report; it should read as such rather than as an internal marker.
+flag conditions. The not-applicable case (§2.2) is part of the language and can
+appear in a report; it must read as a fact about the package rather than as an
+internal marker — "does not have a `simd` flag" for a source release, "not
+applicable" for an installed unit, never a bare sigil.
 
 ## 5. Choice policy is not semantics
 
 Any admissible instance may be chosen. Which one is preferred is **policy**:
 changing it changes the solution found and the time taken, never whether a
-problem is solvable. Two policy statements this project adopts, both revisable
-without touching anything above:
+problem is solvable.
 
-- an instance's assignment defaults to the declared defaults of its version;
-- a flag is only moved off its default when a conflict forces it — no
-  speculative exploration of the assignment space.
+Measure an assignment by its **deviation** from the release's declared defaults:
+
+    cost(ρ, α) = |{ f ∈ D(ρ) | α(f) ≠ default_ρ(f) }|
+
+The policy this project adopts, in two parts because the axes are ordered:
+
+1. **Between releases**, newest first. (PubGrub deliberately leaves version choice
+   to the provider.)
+2. **Within a release**, fewest deviations first:
+
+   > For a fixed source release, the provider does not choose an assignment with
+   > more deviations from the declared defaults while an admissible assignment
+   > with fewer deviations satisfies the accumulated constraint.
+
+Directly implementable as: test the all-default assignment for the release first,
+and consider non-default assignments only once it is excluded or inadmissible.
+
+Two ways to get this wrong, both of which we have written down at some point:
+
+- "a flag only moves when a conflict forces it" is not a policy. When the
+  accumulated constraint says only `not (+simd +docs)`, *something* must decide
+  which flag moves; the constraint does not.
+- ranking candidate cells by **number of pins** is not the same as ranking
+  assignments by deviation. A one-pin cell `f = False` beats a two-pin cell
+  `f = True, g = True` on pin count, yet with both flags defaulting to `True` the
+  second is the all-default assignment and the first is a deviation. The cost is a
+  property of the *completed assignment*, never of the constraint that produced
+  it. Complete each candidate cell, drop non-members and inadmissible
+  completions, deduplicate assignments arising from overlapping cells, then order
+  by cost with a deterministic tie-break.
 
 ## 6. Testing obligations
 
@@ -340,6 +506,34 @@ violated. Two rules, both learned the hard way:
 Everything derived from emptiness (containment, disjointness, and the
 term-relation) must likewise be tested in the direction O4 permits: never
 wrongly Satisfied or Contradicted, allowed to be Inconclusive.
+
+- **The one-sided properties are necessary and not sufficient, so a verdict
+  oracle is owed.** O4 argues that a conservative emptiness test can only produce
+  `Inconclusive` for a single relation query. That is *not* a proof that the
+  algorithm is unaffected: conflict resolution locates the earliest satisfier of
+  an incompatibility and derives a backjump level from it, so detecting
+  satisfaction later than it semantically occurs could in principle change which
+  incompatibility is learned, whether it is asserting after backjumping, and
+  whether the loop makes progress. O5 discharges one case (the provider's `{X}`,
+  recognisable through `R ∖ R`), not the loop.
+
+  The obligation is a **brute-force verdict oracle** over generated finite
+  worlds — not a second solver. Enumerate all legal selections directly (at most
+  one instance per package; reachable from the root with no extras; intrinsically
+  admissible; every selected instance's dependency facts satisfied; translated
+  user constraints satisfied) and assert:
+
+      solver succeeds  ⟺  the oracle's solution set is non-empty
+      the solver's answer, when it succeeds, is in that set
+
+  plus a step bound or repeated-state detector, which is what actually catches a
+  lost-progress regression. This is not a termination proof; it tests the risk
+  conservative emptiness creates far more directly than set-level properties can.
+
+  It must include a generated world in which **the default completion of a cell is
+  inadmissible while a non-default completion of the same cell is admissible** —
+  that case, and only that case, decides whether the implementation satisfies
+  O6's completeness half.
 
 ## 7. Non-goals
 
@@ -371,10 +565,13 @@ exists — a trace pins down what the prose means. This one also serves as the
 **acceptance criterion**: if it cannot be reproduced, the semantics above is not
 implemented.
 
-Note what the example is *not*. There is no flag preference beyond §5's
-"default first", no search over assignments, and no code that knows about flags
-at all beyond the provider. The flip is the negation of something the solver
-learned.
+Note what the example is *not*. There is no flag preference beyond §5, and no
+search over the assignment space. Nor is there any flag-specific logic in the
+PubGrub kernel: unit propagation, conflict resolution and backjumping run
+unchanged, and flag awareness is confined to the value-set algebra (which knows
+the three cases of §2.2 and Boolean operations on them) and to the provider (which
+knows declarations, defaults and dependencies). The flip is the negation of
+something the solver learned.
 
 ### The world
 
@@ -427,18 +624,23 @@ with (3) gives (5), and (5) with (2) gives **(6)**.
 keeping (6) and the derivation `parser >=1.0 && <2`.
 
 **The learning step.** (6) is a unit incompatibility, so propagation derives its
-negation, which in the atoms of §2.2 is a three-way disjunction:
+negation, which by §2.2 is a three-way disjunction:
 
 ```
 not (parser 1.0 +simd)
-  =  parser ≠ 1.0                     ∨    (no such version on the index)
-     parser 1.0 with simd off         ∨    ← the live one
-     parser 1.0 not declaring simd         (empty here: 1.0 does declare it)
+  =  parser ≠ 1.0                       ∨
+     parser 1.0 with simd off           ∨    ← the live one
+     parser 1.0 with simd not applicable
 ```
 
-intersected with `parser >=1.0 && <2`. Decision making runs again; the provider
-enumerates `parser`'s versions, finds 1.0, and completes the assignment from the
-surviving constraint — which now **pins `simd` to False**. Decide
+intersected with `parser >=1.0 && <2`. Note this is stated purely in instance
+properties: whether the index *has* a version other than 1.0 is a separate,
+provider-side question (O6), and belongs to the next step rather than to the
+complement.
+
+Decision making runs again. The provider enumerates `parser`'s releases, finds
+1.0, and — per §5 — tries the all-default assignment first, which the accumulated
+constraint now excludes; the surviving disjunct **pins `simd` to False**. Decide
 `parser 1.0 -simd`, whose dependency set at that assignment is empty. The solve
 succeeds.
 
@@ -449,13 +651,35 @@ succeeds.
 unit incompatibility. Remove §5's default-first policy and the same trace runs
 with a different starting instance; the *verdict* is unchanged, as §5 claims.
 
-**Where the third case of §2.3 earns its place.** Two of the three disjuncts are
-empty in this world, which is exactly why a two-valued pin looks adequate. Add a
-`parser 1.1` that dropped the `simd` flag: the third disjunct is what admits it,
-and under a two-valued pin the propagation of (6) would silently exclude
-`parser 1.1` from a range it belongs to. This step is the one to reproduce when
-testing §2.3 — and per §6 it needs a world where versions differ in what they
-declare, which is precisely this one.
+**Where the third case of §2.3 earns its place — and where it does not.** Not
+here. Add a `parser 1.1` that dropped the `simd` flag and it is admitted by the
+`parser ≠ 1.0` disjunct, whatever it declares; the not-applicable disjunct does no
+work in this trace. That is worth stating explicitly because it explains how a
+two-valued pin survived so long: **while a depender term is a single
+release-and-assignment, negating a learned decision never needs the
+not-applicable case** — the version disjunct always covers the other releases, and
+every pin the algebra produces is attached to a single version's range.
+
+The case becomes load-bearing exactly when a depender term spans several versions
+while carrying a flag condition, which is what §4.2's collapsing creates. In
+collapsed form the same conflict learns
+
+```
+{parser >=1.0 && <2 with simd on, not simd-utils ==0.3}
+```
+
+and the negation of the depender term, intersected with the same range, is
+
+```
+parser >=1.0 && <2 with simd off  ∨  parser >=1.0 && <2 with simd not applicable
+```
+
+where the second disjunct is the *only* thing that retains `parser 1.1`. That is
+the acceptance witness for §2.3, and it is directly checkable without a solver:
+for `A = parser >=1 && <2` and `B = parser >=1 && <2 with simd on`, where 1.0
+declares `simd` and 1.1 does not, `A ∖ B` must contain both `parser 1.0 -simd` and
+`parser 1.1`. Note it needs a world where versions differ in what they declare —
+per §6, the same requirement the property suite has.
 
 **The price from §1.4, made concrete.** Give `parser 1.0` a second, irrelevant
 flag `docs`. Then (2) and (6) name `parser 1.0 +simd +docs`, so propagation

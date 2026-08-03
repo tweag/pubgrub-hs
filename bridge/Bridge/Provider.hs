@@ -44,8 +44,11 @@ import           Distribution.Simple.GHC                      (configure)
 import           Distribution.Simple.Program.Db               (defaultProgramDb)
 import           Distribution.System                          (Platform,
                                                                buildPlatform)
-import           Distribution.Types.Flag                      (PackageFlag (..),
-                                                               mkFlagAssignment)
+import           Distribution.Types.Flag                      (FlagAssignment,
+                                                               FlagName,
+                                                               PackageFlag (..),
+                                                               mkFlagAssignment,
+                                                               unFlagAssignment)
 import           Distribution.Types.PackageName               (PackageName,
                                                                mkPackageName)
 import           Distribution.Types.Version                   (Version,
@@ -148,28 +151,20 @@ mkExpand installedDb platform cInfo handle root = expand'
             Just chosen -> do
                 incs <- consequencesOfUsePreInstalled pn chosen
                 pure (Just (UsePreInstalled chosen, incs))
-            Nothing -> firstUsable candidates
+            Nothing -> firstUsable (sortOn Down (versionsOf pn))
 
                 where
-                    -- The source releases the offered set could admit, newest
-                    -- version first. A candidate is a (version, cell) pair,
-                    -- because the cell says which flag values are still open.
-                    -- Among the cells admitting one version the order is
-                    -- whatever 'PubGrub.InstanceSet.SourceCell.pruneCells'
-                    -- leaves: no flag preference is applied.
-                    candidates =
-                        [ (v, cell)
-                        | v <- sortOn Down (versionsOf pn)
-                        , cell <- filter (\c -> scVersionSet c `VersionSet.contains` v) (isSource range)
-                        ]
-
+                    -- Releases newest first (@docs/flags-semantics.md@ §5,
+                    -- between-releases half). One @.cabal@ read per release, not
+                    -- per candidate assignment.
                     firstUsable [] = pure Nothing
-                    firstUsable ((v, sc):rest) = do
-                        -- Source release: read and flatten its .cabal on demand.
+                    firstUsable (v:rest) = do
                         result <- liftIO (ihLookupGPD handle pn v)
                         case result of
-                            -- A .cabal that fails to parse: warn and skip. If
-                            -- every candidate fails, the solver turns @Nothing@
+                            -- A .cabal that fails to parse: warn and skip. The
+                            -- release then drops out of the universe the solve
+                            -- runs over (§1.5), so the warning has to be visible.
+                            -- If every release fails, the solver turns @Nothing@
                             -- into "no instances in range".
                             Left err -> do
                                 logMsg
@@ -184,23 +179,54 @@ mkExpand installedDb platform cInfo handle root = expand'
                                         )
                                     )
                                 firstUsable rest
-                            Right gpd -> do
-                                -- The cell's pins, with every remaining declared
-                                -- flag at its default: total over this version's
-                                -- flags, as an 'Instance' requires.
-                                let flags =
-                                        assignmentFrom
-                                            [(flagName f, flagDefault f) | f <- genPackageFlags gpd]
-                                            sc
-                                    inst = BuildSource v flags
-                                if memberInstance inst range
-                                -- The guards are evaluated at @flags@ — the same
-                                -- assignment @inst@ pins — so the decision and the
-                                -- incompatibilities it entails cannot disagree.
-                                then let incs = depIncs pn inst (Map.toList (flattenDeps platform cInfo flags gpd))
-                                     in pure $ Just (inst, incs)
-                                else
-                                    firstUsable rest
+                            Right gpd ->
+                                case listToMaybe (usableAssignments v gpd) of
+                                    Nothing -> firstUsable rest
+                                    Just flags ->
+                                        -- The guards are evaluated at @flags@ — the
+                                        -- same assignment the instance pins — so the
+                                        -- decision and the incompatibilities it
+                                        -- entails cannot disagree.
+                                        let inst = BuildSource v flags
+                                            deps = Map.toList (flattenDeps platform cInfo flags gpd)
+                                        in pure (Just (inst, depIncs pn inst deps))
+
+                    -- The assignments this release could be built under, in
+                    -- preference order, keeping only those the offered set
+                    -- admits. Each cell admitting @v@ contributes one assignment:
+                    -- its pins, completed at the declared defaults. That finds a
+                    -- member if the cell has one, because a cell constrains each
+                    -- flag independently. It stops being enough once
+                    -- admissibility depends on the assignment (@buildable: False@
+                    -- under some flags): that is the open completeness obligation
+                    -- O6 in @docs/flags-semantics.md@.
+                    usableAssignments v gpd =
+                        [ flags
+                        | flags <- preferDefaults declared (map (assignmentFrom declared) cells)
+                        , memberInstance (BuildSource v flags) range
+                        ]
+                      where
+                        declared = [(flagName f, flagDefault f) | f <- genPackageFlags gpd]
+                        cells =
+                            filter (\c -> scVersionSet c `VersionSet.contains` v) (isSource range)
+
+    -- | Candidate assignments in preference order, deduplicated: fewest
+    -- deviations from the release's declared defaults first, then a deterministic
+    -- tie-break on the assignment itself
+    -- (@docs/flags-semantics.md@ §5, within-a-release half).
+    --
+    -- The cost is a property of the /completed assignment/, never of the cell it
+    -- came from. Ranking cells by pin count instead looks equivalent and is not: a
+    -- one-pin cell @f = False@ beats a two-pin @f = True, g = True@ on pin count,
+    -- yet with both flags defaulting to True the second cell is the all-default
+    -- assignment and the first is a deviation.
+    preferDefaults :: [(FlagName, Bool)] -> [FlagAssignment] -> [FlagAssignment]
+    preferDefaults declared =
+        Map.elems . Map.fromList . map key
+      where
+        key fa = ((deviations fa, unFlagAssignment fa), fa)
+        deviations fa =
+            length [() | (f, b) <- unFlagAssignment fa, lookup f declared /= Just b]
 
     consequencesOfUsePreInstalled pn pip =
             pure
