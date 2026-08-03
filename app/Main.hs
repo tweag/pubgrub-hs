@@ -27,13 +27,14 @@ import qualified Data.Text                       as T
 import qualified Data.Text.IO                    as TIO
 import           Distribution.Parsec             (eitherParsec)
 import           Distribution.Pretty             (prettyShow)
+import           Distribution.Types.Flag         (showFlagAssignment)
 import           Distribution.Types.PackageName  (PackageName)
 import           Distribution.Types.VersionRange (VersionRange)
 import           Hackage.Security.Util.Path      (fromFilePath, makeAbsolute)
 import           Network.HTTP.Client             (defaultManagerSettings,
                                                   newManager)
 import           PubGrub.InstanceSet             (HasVersion (version),
-                                                  Instance)
+                                                  Instance (..))
 import           PubGrub.Pretty                  (Pretty (pretty))
 import           PubGrub.Report                  (reportConflict)
 import           PubGrub.Solver                  (SolveError (..),
@@ -122,6 +123,12 @@ report (Left (NoSolution incompat)) =
     logMsg (reportConflict incompat)
 report (Right solution) = do
     logMsg (T.pack "Solution:")
-    mapM_
-        (\(p, i) -> logMsg (T.pack ("  " ++ prettyShow p ++ " " ++ prettyShow (version i))))
-        (Map.toList solution)
+    mapM_ (logMsg . uncurry renderChoice) (Map.toList solution)
+
+-- | One line of the plan. A source release is shown with the flag assignment it
+-- was decided under, because a different assignment is a different build. A
+-- pre-installed unit is shown as such: it is already built, with no flags to
+-- choose.
+renderChoice :: PackageName -> Instance -> Text
+renderChoice p (UsePreInstalled i) = T.pack $ unwords [prettyShow p, prettyShow (version i), "(installed)"]
+renderChoice p (BuildSource v fa) = T.pack $ unwords ["  ", prettyShow p, prettyShow v, showFlagAssignment fa]

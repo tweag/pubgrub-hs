@@ -1,5 +1,6 @@
 module Main (main) where
 
+import qualified FlagSolveSpec
 import qualified FlattenSpec
 import qualified InstanceSetSpec
 import qualified PaperSpec
@@ -17,4 +18,5 @@ main =
             , SolverSpec.tests
             , PaperSpec.tests
             , FlattenSpec.tests
+            , FlagSolveSpec.tests
             ]

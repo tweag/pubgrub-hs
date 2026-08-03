@@ -62,7 +62,8 @@ import           PubGrub.InstanceSet                          (HasVersion (..),
                                                                memberInstance,
                                                                singletonInstance,
                                                                singletonUsePreInstalled)
-import           PubGrub.InstanceSet.SourceCell               (SourceCell (..))
+import           PubGrub.InstanceSet.SourceCell               (SourceCell (..),
+                                                               assignmentFrom)
 
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
 import           PubGrub.Provider                             (Provider (..))
@@ -141,29 +142,35 @@ mkExpand installedDb platform cInfo handle root = expand'
             = let incs = depIncs pn rootInstance root
             in pure (Just (rootInstance, incs))
     expand' pn range = do
-        let installed = [toPreInstalled u | u <- Map.findWithDefault [] pn (idbByName installedDb)]
-            filtered = filter (`Set.member` isInstalled range) installed
-            sorted = sortOn (Down . version) filtered
-        case listToMaybe sorted of
+        let installedHere = [toPreInstalled u | u <- Map.findWithDefault [] pn (idbByName installedDb)]
+            admissible = sortOn (Down . version) (filter (`Set.member` isInstalled range) installedHere)
+        case listToMaybe admissible of
             Just chosen -> do
                 incs <- consequencesOfUsePreInstalled pn chosen
                 pure (Just (UsePreInstalled chosen, incs))
-            Nothing -> go filtered
+            Nothing -> firstUsable candidates
 
                 where
-                    filtered = [ (v, cell)
+                    -- The source releases the offered set could admit, newest
+                    -- version first. A candidate is a (version, cell) pair,
+                    -- because the cell says which flag values are still open.
+                    -- Among the cells admitting one version the order is
+                    -- whatever 'PubGrub.InstanceSet.SourceCell.pruneCells'
+                    -- leaves: no flag preference is applied.
+                    candidates =
+                        [ (v, cell)
                         | v <- sortOn Down (versionsOf pn)
                         , cell <- filter (\c -> scVersionSet c `VersionSet.contains` v) (isSource range)
                         ]
 
-                    go [] = pure Nothing
-                    go ((v, sc):rest) = do
+                    firstUsable [] = pure Nothing
+                    firstUsable ((v, sc):rest) = do
                         -- Source release: read and flatten its .cabal on demand.
                         result <- liftIO (ihLookupGPD handle pn v)
                         case result of
-                            -- A .cabal that fails to parse: warn and skip the
-                            -- version. If every candidate fails, the solver
-                            -- reports that no instance is left.
+                            -- A .cabal that fails to parse: warn and skip. If
+                            -- every candidate fails, the solver turns @Nothing@
+                            -- into "no instances in range".
                             Left err -> do
                                 logMsg
                                     ( T.pack
@@ -176,12 +183,15 @@ mkExpand installedDb platform cInfo handle root = expand'
                                             ++ ")"
                                         )
                                     )
-                                go rest
+                                firstUsable rest
                             Right gpd -> do
-                                let packageFlags = genPackageFlags gpd
-                                    flags = mkFlagAssignment
-                                        [ (flagName f, Map.findWithDefault (flagDefault f) (flagName f) (scFlags sc))
-                                        | f <- packageFlags ]
+                                -- The cell's pins, with every remaining declared
+                                -- flag at its default: total over this version's
+                                -- flags, as an 'Instance' requires.
+                                let flags =
+                                        assignmentFrom
+                                            [(flagName f, flagDefault f) | f <- genPackageFlags gpd]
+                                            sc
                                     inst = BuildSource v flags
                                 if memberInstance inst range
                                 -- The guards are evaluated at @flags@ — the same
@@ -190,7 +200,7 @@ mkExpand installedDb platform cInfo handle root = expand'
                                 then let incs = depIncs pn inst (Map.toList (flattenDeps platform cInfo flags gpd))
                                      in pure $ Just (inst, incs)
                                 else
-                                    go rest
+                                    firstUsable rest
 
     consequencesOfUsePreInstalled pn pip =
             pure

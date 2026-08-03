@@ -10,10 +10,10 @@ import           Distribution.Types.Flag        (FlagAssignment, FlagName,
                                                  unFlagAssignment)
 import           Distribution.Types.Version     (Version)
 import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
-import           PubGrub.InstanceSet.SourceCell (SourceCell (..),
+import           PubGrub.InstanceSet.SourceCell (FlagPin (..), SourceCell (..),
                                                  differenceCell, intersectCell,
                                                  mergeCells, nullCell,
-                                                 singletonCell)
+                                                 pruneCells, singletonCell)
 import           PubGrub.Pretty                 (Pretty (..))
 import           PubGrub.SetOps                 (SetOps (..))
 import qualified PubGrub.VersionSet             as VersionSet
@@ -70,16 +70,22 @@ data InstanceSet = InstanceSet
     , isSource    :: [SourceCell]
     }
 
+-- Every operation ends in 'pruneCells'. Correctness does not need it: the union
+-- of cells is deliberately not canonical, and the solver only asks emptiness
+-- questions. But the cell count does not track the denotation, so without
+-- pruning at each step a chain of derivations grows a disjunction of thousands
+-- of cells describing a handful of instances. Pruning only at the end would be
+-- too late, since the blow-up is in the intermediate results.
 instance SetOps InstanceSet where
     union lhs rhs  =
         InstanceSet
             { isInstalled = isInstalled lhs `Set.union` isInstalled rhs
-            , isSource    = mergeCells (isSource lhs <> isSource rhs)
+            , isSource    = pruneCells (mergeCells (isSource lhs <> isSource rhs))
             }
     intersect lhs rhs =
         InstanceSet
             { isInstalled = isInstalled lhs `Set.intersection` isInstalled rhs
-            , isSource    =
+            , isSource    = pruneCells
                 [ cell
                 | x <- isSource lhs
                 , y <- isSource rhs
@@ -90,7 +96,7 @@ instance SetOps InstanceSet where
     difference lhs rhs
         = InstanceSet
             { isInstalled = isInstalled lhs `Set.difference` isInstalled rhs
-            , isSource    = foldl' (\xs y -> concatMap (`differenceCell` y) xs) (isSource lhs) (isSource rhs)
+            , isSource    = foldl' (\xs y -> pruneCells (concatMap (`differenceCell` y) xs)) (isSource lhs) (isSource rhs)
             }
     isEmpty is = Set.null (isInstalled is) && all nullCell (isSource is)
 
@@ -126,14 +132,21 @@ memberInstance (BuildSource v fa) is = any inCell (isSource is)
             && flags `memberFlagAssignment` fa
 
 -- | Does an assignment satisfy a cell's pins? Every pin must be met; flags the
--- cell leaves free are unconstrained — which is exactly "the pins are a submap
--- of the assignment".
+-- cell leaves free are unconstrained.
 --
--- Note the direction. Quantifying over the /assignment/ instead would demand
--- that every assigned flag also be pinned, so an unpinned cell would contain
--- nothing rather than everything.
-memberFlagAssignment :: Map FlagName Bool -> FlagAssignment -> Bool
-memberFlagAssignment flags fa = flags `Map.isSubmapOf` Map.fromList (unFlagAssignment fa)
+-- Note the direction: the quantifier runs over the /pins/, not the assignment.
+-- Quantifying over the assignment would demand that every assigned flag also be
+-- pinned, so an unpinned cell would contain nothing rather than everything.
+--
+-- A 'NotDeclared' pin is decided from the assignment alone, with no index
+-- lookup: the assignment is /exact/ over the version's declared flags, so its
+-- keys are the flags that version declares.
+memberFlagAssignment :: Map FlagName FlagPin -> FlagAssignment -> Bool
+memberFlagAssignment pins fa = all satisfied (Map.toList pins)
+  where
+    assigned = Map.fromList (unFlagAssignment fa)
+    satisfied (f, PinnedTo b) = Map.lookup f assigned == Just b
+    satisfied (f, NotDeclared) = Map.notMember f assigned
 
 instance Pretty InstanceSet where
     pretty is =

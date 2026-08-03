@@ -23,21 +23,23 @@
 -- "no solution".
 module InstanceSetSpec (tests) where
 
+import           Control.Monad                (replicateM)
 import           Data.List                    (intercalate)
 import           Data.Map.Strict              (Map)
 import qualified Data.Map.Strict              as Map
 import           Data.Maybe                   (catMaybes)
+import qualified Data.Set                     as Set
 import qualified Data.Text                    as T
 import           Distribution.Types.Flag      (FlagAssignment, FlagName,
-                                               lookupFlagAssignment,
                                                mkFlagAssignment, mkFlagName)
 import           Distribution.Types.UnitId    (mkUnitId)
 import           Distribution.Version         (Version, earlierVersion,
                                                mkVersion, orLaterVersion)
 import           PubGrub.Index.PreInstalled   (PreInstalledPackage (..))
-import           PubGrub.InstanceSet          (Instance (..), InstanceSet,
+import           PubGrub.InstanceSet          (Instance (..), InstanceSet (..),
                                                emptyInstanceSet, memberInstance,
                                                singletonInstance)
+import           PubGrub.InstanceSet.SourceCell (FlagPin (..), SourceCell (..))
 import           PubGrub.Pretty               (Pretty (..))
 import           PubGrub.Relation             (Relation (..), relation)
 import           PubGrub.SetOps               (SetOps (..), equivalent,
@@ -45,14 +47,15 @@ import           PubGrub.SetOps               (SetOps (..), equivalent,
 import           PubGrub.Term                 (Term (..), intersectTerm,
                                                isBottomTerm, isTopTerm,
                                                negateTerm, unionTerm)
-import           PubGrub.VersionSet           (VersionSet, contains,
+import           PubGrub.VersionSet           (VersionSet,
                                                emptyVersionSet,
                                                fromVersionRange, fullVersionSet,
                                                singletonVersionSet,
                                                unionVersionSet)
 import           Test.Tasty                   (TestTree, testGroup)
+import           Test.Tasty.HUnit             (assertBool, assertEqual, testCase)
 import           Test.Tasty.QuickCheck        (Arbitrary (..), Gen, elements,
-                                               frequency, oneof, sized,
+                                               forAll, frequency, oneof, sized,
                                                sublistOf, testProperty, (===))
 
 -- --------------------------------------------------------------------------
@@ -62,23 +65,16 @@ import           Test.Tasty.QuickCheck        (Arbitrary (..), Gen, elements,
 -- | All source instances whose version lies in @vs@ and whose flag assignment
 -- agrees with @pins@ (a flag absent from @pins@ is unconstrained).
 --
--- The body unions singletons drawn from the universe, and a union of
--- fully-pinned singletons only ever produces fully-pinned cells. So the
--- range-shaped cells, and the flag-splitting branch of cell difference, are
--- never exercised. Building the set as the provider widens a dependency's
--- 'VersionSet', from one cell, would exercise them; nothing else in this
--- module depends on the body.
-sourceInstances :: VersionSet -> Map FlagName Bool -> InstanceSet
+-- This is the /intensional/ constructor — one cell carrying the range and the
+-- pins themselves, the same shape the provider produces when it widens a
+-- dependency's 'VersionSet'. It has to be: the extensional alternative (union
+-- singletons drawn from the universe) only ever produces fully-pinned,
+-- version-singleton cells, so range-shaped cells and the flag-splitting branch
+-- of cell difference — the two things most likely to be wrong — would never be
+-- exercised.
+sourceInstances :: VersionSet -> Map FlagName FlagPin -> InstanceSet
 sourceInstances vs pins =
-    unionAll
-        [ singletonInstance i
-        | i <- sourceUniverse
-        , BuildSource v fa <- [i]
-        , contains vs v
-        , agrees fa
-        ]
-  where
-    agrees fa = all (\(f, b) -> lookupFlagAssignment f fa == Just b) (Map.toList pins)
+    InstanceSet { isInstalled = Set.empty, isSource = [SourceCell vs pins] }
 
 unionAll :: [InstanceSet] -> InstanceSet
 unionAll = foldr union emptyInstanceSet
@@ -88,31 +84,46 @@ unionAll = foldr union emptyInstanceSet
 -- --------------------------------------------------------------------------
 
 -- Small enough to enumerate exhaustively, large enough that a wrong
--- flag-splitting difference cannot hide: three versions x four total flag
--- assignments over two declared flags, plus two installed units.
+-- flag-splitting difference cannot hide: five versions with their total flag
+-- assignments (fifteen source instances), plus two installed units.
 
-versions :: [Version]
-versions = [mkVersion [1, 0], mkVersion [1, 1], mkVersion [2, 0]]
-
--- | The two declared flags of every source package in this universe, so a
--- total assignment fixes both.
+-- | Two flag names, and — this is the load-bearing part — /not/ every version
+-- declares both.
+--
+-- A flag is declared by a @.cabal@ file, so it is a property of a
+-- @(package, version)@, not of a package. An 'Instance' therefore carries an
+-- assignment total over /that version's/ flags, while a 'SourceCell' pins bare
+-- flag names across a whole range. A universe where every version declares the
+-- same flags cannot tell the two apart, and so cannot see what a pin on a flag
+-- some version does not declare is supposed to mean.
 flagA, flagB :: FlagName
 flagA = mkFlagName "a"
 flagB = mkFlagName "b"
 
--- | Every /total/ assignment over the two declared flags.
-totalAssignments :: [FlagAssignment]
-totalAssignments =
-    [ mkFlagAssignment [(flagA, a), (flagB, b)]
-    | a <- [False, True]
-    , b <- [False, True]
+-- | The universe's source releases, each with the flags it declares.
+declaredFlags :: [(Version, [FlagName])]
+declaredFlags =
+    [ (mkVersion [1, 0], [flagA, flagB])
+    , (mkVersion [1, 1], [flagA, flagB])
+    , (mkVersion [2, 0], [flagA, flagB])
+    , (mkVersion [3, 0], [flagA]) -- dropped b
+    , (mkVersion [4, 0], []) -- declares no flags at all
     ]
+
+versions :: [Version]
+versions = map fst declaredFlags
+
+-- | Every /total/ assignment over the given flags — so one empty assignment for
+-- a version that declares none.
+totalAssignments :: [FlagName] -> [FlagAssignment]
+totalAssignments fs =
+    map mkFlagAssignment (traverse (\f -> [(f, False), (f, True)]) fs)
 
 sourceUniverse :: [Instance]
 sourceUniverse =
     [ BuildSource v fa
-    | v <- versions
-    , fa <- totalAssignments
+    | (v, fs) <- declaredFlags
+    , fa <- totalAssignments fs
     ]
 
 installedUniverse :: [Instance]
@@ -135,6 +146,12 @@ universe = installedUniverse ++ sourceUniverse
 -- equality and no 'Ord'\/'Eq' on 'InstanceSet' is needed.
 model :: InstanceSet -> [Instance]
 model s = filter (`memberInstance` s) universe
+
+-- | Boolean implication. Deliberately not QuickCheck's '==>': the premises in
+-- the one-sided properties below (emptiness, containment, equality) are rare, so
+-- discarding whenever one is false would give up long before 100 tests.
+implies :: Bool -> Bool -> Bool
+implies p q = not p || q
 
 subsetOfL :: Eq a => [a] -> [a] -> Bool
 subsetOfL xs ys = all (`elem` ys) xs
@@ -169,8 +186,13 @@ genRawVersionSet =
             <*> (singletonVersionSet <$> elements versions)
         ]
 
--- | A partial pin map: each flag independently pinned or left free.
-genPins :: Gen (Map FlagName Bool)
+-- | A partial pin map: each flag independently left free, pinned to a value, or
+-- pinned 'NotDeclared'.
+--
+-- All four states per flag have to be generated. 'NotDeclared' is the one that
+-- only arises internally — from negating a pin — so a generator that omitted it
+-- would leave exactly the cells 'differenceCell' produces untested.
+genPins :: Gen (Map FlagName FlagPin)
 genPins = do
     a <- genPin flagA
     b <- genPin flagB
@@ -179,7 +201,8 @@ genPins = do
     genPin f =
         frequency
             [ (1, pure Nothing)
-            , (2, (\v -> Just (f, v)) <$> arbitrary)
+            , (2, (\v -> Just (f, PinnedTo v)) <$> arbitrary)
+            , (1, pure (Just (f, NotDeclared)))
             ]
 
 genLeaf :: Gen InstanceSet
@@ -264,9 +287,8 @@ tests =
                 model (a `intersect` b) === meetL (model a) (model b)
             , testProperty "difference" $ \(Sym a) (Sym b) ->
                 model (a `difference` b) === diffL (model a) (model b)
-            , testProperty "isEmpty agrees with the model" $ \(Sym a) ->
-                isEmpty a === null (model a)
             ]
+        , emptinessIsOneSided
         , testGroup
             "element operations"
             [ testProperty "the empty set contains nothing" $
@@ -280,13 +302,16 @@ tests =
                 \(InUniverse i) -> memberInstance i emptyInstanceSet === False
             ]
         , testGroup
-            "derived predicates agree with the model"
-            [ testProperty "isSubsetOf" $ \(Sym a) (Sym b) ->
-                isSubsetOf a b === subsetOfL (model a) (model b)
-            , testProperty "isDisjoint" $ \(Sym a) (Sym b) ->
-                isDisjoint a b === null (meetL (model a) (model b))
-            , testProperty "equivalent" $ \(Sym a) (Sym b) ->
-                equivalent a b === (model a == model b)
+            "derived predicates never claim more than the model allows"
+            -- All three are emptiness questions underneath, so they inherit the
+            -- one-sidedness of 'isEmpty': a claim must be true, a missing claim
+            -- is permitted.
+            [ testProperty "isSubsetOf only claims real containment" $ \(Sym a) (Sym b) ->
+                isSubsetOf a b `implies` subsetOfL (model a) (model b)
+            , testProperty "isDisjoint only claims real disjointness" $ \(Sym a) (Sym b) ->
+                isDisjoint a b `implies` null (meetL (model a) (model b))
+            , testProperty "equivalent only claims real equality" $ \(Sym a) (Sym b) ->
+                equivalent a b `implies` (model a == model b)
             ]
         , testGroup
             "ring-of-sets laws"
@@ -322,24 +347,131 @@ tests =
                 termModel (unionTerm x y) === joinT (termModel x) (termModel y)
             , testProperty "negateTerm is complement" $ \(SymTerm x) ->
                 termModel (negateTerm x) === compT (termModel x)
-            , testProperty "isTopTerm" $ \(SymTerm x) ->
-                isTopTerm x === (termModel x == fullTermModel)
-            , testProperty "isBottomTerm" $ \(SymTerm x) ->
-                isBottomTerm x === null (termModel x)
-            , -- The property that ties the set algebra to solver behaviour: a
-              -- wrong 'difference' surfaces here as a bogus 'Contradicted',
-              -- which is how a bad algebra becomes a wrong "no solution".
-              testProperty "relation matches subset/disjoint on term models" $
+            , testProperty "isTopTerm only claims a real top" $ \(SymTerm x) ->
+                isTopTerm x `implies` (termModel x == fullTermModel)
+            , testProperty "isBottomTerm only claims a real bottom" $ \(SymTerm x) ->
+                isBottomTerm x `implies` null (termModel x)
+            , -- The property that ties the set algebra to solver behaviour, and
+              -- the one that matters most: a wrong 'difference' surfaces here as
+              -- a bogus 'Satisfied' or 'Contradicted', which is how a bad algebra
+              -- becomes a wrong "no solution".
+              --
+              -- Stated in the only direction that holds. 'Inconclusive' is always
+              -- permitted, because 'isEmpty' may under-claim (see
+              -- 'emptinessIsOneSided'); a definite answer must be right.
+              testProperty "relation never claims a relation the model denies" $
                 \(SymTerm x) (SymTerm y) ->
                     let tx = termModel x
                         ty = termModel y
-                        expected
-                            | tx `subsetOfL` ty = Satisfied
-                            | null (meetT tx ty) = Contradicted
-                            | otherwise = Inconclusive
-                     in relation x y === expected
+                     in case relation x y of
+                            Satisfied    -> tx `subsetOfL` ty
+                            Contradicted -> null (meetT tx ty)
+                            Inconclusive -> True
             ]
+        , sizeControl
         ]
+
+-- --------------------------------------------------------------------------
+-- Emptiness
+-- --------------------------------------------------------------------------
+
+-- | Emptiness is the one query the algebra is allowed to get wrong, in one
+-- direction only:
+--
+-- * (a) a claim of emptiness must be true;
+-- * (b) a set that is empty for /every/ possible flag-declaration function must
+--   be detected.
+--
+-- The slack between them is real and unavoidable: a cell pinning @a@
+-- 'NotDeclared' over a range whose versions all declare @a@ denotes nothing, and
+-- seeing that needs to know which versions declare what — index data the algebra
+-- does not have. Asserting @isEmpty ⟺ null . model@ would therefore fail on
+-- correct code.
+--
+-- Note this cannot be dodged by generating "well-behaved" sets only:
+-- 'PubGrub.InstanceSet.SourceCell.differenceCell' manufactures 'NotDeclared'
+-- pins itself, so any chain of differences produces cells of this kind whatever
+-- the inputs looked like.
+--
+-- What stops (a) alone from being satisfied by a do-nothing implementation is
+-- (b) plus the end-to-end solver suites ("Solver", "PubGrub paper examples",
+-- "Flags (end to end)"): a solver whose 'PubGrub.Relation.relation' always said
+-- 'Inconclusive' would never terminate a conflict, so those tests are the real
+-- guard on the strength of this one.
+emptinessIsOneSided :: TestTree
+emptinessIsOneSided =
+    testGroup
+        "emptiness is one-sided"
+        [ testProperty "(a) a claim of emptiness is always true" $ \(Sym a) ->
+            isEmpty a `implies` null (model a)
+        , testProperty "(b) self-difference is detected empty" $ \(Sym a) ->
+            isEmpty (a `difference` a)
+        , testProperty "(b) a set minus itself twice over stays detected" $ \(Sym a) (Sym b) ->
+            isEmpty ((a `intersect` b) `difference` b)
+        , -- The three ways a pin map can contradict itself. These are what O5
+          -- (progress) rests on: they hold whatever any version declares, so the
+          -- solver can always detect the incompatibility it just derived.
+          testProperty "(b) opposite values contradict" $
+            isEmpty (pinned (PinnedTo True) `intersect` pinned (PinnedTo False))
+        , testProperty "(b) a value contradicts NotDeclared" $
+            isEmpty (pinned (PinnedTo True) `intersect` pinned NotDeclared)
+        , testProperty "(b) an empty range is empty whatever the pins" $
+            forAll genPins (isEmpty . sourceInstances emptyVersionSet)
+        ]
+  where
+    pinned p = sourceInstances fullVersionSet (Map.singleton flagA p)
+
+-- --------------------------------------------------------------------------
+-- Size control
+-- --------------------------------------------------------------------------
+
+-- | Pruning is not a correctness property, so the model tests above cannot see
+-- it. This is the guard for it.
+--
+-- The shape is the solver's own: a decision is refuted, the negated term is
+-- intersected in, and the accumulated set becomes a difference against a
+-- version-singleton, fully-pinned cell. 'differenceCell' splits one cell into
+-- up to @1 + 2·|pins|@, so the cell count compounds while the denotation only
+-- shrinks by one instance per ban. Measured over the 24 bans below: 28293 cells
+-- for 56 remaining instances with null-dropping alone, 41 with 'pruneCells'.
+--
+-- The bans go assignment-major (all versions of one assignment, then the next),
+-- which is the order that compounds: banning a version's assignments
+-- consecutively instead lets the version's cell vanish outright and the count
+-- collapses on its own.
+sizeControl :: TestTree
+sizeControl =
+    testGroup
+        "size control"
+        [ testCase "repeated instance bans keep the cell count near the pin count" $ do
+            let counts = map (length . isSource) states
+            assertEqual
+                "one instance leaves the denotation per ban"
+                [80, 79 .. 56]
+                (map (\s -> length (filter (`memberInstance` s) banUniverse)) states)
+            assertBool
+                ("cell counts along the chain: " ++ show counts)
+                (maximum counts <= 48)
+        ]
+  where
+    -- A universe of its own: four flags and five versions, so the split factor
+    -- is large enough for compounding to show. (The module's two-flag universe
+    -- is too small — it never exceeds four cells either way.)
+    banFlags =
+        [ mkFlagAssignment (zip (map mkFlagName ["a", "b", "c", "d"]) bs)
+        | bs <- replicateM 4 [False, True]
+        ]
+    banUniverse =
+        [ BuildSource v fa
+        | fa <- banFlags
+        , v <- [mkVersion [n] | n <- [1 .. 5]]
+        ]
+    everything =
+        InstanceSet
+            { isInstalled = Set.empty
+            , isSource = [SourceCell fullVersionSet Map.empty]
+            }
+    states = scanl (\s i -> s `difference` singletonInstance i) everything (take 24 banUniverse)
 
 -- List-level set operations on models, canonicalised against 'universe'.
 meetL, joinL, diffL :: [Instance] -> [Instance] -> [Instance]

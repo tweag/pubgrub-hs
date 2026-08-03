@@ -1,32 +1,72 @@
 module PubGrub.InstanceSet.SourceCell where
 
-import qualified Data.Map.Merge.Strict       as Map
-import           Data.Map.Strict             (Map)
-import qualified Data.Map.Strict             as Map
-import qualified Data.Text                   as T
-import           Distribution.Types.Flag     (FlagAssignment, FlagName,
-                                              mkFlagAssignment,
-                                              showFlagAssignment,
-                                              unFlagAssignment)
-import           Distribution.Types.Version  (Version)
-import           PubGrub.Pretty              (Pretty (..))
-import           PubGrub.SetOps              (SetOps (..))
-import           PubGrub.VersionSet          (VersionSet)
-import qualified PubGrub.VersionSet          as VersionSet
+import           Data.List                  (sortOn)
+import qualified Data.Map.Merge.Strict      as Map
+import           Data.Map.Strict            (Map)
+import qualified Data.Map.Strict            as Map
+import           Data.Ord                   (Down (..))
+import qualified Data.Text                  as T
+import           Data.Maybe                 (fromMaybe)
+import           Distribution.Types.Flag    (FlagAssignment, FlagName,
+                                             mkFlagAssignment, unFlagAssignment,
+                                             unFlagName)
+import           Distribution.Types.Version (Version)
+import           PubGrub.Pretty             (Pretty (..))
+import           PubGrub.SetOps             (SetOps (..), isSubsetOf)
+import           PubGrub.VersionSet         (VersionSet)
+import qualified PubGrub.VersionSet         as VersionSet
+
+-- | What a cell says about one flag. Three states, because a flag is declared by
+-- a @(package, version)@ rather than by a package, so "the version has no such
+-- flag" is a real thing to say about an instance and not an error case.
+--
+-- Together with /absence from the pin map/, which means unconstrained, that
+-- makes four states per flag. The two are easy to confuse: 'NotDeclared' is a
+-- statement about the package version, absence is a statement about the
+-- constraint.
+--
+-- 'PinnedTo' alone would not be closed under negation: @not (f is on)@ is
+-- @f is off@ /or/ @f is not declared@, and a two-valued pin drops the second
+-- disjunct, silently losing from a 'differenceCell' every instance that lacks
+-- the flag.
+data FlagPin
+    = PinnedTo Bool  -- ^ the version declares this flag, with this value
+    | NotDeclared    -- ^ the version does not declare this flag at all
+    deriving (Eq, Ord, Show)
+
+-- | The two states a pin can escape to, i.e. the disjunction @not pin@ denotes.
+-- Two, always — which is where the @1 + 2·|pins|@ growth of 'differenceCell'
+-- comes from.
+otherPins :: FlagPin -> [FlagPin]
+otherPins (PinnedTo b) = [PinnedTo (not b), NotDeclared]
+otherPins NotDeclared  = [PinnedTo False, PinnedTo True]
 
 -- | A version range together with pinned flags. A flag absent from the map is
--- unconstrained (both values are in the set). A cell is not closed under union
--- or difference, so it has no 'SetOps' instance; t'PubGrub.InstanceSet.InstanceSet',
--- a union of cells, is closed under all three and has one.
+-- unconstrained (every 'FlagPin' state allowed). A cell is not closed under
+-- union or difference, so it has no 'SetOps' instance;
+-- t'PubGrub.InstanceSet.InstanceSet', a union of cells, is closed under all three
+-- and has one.
+--
+-- The 'Ord' is /structural/, on the canonical 'VersionSet' and the pin map. It
+-- gives a disjunction of cells a deterministic order (the DNF is otherwise in
+-- derivation order) and keys 'mergeCells'. It is not semantic equality: empty
+-- cells with different pins denote the same nothing yet compare unequal, which
+-- is why 'PubGrub.InstanceSet.InstanceSet' has no 'Eq' and semantic questions go
+-- through 'PubGrub.SetOps.equivalent'.
 data SourceCell = SourceCell
     { scVersionSet :: VersionSet
-    , scFlags      :: Map FlagName Bool
+    , scFlags      :: Map FlagName FlagPin
     }
+    deriving (Eq, Ord)
 
 
 -- | Intersect two cells. The result can be empty for a reason the version set
--- cannot express: if the cells pin the same flag to opposite values, no
--- assignment satisfies both. 'Nothing' is that contradiction.
+-- cannot express: if the cells pin the same flag to two different states, no
+-- instance satisfies both. 'Nothing' is that contradiction.
+--
+-- All three states take part: @PinnedTo True@ contradicts @PinnedTo False@ and
+-- also contradicts 'NotDeclared', since an instance either has the flag or does
+-- not. So the test remains plain inequality.
 intersectCell  :: SourceCell -> SourceCell -> Maybe SourceCell
 intersectCell lhs rhs =
     mkCell <$> scFlags lhs `combine` scFlags rhs
@@ -38,7 +78,7 @@ intersectCell lhs rhs =
 
         -- Keep every pin from either side. One flag pinned to opposite values
         -- makes the whole result 'Nothing'.
-        combine :: Map FlagName Bool -> Map FlagName Bool -> Maybe (Map FlagName Bool)
+        combine :: Map FlagName FlagPin -> Map FlagName FlagPin -> Maybe (Map FlagName FlagPin)
         combine =
             Map.mergeA
                 Map.preserveMissing            -- pinned only by lhs
@@ -51,39 +91,80 @@ intersectCell lhs rhs =
 
 -- | Cells are /not/ closed under difference, so the result is a disjunction. An
 -- instance of @lhs@ avoids @rhs@ either by falling outside its version set, or —
--- among the versions the two share — by disagreeing with one of its pinned
--- flags. The second case contributes one cell per flag that can carry the
--- disagreement, which is where the @1 + |flags|@ growth comes from.
+-- among the versions the two share — by failing one of @rhs@'s pins.
+--
+-- Failing a pin means being in one of the /two other/ states ('otherPins'), so
+-- each flag @rhs@ pins contributes up to two cells rather than one, and the
+-- growth is @1 + 2·|pins of rhs|@. Offering only the opposite 'Bool' would
+-- silently drop the instances whose version does not declare the flag: they
+-- escape @rhs@ via 'NotDeclared' and have no other route out.
 differenceCell :: SourceCell -> SourceCell -> [SourceCell]
 differenceCell lhs rhs =
-    filter (not . nullCell) $
-        SourceCell { scVersionSet = scVersionSet lhs `difference` scVersionSet rhs
-               , scFlags      = scFlags lhs
-               }
-        : [ SourceCell { scVersionSet = scVersionSet lhs `intersect` scVersionSet rhs
-                       , scFlags      = Map.insert flag val (scFlags lhs)
-                       }
-          | (flag, val) <- Map.toList (scFlags lhs `combine` scFlags rhs)
-          ]
+    filter (not . nullCell) (outsideRange : concatMap escapesVia (Map.toList (scFlags rhs)))
+  where
+    -- Route one: a version @rhs@ does not cover at all. Keeps @lhs@'s own pins.
+    outsideRange =
+        lhs { scVersionSet = scVersionSet lhs `difference` scVersionSet rhs }
 
-    where
-        -- For each flag rhs pins, the value an instance of lhs takes to escape
-        -- rhs, giving one cell per flag. A flag lhs pins to rhs's value offers no
-        -- escape and is dropped. A flag lhs pins to the opposite value is kept,
-        -- since that cell lies wholly outside rhs.
-        combine :: Map FlagName Bool -> Map FlagName Bool -> Map FlagName Bool
-        combine =
-            Map.merge
-                Map.dropMissing                     -- pinned only by lhs: rhs leaves it free, so no escape needed
-                (Map.mapMissing (\_ v -> not v))    -- pinned only by rhs: lhs escapes by taking the opposite
-                (Map.zipWithMaybeMatched escape)    -- pinned by both
-          where
-            escape _flag v1 v2
-                | v1 == v2  = Nothing   -- agrees, so this flag cannot carry the escape
-                | otherwise = Just v1   -- already disagrees: lhs escapes as it stands
+    sharedVersions = scVersionSet lhs `intersect` scVersionSet rhs
+
+    -- Route two: a shared version, in a state this pin excludes. One cell per
+    -- (flag, escape state) that @lhs@ does not already rule out.
+    escapesVia (flag, pin) =
+        [ SourceCell { scVersionSet = sharedVersions
+                     , scFlags      = Map.insert flag escape (scFlags lhs)
+                     }
+        | escape <- otherPins pin
+        , reachable flag escape
+        ]
+
+    -- Whether @lhs@ can be in that state at all. If @lhs@ leaves the flag free,
+    -- yes. If @lhs@ already pins it, only that pin is reachable. When the pin is
+    -- an escape, the 'Map.insert' above is a no-op and the cell is @lhs@ over the
+    -- shared versions, wholly outside @rhs@. When @lhs@ pins the state @rhs@
+    -- requires, neither escape is reachable and this flag offers no route out.
+    reachable flag escape = maybe True (== escape) (Map.lookup flag (scFlags lhs))
 
 nullCell :: SourceCell -> Bool
 nullCell sc = isEmpty (scVersionSet sc)
+
+-- | @a `subsumes` b@: every instance @b@ denotes, @a@ denotes too.
+--
+-- The two coordinates run in opposite directions. @a@'s version set must be the
+-- /wider/ one, but @a@'s pins must be the /weaker/ ones — a submap of @b@'s —
+-- because a pin is a constraint, so fewer pins means more instances. (Same
+-- direction as 'PubGrub.InstanceSet.memberFlagAssignment', for the same
+-- reason.)
+--
+-- Sufficient, not necessary: @(V, ∅)@ is also covered by
+-- @(V, f↦True) ∨ (V, f↦False)@, but that is a property of the disjunction
+-- rather than of either cell, and 'pruneCells' does not look for it.
+subsumes :: SourceCell -> SourceCell -> Bool
+subsumes a b =
+    scVersionSet b `isSubsetOf` scVersionSet a
+        && scFlags a `Map.isSubmapOf` scFlags b
+
+-- | Drop cells that another cell of the same disjunction already covers, and
+-- put what survives in a deterministic order.
+--
+-- Size control, and load-bearing. 'differenceCell' turns one cell into up to
+-- @1 + 2·|pins|@ cells, so 'PubGrub.SetOps.difference' multiplies the cell count
+-- while the /denotation/ only shrinks: a set denoting two flag assignments was
+-- measured holding 40897 cells. Pruning after each operation keeps the count
+-- near the number of genuinely distinct pin maps instead.
+--
+-- Sound whatever the input order, since a cell is only dropped when a surviving
+-- cell denotes everything it does. The order matters only for how much gets
+-- pruned in one pass: cells are visited widest-first, and a superset can sort
+-- below a subset only when the two version sets share a reach and a start (see
+-- the 'Ord' on 'PubGrub.VersionSet.VersionSet'), which is why a kept cell is
+-- also re-checked against the newcomer.
+pruneCells :: [SourceCell] -> [SourceCell]
+pruneCells = foldl' keep [] . sortOn Down . filter (not . nullCell)
+  where
+    keep kept c
+        | any (`subsumes` c) kept = kept
+        | otherwise               = c : filter (not . subsumes c) kept
 
 -- | Collapse cells that pin exactly the same flags:
 -- @(V₁, F) ∨ (V₂, F) = (V₁ ∪ V₂, F)@. Sound because the two conjunctions are
@@ -100,13 +181,47 @@ mergeCells cells =
     | (flags, vs) <- Map.toList (Map.fromListWith union [(scFlags c, scVersionSet c) | c <- cells])
     ]
 
+-- | Complete a cell's pins into a total assignment over the flags a version
+-- declares, given those flags and their defaults: the pinned value where the
+-- cell gives one, the declared default where it does not. This is the rule every
+-- provider needs when turning an offered cell into a candidate instance, so it
+-- lives here rather than being reinvented per provider.
+--
+-- A 'NotDeclared' pin yields no value, so the default is used and the resulting
+-- instance then fails /that cell's/ membership test — correctly, since a version
+-- which declares the flag can never satisfy a cell demanding it not be declared.
+-- Callers test membership against the whole offered set, so another cell may
+-- still admit the candidate; that is why this returns an assignment rather than
+-- refusing.
+assignmentFrom :: [(FlagName, Bool)] -> SourceCell -> FlagAssignment
+assignmentFrom declared sc =
+    mkFlagAssignment [(f, fromMaybe def (pinnedValue f)) | (f, def) <- declared]
+  where
+    pinnedValue f = case Map.lookup f (scFlags sc) of
+        Just (PinnedTo b) -> Just b
+        Just NotDeclared  -> Nothing
+        Nothing           -> Nothing
+
+-- | The cell denoting one instance. Every flag the assignment mentions is
+-- pinned; flags it does not mention are left free rather than pinned
+-- 'NotDeclared', which is exact because the version set is a single version —
+-- the assignment /is/ that version's declared flags, so there is nothing else to
+-- say about it. (Genuinely a singleton only if the assignment is total, which is
+-- a provider obligation, not something checked here.)
 singletonCell :: Version -> FlagAssignment -> SourceCell
 singletonCell v flags =
   SourceCell
       { scVersionSet = VersionSet.singletonVersionSet v
-      , scFlags = Map.fromList (unFlagAssignment flags)
+      , scFlags = Map.fromList [(f, PinnedTo b) | (f, b) <- unFlagAssignment flags]
       }
 
 instance Pretty SourceCell where
     pretty sc =
-        pretty (scVersionSet sc) <> T.pack (showFlagAssignment (mkFlagAssignment (Map.toList (scFlags sc))))
+        T.unwords (pretty (scVersionSet sc) : map pin (Map.toList (scFlags sc)))
+      where
+        -- 'NotDeclared' spells itself out: it appears in explanations, where a
+        -- terse marker would read as an internal detail rather than as a fact
+        -- about the package.
+        pin (f, PinnedTo True)  = T.pack ('+' : unFlagName f)
+        pin (f, PinnedTo False) = T.pack ('-' : unFlagName f)
+        pin (f, NotDeclared)    = T.pack ("(no " ++ unFlagName f ++ " flag)")
