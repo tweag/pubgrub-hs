@@ -3,6 +3,7 @@ module Main (main) where
 import qualified FlagSolveSpec
 import qualified FlattenSpec
 import qualified InstanceSetSpec
+import qualified PartialSolutionSpec
 import qualified PaperSpec
 import qualified SolverSpec
 import           Test.Tasty     (defaultMain, testGroup)
@@ -15,6 +16,7 @@ main =
             "pubgrub-hs"
             [ VersionSetSpec.tests
             , InstanceSetSpec.tests
+            , PartialSolutionSpec.tests
             , SolverSpec.tests
             , PaperSpec.tests
             , FlattenSpec.tests

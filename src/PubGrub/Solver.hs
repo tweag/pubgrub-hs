@@ -1,6 +1,16 @@
 {-# LANGUAGE LambdaCase #-}
 
 -- | The PubGrub solving loop, over whole package instances.
+--
+-- Two layers: the storage layer — 'Assignment', 'PackageAssignments',
+-- 'PartialSolution' and their queries — and the algorithm on top
+-- ('unitPropagation', 'conflictResolution', 'solve').
+--
+-- The storage layer exists to make the algorithm's questions cheap. Every one
+-- of them is about a single package, so assignments are indexed by package and
+-- each package's accumulated term is cached: propagation judges an
+-- incompatibility with a lookup per term instead of a scan of the whole
+-- partial solution.
 module PubGrub.Solver
     ( -- * Provider
       Provider (..)
@@ -9,6 +19,7 @@ module PubGrub.Solver
     , Assignment (..)
     , assignmentTerm
     , assignmentPackageTerm
+    , PackageAssignments (..)
     , PartialSolution (..)
     , emptyPS
     , addDecision
@@ -29,7 +40,9 @@ module PubGrub.Solver
     ) where
 
 import           Colog                          (WithLog, logMsg)
+import           Control.Applicative            (Alternative (..))
 import           Data.Foldable                  (Foldable (..), maximumBy)
+import           Data.List                      (sortOn)
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Data.Maybe                     (fromMaybe, mapMaybe)
@@ -83,53 +96,109 @@ assignmentTerm Derivation{aTerm}   = aTerm
 assignmentPackageTerm :: Assignment -> PackageTerm
 assignmentPackageTerm a = PackageTerm (aPackage a) (assignmentTerm a)
 
--- | Assignments are stored oldest-first (chronological), so the satisfier
--- search reads them in order without reversing; @psLevel@ is the current
--- decision level; @psNextIndex@ is a monotone counter giving chronological
--- order.
+-- | Everything recorded about one package: its own assignments oldest-first,
+-- the intersection of their terms, and the instance it was decided to be if it
+-- has been decided.
+--
+-- @paTerm@ is a cache of @foldl1 intersectTerm (assignmentTerm <$> paHistory)@
+-- and @paDecision@ a cache of the (at most one) decision in @paHistory@;
+-- keeping them is what lets propagation ask about a package without scanning
+-- the partial solution. Invariant: a record exists only for a package with a
+-- non-empty history.
+data PackageAssignments = PackageAssignments
+    { paHistory  :: Seq Assignment
+    , paTerm     :: Term InstanceSet
+    , paDecision :: Maybe Instance
+    }
+
+-- | Assignments are indexed by package, and within a package stored
+-- oldest-first (chronological), so the satisfier search reads them in order
+-- without reversing; @psLevel@ is the current decision level; @psNextIndex@ is
+-- a monotone counter giving chronological order /across/ packages.
 data PartialSolution = PartialSolution
-    { psAssignments :: Seq Assignment
-    , psLevel       :: !Int
-    , psNextIndex   :: !Int
+    { psPackages  :: Map PackageName PackageAssignments
+    , psLevel     :: !Int
+    , psNextIndex :: !Int
     }
 
 emptyPS :: PartialSolution
-emptyPS = PartialSolution{psAssignments = Seq.empty, psLevel = 0, psNextIndex = 0}
+emptyPS = PartialSolution{psPackages = Map.empty, psLevel = 0, psNextIndex = 0}
+
+-- | The instance a decision decides; 'Nothing' for a derivation.
+decidedInstance :: Assignment -> Maybe Instance
+decidedInstance Decision{aInstance} = Just aInstance
+decidedInstance Derivation{}        = Nothing
+
+-- | Add one assignment to a package's record, creating the record if this is
+-- the package's first assignment. The caches move with it: the term folds in
+-- by intersection, the decision is remembered.
+extendPackage :: Assignment -> Maybe PackageAssignments -> PackageAssignments
+extendPackage a Nothing =
+    PackageAssignments
+        { paHistory = Seq.singleton a
+        , paTerm = assignmentTerm a
+        , paDecision = decidedInstance a
+        }
+extendPackage a (Just pa) =
+    pa
+        { paHistory = paHistory pa Seq.|> a
+        , paTerm = intersectTerm (paTerm pa) (assignmentTerm a)
+        , paDecision = decidedInstance a <|> paDecision pa
+        }
+
+-- | Rebuild a record from a history, recomputing both caches. 'Nothing' for an
+-- empty history, which has no record.
+fromHistory :: Seq Assignment -> Maybe PackageAssignments
+fromHistory = foldl' (\acc a -> Just (extendPackage a acc)) Nothing
+
+-- | File an assignment under its package and consume its index.
+recordAssignment :: Assignment -> PartialSolution -> PartialSolution
+recordAssignment a ps@PartialSolution{psPackages, psNextIndex} =
+    ps
+        { psPackages = Map.alter (Just . extendPackage a) (aPackage a) psPackages
+        , psNextIndex = psNextIndex + 1
+        }
 
 -- | Record a decision (a guess); increments the decision level.
 addDecision :: PackageName -> Instance -> PartialSolution -> PartialSolution
-addDecision p i ps@PartialSolution{psAssignments, psLevel, psNextIndex} =
-    ps
-        { psAssignments = psAssignments Seq.|> Decision psNextIndex (psLevel + 1) p i
-        , psLevel = psLevel + 1
-        , psNextIndex = psNextIndex + 1
-        }
+addDecision p i ps@PartialSolution{psLevel, psNextIndex} =
+    recordAssignment
+        (Decision psNextIndex (psLevel + 1) p i)
+        ps{psLevel = psLevel + 1}
 
 -- | Record a derivation: the negation of @cause@'s term for @p@, at the
 -- current level.
 addDerivation :: PackageName -> Incompatibility -> PartialSolution -> PartialSolution
-addDerivation p cause ps@PartialSolution{psAssignments, psLevel, psNextIndex} =
+addDerivation p cause ps@PartialSolution{psLevel, psNextIndex} =
     let term = maybe anyTerm negateTerm (incompGet p cause)
-     in ps
-            { psAssignments = psAssignments Seq.|> Derivation psNextIndex psLevel p term cause
-            , psNextIndex = psNextIndex + 1
-            }
+     in recordAssignment (Derivation psNextIndex psLevel p term cause) ps
 
 -- | Backtrack: drop every assignment strictly above the target level.
+--
+-- Levels are non-decreasing along a history (a derivation takes the current
+-- level, a decision the next, and backtracking only lowers it), so what is
+-- dropped is always a suffix. A package that loses assignments must have both
+-- its caches rebuilt from the survivors — @intersectTerm@ cannot be undone, so
+-- the accumulated term is recomputed, and a dropped decision must stop being
+-- remembered. A package that loses all of them loses its record.
 backtrack :: Int -> PartialSolution -> PartialSolution
-backtrack level ps@PartialSolution{psAssignments} =
+backtrack level ps@PartialSolution{psPackages} =
     ps
-        { psAssignments = Seq.filter ((<= level) . aLevel) psAssignments
+        { psPackages = Map.mapMaybe prune psPackages
         , psLevel = level
         }
+  where
+    prune pa
+        | Seq.length kept == Seq.length (paHistory pa) = Just pa
+        | otherwise = fromHistory kept
+      where
+        kept = Seq.filter ((<= level) . aLevel) (paHistory pa)
 
 -- | Intersection of all terms recorded for a package ('Nothing' if the
 -- package is unmentioned, which judges as 'anyTerm' = ⊤).
 termIntersectionForPackage :: PartialSolution -> PackageName -> Maybe (Term InstanceSet)
-termIntersectionForPackage PartialSolution{psAssignments} p =
-    case assignmentTerm <$> Seq.filter ((== p) . aPackage) psAssignments of
-        Seq.Empty    -> Nothing
-        t Seq.:<| ts -> Just (foldl' intersectTerm t ts)
+termIntersectionForPackage PartialSolution{psPackages} p =
+    paTerm <$> Map.lookup p psPackages
 
 -- | Relation of the whole partial solution to an incompatibility.
 psRelation :: PartialSolution -> Incompatibility -> IncompatRelation
@@ -137,33 +206,27 @@ psRelation ps = incompRelation (termIntersectionForPackage ps)
 
 -- | The decisions, as a solution map.
 extractSolution :: PartialSolution -> Map PackageName Instance
-extractSolution PartialSolution{psAssignments} =
-    Map.fromList [(aPackage a, aInstance a) | a@Decision{} <- toList psAssignments]
+extractSolution PartialSolution{psPackages} = Map.mapMaybe paDecision psPackages
 
 -- | Packages that have a positive accumulated term but no decision yet, with
--- that positive instance set. Chronological (oldest first) for determinism.
+-- that positive instance set. Ordered by first mention (oldest first) for
+-- determinism.
 undecidedPositive :: PartialSolution -> [(PackageName, InstanceSet)]
-undecidedPositive ps@PartialSolution{psAssignments} =
-    let assigns = toList psAssignments -- oldest-first
-        decided = [aPackage a | a@Decision{} <- assigns]
-        pkgs = uniqueOldestFirst [aPackage a | a <- assigns]
-     in mapMaybe positive (filter (`notElem` decided) pkgs)
+undecidedPositive PartialSolution{psPackages} =
+    map snd (sortOn fst (mapMaybe candidate (Map.toList psPackages)))
   where
-    positive p = case termIntersectionForPackage ps p of
-        Just (Positive r) -> Just (p, r)
-        _                 -> Nothing
-    uniqueOldestFirst = go []
-      where
-        go seen []       = reverse seen
-        go seen (x : xs)
-            | x `elem` seen = go seen xs
-            | otherwise = go (x : seen) xs
+    candidate (p, pa) = case (paDecision pa, paTerm pa) of
+        (Nothing, Positive r) -> Just (firstIndex pa, (p, r))
+        _                     -> Nothing
+    -- The package's first mention, which is what the order is keyed on. A
+    -- record always has a non-empty history, so the fallback is unreachable.
+    firstIndex pa = maybe maxBound aIndex (Seq.lookup 0 (paHistory pa))
 
 -- | All assignments for a package, oldest first. The satisfier search walks
 -- this list.
 packageHistory :: PartialSolution -> PackageName -> [Assignment]
-packageHistory PartialSolution{psAssignments} p =
-    toList (Seq.filter ((== p) . aPackage) psAssignments)
+packageHistory PartialSolution{psPackages} p =
+    maybe [] (toList . paHistory) (Map.lookup p psPackages)
 
 -- --------------------------------------------------------------------------
 -- The algorithm
@@ -313,4 +376,3 @@ solve provider rootPkg rootV =
                                     go (noInstances p range : incompats') ps'
                                 Just (i, depIncs) ->
                                     go (depIncs ++ incompats') (addDecision p i ps')
-
