@@ -11,6 +11,7 @@ import           Data.List                      (maximumBy)
 import qualified Data.Map.Strict                as Map
 import           Data.Ord                       (comparing)
 import           Data.Text                      (Text)
+import qualified Data.Text                      as T
 import           Distribution.Types.Flag        (mkFlagAssignment)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.Version     (mkVersion)
@@ -76,6 +77,8 @@ runSolve provider p i =
 
 renderFailure :: SolveError -> Text
 renderFailure (NoSolution i) = reportConflict i
+renderFailure (NoSatisfier p _) =
+    T.pack ("internal error: no satisfier for " <> show p)
 
 root, foo, bar :: PackageName
 root = mkPackageName "root"

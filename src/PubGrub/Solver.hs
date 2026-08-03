@@ -17,7 +17,9 @@ module PubGrub.Solver
 
       -- * Partial solution
     , Assignment (..)
+    , AssignmentKind (..)
     , assignmentTerm
+    , decidedInstance
     , assignmentPackageTerm
     , PackageAssignments (..)
     , PartialSolution (..)
@@ -41,12 +43,11 @@ module PubGrub.Solver
 
 import           Colog                          (WithLog, logMsg)
 import           Control.Applicative            (Alternative (..))
-import           Data.Foldable                  (Foldable (..), maximumBy)
+import           Data.Foldable                  (Foldable (..))
 import           Data.List                      (sortOn)
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Data.Maybe                     (fromMaybe, mapMaybe)
-import           Data.Ord                       (comparing)
 import           Data.Sequence                  (Seq)
 import qualified Data.Sequence                  as Seq
 import           Distribution.Types.PackageName
@@ -68,29 +69,40 @@ import           PubGrub.Term                   (Term (..), intersectTerm,
 -- Partial solution
 -- --------------------------------------------------------------------------
 
--- | A single entry in the partial solution: a decision (a freely chosen
--- singleton instance) or a derivation (a term forced by unit propagation,
--- with the incompatibility that forced it as its cause).
-data Assignment
-    = Decision
-        { aIndex    :: !Int
-        , aLevel    :: !Int
-        , aPackage  :: PackageName
-        , aInstance :: Instance
-        }
-    | Derivation
-        { aIndex   :: !Int
-        , aLevel   :: !Int
-        , aPackage :: PackageName
-        , aTerm    :: Term InstanceSet
-        , aCause   :: Incompatibility
-        }
+-- | A single entry in the partial solution: one package, at one decision
+-- level, with the reason it is there.
+data Assignment = Assignment
+    { aIndex   :: !Int
+    , aLevel   :: !Int
+    , aPackage :: PackageName
+    , aKind    :: AssignmentKind
+    }
+
+-- | Why an assignment is in the partial solution, and what it asserts: a
+-- decision (a freely chosen singleton instance) or a derivation (a term forced
+-- by unit propagation, with the incompatibility that forced it).
+--
+-- The two shapes are a sum /inside/ the record rather than two constructors of
+-- it because they carry different payloads: sharing @aIndex@, @aLevel@ and
+-- @aPackage@ across two constructors is what would make the payload fields
+-- partial selectors, and a partial selector is a crash waiting for the wrong
+-- constructor.
+data AssignmentKind
+    = Decided Instance
+    | Derived (Term InstanceSet) Incompatibility
 
 -- | The term contributed by an assignment; for a decision, @Positive@ of the
 -- singleton.
 assignmentTerm :: Assignment -> Term InstanceSet
-assignmentTerm Decision{aInstance} = Positive (singletonInstance aInstance)
-assignmentTerm Derivation{aTerm}   = aTerm
+assignmentTerm a = case aKind a of
+    Decided i   -> Positive (singletonInstance i)
+    Derived t _ -> t
+
+-- | The instance a decision decides; 'Nothing' for a derivation.
+decidedInstance :: Assignment -> Maybe Instance
+decidedInstance a = case aKind a of
+    Decided i -> Just i
+    Derived{} -> Nothing
 
 -- | The assignment as "one term about one package".
 assignmentPackageTerm :: Assignment -> PackageTerm
@@ -123,11 +135,6 @@ data PartialSolution = PartialSolution
 
 emptyPS :: PartialSolution
 emptyPS = PartialSolution{psPackages = Map.empty, psLevel = 0, psNextIndex = 0}
-
--- | The instance a decision decides; 'Nothing' for a derivation.
-decidedInstance :: Assignment -> Maybe Instance
-decidedInstance Decision{aInstance} = Just aInstance
-decidedInstance Derivation{}        = Nothing
 
 -- | Add one assignment to a package's record, creating the record if this is
 -- the package's first assignment. The caches move with it: the term folds in
@@ -163,7 +170,7 @@ recordAssignment a ps@PartialSolution{psPackages, psNextIndex} =
 addDecision :: PackageName -> Instance -> PartialSolution -> PartialSolution
 addDecision p i ps@PartialSolution{psLevel, psNextIndex} =
     recordAssignment
-        (Decision psNextIndex (psLevel + 1) p i)
+        (Assignment psNextIndex (psLevel + 1) p (Decided i))
         ps{psLevel = psLevel + 1}
 
 -- | Record a derivation: the negation of @cause@'s term for @p@, at the
@@ -171,16 +178,20 @@ addDecision p i ps@PartialSolution{psLevel, psNextIndex} =
 addDerivation :: PackageName -> Incompatibility -> PartialSolution -> PartialSolution
 addDerivation p cause ps@PartialSolution{psLevel, psNextIndex} =
     let term = maybe anyTerm negateTerm (incompGet p cause)
-     in recordAssignment (Derivation psNextIndex psLevel p term cause) ps
+     in recordAssignment (Assignment psNextIndex psLevel p (Derived term cause)) ps
 
 -- | Backtrack: drop every assignment strictly above the target level.
 --
 -- Levels are non-decreasing along a history (a derivation takes the current
 -- level, a decision the next, and backtracking only lowers it), so what is
--- dropped is always a suffix. A package that loses assignments must have both
--- its caches rebuilt from the survivors — @intersectTerm@ cannot be undone, so
--- the accumulated term is recomputed, and a dropped decision must stop being
--- remembered. A package that loses all of them loses its record.
+-- dropped is always a suffix — which is why this splits the history from the
+-- right instead of filtering it: a package that drops nothing keeps its history
+-- as it stands, rather than paying to rebuild an identical one.
+--
+-- A package that does lose assignments must have both its caches rebuilt from
+-- the survivors — @intersectTerm@ cannot be undone, so the accumulated term is
+-- recomputed, and a dropped decision must stop being remembered. A package that
+-- loses all of them loses its record.
 backtrack :: Int -> PartialSolution -> PartialSolution
 backtrack level ps@PartialSolution{psPackages} =
     ps
@@ -188,11 +199,10 @@ backtrack level ps@PartialSolution{psPackages} =
         , psLevel = level
         }
   where
-    prune pa
-        | Seq.length kept == Seq.length (paHistory pa) = Just pa
-        | otherwise = fromHistory kept
-      where
-        kept = Seq.filter ((<= level) . aLevel) (paHistory pa)
+    prune pa = case Seq.spanr ((> level) . aLevel) (paHistory pa) of
+        (dropped, kept)
+            | Seq.null dropped -> Just pa
+            | otherwise -> fromHistory kept
 
 -- | Intersection of all terms recorded for a package ('Nothing' if the
 -- package is unmentioned, which judges as 'anyTerm' = ⊤).
@@ -240,45 +250,66 @@ data SatisfierSearch
       -- ^ satisfier's cause
 
 -- | Earliest assignment of @p@ whose running accumulated term becomes disjoint
--- from @startTerm@.
--- Precondition: such an assignment exists (guaranteed during conflict resolution).
+-- from @startTerm@, or 'Nothing' if none does.
 satisfierOf
     :: PartialSolution
     -> PackageName
     -> Term InstanceSet
-    -> Assignment
+    -> Maybe Assignment
 satisfierOf ps p startTerm = go anyTerm (packageHistory ps p)
   where
-    go _ [] = error "satisfierOf: no satisfier (precondition violated)"
-    go acc (a : as) =
-        let acc' = intersect acc (assignmentTerm a)
-         in if isEmpty (intersectTerm acc' startTerm) then a else go acc' as
+    go _ [] = Nothing
+    go acc (a : as)
+        | isEmpty (intersectTerm acc' startTerm) = Just a
+        | otherwise = go acc' as
+      where
+        acc' = intersect acc (assignmentTerm a)
+
+-- | 'maximumBy' on a key, total. Ties keep the earlier element, which never
+-- arises here: the key is @aIndex@, and indices are unique.
+maximumOn :: Ord b => (a -> b) -> [a] -> Maybe a
+maximumOn f = foldl' pick Nothing
+  where
+    pick Nothing x = Just x
+    pick (Just best) x
+        | f x > f best = Just x
+        | otherwise = Just best
 
 -- | The satisfier of an incompatibility is the latest of its terms' satisfiers.
 -- When the satisfier is a derivation and the previous satisfier sits at its
 -- level, resolution continues with the satisfier's cause; otherwise it
 -- backtracks to the previous satisfier's level (at least 1).
+--
+-- Every term of a satisfied incompatibility has a satisfier, so 'satisfierOf'
+-- returning 'Nothing' means the partial solution and 'psRelation' disagree.
+-- That is reported as a 'NoSatisfier' failure rather than thrown, so a bug
+-- there is something the caller can print, not a crash inside a pure fold.
 satisfierSearch
     :: PartialSolution
     -> Incompatibility
-    -> (PackageName, SatisfierSearch)
-satisfierSearch ps i =
-    let satMap =
-            [ (p, satisfierOf ps p (negateTerm it))
-            | (p, it) <- Map.toList (incompTerms i)
-            ]
-        (satPkg, satAssign) = maximumBy (comparing (aIndex . snd)) satMap
-        satLevel = aLevel satAssign
+    -> Either SolveError (PackageName, SatisfierSearch)
+satisfierSearch ps i = do
+    satMap <- traverse satisfierForTerm (Map.toList (incompTerms i))
+    (satPkg, satAssign) <- latestSatisfier satMap
+    let satLevel = aLevel satAssign
         it_s = fromMaybe anyTerm (incompGet satPkg i)
         startTerm' = intersect (assignmentTerm satAssign) (negateTerm it_s)
-        prevForSat = satisfierOf ps satPkg startTerm'
-        satMap' = [(p, if p == satPkg then prevForSat else a) | (p, a) <- satMap]
-        prevLevel = max 1 (aLevel (snd (maximumBy (comparing (aIndex . snd)) satMap')))
-     in case satAssign of
-            Derivation{aCause}
-                | prevLevel >= satLevel -> (satPkg, SameDecisionLevels aCause)
-            _ -> (satPkg, DifferentDecisionLevels prevLevel)
-
+    prevForSat <- require satPkg (satisfierOf ps satPkg startTerm')
+    let satMap' = [(p, if p == satPkg then prevForSat else a) | (p, a) <- satMap]
+    (_, prevAssign) <- latestSatisfier satMap'
+    let prevLevel = max 1 (aLevel prevAssign)
+    pure $ case aKind satAssign of
+        Derived _ cause
+            | prevLevel >= satLevel -> (satPkg, SameDecisionLevels cause)
+        _ -> (satPkg, DifferentDecisionLevels prevLevel)
+  where
+    satisfierForTerm (p, it) = (,) p <$> require p (satisfierOf ps p (negateTerm it))
+    require p = maybe (Left (NoSatisfier p i)) Right
+    -- An incompatibility with no terms is the empty clause: unsatisfiable
+    -- outright, hence a terminal failure. 'isTerminal' catches it before
+    -- conflict resolution ever gets here, so this is the same verdict by
+    -- another route, not a second opinion.
+    latestSatisfier = maybe (Left (NoSolution i)) Right . maximumOn (aIndex . snd)
 
 -- | Propagate the incompatibilities to a fixpoint: judge each with
 -- 'psRelation'; on @IAlmostSatisfied p@ derive (¬ its term for @p@) via
@@ -291,7 +322,7 @@ unitPropagation
     -> Instance
     -> [Incompatibility]
     -> PartialSolution
-    -> m (Either Incompatibility ([Incompatibility], PartialSolution))
+    -> m (Either SolveError ([Incompatibility], PartialSolution))
 unitPropagation rootPkg rootI = scan
   where
     scan incompats ps = step incompats ps incompats
@@ -302,8 +333,8 @@ unitPropagation rootPkg rootI = scan
         case psRelation ps i of
             ISatisfied ->
                 case conflictResolution rootPkg rootI i ps of
-                    Left terminal ->
-                        pure (Left terminal)
+                    Left err ->
+                        pure (Left err)
                     Right (almostPkg, rootCause, ps') ->
                         scan (rootCause : incompats) (addDerivation almostPkg rootCause ps')
             IAlmostSatisfied q ->
@@ -313,29 +344,37 @@ unitPropagation rootPkg rootI = scan
 
 -- | Conflict resolution: satisfier search over 'packageHistory', 'priorCause'
 -- while satisfier and previous satisfier share a decision level, then
--- 'backtrack'. Returns the terminal incompatibility (no solution), or the
--- pivot package, the learned root cause, and the backtracked solution.
+-- 'backtrack'. Returns the failure (no solution, or a violated invariant), or
+-- the pivot package, the learned root cause, and the backtracked solution.
 conflictResolution
     :: PackageName
     -> Instance
     -> Incompatibility
     -> PartialSolution
-    -> Either Incompatibility (PackageName, Incompatibility, PartialSolution)
+    -> Either SolveError (PackageName, Incompatibility, PartialSolution)
 conflictResolution rootPkg rootV = loop
   where
     loop current ps
-        | isTerminal rootPkg rootV current = Left current
+        | isTerminal rootPkg rootV current = Left (NoSolution current)
         | otherwise =
-            case satisfierSearch ps current of
+            satisfierSearch ps current >>= \case
                 (satPkg, DifferentDecisionLevels prevLevel) ->
                     Right (satPkg, current, backtrack prevLevel ps)
                 (satPkg, SameDecisionLevels satCause) ->
                     loop (priorCause current satCause satPkg) ps
 
 
--- | Failure: no solution; carries the terminal incompatibility (the root of
--- the derivation tree, for reporting).
-newtype SolveError = NoSolution Incompatibility
+-- | Failure. Either the problem has no solution, or an invariant the solver
+-- relies on did not hold — the latter cannot happen for a consistent partial
+-- solution, and exists so that if it ever does, it arrives as a value to
+-- report instead of an exception from inside a pure function.
+data SolveError
+    = -- | no solution; carries the terminal incompatibility (the root of the
+      -- derivation tree, for reporting)
+      NoSolution Incompatibility
+    | -- | conflict resolution found a term of a satisfied incompatibility
+      -- whose package has no satisfier in the partial solution
+      NoSatisfier PackageName Incompatibility
 
 -- | Structured progress events emitted during resolution.
 data SolverMsg
@@ -365,7 +404,7 @@ solve provider rootPkg rootV =
     where
         go incompats ps =
             unitPropagation rootPkg rootV incompats ps >>= \case
-                Left terminal -> pure (Left (NoSolution terminal))
+                Left err -> pure (Left err)
                 Right (incompats', ps') ->
                     case undecidedPositive ps' of
                         [] -> pure (Right (extractSolution ps'))

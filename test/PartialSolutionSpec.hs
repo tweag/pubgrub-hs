@@ -28,9 +28,11 @@ import           PubGrub.InstanceSet            (Instance (..), InstanceSet (..)
 import           PubGrub.InstanceSet.SourceCell (SourceCell (..))
 import           PubGrub.SetOps                 (equivalent)
 import           PubGrub.Solver                 (Assignment (..),
+                                                 AssignmentKind (..),
                                                  PartialSolution (..),
                                                  addDecision, addDerivation,
                                                  assignmentTerm, backtrack,
+                                                 decidedInstance,
                                                  emptyPS, extractSolution,
                                                  packageHistory,
                                                  termIntersectionForPackage,
@@ -132,11 +134,11 @@ emptyModel = Model{mAssignments = [], mLevel = 0, mNextIndex = 0}
 
 mDecide :: PackageName -> Instance -> Model -> Model
 mDecide p i (Model as l n) =
-    Model (as ++ [Decision n (l + 1) p i]) (l + 1) (n + 1)
+    Model (as ++ [Assignment n (l + 1) p (Decided i)]) (l + 1) (n + 1)
 
 mDerive :: PackageName -> Incompatibility -> Model -> Model
 mDerive p cause (Model as l n) =
-    Model (as ++ [Derivation n l p term cause]) l (n + 1)
+    Model (as ++ [Assignment n l p (Derived term cause)]) l (n + 1)
   where
     term = maybe anyTerm negateTerm (incompGet p cause)
 
@@ -152,13 +154,15 @@ mTerm m p = case map assignmentTerm (mHistory m p) of
     t : ts -> Just (foldl intersectTerm t ts)
 
 mSolution :: Model -> Map.Map PackageName Instance
-mSolution m = Map.fromList [(aPackage a, aInstance a) | a@Decision{} <- mAssignments m]
+mSolution m =
+    Map.fromList
+        [(aPackage a, i) | a <- mAssignments m, Just i <- [decidedInstance a]]
 
 mUndecidedPositive :: Model -> [(PackageName, InstanceSet)]
 mUndecidedPositive m =
     mapMaybe positive (filter (`notElem` decided) pkgs)
   where
-    decided = [aPackage a | a@Decision{} <- mAssignments m]
+    decided = [aPackage a | a <- mAssignments m, Just _ <- [decidedInstance a]]
     pkgs = uniqueOldestFirst [aPackage a | a <- mAssignments m]
     positive p = case mTerm m p of
         Just (Positive r) -> Just (p, r)
@@ -202,10 +206,7 @@ maybeTermEquiv _ _               = False
 -- | An assignment's identity, ignoring the term (compared separately, by
 -- equivalence).
 key :: Assignment -> (Int, Int, PackageName, Maybe Instance)
-key a = (aIndex a, aLevel a, aPackage a, decided a)
-  where
-    decided Decision{aInstance} = Just aInstance
-    decided Derivation{}        = Nothing
+key a = (aIndex a, aLevel a, aPackage a, decidedInstance a)
 
 check :: String -> Bool -> Property
 check what ok = counterexample ("mismatch: " ++ what) ok

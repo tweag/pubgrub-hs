@@ -49,7 +49,7 @@ import           PubGrub.InstanceSet            (Instance (BuildSource),
 import           PubGrub.InstanceSet.SourceCell (SourceCell (..), assignmentFrom)
 import           PubGrub.Provider               (Provider (Provider, expand))
 import           PubGrub.Report                 (reportConflict)
-import           PubGrub.Solver                 (SolveError (NoSolution),
+import           PubGrub.Solver                 (SolveError (..),
                                                  SolverMsg, solve)
 import           PubGrub.VersionSet             (VersionSet, contains,
                                                  fullVersionSet)
@@ -163,6 +163,8 @@ runSolve provider =
 
 renderFailure :: SolveError -> Text
 renderFailure (NoSolution i) = reportConflict i
+renderFailure (NoSatisfier p _) =
+    T.pack ("internal error: no satisfier for " <> show p)
 
 solveWorld :: World -> IO (Either Text (Map PackageName Instance))
 solveWorld = runSolve . mkProvider

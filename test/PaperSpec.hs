@@ -21,6 +21,7 @@ import qualified Data.Map.Strict                as Map
 import qualified Data.Set                       as Set
 import           Data.Ord                       (comparing)
 import           Data.Text                      (Text)
+import qualified Data.Text                      as T
 import           Distribution.Types.Flag        (mkFlagAssignment)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Version           (earlierVersion,
@@ -35,7 +36,7 @@ import           PubGrub.InstanceSet            (HasVersion (version),
 import           PubGrub.InstanceSet.SourceCell  (SourceCell (..))
 import           PubGrub.Provider               (Provider (Provider))
 import           PubGrub.Report                 (reportConflict)
-import           PubGrub.Solver                 (SolveError (NoSolution),
+import           PubGrub.Solver                 (SolveError (..),
                                                  SolverMsg, solve)
 import           PubGrub.VersionSet             (VersionSet, fromVersionRange)
 import           Test.Tasty                     (TestTree, testGroup)
@@ -146,6 +147,8 @@ solveWorld world =
 -- | Render a solver failure as its explanatory proof.
 renderFailure :: SolveError -> Text
 renderFailure (NoSolution i) = reportConflict i
+renderFailure (NoSatisfier p _) =
+    T.pack ("internal error: no satisfier for " <> show p)
 
 -- | The expected solution as a map, from (name, version) pairs.
 expected :: World -> [(String, [Int])] -> Map PackageName Instance

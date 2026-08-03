@@ -121,6 +121,8 @@ main = do
 report :: Either SolveError (Map PackageName Instance) -> App ()
 report (Left (NoSolution incompat)) =
     logMsg (reportConflict incompat)
+report (Left (NoSatisfier p _)) =
+    logMsg (T.pack ("internal error: no satisfier for " ++ prettyShow p))
 report (Right solution) = do
     logMsg (T.pack "Solution:")
     mapM_ (logMsg . uncurry renderChoice) (Map.toList solution)
