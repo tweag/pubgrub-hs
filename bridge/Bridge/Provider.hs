@@ -3,10 +3,10 @@
 --
 -- A package's instances are its installed units ('UsePreInstalled') and its
 -- Hackage source releases. Installed units are strictly preferred: if the
--- range admits one, the provider commits to the newest such and pins its
--- dependencies to their exact installed units. Otherwise it picks the newest
--- source release and reads its dependencies from its @.cabal@, widened to the
--- instances in range, installed and source.
+-- range admits one, the provider commits to the newest such and pins its whole
+-- transitive closure to the exact units it was built against. Otherwise it
+-- picks the newest source release and reads its dependencies from its
+-- @.cabal@, widened to the instances in range, installed and source.
 --
 -- 'withProvider' is the entry point: it opens the index, resolves the compiler
 -- and installed packages, and runs an action with the 'Provider'. The provider
@@ -26,10 +26,11 @@ import           Bridge.Hackage                               (IndexHandle (..),
                                                                ParseError,
                                                                withHackageIndex)
 import           Bridge.Installed                             (InstalledDb (..),
+                                                               InstalledEdge (..),
+                                                               closureEdges,
                                                                installedInstancesOf,
                                                                mkInstalledDb,
-                                                               toPreInstalled,
-                                                               unitInstance)
+                                                               toPreInstalled)
 import           Colog                                        (WithLog, logMsg)
 import           Data.IORef                                   (atomicModifyIORef',
                                                                newIORef,
@@ -220,7 +221,7 @@ mkExpand installedDb readRelease handle root = expand'
             admissible = sortOn (Down . version) (filter (`Set.member` isInstalled range) installedHere)
         case listToMaybe admissible of
             Just chosen -> do
-                incs <- consequencesOfUsePreInstalled pn chosen
+                incs <- consequencesOfUsePreInstalled chosen
                 pure (Just (UsePreInstalled chosen, incs))
             Nothing -> firstUsable (sortOn Down (versionsOf pn))
 
@@ -299,11 +300,19 @@ mkExpand installedDb readRelease handle root = expand'
         deviations fa =
             length [() | (f, b) <- unFlagAssignment fa, lookup f declared /= Just b]
 
-    consequencesOfUsePreInstalled pn pip =
+    -- Committing to an installed unit fixes its whole transitive closure, so
+    -- hand the solver every edge of that closure at once. Each edge names its
+    -- own depender, so each is a genuine direct dependency: propagation chains
+    -- through the closure in one fixpoint (rather than learning one hop per
+    -- decision), and a report about any edge stays true.
+    consequencesOfUsePreInstalled pip =
             pure
-                [ fromDependency pn (singletonUsePreInstalled pip) (depName, singletonInstance depInst)
-                | uid <- pipDependencies pip
-                , Just (depName, depInst) <- [unitInstance installedDb uid]
+                [ fromDependency
+                    fromName
+                    (singletonUsePreInstalled fromPip)
+                    (toName, singletonUsePreInstalled toPip)
+                | InstalledEdge (fromName, fromPip) (toName, toPip) <-
+                    closureEdges installedDb (pipUnitId pip)
                 ]
 
     depIncs :: PackageName -> Instance -> [(PackageName, VersionSet)] -> [Incompatibility]

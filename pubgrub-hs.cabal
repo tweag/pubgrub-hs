@@ -44,13 +44,12 @@ library bridge
     hs-source-dirs:     bridge
     exposed-modules:
         Bridge.Cabal.Flatten
+        Bridge.Cabal.InstalledPkg
         Bridge.Hackage
         Bridge.Hackage.HttpClient
         Bridge.Hackage.Unlifted
-        Bridge.Provider
-    other-modules:
-        Bridge.Cabal.InstalledPkg
         Bridge.Installed
+        Bridge.Provider
     build-depends:
         , base
         , binary
@@ -102,6 +101,7 @@ test-suite pubgrub-hs-test
     other-modules:
         FlagSolveSpec
         FlattenSpec
+        InstalledSpec
         InstanceSetSpec
         PaperSpec
         PartialSolutionSpec

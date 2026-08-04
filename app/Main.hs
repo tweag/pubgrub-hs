@@ -140,6 +140,11 @@ report provider (Right solution) = do
 -- is deterministic on a singleton offered set, so this recovers the same
 -- dependency incompatibilities the solve itself derived, without the solver
 -- having to hand back its internal store.
+--
+-- Keep only the edges @pn@ itself declares: on an installed unit the provider
+-- returns every edge of the unit's /transitive/ closure at once, and those
+-- deeper edges belong under their own depender, which the same walk reaches on
+-- its own turn.
 dependencyMap :: Provider App -> Map PackageName Instance -> App (Map PackageName [PackageName])
 dependencyMap provider solution =
     Map.fromList <$> mapM childrenOf (Map.toList solution)
@@ -147,8 +152,13 @@ dependencyMap provider solution =
     childrenOf (pn, inst) = do
         result <- expand provider pn (singletonInstance inst)
         let deps = case result of
-                Just (_, incs) -> [d | inc <- incs, CauseDependency _ _ (d, _) <- [incompCause inc]]
-                Nothing        -> []
+                Just (_, incs) ->
+                    [ d
+                    | inc <- incs
+                    , CauseDependency p _ (d, _) <- [incompCause inc]
+                    , p == pn
+                    ]
+                Nothing -> []
         pure (pn, deps)
 
 -- | Render the solution as a dependency tree from the synthetic root, in the

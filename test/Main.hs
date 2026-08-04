@@ -2,6 +2,7 @@ module Main (main) where
 
 import qualified FlagSolveSpec
 import qualified FlattenSpec
+import qualified InstalledSpec
 import qualified InstanceSetSpec
 import qualified PartialSolutionSpec
 import qualified PaperSpec
@@ -21,4 +22,5 @@ main =
             , PaperSpec.tests
             , FlattenSpec.tests
             , FlagSolveSpec.tests
+            , InstalledSpec.tests
             ]
