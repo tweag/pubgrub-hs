@@ -26,6 +26,11 @@ on the delivery path.)
 
 ## Key references
 
+**Start at `docs/STATUS.md`** — the single current-state document: what works, what
+is specified but not built, what is open, and which file wins when two disagree. It
+is a summary and not authoritative; the documents below decide. Project history is
+`docs/decision-log.md`; abandoned directions are `docs/attic/`.
+
 - **PubGrub algorithm spec: `references/pubgrub.md`** (vendored copy of
   https://github.com/dart-lang/pub/blob/master/doc/solver.md). This is *the*
   authority on what PubGrub requires. When a question is "is this fundamental to
@@ -36,7 +41,17 @@ on the delivery path.)
   `references/pubgrub.md` has for the algorithm: what must be *true*, with no
   types in it. Cite it for any question about what a constraint mentioning a flag
   means, what may be approximated, and in which direction. It overrules this file
-  and `docs/flags-design.md` (a pre-reboot design doc, superseded on semantics).
+  and `docs/attic/flags-design.md` (a pre-reboot design doc, superseded on
+  semantics).
+- **Decision semantics: `docs/decision-semantics.md`** (drafted 2026-08-04,
+  **nothing implemented**). Specifies *condition decisions*: decide the version
+  first, then only the flag conditions some dependency guards. It registers its
+  deviations from `references/pubgrub.md` in its §1 and defers to
+  `docs/flags-semantics.md` on flags. Its §11 proposes four amendments to that file
+  which are **not applied**, and its §10 notes it subsumes the `expand`-split
+  question.
+- **Formal kernel model: `specification/`** — Lean 4. Its own README states the Lean
+  code is normative where its prose disagrees.
 - PubGrub internals guide: https://pubgrub-rs-guide.pages.dev/internals/intro
 - Reference Rust implementation: https://github.com/pubgrub-rs/pubgrub (a second
   implementation's choices, not a specification)
@@ -147,6 +162,12 @@ data SourceCell = SourceCell VersionSet (Map FlagName FlagPin)  -- range × pinn
 data FlagPin    = PinnedTo Bool | NotDeclared
 ```
 
+**DNF** is *disjunctive normal form* — an OR of ANDs. Here: within one `SourceCell`
+the conditions are ANDed (version in this range **and** `simd` pinned on), and the
+list of cells is ORed (the set is their **union**). "NOT canonicalised" means nothing
+reduces that list to a unique representative, which is why there is no lawful `Eq`
+— two different lists can denote the same set.
+
 It is **intensional on the source side**: a dependency's declared range becomes
 *one* cell, not one entry per in-range version. That is what makes reports able
 to say `>=1.0 && <2`, and what keeps the cell count O(1) per dependency instead
@@ -247,8 +268,8 @@ Known gaps, in the order worth fixing:
 
    We emit the per-version form the spec tells us not to: `Bridge.Provider.depIncs`
    uses `singletonInstance chosen` as the depender
-   (`bridge/Bridge/Provider.hs:225`). ("No instances" is not affected — the solver
-   raises that itself from the provider's `Nothing`, `src/PubGrub/Solver.hs:317`.)
+   (`bridge/Bridge/Provider.hs:332`). ("No instances" is not affected — the solver
+   raises that itself from the provider's `Nothing`, `src/PubGrub/Solver.hs:416`.)
    This costs *both* deliverables — more incompatibilities to propagate, and proof
    lines reading `foo 1.2.3 depends on …` where the spec's own examples read
    `foo >=1.0 && <1.3 depends on …`. `mergeCells` recovers some of it incidentally,
@@ -263,12 +284,28 @@ Known gaps, in the order worth fixing:
    expansions of a package with one dead version), and
    `docs/flags-semantics.md` §9 traces it.
 
-   Fix at generation: group a package's instances by identical flattened
-   dependency set, emit one incompatibility per group, with the depender widened
-   to a cell spanning the group. Note the flag axis complicates "adjacent" — two
-   instances of the *same* version under different flag assignments can have
-   different deps — so the grouping key is the dep set, and the widened cell must
-   retain whatever pins the whole group shares.
+   Fix at generation, and the shape is fixed by `docs/flags-semantics.md` §4.2,
+   which overrules this file: the unit is **one guarded dependency occurrence**
+   `C ⇒ q ∈ R`, read straight off the flattened conditional tree. Emit
+   `{p ∈ V × C, not q ∈ R}` with the guard `C` used **verbatim** as the depender's
+   flag component. That is what keeps flags the guard never mentions out of the
+   term, which is the entire point — and it needs no enumeration of assignments and
+   no per-assignment dependency sets. Where several occurrences constrain the same
+   `q` (an unconditional `q >=1`, a guarded `q <3`), emit them as separate facts and
+   let propagation intersect them.
+
+   **Do not group instances by identical flattened dependency *set*.** §4.2 rejects
+   that explicitly, as "a serious mistake, not a conservative one": two assignments
+   that agree on `q` but differ on an unrelated dependency fail to group, so the
+   depender term still names the irrelevant flag and the 2^k cost survives intact.
+   (This file prescribed the rejected form until 2026-08-05.)
+
+   What genuinely remains is the **version** axis: widening the depender across
+   adjacent releases still requires inspecting the intervening ones — including
+   whether each declares the flag the guard mentions at all, since where it does not
+   the guard is not merely false but *inapplicable*, which is the third pin state's
+   job. See also `docs/decision-semantics.md`, which builds on this emission shape
+   and treats it as its prerequisite.
 2. **`collapseNoInstances`** — intensional ranges mean the solver must separately
    learn that a range's *holes* are empty, so `no version for bar in >2.0.0 && <3`
    leaves clutter the proof. pubgrub-rs has a dedicated post-pass for exactly

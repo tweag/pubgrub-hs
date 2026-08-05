@@ -1,5 +1,17 @@
 # Specification: Building Cabal Packages and Projects
 
+> **Status: forward-looking reference. None of this is implemented.** A model of
+> *Cabal's* build structure — components, scopes, build units, installed units,
+> setup programs, Backpack — not of our solver. It is the reference for **rungs 4
+> and 5** (setup / build-tool dependencies, public sublibraries), which have not
+> been started.
+>
+> Do not confuse it with [`../specification/`](../specification/), which is a Lean
+> formalisation of the **PubGrub kernel**. Different subject, similar name.
+>
+> The solver as built handles one component per package and ignores scopes
+> entirely. See [STATUS.md](STATUS.md).
+
 ## Scope of this specification
 
 This specification describes a simplified semantic model of building Cabal packages and projects.

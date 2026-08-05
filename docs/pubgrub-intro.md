@@ -1,5 +1,26 @@
 # PubGrub: A Dependency Solver for Haskell Packages
 
+> **Status: tutorial. Current on the algorithm, stale in three places.** This is the
+> gentlest introduction in the repository and a good starting point — but it was
+> written before the reboot, so do not take its interface or roadmap as current.
+> See [STATUS.md](STATUS.md) for what is actually true.
+>
+> Specifically:
+>
+> - **§2 "The Type Class Interface"** shows the provider as two methods,
+>   `chooseVersion` and `getDependencies`. They were **merged into one `expand`** on
+>   2026-06-24. (Splitting them back is an open question —
+>   [flags-semantics.md](flags-semantics.md) §8.)
+> - **§8 "Connection to Answer Set Programming"** describes a framing that was
+>   **abandoned before any code was written**. There is no ASP component and never
+>   was. See [attic/](attic/) §1.
+> - **§9 "Implementation Roadmap"** is superseded by the rung ladder in
+>   `../CLAUDE.md` and by [STATUS.md](STATUS.md).
+>
+> Nothing here covers flags or the instance model, which are the parts that took the
+> most work. Those are [flags-semantics.md](flags-semantics.md) and
+> [decision-semantics.md](decision-semantics.md).
+
 This document introduces the PubGrub version-solving algorithm and explains how it will be implemented in this project. All examples use Cabal package names and PVP version syntax. The goal is to give enough precision to drive implementation, not to be a formal proof.
 
 ---
@@ -28,6 +49,14 @@ The naive approach — enumerate every combination of versions and test consiste
 ---
 
 ## 2. The Type Class Interface
+
+> **Stale.** The two provider methods below, `chooseVersion` and `getDependencies`,
+> were **merged into a single `expand`** on 2026-06-24, and the value a decision
+> takes is no longer a bare version but a whole *instance* (a version plus a total
+> flag assignment, or a pre-installed unit). The split shown here is still how the
+> reference Rust implementation does it, and splitting back is an open question —
+> [flags-semantics.md](flags-semantics.md) §8. Read this section for the *shape* of
+> the seam, not for the current API, which is `src/PubGrub/Provider.hs`.
 
 Three abstractions anchor the entire algorithm. Every subsequent section is defined in terms of them.
 
@@ -340,6 +369,17 @@ A default implementation performs post-order traversal of the DAG:
 
 ## 8. Connection to Answer Set Programming
 
+> **Abandoned framing — there is no ASP component, and there never was.** The
+> `ASP.hs` module this section refers to was never written; no `.lp` file was ever
+> committed and Clingo was never invoked. The plan to encode solving as Answer Set
+> Programming was dropped *before any code*, in favour of implementing PubGrub
+> natively. See [attic/README.md](attic/README.md) §1.
+>
+> The *analogy* below is still accurate and still worth reading — PubGrub really is
+> a CDNL algorithm, and the mapping illuminates it. Only the implied deliverable is
+> gone. The role of an independent checker is now played by the Lean specification
+> in [../specification/](../specification/).
+
 PubGrub is an instance of **Conflict-Driven NoGood Learning (CDNL)**, the core algorithm in modern Answer Set Programming solvers such as Clingo. Understanding this connection motivates the `ASP.hs` module and clarifies what "Answer Set Solving" buys us.
 
 ### The Mapping
@@ -394,6 +434,10 @@ Suggested use: implement the native solver first, then use the ASP encoding as a
 ---
 
 ## 9. Implementation Roadmap
+
+> **Superseded.** The module map and phasing below describe the pre-reboot tree.
+> For what exists now see `../CLAUDE.md` (architecture and the rung ladder) and
+> [STATUS.md](STATUS.md) (what is built, what is specified, what is open).
 
 ### Module Map
 

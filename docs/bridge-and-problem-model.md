@@ -1,5 +1,20 @@
 # Bridge, problem model, and PInfo adapter
 
+> **Status: part live, part dead.** Read for *why the bridge is shaped as it is* —
+> that reasoning is current and is the load-bearing content. Do not read it as an
+> API description.
+>
+> - **Live:** the three-component split and its hard dependency boundary; why we
+>   dropped `cabal-install` and `hackage-security` and write our own index reader;
+>   why one shared index must feed both solvers (it is what makes the benchmark
+>   comparison apples-to-apples).
+> - **Dead:** the `PInfo → SourcePackage` adapter of the section marked
+>   *"SKETCH — not compiled"*, and the "Core frontier (as of 2026-07-23)" section.
+>   Several type names here predate the reboot and no longer exist.
+>
+> See [STATUS.md](STATUS.md) for current state and `../CLAUDE.md` for the
+> architecture as built.
+
 Design notes from the 2026-07-23 planning session. This records *decisions and
 sketches*, not finished code. Some type names here predate the reboot and no
 longer exist; flags, described below as "later", are implemented — see

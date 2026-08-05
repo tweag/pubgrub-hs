@@ -12,7 +12,7 @@
 > before relying on any of them.
 >
 > **Authority:** on the questions it answers, this file wins over
-> [flags-design.md](flags-design.md) (which chose a different rule — see §2.3)
+> [flags-design.md](attic/flags-design.md) (which chose a different rule — see §2.3)
 > and over `CLAUDE.md`. It does not overrule
 > [references/pubgrub.md](../references/pubgrub.md); where PubGrub already
 > decides something, this file cites it.
@@ -59,6 +59,11 @@ assignment α where
 Totality is the load-bearing half (no conditional is left unresolved); exactness
 is the half we keep forgetting (α never mentions a flag the version does not
 declare, so "α has no value for `f`" is meaningful and observable).
+
+Totality is a property of an **instance**, and is demanded wherever an instance is
+produced — under condition decisions
+([decision-semantics.md](decision-semantics.md)) that is the witness of D1, not any
+decision: decisions there are terms and pin only what a guard made relevant.
 
 ### 1.3 Flags of different versions are unrelated
 
@@ -110,12 +115,19 @@ price. It is recoverable **inside this model** — per-fact dependency collapsin
 alternative's advantage — so the answer to the cost is collapsing, not a change of
 model.
 
-**Status.** Nothing in §2 or §3 depends on this choice being the right one; if
-the retry cost ever dominates, this is the decision to revisit, and §2.3 largely
-dissolves when it is. It is recorded here as a decision with a price, because the
-previous record of it (see [flags-design.md](flags-design.md) §1) gave a reason
-that does not hold — invasiveness of a type substitution — and omitted the price
-entirely.
+**Status.** Revisited 2026-08-04:
+[decision-semantics.md](decision-semantics.md) collects the alternative's
+advantage — irrelevant flags never enter clauses *or decisions* — without flag
+variables: decisions generalise to condition terms on the package variable, made
+under a decided version, so conditional existence never arises. The modelling
+choice recorded here (the flag lives in the value) is unchanged and is what makes
+that generalisation cheap.
+
+Nothing in §2 or §3 depends on this choice being the right one; if the retry cost
+ever dominates, this is the decision to revisit, and §2.3 largely dissolves when it
+is. It is recorded here as a decision with a price, because the previous record of
+it (see [flags-design.md](attic/flags-design.md) §1) gave a reason that does not
+hold — invasiveness of a type substitution — and omitted the price entirely.
 
 **Consequence for the rest of this document.** A constraint that mentions `f` is
 evaluated **per instance, against that instance's own α**. Sharing a name across
@@ -160,7 +172,7 @@ that flag is **not** an error and excludes nothing. `--flag=+fast` against a
 version with no `fast` flag simply says nothing about it. Only versions that
 declare `fast` and set it `False` are excluded. This is a deliberate
 input-handling decision, inherited from
-[flags-design.md](flags-design.md) §5, and this specification does not change it.
+[flags-design.md](attic/flags-design.md) §5, and this specification does not change it.
 
 What it *does* change is where the leniency comes from. It is a property of how
 user input is **translated**, not of how a constraint is interpreted: for a user
@@ -272,7 +284,7 @@ each of them:
   observable — a version declaring no flags vanished from `A ∖ B` while being in
   `A` and not in `B`.
 - **Lenient** — "undeclared makes the atom vacuously true", the rule
-  [flags-design.md §2 "Domain-freedom principle"](flags-design.md) chose. Then
+  [flags-design.md §2 "Domain-freedom principle"](attic/flags-design.md) chose. Then
   the atom `f is on` also covers instances lacking `f`, and its negation covers
   them again. Difference comes out **too big**. That is the safe direction
   (§3, O4) but it is still not exact, and it makes two different constraints
@@ -613,6 +625,15 @@ wrongly Satisfied or Contradicted, allowed to be Inconclusive.
   Schedule it with the buildability work item in §10, which it makes smaller rather
   than larger.
 
+  **All three benefits are inherited by condition decisions.**
+  [decision-semantics.md](decision-semantics.md) §10 records that completeness
+  dissolving into the solver's loop, propagation running between candidate attempts,
+  and rejection reasons becoming first-class all fall out of its §2–§3 without any
+  change to the provider's *shape*. So this item and that one are **one scheduling
+  decision, not two**: deciding the split in isolation risks paying for the same
+  benefit twice. Note also that document's sequencing note, which puts §4.2 per-fact
+  emission first and measurement before either.
+
 ## 9. Worked example: learning that a flag must leave its default
 
 `references/pubgrub.md` carries an Examples section for the same reason this
@@ -773,7 +794,11 @@ be edited whenever the tree moves.
 | §4.3 report wording | partial: constraints render, the not-applicable wording is not aligned |
 | §5 choice policy | implemented (release-major, then fewest deviations) |
 | §6 non-uniform universe, one-sided properties | in place |
-| §6 verdict oracle | owed |
+| §6 verdict oracle | owed, **and blocking for condition decisions** |
+| D1 determination before success | specified ([decision-semantics.md](decision-semantics.md) §3), not implemented |
+| D2 progress | specified ([decision-semantics.md](decision-semantics.md) §4), not implemented |
+| D3 concretisation | specified ([decision-semantics.md](decision-semantics.md) §5), not implemented |
+| condition-decision emission | specified ([decision-semantics.md](decision-semantics.md) §2.2), not implemented |
 
 Three couplings worth knowing before picking up any of it.
 
