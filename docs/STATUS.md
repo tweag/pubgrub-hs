@@ -27,9 +27,12 @@ correctly is table stakes. It exists to answer two questions:
 ranges, Cabal flags, and installed/boot-package pinning. 95 tests pass, including
 both worked examples from the PubGrub spec.
 
-**Neither deliverable has been measured.** There is no benchmark harness and no
-cabal baseline wired in. That is the honest headline: the interesting half of the
-project has not started.
+**Neither deliverable has been delivered.** There is no benchmark harness and no
+cabal baseline wired in, so nothing has been *compared* to anything. A first cut of
+our own numbers exists — see [Measurement](#measurement--first-results) — and its
+main result is about the apparatus rather than the solver: the standing stress case
+has one conflict in it, and peak residency currently measures the index reader.
+The interesting half of the project has barely started.
 
 ---
 
@@ -253,15 +256,100 @@ Full arguments in the linked sections; this is the index.
    landed on 2026-08-05: the 2^k re-offer is gone (measured — 2 expansions where it
    was 3 with one irrelevant flag and 5 with two), and depender terms now carry the
    guard rather than the whole assignment. What remains is widening a depender across
-   *adjacent releases*, which is what `:456` literally asks for and what would make a
-   proof line read `foo >=1.0 && <1.3 depends on …`. It needs `NotDeclared`, because a
-   term spanning releases that differ in what they declare is exactly where the third
-   pin state earns its place.
+   *adjacent releases* — see the notes below before starting it.
 3. **Should the set algebra be allowed to read flag declarations?** Would make
    emptiness exact and remove the one-sided slack, at the cost of the core/bridge
    boundary. Cost/benefit, not correctness.
-4. **Report polish** — `collapseNoInstances`, then chain collapsing, then cosmetics.
-   See `CLAUDE.md`'s Reporting section.
+4. **`collapseNoInstances`, and it may not be cosmetic.** Filed under report polish
+   in `CLAUDE.md` (Reporting gap 2), but the measurement below found it is where all
+   the deep conflict resolution goes: the three deepest resolutions in `aeson <2`
+   (9, 10 and 18 iterations) are each a gappy range being learned one hole at a time.
+   That is an argument for weighing it against the version axis rather than after the
+   cosmetics — both are about ranges, and this one has measured depth behind it. Then
+   chain collapsing, then wording.
+
+### Notes on the version axis, before anyone starts it
+
+**What changes.** If `foo` 1.0, 1.1 and 1.2 all depend on `bar >=1.0 && <2` and 1.3
+dropped it, three facts become one:
+
+```
+{foo 1.0, not bar >=1.0 && <2}
+{foo 1.1, not bar >=1.0 && <2}     ⟶     {foo >=1.0 && <1.3, not bar >=1.0 && <2}
+{foo 1.2, not bar >=1.0 && <2}
+```
+
+The bounds rule is exact in the spec: inclusive lower bound at the first version
+that **has** the dependency, exclusive upper bound at the first that **doesn't**,
+each omitted when the run reaches the oldest or newest published version.
+
+**Why it is the harder half.** The flag axis needed no new information — the guard
+was already in `GuardedDeps` and `depsAt` was discarding it. This one does: the
+provider is asked about *one* version and must establish what its **neighbours**
+declare, which means reading their `.cabal` files. That is in direct tension with
+the laziness the same spec paragraph asks for ("lazily when each package version is
+first chosen, to avoid flooding the solver"), and this is a measured-expensive area
+— retaining parsed descriptions once cost 27.2 s / 904 MB on `pandoc` against
+3.7 s / 83 MB uncached. Any walk must stay in reduced form and memoised.
+
+**What `NotDeclared` is actually for here, which is narrower than it first looks.**
+[Two-valued where you decide, three-valued where you collapse](#how-those-two-relate)
+above shows why the third state is *necessary* when a run spans releases that
+disagree about whether a flag exists: dropping it loses `parser 1.1` unsoundly.
+
+The narrower point, which that section does not cover: when every release in the
+run **does** declare the flag, the negation still produces that cell and it is
+simply empty. Same two worlds, measured against the real `InstanceSet`:
+
+```
+cells in A∖B: 2                            ← identical in both worlds
+isEmpty (NotDeclared cell alone) = False   ← even when nothing can inhabit it
+
+both releases declare simd:  2 members, 0 of them via the NotDeclared cell
+1.1 declares no flags:       2 members, 1 of them via the NotDeclared cell
+```
+
+So the collapsed fact and its complement are **syntactically identical** in both
+worlds; only the denotation differs. The algebra cannot tell them apart because
+telling them apart needs `D(ρ)` — which flags each release declares — and
+`flags-semantics.md` §1.1 puts that firmly on the bridge: *"the core algebra cannot,
+and per the architecture boundary must not try."* The surviving-but-empty cell is
+**O3's one-sided emptiness being exercised**, exactly as specified, and the cost
+lands on `Inconclusive`: work, never a wrong verdict (O4).
+
+The dead cell dies at the **provider**, the one place reality is consulted:
+`expand'` enumerates real releases and filters by `memberInstance`, so an
+uninhabitable cell yields no candidate. Same shape as `widen` admitting versions
+Hackage does not have.
+
+Two consequences for the work:
+
+- **a simplification** — emission needs no declaration-checking at negation time,
+  because one complement is correct for both worlds;
+- **a cost for the ledger** — when a run does *not* span a declaration change, you
+  carry one redundant cell per collapsed guarded fact. Small, real, and it belongs
+  in the measurement below rather than being assumed away.
+
+**The trade, which is why measurement comes first.** Fewer clauses to rescan (clause
+count and position dominate propagation cost here) and one refutation killing a
+whole run, against new `.cabal` reads that happen even when the run is never
+refuted, plus the redundant cells above. Which side wins is empirical, and the flag
+axis already took the cost that motivated most of this.
+
+**The concrete work.** A range-taking cell constructor (`pinnedCell` pins one
+version via `singletonVersionSet`; `SourceCell` already holds a `VersionSet`, so
+only the smart constructor is missing); run detection in the provider over
+`rsVersionsOf`/`rsReadRelease`, extending while a *guarded occurrence* is identical —
+same guard and same dependency, **not** the whole dependency set, per §4.2; and the
+report wording change to `foo >=1.0 && <1.3 depends on …`.
+
+**Two things genuinely undecided.** How far to walk — unbounded widening reads the
+whole version list in the worst case, and a cap stays sound because §4.2 makes
+maximality *policy* rather than a requirement, but nothing has chosen one. And what
+an **unparseable** release does to a run: per §1.5 it is not in the universe at all,
+so spanning it would claim a fact about a release nobody could read, while breaking
+on it lets index noise fragment otherwise-collapsible runs. Neither document answers
+this; the version axis creates the question rather than inheriting it.
 
 ### Recommended order
 
@@ -280,6 +368,108 @@ Seeds before collapsing, incidentally: smaller change, and it removes a special 
 collapsing would otherwise have to preserve.
 
 ---
+
+## Measurement — first results
+
+First cut, 2026-08-05, one machine, warm cached index. Not a benchmark report: no
+cabal baseline, no repetition, no controlled environment. Enough to decide what to
+do next, which is what it was for.
+
+### There is now a set of problems with real search in it
+
+Constraining a package to an **older** release is what forces conflicts: the old
+bounds have to be reconciled against everything else. Unconstrained popular
+packages mostly do not conflict at all.
+
+| problem | time | decisions | conflicts | backjumps | no-version | reads |
+|---|---|---|---|---|---|---|
+| `aeson <2` | 8.5 s | 1443 | **98** | 98 | 6 | 350 |
+| `lens <4` | 4.8 s | 1059 | **63** | 63 | 1 | 557 |
+| `conduit <1.3` | 3.2 s | 127 | **34** | 34 | 1 | 142 |
+| `yesod` | >60 s | 4635+ | — | — | — | — |
+| `pandoc` | 1.1 s | 266 | **1** | 1 | 0 | 167 |
+| `vector` | 0.6 s | 39 | **0** | 0 | 0 | 13 |
+
+Use the top three for anything about search. `yesod` does not finish in 60 s and is
+worth understanding on its own.
+
+### Three findings that change what to do next
+
+**1. `pandoc` is an index-throughput benchmark, not a search one.** It has *one*
+conflict, resolved immediately (`{cassava ==0.5.5.0}`, backjump to level 65). Its
+266 decisions are nearly all first-time expansions. It has been this project's
+standing stress case, and it cannot see a search improvement.
+
+Concretely: the A/B for §4.2's flag axis showed **identical `.cabal` read counts** on
+`vector`, `aeson` and `pandoc` — 13/13, 47/47, 167/167 — with the only difference
+being the depender term. That is not evidence the change did nothing; the 2^k cost
+only materialises when a version is *refuted*, and none of those three refutes
+anything. **A benchmark set of cleanly-resolving packages would have reported the
+fix as worthless.**
+
+**2. Peak residency is currently a constant, and half the deliverable rests on it.**
+About 22 MB whether a run does 13 reads or 557 — it is dominated by the index's
+package→versions map, not by the solve. Comparing this number against cabal would
+compare index readers. Either measure the solve separately from index loading, or
+subtract a no-op baseline, before quoting peak memory at all.
+
+(Also: the 27.2 s / 904 MB and 3.7 s / 83 MB figures recorded for the memoisation
+experiment are stale as absolutes — `pandoc` now runs at 1.1 s / 22 MB. The *ratio*
+lesson about retaining parse trees stands; the numbers no longer describe this tree.)
+
+**3. Resolution depth is concentrated, and where it is deep the cause is
+`collapseNoInstances`.** Over `aeson <2`'s 98 conflicts:
+
+```
+depth 0   x95      ← resolved in one step
+depth 9   x1
+depth 10  x1
+depth 18  x1
+```
+
+The deep ones are all the same shape — a gappy range being learned one hole at a
+time:
+
+```
+Conflict {bytestring >0.10.8.1 && <0.10.8.2 || >0.10.8.2 && <0.10.9.0 || … 9 more gaps}
+  resolving at bytestring -> {base ¬(>=4.2 && <4.15), bytestring …}
+  resolving at bytestring -> {base ¬(>=4.2 && <4.16), bytestring …}
+  … 8 more, each absorbing one gap
+Learned {base ¬(>=4.2 && <4.20), bytestring >=0.10.8.1 && <0.11.2}
+```
+
+Eighteen iterations to learn one clause, walking `base`'s bound up one release at a
+time. That is exactly what `CLAUDE.md`'s Reporting gap 2 describes: intensional
+ranges make the solver learn separately that each *hole* in a range is empty.
+
+**It is filed as report clutter. This is evidence it is also a search-depth item**,
+and that is an argument for reordering it against the version axis — both are about
+ranges rather than flags, and this one has measured depth behind it.
+
+### What made these visible
+
+`SolverMsg` declared five events and the solver emitted **one** (`Deciding`).
+`Chose`, `NoVersionFor`, `Conflict` and `Backtracked` were dead, and `app/Main.hs`
+rendered all five, so the plumbing existed with nothing feeding it. A first sweep
+here reported `conflicts=0 backtracks=0` for every package and it meant nothing.
+
+All are now emitted, plus two new ones: **`Resolving`** (one per same-level
+resolution iteration, so counting them between a `Conflict` and its `Learned` gives
+the depth) and **`Learned`** (the root cause, as distinct from the conflict that
+started it). `conflictResolution` became monadic for `Resolving` only; the algorithm
+is unchanged.
+
+**Caveat for timing.** Tracing renders to stdout, so `aeson <2` prints ~1500 lines
+and the 8.5 s above includes that. A timed run should discard the log, or the CLI
+needs a verbosity switch. There isn't one.
+
+### One incidental oddity, unexplained
+
+`aeson <2` resolves with **`base 4.15.1.0`** in the plan — a *source* release of
+`base`, not the installed 4.21.0.0. Rung 3 is described as **strict
+prefer-installed**, so this may be outside the intended model, or may be correct
+because the constraint excludes the installed unit and a source `base` is then the
+only option. Not investigated. Worth settling before a benchmark set bakes it in.
 
 ## Resolved contradictions
 
@@ -351,7 +541,7 @@ moves; treat a cited line number as a hint, and grep for the identifier.
 | deliverable | state |
 |---|---|
 | **Explanation showcase** — real failing problems, pubgrub-hs vs cabal side by side | solver produces numbered proofs; no side-by-side, no cabal baseline, wording gaps open |
-| **Benchmark report** — time + peak residency on real sat/unsat problems | **not started.** No harness, no baseline |
+| **Benchmark report** — time + peak residency on real sat/unsat problems | **not started** as a comparison. Our own first numbers exist ([Measurement](#measurement--first-results)); peak residency is not yet a usable metric |
 
 Both need `cabal-install-solver` wired in as a baseline and both solvers driven from
 the one shared index. That structural sharing is the point of the bridge design, and

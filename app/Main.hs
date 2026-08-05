@@ -37,7 +37,8 @@ import           Hackage.Security.Util.Path      (fromFilePath, makeAbsolute)
 import           Network.HTTP.Client             (defaultManagerSettings,
                                                   newManager)
 import           PubGrub.Incompatibility         (IncompatCause (..),
-                                                  incompCause)
+                                                  Incompatibility,
+                                                  incompCause, incompTerms)
 import           PubGrub.InstanceSet             (HasVersion (version),
                                                   Instance (..),
                                                   singletonInstance)
@@ -86,10 +87,26 @@ runApp app = runReaderT (unApp app) env
 renderSolverMsg :: SolverMsg -> Text
 renderSolverMsg (Deciding pn is) = T.pack "Deciding " <> pretty pn <> T.pack " among " <> pretty is
 renderSolverMsg (Chose pn i) = T.pack "Chose " <> pretty pn <> T.pack " as " <> pretty i
-renderSolverMsg (Conflict _incompatibility) = T.pack "Conflict ..."
+renderSolverMsg (Conflict incompatibility) =
+    T.pack "Conflict " <> prettyIncompat incompatibility
+renderSolverMsg (Resolving pn incompatibility) =
+    T.pack "  resolving at " <> pretty pn <> T.pack " -> " <> prettyIncompat incompatibility
+renderSolverMsg (Learned incompatibility) =
+    T.pack "Learned " <> prettyIncompat incompatibility
 renderSolverMsg (Backtracked level) = T.pack ("Backtracked to level " <> show level)
 renderSolverMsg (NoVersionFor pn is) =
     T.pack "No version available for " <> pretty pn <> T.pack " in " <> pretty is
+
+-- | An incompatibility on one line, as its terms. Deliberately not
+-- 'PubGrub.Report.reportConflict', which renders a whole numbered proof — that is
+-- the right thing for a failure and far too much for a trace event.
+prettyIncompat :: Incompatibility -> Text
+prettyIncompat i =
+    T.pack "{"
+        <> T.intercalate
+            (T.pack ", ")
+            [pretty p <> T.pack " " <> pretty t | (p, t) <- Map.toList (incompTerms i)]
+        <> T.pack "}"
 
 -- --------------------------------------------------------------------------
 -- Argument parsing

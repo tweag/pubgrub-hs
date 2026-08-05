@@ -331,11 +331,18 @@ unitPropagation rootPkg rootI = scan
     step incompats ps [] = pure (Right (incompats, ps))
     step incompats ps (i : rest) =
         case psRelation ps i of
-            ISatisfied ->
-                case conflictResolution rootPkg rootI i ps of
+            ISatisfied -> do
+                -- 'conflictResolution' is pure, so both of its events are logged
+                -- from here: the conflict before it runs, and the level it landed
+                -- on after. A terminal conflict logs the first and not the second,
+                -- which is the right shape — nothing was backtracked to.
+                logMsg (Conflict i)
+                conflictResolution rootPkg rootI i ps >>= \case
                     Left err ->
                         pure (Left err)
-                    Right (almostPkg, rootCause, ps') ->
+                    Right (almostPkg, rootCause, ps') -> do
+                        logMsg (Learned rootCause)
+                        logMsg (Backtracked (psLevel ps'))
                         scan (rootCause : incompats) (addDerivation almostPkg rootCause ps')
             IAlmostSatisfied q ->
                 scan incompats (addDerivation q i ps)
@@ -346,22 +353,28 @@ unitPropagation rootPkg rootI = scan
 -- while satisfier and previous satisfier share a decision level, then
 -- 'backtrack'. Returns the failure (no solution, or a violated invariant), or
 -- the pivot package, the learned root cause, and the backtracked solution.
+-- It is monadic only to log 'Resolving': the outcome depends on the partial
+-- solution alone.
 conflictResolution
-    :: PackageName
+    :: (Monad m, WithLog env SolverMsg m)
+    => PackageName
     -> Instance
     -> Incompatibility
     -> PartialSolution
-    -> Either SolveError (PackageName, Incompatibility, PartialSolution)
+    -> m (Either SolveError (PackageName, Incompatibility, PartialSolution))
 conflictResolution rootPkg rootV = loop
   where
     loop current ps
-        | isTerminal rootPkg rootV current = Left (NoSolution current)
+        | isTerminal rootPkg rootV current = pure (Left (NoSolution current))
         | otherwise =
-            satisfierSearch ps current >>= \case
-                (satPkg, DifferentDecisionLevels prevLevel) ->
-                    Right (satPkg, current, backtrack prevLevel ps)
-                (satPkg, SameDecisionLevels satCause) ->
-                    loop (priorCause current satCause satPkg) ps
+            case satisfierSearch ps current of
+                Left err -> pure (Left err)
+                Right (satPkg, DifferentDecisionLevels prevLevel) ->
+                    pure (Right (satPkg, current, backtrack prevLevel ps))
+                Right (satPkg, SameDecisionLevels satCause) -> do
+                    let next = priorCause current satCause satPkg
+                    logMsg (Resolving satPkg next)
+                    loop next ps
 
 
 -- | Failure. Either the problem has no solution, or an invariant the solver
@@ -386,6 +399,16 @@ data SolverMsg
       NoVersionFor PackageName InstanceSet
     | -- | this incompatibility is satisfied (a conflict)
       Conflict Incompatibility
+    | -- | one step of conflict resolution: the satisfier it located, and the
+      -- prior cause derived from it. Fires once per iteration in which the
+      -- satisfier and the previous satisfier share a decision level, so the
+      -- count of these between a 'Conflict' and its 'Backtracked' /is/ the depth
+      -- of that resolution — which nothing else reports.
+      Resolving PackageName Incompatibility
+    | -- | the root cause conflict resolution settled on, about to be added to
+      -- the store. Distinct from the 'Conflict' that started it: that one was
+      -- already known, this one is what was learned.
+      Learned Incompatibility
     | -- | backtracked to this decision level
       Backtracked Int
 
@@ -411,7 +434,9 @@ solve provider rootPkg rootV =
                         ((p, range) : _) -> do
                             logMsg (Deciding p range)
                             expand provider p range >>= \case
-                                Nothing ->
+                                Nothing -> do
+                                    logMsg (NoVersionFor p range)
                                     go (noInstances p range : incompats') ps'
-                                Just (i, depIncs) ->
+                                Just (i, depIncs) -> do
+                                    logMsg (Chose p i)
                                     go (depIncs ++ incompats') (addDecision p i ps')
