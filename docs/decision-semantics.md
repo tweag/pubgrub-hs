@@ -138,7 +138,9 @@ see the sequencing note at the end of §11.
 | the sections below say | it means |
 |---|---|
 | instance | a filled-in recipe card: one recipe, every switch set |
-| guard, condition, `C` | an IF-rule on the box |
+| flag | one switch: a declared name with a factory setting |
+| **guard**, condition, `C` | an IF-rule on the box — see below |
+| guarded dependency occurrence | one IF-rule paired with **one** ingredient |
 | version decision | "this recipe", switches left open |
 | refinement decision | flipping one switch, because a rule asked about it |
 | dormant | a rule nobody has asked about yet |
@@ -147,6 +149,59 @@ see the sequencing note at the end of §11.
 | **D1** (§3) | do not declare success with a triggered rule unchecked |
 | **D2** (§4) | each flip settles a rule, and rules run out — so it terminates |
 | **D3** (§5) | the answer is the finished card, not the list of choices |
+
+### What a guard is, exactly
+
+The word carries a lot of weight below, so: a **guard** is the flag condition
+attached to a group of dependencies — the `if` in a `.cabal` file, once the parts
+that do not depend on flags have been evaluated away. Given this, on Linux:
+
+```cabal
+library
+  build-depends: base >=4.14, containers
+
+  if flag(simd)
+    build-depends: simd-utils ==0.3
+  else
+    build-depends: fallback-impl >=1
+
+  if os(windows) && flag(fast)
+    build-depends: win-fast-io
+```
+
+`Bridge.Cabal.Flatten` produces three groups, and the left column is the guards:
+
+| guard | dependencies |
+|---|---|
+| `True` | `base >=4.14`, `containers` |
+| `flag(simd)` | `simd-utils ==0.3` |
+| `NOT flag(simd)` | `fallback-impl >=1` |
+
+The `os(windows)` block is **gone** — not guarded, discarded. Four things follow,
+each used below:
+
+1. **Flags only.** OS, architecture and compiler conditions are resolved to a
+   concrete yes/no while flattening, so a guard is always a formula over flag
+   *names*.
+2. **A formula, not a flag.** `flag(a) && !flag(b)` is *one* guard mentioning two
+   flags. Don't picture one flag per guard.
+3. **Accumulated, not nested.** Nested `if`s conjoin into a longer formula, with
+   `else` branches carrying the negation. A dependency two levels deep carries both
+   conditions.
+4. **Per release, not per package.** A guard comes from one `.cabal` file, so it
+   mentions only flags *that release* declares. This is why §7's "two-valued where
+   you decide" holds: under a decided version the flag is known to exist, so the
+   "not declared here" state cannot arise.
+
+`True` is a real guard, not the absence of one — every component has an
+unconditional block, and that block's guard is exactly `True`. It is the case that
+keeps the existing flagless behaviour unchanged.
+
+Finally, note that the *unit* is one guard with one **dependency**, not one guard
+with its whole list. The same package can appear under several guards (an
+unconditional `q >=1` and a guarded `q <3`), and
+[flags-semantics.md §4.2](flags-semantics.md) wants those kept as separate facts,
+with propagation intersecting them.
 
 ## 0. Why this exists
 

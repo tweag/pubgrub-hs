@@ -8,6 +8,65 @@
 -- @(flag guard, deps)@ groups — with the fixed environment (operating system,
 -- architecture, compiler) already resolved and only flag conditions left
 -- symbolic. 'depsAt' then evaluates those guards at a concrete flag assignment.
+--
+-- == What a /guard/ is
+--
+-- A /guard/ is the flag condition attached to a group of dependencies: the
+-- @if@ of a @.cabal@ file, after the parts that do not depend on flags have been
+-- evaluated away. Given this library stanza, on a non-Windows platform:
+--
+-- > library
+-- >   build-depends: base >=4.14, containers
+-- >
+-- >   if flag(simd)
+-- >     build-depends: simd-utils ==0.3
+-- >   else
+-- >     build-depends: fallback-impl >=1
+-- >
+-- >   if os(windows) && flag(fast)
+-- >     build-depends: win-fast-io
+--
+-- 'componentDeps' yields these groups, whose first components are the guards:
+--
+-- > (Lit True,          [base >=4.14, containers])
+-- > (Var simd,          [simd-utils ==0.3])
+-- > (CNot (Var simd),   [fallback-impl >=1])
+--
+-- and a fourth, @(Lit False, [win-fast-io])@: the @os(windows)@ block keeps a
+-- guard that no flag assignment satisfies, so it never contributes.
+--
+-- Four properties, each relied on elsewhere:
+--
+-- * /Flags only/. @envConfVar@ resolves operating system, architecture and
+--   compiler to a concrete boolean and leaves only @PackageFlag@ symbolic, so a
+--   guard is always a formula over flag /names/.
+-- * /A formula, not a flag/. @flag(a) && !flag(b)@ is one guard mentioning two
+--   flags. Do not picture one flag per guard.
+-- * /Accumulated down the tree/. @flattenComponent@ starts at @Lit True@ and
+--   pushes conditions down: the @if@ branch gets @guard \`cAnd\` cond@, the
+--   @else@ branch @guard \`cAnd\` cNot cond@. A dependency nested two levels deep
+--   carries both conditions conjoined; nesting produces a longer formula, not
+--   nested structure.
+-- * /Per release, not per package/. A guard comes from one @.cabal@ file, so it
+--   mentions only flags /that/ release declares. This is why a pin derived from a
+--   guard under a known version is two-valued — the flag is known to exist, so
+--   @NotDeclared@ cannot arise (@docs\/decision-semantics.md@ §7).
+--
+-- Note @Lit True@ is a real guard, not the absence of one: every component has an
+-- unconditional block and its guard is exactly @Lit True@.
+--
+-- Terminology, since the specifications distinguish these and
+-- @docs\/flags-semantics.md@ §4.2 turns on the difference:
+--
+-- * a /flag/ is a declared name with a default;
+-- * a /guard/ is a boolean formula over flag names;
+-- * a /guarded dependency occurrence/ is one guard paired with /one/
+--   dependency — §4.2's unit, and what an incompatibility may be built from;
+-- * 'GuardedDeps' is the whole flat list for a release.
+--
+-- The same package may appear under several guards (an unconditional @q >=1@ and
+-- a guarded @q <3@). 'depsAt' intersects those into one range, where §4.2 wants
+-- them kept as separate facts.
 module Bridge.Cabal.Flatten (
     GuardedDeps,
     componentDeps,
