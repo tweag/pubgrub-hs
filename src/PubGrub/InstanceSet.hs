@@ -15,7 +15,7 @@ import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
 import           PubGrub.InstanceSet.SourceCell (FlagPin (..), SourceCell (..),
                                                  differenceCell, intersectCell,
                                                  mergeCells, nullCell,
-                                                 pruneCells, singletonCell)
+                                                 pinnedCell, pruneCells)
 import           PubGrub.Pretty                 (Pretty (..))
 import           PubGrub.SetOps                 (SetOps (..))
 import qualified PubGrub.VersionSet             as VersionSet
@@ -119,16 +119,28 @@ singletonUsePreInstalled :: PreInstalledPackage -> InstanceSet
 singletonUsePreInstalled pip =
     InstanceSet { isInstalled = Set.singleton pip, isSource = [] }
 
+-- | One source instance: 'sourceInstances' at a single assignment. It is a
+-- singleton only if the assignment is total over the version's declared flags.
 singletonBuildSource :: Version -> FlagAssignment -> InstanceSet
 singletonBuildSource v flags =
     sourceInstances v (NE.singleton (Map.fromList (unFlagAssignment flags)))
 
--- | The instances of source release @v@ that satisfy any of the given pin maps
--- (a disjunction of flag pins): one cell per map, all at version @v@.
+-- | Instances of one source version, as a union of pinned regions: one cell per
+-- pin set, pinning the flags it names and leaving the rest free.
+--
+-- A pin set need not mention every declared flag, and how much the result
+-- denotes follows from how much it pins (see 'pinnedCell'). The two callers sit
+-- at the extremes: 'singletonBuildSource' passes one total assignment and gets
+-- one instance, while the provider passes a guard's disjuncts and gets every
+-- instance of the version satisfying that guard.
+--
+-- 'NonEmpty' because an empty union is the empty set: a guard that no
+-- assignment satisfies is dropped before it gets here, since an incompatibility
+-- with a ⊥ term is vacuous.
 sourceInstances :: Version -> NonEmpty (Map FlagName Bool) -> InstanceSet
-sourceInstances v flags = InstanceSet
+sourceInstances v pinSets = InstanceSet
     { isInstalled = Set.empty
-    , isSource = [ singletonCell v m | m <- NE.toList flags ]
+    , isSource = [ pinnedCell v pins | pins <- NE.toList pinSets ]
     }
 
 -- | Does the set contain this instance?

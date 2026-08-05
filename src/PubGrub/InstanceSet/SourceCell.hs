@@ -207,18 +207,28 @@ assignmentFrom declared sc =
         Just NotDeclared  -> Nothing
         Nothing           -> Nothing
 
--- | The cell denoting one instance. Every flag the assignment mentions is
--- pinned; flags it does not mention are left free rather than pinned
--- 'NotDeclared', which is exact because the version set is a single version —
--- the assignment /is/ that version's declared flags, so there is nothing else to
--- say about it. (Genuinely a singleton only if the assignment is total, which is
--- a provider obligation, not something checked here.)
-singletonCell :: Version -> Map FlagName Bool -> SourceCell
-singletonCell v flags =
-  SourceCell
-      { scVersionSet = VersionSet.singletonVersionSet v
-      , scFlags = Map.fromList [(f, PinnedTo b) | (f, b) <- Map.toList flags]
-      }
+-- | The cell of exactly one version, with these flags pinned. Flags absent from
+-- the map are left __free__, not pinned 'NotDeclared', so how much the cell
+-- denotes is decided entirely by how much the caller pins:
+--
+--  * a __total__ assignment over the version's declared flags gives one instance.
+--    That is 'PubGrub.InstanceSet.singletonBuildSource', and the totality is the
+--    caller's obligation: an under-pinned cell silently denotes many instances
+--    (see 'PubGrub.InstanceSet.singletonInstance').
+--  * a __guard's__ pins give every instance of the version satisfying that guard,
+--    whatever the flags the guard never mentions are set to. That is what keeps
+--    irrelevant flags out of a depender term.
+--
+-- Leaving unmentioned flags free is exact in both cases because the version set is
+-- a single version, so there is no release in the cell whose declared flags differ.
+-- 'NotDeclared' becomes necessary only once a cell spans versions that disagree
+-- about which flags exist.
+pinnedCell :: Version -> Map FlagName Bool -> SourceCell
+pinnedCell v pins =
+    SourceCell
+        { scVersionSet = VersionSet.singletonVersionSet v
+        , scFlags = PinnedTo <$> pins
+        }
 
 instance Pretty SourceCell where
     pretty sc =
