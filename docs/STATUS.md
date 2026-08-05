@@ -8,7 +8,7 @@
 > table below decide. If this file contradicts one of them, that one is right and
 > this file is stale — fix it.
 >
-> **Last checked against the tree:** 2026-08-05, 94 tests passing.
+> **Last checked against the tree:** 2026-08-05, 95 tests passing.
 >
 > History lives in [decision-log.md](decision-log.md) (how we got here);
 > abandoned ideas live in [attic/](attic/) (what we tried and dropped).
@@ -24,7 +24,7 @@ correctly is table stakes. It exists to answer two questions:
 2. Can it **match cabal-install on time and peak memory** on real problems?
 
 **The solver works.** It resolves real Hackage packages end to end, with version
-ranges, Cabal flags, and installed/boot-package pinning. 94 tests pass, including
+ranges, Cabal flags, and installed/boot-package pinning. 95 tests pass, including
 both worked examples from the PubGrub spec.
 
 **Neither deliverable has been measured.** There is no benchmark harness and no
@@ -50,6 +50,7 @@ the "authoritative on" column says who owns the question.
 | [`specification.md`](specification.md) | Cabal's **build model** (components, scopes, Backpack) | reference for rungs 4–5, nothing implemented |
 | [`bridge-and-problem-model.md`](bridge-and-problem-model.md) | why the bridge is shaped as it is | 2026-07-23 notes, partly pre-reboot |
 | [`pubgrub-intro.md`](pubgrub-intro.md) | tutorial introduction to PubGrub | useful, three stale sections (flagged in it) |
+| [`flags-semantics-review.md`](flags-semantics-review.md) | an independent review of the flag spec | 2026-08-05; findings folded in, kept as the record |
 | [`decision-log.md`](decision-log.md) | project history | narrative, not authoritative |
 | this file | current state | summary, not authoritative |
 
@@ -87,8 +88,9 @@ Three consequences:
    it. It deviates from `references/pubgrub.md` only where its §1 registers.
 2. **It has a hard prerequisite** — per-fact guarded emission,
    `flags-semantics.md` §4.2 — and says of itself that it *"is inert without"* it.
-   §4.2 is **not implemented**, so nothing in `decision-semantics.md` can be built
-   first.
+   §4.2's **flag axis is implemented** (2026-08-05); its **version axis is not**, and
+   that is the half `references/pubgrub.md:456` actually asks for. So the prerequisite
+   is half paid.
 3. **It is the revisit `flags-semantics.md` reserved.** §1.4 there recorded that
    putting the flag in the value costs 2^k re-offers and said "if the retry cost ever
    dominates, this is the decision to revisit." `decision-semantics.md` §0 is that
@@ -200,15 +202,15 @@ it exists in the code.**
 | thing | spec | note |
 |---|---|---|
 | **Condition decisions** (its rules D1, D2, D3) | [`decision-semantics.md`](decision-semantics.md) §2–§9 | kernel-level change to what a decision is |
-| **Per-fact guarded emission** | [`flags-semantics.md`](flags-semantics.md) §4.2 | the prerequisite for the above, and valuable alone |
+| **§4.2's version axis** — widening a depender across adjacent releases | [`flags-semantics.md`](flags-semantics.md) §4.2 | the flag axis landed 2026-08-05; this half needs `NotDeclared` and is what `pubgrub.md:456` asks for |
 | **Seed incompatibilities** instead of a synthetic root | [decision-log](decision-log.md#5-open-decisions) | decided 2026-07-30; `solve` still takes `rootPkg`/`rootV` |
 | **`buildable:`** | [`flags-semantics.md`](flags-semantics.md) §1.5 | ignored entirely today — see the trap below |
-| **Manual flags** | [`flags-semantics.md`](flags-semantics.md) §1.5 | and the intended rule is unverified guesswork |
+| **Manual flags** | [`flags-semantics.md`](flags-semantics.md) §1.6 | rule now settled and locally checkable against cabal's `enforceManualFlags`; it is *input translation*, not admissibility |
 | **User flag constraints** (`--flag`) | [`flags-semantics.md`](flags-semantics.md) §1.6 | do not exist yet |
 | **Rung 4** — setup / build-tool deps | — | not started |
 | **Rung 5** — public sublibraries | — | not started |
 | **The benchmark harness** | — | nothing exists; the larger of the two deliverables |
-| **The verdict oracle** (test) | [`flags-semantics.md`](flags-semantics.md) §6 | owed, and blocks condition decisions |
+| **The verdict oracle** (test) | [`flags-semantics.md`](flags-semantics.md) §6 | owed; blocks condition decisions, and is what would discharge O4's whole-loop claim |
 
 ---
 
@@ -226,6 +228,10 @@ It looks like three separate gaps. It is not:
 - The test that would catch it needs a world where the *default* flag completion is
   unusable but another completion of the same region is fine — and that world cannot
   be built until `buildable:` exists.
+- And it is **written into the spec, not only the code**: `flags-semantics.md` §5's
+  selection recipe was itself phrased against the accident until the 2026-08-05
+  review caught it. §5 is now stated as policy over an O6-complete search, so the
+  search and the policy have to land together.
 
 So: implement buildability, the search, and the oracle together. Doing the first
 alone introduces the bug. `flags-semantics.md` §10 states this; it is repeated here
@@ -242,12 +248,15 @@ Full arguments in the linked sections; this is the index.
    **Note the interaction:** [`decision-semantics.md`](decision-semantics.md) §10 says
    the condition-decision model *inherits all three benefits* of the split, and that
    the two should be scheduled as one item.
-2. **Depender-range collapsing** — the one outright **divergence from the PubGrub
-   spec** (`references/pubgrub.md:456`). Costs both deliverables: proof lines name a
-   single version where the spec's own examples name a range, and a version rejected
-   for a flag-irrelevant reason is re-offered once per irrelevant flag assignment
-   (2^k). The fix is per-fact guarded emission,
-   [`flags-semantics.md`](flags-semantics.md) §4.2.
+2. **Depender-range collapsing, version axis** — the remaining half of the outright
+   **divergence from the PubGrub spec** (`references/pubgrub.md:456`). The flag axis
+   landed on 2026-08-05: the 2^k re-offer is gone (measured — 2 expansions where it
+   was 3 with one irrelevant flag and 5 with two), and depender terms now carry the
+   guard rather than the whole assignment. What remains is widening a depender across
+   *adjacent releases*, which is what `:456` literally asks for and what would make a
+   proof line read `foo >=1.0 && <1.3 depends on …`. It needs `NotDeclared`, because a
+   term spanning releases that differ in what they declare is exactly where the third
+   pin state earns its place.
 3. **Should the set algebra be allowed to read flag declarations?** Would make
    emptiness exact and remove the one-sided slack, at the cost of the core/bridge
    boundary. Cost/benefit, not correctness.
@@ -259,9 +268,11 @@ Full arguments in the linked sections; this is the index.
 From [`decision-semantics.md`](decision-semantics.md)'s own sequencing note, which is
 the most recent thinking on this:
 
-1. **Per-fact guarded emission** (§4.2) first. It is the prerequisite for everything
-   else, and on its own it removes the 2^k re-offer *and* fixes the depender wording.
-2. **Measure it on real problems.**
+1. ~~Per-fact guarded emission (§4.2), flag axis.~~ **Done 2026-08-05.** It removed
+   the 2^k re-offer on its own, as predicted.
+2. **Measure it on real problems.** This is the step now due, and nothing above it in
+   the list should start before it: the sequencing note's whole point is that the
+   kernel change is justified by measurement, not by argument.
 3. Only then decide whether the kernel generalisation (condition decisions) pays for
    itself. If it does, the verdict oracle lands before or with it — not after.
 
@@ -300,6 +311,28 @@ disagreeing where one had authority and the other had not been updated.
    removed again, because a second model of the same concepts building alongside
    `src/` confuses more than it teaches. The lesson is kept in prose at
    [attic/](attic/) §7.
+
+5. **Four claims in `flags-semantics.md` overreached their own arguments**, found by
+   [`flags-semantics-review.md`](flags-semantics-review.md) and all folded in:
+   - **manual flags sat in §1.5's *admissibility*** while §1.6 said user flag values
+     are translated once and never re-checked. Both cannot hold — `Adm` would be
+     parameterised by user input, so the same instance would change admissibility
+     depending on what the user typed. Now stated as input translation. Behaviour
+     unchanged; the owner changed.
+   - **§5's selection recipe contradicted O6.** "Complete each candidate cell, drop
+     inadmissible completions" discards a cell after its *default* completion fails,
+     which is the false `None` O6 forbids. Now phrased as policy over an O6-complete
+     search — see the trap above.
+   - **O4 concluded "no wrong solution either"**, which its own local argument does
+     not support. Now limited to per-query soundness, with the whole-loop claim marked
+     owed to §6's oracle.
+   - **§2.5 cited `pubgrub.md:1172` to exclude version-keyed flags.** That citation
+     forbids expanding version ranges into per-version atoms; it does not settle the
+     flag-variable question. Now a project design decision, argued from §1.4.
+
+   The review also found the manual-flag rule is **no longer memory-only** (there is an
+   adjacent Cabal checkout with `enforceManualFlags`) and that §1.2 should write
+   `D(ρ)` rather than `D(p, v)`. Both applied.
 
 ### Stale line references, also fixed
 

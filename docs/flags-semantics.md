@@ -16,6 +16,14 @@
 > and over `CLAUDE.md`. It does not overrule
 > [references/pubgrub.md](../references/pubgrub.md); where PubGrub already
 > decides something, this file cites it.
+>
+> **Reviewed** 2026-08-05 —
+> [flags-semantics-review.md](flags-semantics-review.md). Its verdict was that the
+> core three-state model is sound, and that four claims overreached their own
+> arguments. All four are now folded in: §1.5 and §1.6 (who owns the manual-flag
+> rule), §2.5 (a project decision, not a PubGrub requirement), §5 (the recipe must
+> consume an O6-complete search), and O4 (a local result, not a whole-solver one).
+> The review is kept as the record of why those changed.
 
 ## 0. Why this exists
 
@@ -54,7 +62,14 @@ The value of a solver variable is an **instance**: one concrete way of having a
 package. Either a pre-installed unit, or a source release together with a flag
 assignment α where
 
-> **dom α = D(p, v), exactly.**
+> **dom α = D(ρ), exactly.**
+
+`D(ρ)`, not `D(p, v)`: ρ is the release identity of §1.1, and the distinction is
+the one §1.1 just made — the same name and version from a different source or
+revision is a different description with different declared flags. It is dormant
+while a solve reads one index and stops being dormant with local packages or a
+second source, at which point **the instance value must also retain ρ**, since a
+version plus a flag assignment cannot tell two such releases apart.
 
 Totality is the load-bearing half (no conditional is left unresolved); exactness
 is the half we keep forgetting (α never mentions a flag the version does not
@@ -150,12 +165,32 @@ question went wrong the first time:
      reachable only under some assignments makes exactly those instances
      inadmissible, and PubGrub asks for that to be expressed as "never select
      this" rather than as dependencies (`references/pubgrub.md:476`);
-   - *(provisional, see §8)* every **manual** flag takes its declared default
-     unless the user set it. This is stated from memory and unverified against
-     `cabal-install-solver`; treat it as intended behaviour, not as settled
-     normative content.
+   That is the whole of it. **Manual flags are deliberately not on this list** —
+   see below.
 3. **Eligibility for a query** — intrinsic admissibility *plus* membership in the
    accumulated constraint the solver is asking about.
+
+**Manual flags belong to input translation, not to admissibility.** An earlier
+draft put them here, as "every manual flag takes its declared default unless the
+user set it", and that cannot hold: §1.6 says user flag values are translated once
+and never re-checked by the provider, so if admissibility mentioned "unless the
+user set it" then `Adm` would be parameterised by user input and the *same*
+instance would change admissibility depending on what the user typed. Two rules,
+one owner, exactly the drift this section exists to prevent.
+
+The division that works, and it is all translation (§1.6):
+
+- **no user value for a manual flag `f`** — translate the manual-default rule into
+  an initial constraint, `(f is default) ∨ (f is not declared)`, leniently as §1.6
+  requires;
+- **a user value for `f`** — translate that value instead, by the same rule;
+- **the provider's notion of admissibility never mentions user input at all.**
+
+This matches what cabal does: `enforceManualFlags` lets only the default survive
+when the flag is unconstrained, and admits the mentioned values when the user names
+it, after which ordinary constraint enforcement picks. The behaviour is unchanged
+from the earlier draft; what changed is which layer owns it. (And it is no longer
+asserted from memory — see §8.)
 
 Note that intrinsic admissibility is **assignment-dependent**: whether an
 instance is buildable can depend on α. That is what makes O6's completeness
@@ -315,10 +350,22 @@ solving (`references/pubgrub.md:1172`): expanding a range into concrete versions
 costs overhead *and* has to be undone to talk to users.
 
 The same requirement applies to the flag axis: a constraint mentioning `f` over
-N versions must not become N constraints, one per version's own `f`. Keying
-flags by version is therefore excluded — not as a matter of taste, but because
-it is the enumeration §2.5 forbids and because the version axis is open (naming
-"every version except this one" is required, and a per-version keying cannot).
+N versions must not become N constraints, one per version's own `f`.
+
+**Where the cited authority stops.** `:1172` establishes that a version constraint
+must not be expanded into one atom per concrete version. It does *not* establish
+that every conceivable release-scoped or lazily-instantiated flag-variable design
+must enumerate the version axis — some would not. So keying flags by version is
+**this project's design decision, not a PubGrub requirement**, and the honest
+reasons are the ones §1.4 gives: such designs need conditional-existence
+machinery, complicate incompatibilities, and either impose a cross-version flag
+identity §1.3 denies or fail to generalise. An earlier draft of this section said
+the exclusion followed from `:1172` "not as a matter of taste"; that overstated
+what the citation supports.
+
+The version axis being open is a real constraint on any such design and is worth
+keeping in view: naming "every version except this one" is required, and a
+per-version keying cannot express it.
 
 ## 3. Obligations
 
@@ -346,8 +393,26 @@ happens to declare.
   and contradiction are emptiness questions about `⋂S ∖ t` and `⋂S ∩ t`. Under
   O2 those sets are exact, so an emptiness test that only ever *under*-claims
   emptiness (O3a) can only fail to report Satisfied or Contradicted — never
-  report one wrongly. Therefore no incompatibility is ever derived that is not
-  entailed: no wrong "no solution", and no wrong solution either.
+  report one wrongly. What follows is therefore, precisely:
+
+  > Every relation the implementation positively reports, and every unit
+  > propagation performed from such a relation, is semantically sound.
+
+  **That is a local result, and it is the only one O4 gives.** It does *not*
+  follow that the solver's verdict is unaffected. An earlier draft concluded "no
+  wrong 'no solution', and no wrong solution either", which overreaches its own
+  argument: conflict resolution locates the *earliest* satisfier and derives a
+  backjump level from it, so noticing satisfaction later than it semantically
+  occurs could change which incompatibility is learned, whether it is asserting
+  after backjumping, and whether the loop progresses. §6 already says this and
+  owes the verdict oracle; O5 discharges one case (the provider's `{X}`,
+  recognisable through `R ∖ R`) and not the loop. The formal model draws the same
+  line — relation and propagation soundness use conservative emptiness, while the
+  satisfier-search results in `specification/PubGrub/PartialSolution.lean` require
+  exact emptiness.
+
+  So: sound per query, unproven per solve. Treat the whole-loop claim as owed, not
+  held.
 - **O5 — progress.** O3b is what keeps O4 from meaning "the solver may do
   nothing". In particular, when the provider reports that a package has no
   admissible instance in the offered set, the resulting incompatibility must be
@@ -506,9 +571,24 @@ Two ways to get this wrong, both of which we have written down at some point:
   `f = True, g = True` on pin count, yet with both flags defaulting to `True` the
   second is the all-default assignment and the first is a deviation. The cost is a
   property of the *completed assignment*, never of the constraint that produced
-  it. Complete each candidate cell, drop non-members and inadmissible
-  completions, deduplicate assignments arising from overlapping cells, then order
-  by cost with a deterministic tie-break.
+  it.
+
+**This section is policy over an O6-complete search, and cannot substitute for
+one.** State it that way round: *enumerate the admissible members of the offered
+set in nondecreasing deviation cost, deduplicate assignments arising from
+overlapping cells, and take the first* — with a deterministic tie-break.
+
+An earlier draft gave the recipe as "complete each candidate cell, drop
+non-members and inadmissible completions, deduplicate, then order by cost". Read
+with §5's own vocabulary, "complete each candidate cell" means *its default
+completion*, so if that one completion is inadmissible the cell is discarded
+without the rest of it being tried — which is exactly the false `None` that O6 and
+§10 warn about. Dropping a *non-member* is fine; dropping a cell because one
+completion of it was **inadmissible** is not.
+
+That recipe is sound only while admissibility is assignment-independent, which is
+the accident §10 records. It stops being sound the moment §1.5's buildability
+lands, and it is therefore part of that one work item and not a separate cleanup.
 
 ## 6. Testing obligations
 
@@ -569,11 +649,18 @@ wrongly Satisfied or Contradicted, allowed to be Inconclusive.
 
 ## 8. To verify or decide
 
-- **Manual flags.** cabal's solver does not treat a manual flag as freely
-  choosable, but the exact rule (default only? user value only? interaction with
-  `--flag`?) is asserted from memory in §1.5 and must be checked against
-  `cabal-install-solver` before we implement it. The source is not vendored
-  here.
+- **Manual flags — no longer a memory claim, and the owner is now settled.** The
+  behaviour is supported by `enforceManualFlags` in
+  `cabal-install-solver`'s `Distribution.Solver.Modular.Preference`: with the flag
+  unconstrained only the default survives, and when the user names it the mentioned
+  values are admitted, after which ordinary constraint enforcement selects. The
+  source is not vendored in this repository, but there is an adjacent Cabal
+  checkout, so this is checkable locally rather than recalled.
+
+  §1.5 previously listed the rule under *admissibility*, which contradicted §1.6;
+  it is now stated as **input translation**, which is where §1.6 puts every other
+  user flag value. What remains open is only the qualification for multiple package
+  goals, and whether we want a strict mode.
 - **Whether to give the algebra access to `D`.** It would make emptiness exact
   and delete the O3 slack, at the cost of the boundary in §1.1 and of O7. The
   slack is believed harmless (O4); this is a cost/benefit decision, not a
@@ -781,18 +868,19 @@ be edited whenever the tree moves.
 | O1 membership exact | holds |
 | O2 exact ∩ ∪ ∖ | holds (since the three-case pin); guarded by the model-homomorphism properties |
 | O3a / O3b one-sided emptiness | holds; guarded by "emptiness is one-sided" |
-| O4 imprecision ⇒ Inconclusive | **argued, not proved.** The single-query direction is guarded; the loop is not |
+| O4 per-query soundness | holds, and is all O4 claims since the 2026-08-05 review |
+| O4 whole-loop verdict preservation | **owed, not held.** §6's oracle is the discharge; do not cite O4 for it |
 | O5 progress | the provider's `{X}` case holds; the conflict-resolution loop is unproven (§6 owes the oracle) |
 | O6 soundness | holds |
 | O6 completeness | **latent — see below** |
 | O7 enumeration boundary | holds: the algebra never enumerates, the provider enumerates releases only |
 | §1.5 buildability | not implemented (`buildable:` is ignored) |
-| §1.5 manual flags | not implemented, and provisional as a rule |
+| §1.5 manual flags | not implemented; the rule is now settled and lives in §1.6's translation, not in admissibility |
 | §1.6 lenient user constraints | not implemented (no user flag constraints yet) |
 | §4.1 dependencies at the decided assignment | holds |
 | §4.2 per-fact collapsing | not implemented — dependers are single instances |
 | §4.3 report wording | partial: constraints render, the not-applicable wording is not aligned |
-| §5 choice policy | implemented (release-major, then fewest deviations) |
+| §5 choice policy | implemented as release-major then fewest deviations, but over a **one-completion-per-cell** search — correct only while admissibility is assignment-independent (below) |
 | §6 non-uniform universe, one-sided properties | in place |
 | §6 verdict oracle | owed, **and blocking for condition decisions** |
 | D1 determination before success | specified ([decision-semantics.md](decision-semantics.md) §3), not implemented |
@@ -809,6 +897,11 @@ one-completion-per-cell search cannot currently miss an admissible instance — 
 cell-completion lemma is enough on its own. The gap opens the moment §1.5 is
 implemented. Implement the two together, or the first correct-looking buildability
 patch introduces a wrong "no solution".
+
+Note this is not only a property of the code: **§5's own selection recipe was
+written against that accident** and said so, until the 2026-08-05 review caught it.
+§5 is now stated as policy over an O6-complete search, which means the search and
+the policy land together and neither is a separate task.
 
 **§6's required oracle case cannot be built before then either.** "A cell whose
 default completion is inadmissible while another completion of the same cell is
