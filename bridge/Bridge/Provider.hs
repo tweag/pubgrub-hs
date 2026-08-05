@@ -16,6 +16,16 @@ module Bridge.Provider
     ( withProvider
     , rootName
     , rootInstance
+
+      -- * The provider rule, independently of where releases come from
+      --
+      -- | 'mkExpand' is the whole candidate-selection and emission rule, and it
+      -- takes its world as arguments: an installed db, a 'ReleaseSource', and the
+      -- root's targets. So @test\/FlagSolveSpec.hs@ runs the real rule over an
+      -- in-memory world rather than a copy of it.
+    , mkExpand
+    , ReleaseSource (..)
+    , Release (..)
     ) where
 
 import           Bridge.Cabal.Flatten                         (GuardedDeps,
@@ -109,8 +119,11 @@ withProvider cache manager root act =
                 Provider
                     ( mkExpand
                         (mkInstalledDb installed)
-                        (\pn v -> liftIO (readRelease pn v))
-                        handle
+                        ReleaseSource
+                            { rsVersionsOf = \pn ->
+                                maybe [] NE.toList (Map.lookup pn (ihVersions handle))
+                            , rsReadRelease = \pn v -> liftIO (readRelease pn v)
+                            }
                         root
                     )
         result <- act provider
@@ -193,19 +206,35 @@ releaseReader platform cInfo handle = do
                 }
     pure (readRelease, (\(_, p, reused) -> (p, reused)) <$> readIORef ref)
 
--- | The provider's @expand@.
+-- | Where a package's /source releases/ come from: which versions exist, and
+-- how to read one. These are the only two questions 'mkExpand' asks about the
+-- source side, so the same rule runs over Hackage ('withProvider') and over an
+-- in-memory world (@test\/FlagSolveSpec.hs@).
+--
+-- Installed units are deliberately not here. They have no flags to assign and
+-- no @.cabal@ to read, they come from the compiler rather than an index, and
+-- 'mkExpand' takes them as a separate argument.
+data ReleaseSource m = ReleaseSource
+    { rsVersionsOf  :: PackageName -> [Version]
+    -- ^ every version of this package the source has, in any order.
+    , rsReadRelease :: PackageName -> Version -> m (Either ParseError Release)
+    -- ^ the reduced form of one release: its declared flags and its guarded
+    -- dependencies. Only ever called for versions 'rsVersionsOf' reported.
+    }
+
+-- | The provider's @expand@: the whole candidate-selection and emission rule, over
+-- an installed world, a source world, and the root's targets.
 mkExpand
     :: forall m env
      . (MonadIO m, WithLog env Text m)
     => InstalledDb
-    -> (PackageName -> Version -> m (Either ParseError Release))
-    -> IndexHandle
+    -> ReleaseSource m
     -> [(PackageName, VersionSet)]
     -- ^ the synthetic root's targets, which are not in the index
     -> PackageName
     -> InstanceSet
     -> m (Maybe (Instance, [Incompatibility]))
-mkExpand installedDb readRelease handle root = expand'
+mkExpand installedDb source root = expand'
   where
     -- An 'InstanceSet' is a symbolic description (version ranges plus flag
     -- pins), not a container: membership is decidable but it cannot be
@@ -237,7 +266,7 @@ mkExpand installedDb readRelease handle root = expand'
                     -- per candidate assignment.
                     firstUsable [] = pure Nothing
                     firstUsable (v:rest) = do
-                        result <- readRelease pn v
+                        result <- rsReadRelease source pn v
                         case result of
                             -- A .cabal that fails to parse: warn and skip. The
                             -- release then drops out of the universe the solve
@@ -357,4 +386,4 @@ mkExpand installedDb readRelease handle root = expand'
             , isSource = [SourceCell vs Map.empty]
             }
 
-    versionsOf d = maybe [] NE.toList (Map.lookup d (ihVersions handle))
+    versionsOf = rsVersionsOf source

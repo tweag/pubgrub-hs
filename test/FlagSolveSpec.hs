@@ -1,3 +1,8 @@
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+
 -- | End-to-end solver tests in which /flags/ are the interesting axis.
 --
 -- 'SolverSpec' and 'PaperSpec' both build every 'Instance' at
@@ -7,62 +12,53 @@
 -- over the two: the solver learning "not this assignment" and the provider
 -- coming back with a different one.
 --
--- The toy provider imitates 'Bridge.Provider.mkExpand' rather than inventing
--- its own rule, because that rule /is/ the thing under test:
+-- These tests run the __real__ provider. 'Bridge.Provider.mkExpand' is the whole
+-- rule — candidate enumeration, flag completion, the fewest-deviations
+-- preference, and incompatibility emission — and it takes its world as arguments,
+-- so 'worldProvider' feeds it an in-memory index instead of Hackage. Nothing about
+-- the rule is restated here: a paraphrase of the rule can only ever test the
+-- paraphrase.
 --
---  * enumerate the package's own versions, newest first (an 'InstanceSet' is
---    symbolic and cannot be enumerated, so candidates come from the world);
---  * for each 'SourceCell' of the offered set that contains that version, derive
---    a /total/ assignment: the cell's pins, plus every remaining declared flag
---    at its default;
---  * keep that candidate only if 'memberInstance' accepts it;
---  * emit one incompatibility per /guarded dependency occurrence/ whose guard the
---    decided assignment satisfies, with the guard itself, not the assignment, as
---    the depender's flag component (@docs\/flags-semantics.md@ §4.2).
+-- What the worlds supply is the /data/: which packages and versions exist,
+-- which flags each declares, and its dependencies as flag-guarded groups (the toy
+-- analogue of @Bridge.Cabal.Flatten.GuardedDeps@). A package absent from the world
+-- has no versions at all, which is how these tests write an unsatisfiable
+-- dependency.
 --
--- So a non-default assignment is tried only after the solver has learned an
--- incompatibility that pins the flag the other way, which is what makes flags
--- a search dimension rather than a constant.
---
--- The guard handling is not re-implemented here: these worlds carry real
--- 'Condition' guards and go through the same 'expandGuard' and 'sourceInstances'
--- the bridge uses, so what is under test is the production emission rule rather
--- than a paraphrase of it.
+-- A non-default assignment is tried only after the solver has learned an
+-- incompatibility that pins the flag the other way, which is what makes flags a
+-- search dimension rather than a constant.
 module FlagSolveSpec (tests) where
 
-import           Bridge.Cabal.Flatten           (expandGuard)
-import           Colog                          (LoggerT, usingLoggerT)
-import           Control.Monad.IO.Class         (liftIO)
+import           Bridge.Hackage                 (ParseError (..))
+import           Bridge.Installed               (mkInstalledDb)
+import qualified Bridge.Provider                as BP
+import           Colog                          (HasLog (..), LogAction)
+import           Control.Exception              (toException)
+import           Control.Monad.IO.Class         (MonadIO, liftIO)
+import           Control.Monad.Reader           (MonadReader, ReaderT,
+                                                 runReaderT)
 import           Data.Either                    (fromLeft, isLeft)
 import           Data.IORef                     (IORef, modifyIORef', newIORef,
                                                  readIORef)
-import           Data.List                      (sortOn)
 import           Data.List.NonEmpty             (nonEmpty)
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
-import           Data.Ord                       (Down (..))
-import qualified Data.Set                       as Set
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Types.Condition   (Condition (..))
-import           Distribution.Types.Flag        (FlagAssignment, FlagName,
-                                                 mkFlagAssignment, mkFlagName)
+import           Distribution.Types.Dependency  (Dependency, mainLibSet,
+                                                 mkDependency)
+import           Distribution.Types.Flag        (FlagName, mkFlagAssignment,
+                                                 mkFlagName)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.Version     (Version, mkVersion)
-import           PubGrub.Incompatibility        (Incompatibility,
-                                                 fromDependency)
-import           PubGrub.InstanceSet            (Instance (BuildSource),
-                                                 InstanceSet (..),
-                                                 memberInstance,
-                                                 sourceInstances)
-import           PubGrub.InstanceSet.SourceCell (SourceCell (..),
-                                                 assignmentFrom)
+import           Distribution.Version           (anyVersion)
+import           PubGrub.InstanceSet            (Instance (BuildSource))
 import           PubGrub.Provider               (Provider (Provider, expand))
 import           PubGrub.Report                 (reportConflict)
 import           PubGrub.Solver                 (SolveError (..), SolverMsg,
                                                  solve)
-import           PubGrub.VersionSet             (VersionSet, contains,
-                                                 fullVersionSet)
 import           Test.Tasty                     (TestTree, testGroup)
 import           Test.Tasty.HUnit               (assertBool, testCase, (@?=))
 
@@ -83,7 +79,7 @@ import           Test.Tasty.HUnit               (assertBool, testCase, (@?=))
 -- be refuted on its own.
 data Release = Release
     { relVersion :: Version
-    , relGuarded :: [(Condition FlagName, [(PackageName, VersionSet)])]
+    , relGuarded :: [(Condition FlagName, [Dependency])]
     }
 
 -- | A package: the flags it declares (with their defaults) and its releases.
@@ -99,93 +95,93 @@ data Pkg = Pkg
 -- the same shape a missing Hackage package produces.
 type World = [(PackageName, Pkg)]
 
--- | The provider for a world: the rule in the module header, which is
--- 'Bridge.Provider.mkExpand' without its installed half (these worlds have no
--- installed units, so the installed side of every 'InstanceSet' is empty).
-mkProvider :: Applicative m => World -> Provider m
-mkProvider world = Provider expand'
+-- | The provider for a world: the /real/ 'BP.mkExpand', driven from an in-memory
+-- index built out of the world. Two departures from a Hackage-backed run, neither
+-- touching the rule:
+--
+--  * the 'BP.ReleaseSource' answers from a list rather than from an index, so no
+--    @.cabal@ is ever parsed.
+--  * the world's root is an ordinary release rather than 'BP.rootName', so the
+--    synthetic-root shortcut never fires and the root is resolved through the same
+--    path as every other package. Hence the empty target list.
+--
+-- The installed db is empty: these worlds have no pre-installed units, so every
+-- 'PubGrub.InstanceSet.InstanceSet' has an empty installed side.
+worldProvider :: World -> Provider TestM
+worldProvider world =
+    Provider (BP.mkExpand (mkInstalledDb []) source [])
   where
-    expand' pn range = pure (go (offers pn range))
-      where
-        -- Try the offered (version, cell) pairs in order and commit to the
-        -- first whose derived assignment the offered set actually admits. The
-        -- membership test can fail: a cell fixes only some flags, and the
-        -- defaults filling in the rest may contradict a /different/ cell's pins
-        -- — the same reason 'Bridge.Provider' loops instead of taking the head.
-        go [] = Nothing
-        go ((v, sc) : rest)
-            | memberInstance i range = Just (i, depIncs pn v i)
-            | otherwise = go rest
-          where
-            flags = assignmentFor pn sc
-            i = BuildSource v flags
+    source =
+        BP.ReleaseSource
+            { BP.rsVersionsOf = \p -> maybe [] (map relVersion . pkgReleases) (lookup p world)
+            , BP.rsReadRelease = \p v -> pure (readRelease p v)
+            }
 
-    -- Newest version first, crossed with the cells of the offered set that
-    -- admit that version.
-    offers :: PackageName -> InstanceSet -> [(Version, SourceCell)]
-    offers pn range =
-        [ (v, sc)
-        | v <- sortOn Down (versionsOf pn)
-        , sc <- filter (\c -> scVersionSet c `contains` v) (isSource range)
-        ]
+    -- Every release of every package, in the reduced shape the bridge expects:
+    -- the package's declared flags, and this release's guarded dependency groups.
+    releases :: Map (PackageName, Version) BP.Release
+    releases =
+        Map.fromList
+            [ ((p, relVersion r), BP.Release (pkgFlags pk) (relGuarded r))
+            | (p, pk) <- world
+            , r <- pkgReleases pk
+            ]
 
-    -- The cell's pins, completed at the declared defaults for every flag it
-    -- leaves free. Total over the package's declared flags, which is the
-    -- 'Instance' invariant 'singletonInstance' relies on.
-    assignmentFor :: PackageName -> SourceCell -> FlagAssignment
-    assignmentFor pn = assignmentFrom (flagsOf pn)
+    -- 'BP.mkExpand' only ever asks about versions @rsVersionsOf@ reported, so the
+    -- miss branch is unreachable; it answers with a parse failure rather than an
+    -- 'error' so a future wiring bug degrades into a skipped release instead of a
+    -- crash.
+    readRelease p v =
+        maybe (Left (missing p v)) Right (Map.lookup (p, v) releases)
 
-    -- One incompatibility per guarded dependency occurrence, exactly as
-    -- 'Bridge.Provider' does it: the depender is the guard's own region of this
-    -- version — /not/ the decided instance — so flags the guard never mentions
-    -- stay out of the term, and refuting it refutes every assignment that agrees
-    -- with the guard. An unsatisfiable guard denotes nothing, so it is dropped
-    -- rather than emitted as a vacuous incompatibility.
-    depIncs :: PackageName -> Version -> Instance -> [Incompatibility]
-    depIncs pn v chosen =
-        [ fromDependency pn dependers q (widen vs)
-        | (guard, deps) <- guardedOf pn v
-        , Just pins <- [nonEmpty (expandGuard guard)]
-        , let dependers = sourceInstances v pins
-        , chosen `memberInstance` dependers
-        , (q, vs) <- deps
-        ]
+    missing p v =
+        ParseException (toException (userError ("not in world: " <> show (p, v))))
 
-    -- One cell carrying the declared range, so the range survives into the
-    -- incompatibility and into any conflict report.
-    widen :: VersionSet -> InstanceSet
-    widen vs = InstanceSet Set.empty [SourceCell vs Map.empty]
+-- --------------------------------------------------------------------------
+-- The monad the tests solve in
+-- --------------------------------------------------------------------------
 
-    lookupPkg pn = lookup pn world
-    releasesOf pn = maybe [] pkgReleases (lookupPkg pn)
-    versionsOf pn = map relVersion (releasesOf pn)
-    flagsOf pn = maybe [] pkgFlags (lookupPkg pn)
-    guardedOf pn v =
-        concat [relGuarded r | r <- releasesOf pn, relVersion r == v]
+-- | Two log channels, because the pieces being composed want different message
+-- types: 'solve' emits 'SolverMsg' and the bridge emits 'Text'. This mirrors the
+-- application monad in @app\/Main.hs@, with both channels discarded.
+data TestEnv = TestEnv
+    { teText   :: LogAction TestM Text
+    , teSolver :: LogAction TestM SolverMsg
+    }
+
+newtype TestM a = TestM {unTestM :: ReaderT TestEnv IO a}
+    deriving newtype (Functor, Applicative, Monad, MonadIO, MonadReader TestEnv)
+
+instance HasLog TestEnv Text TestM where
+    getLogAction = teText
+    setLogAction a e = e {teText = a}
+
+instance HasLog TestEnv SolverMsg TestM where
+    getLogAction = teSolver
+    setLogAction a e = e {teSolver = a}
+
+runTestM :: TestM a -> IO a
+runTestM m = runReaderT (unTestM m) (TestEnv mempty mempty)
 
 -- --------------------------------------------------------------------------
 -- Running a world
 -- --------------------------------------------------------------------------
 
--- | The monad the tests solve in. 'IO' rather than 'Identity' only so that
--- 'countingProvider' can observe how many times the solver asks about a
--- package; the solver itself is pure.
-type M = LoggerT SolverMsg IO
-
--- | The root package, whose sole release is @1.0.0@ with no flags.
+-- | The root package, whose sole release is @1.0.0@ with no flags. Deliberately
+-- /not/ 'BP.rootName': see 'worldProvider'.
 root :: PackageName
 root = pkg "root"
 
 rootInstance :: Instance
 rootInstance = BuildSource v1 (mkFlagAssignment [])
 
--- | Run the solver, discarding its log trace. A failure is kept as its rendered
--- proof rather than 'show'n: the derived 'Show' would expand the whole
+-- | Run the solver, discarding both log channels. A failure is kept as its
+-- rendered proof rather than 'show'n: the derived 'Show' would expand the whole
 -- derivation DAG.
-runSolve :: Provider M -> IO (Either Text (Map PackageName Instance))
+runSolve :: Provider TestM -> IO (Either Text (Map PackageName Instance))
 runSolve provider =
     either (Left . renderFailure) Right
-        <$> usingLoggerT mempty (solve provider root rootInstance)
+        <$> runTestM (solve provider root rootInstance)
 
 renderFailure :: SolveError -> Text
 renderFailure (NoSolution i) = reportConflict i
@@ -193,12 +189,12 @@ renderFailure (NoSatisfier p _) =
     T.pack ("internal error: no satisfier for " <> show p)
 
 solveWorld :: World -> IO (Either Text (Map PackageName Instance))
-solveWorld = runSolve . mkProvider
+solveWorld = runSolve . worldProvider
 
 -- | Wrap a provider so that every @expand@ records the package it was asked
 -- about. The solver asks exactly once per decision, so the tally counts
 -- decision /attempts/: a package asked twice was reconsidered after a conflict.
-countingProvider :: IORef [PackageName] -> Provider M -> Provider M
+countingProvider :: IORef [PackageName] -> Provider TestM -> Provider TestM
 countingProvider ref provider = Provider $ \p range -> do
     liftIO (modifyIORef' ref (p :))
     expand provider p range
@@ -207,7 +203,7 @@ countingProvider ref provider = Provider $ \p range -> do
 solveCounting :: World -> IO (Either Text (Map PackageName Instance), Map PackageName Int)
 solveCounting world = do
     ref <- newIORef []
-    result <- runSolve (countingProvider ref (mkProvider world))
+    result <- runSolve (countingProvider ref (worldProvider world))
     asked <- readIORef ref
     pure (result, Map.fromListWith (+) [(p, 1 :: Int) | p <- asked])
 
@@ -225,15 +221,15 @@ v1, v2 :: Version
 v1 = mkVersion [1, 0, 0]
 v2 = mkVersion [2, 0, 0]
 
--- | An unconstrained dependency. These worlds are about flags, so no test needs
--- a narrower range than "any version".
-dep :: PackageName -> (PackageName, VersionSet)
-dep p = (p, fullVersionSet)
+-- | An unconstrained dependency on a package's main library. These worlds are
+-- about flags, so no test needs a narrower range than "any version".
+dep :: PackageName -> Dependency
+dep p = mkDependency p anyVersion mainLibSet
 
 -- | One guarded dependency group, the toy analogue of a @.cabal@ conditional
 -- block. @always@ is the unconditional block every component has — its guard is
 -- literally @Lit True@, which is a real guard and not the absence of one.
-type Group = (Condition FlagName, [(PackageName, VersionSet)])
+type Group = (Condition FlagName, [Dependency])
 
 always :: [PackageName] -> Group
 always deps = (Lit True, map dep deps)

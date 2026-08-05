@@ -115,6 +115,7 @@ test-suite pubgrub-hs-test
         , Cabal-syntax
         , co-log
         , containers
+        , mtl
         , tasty
         , tasty-hunit
         , tasty-quickcheck
