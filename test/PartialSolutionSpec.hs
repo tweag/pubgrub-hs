@@ -13,38 +13,39 @@
 -- exactly the property at issue.
 module PartialSolutionSpec (tests) where
 
-import qualified Data.Map.Strict                as Map
-import           Data.Maybe                     (mapMaybe)
-import qualified Data.Set                       as Set
-import           Distribution.Types.Flag        (mkFlagAssignment)
-import           Distribution.Types.PackageName (PackageName, mkPackageName)
-import           Distribution.Types.Version     (mkVersion)
-import           Distribution.Types.VersionRange (earlierVersion, orLaterVersion,
-                                                 thisVersion)
-import           PubGrub.Incompatibility        (Incompatibility, anyTerm,
-                                                 fromDependency, incompGet,
-                                                 noInstances, notRoot)
-import           PubGrub.InstanceSet            (Instance (..), InstanceSet (..))
-import           PubGrub.InstanceSet.SourceCell (SourceCell (..))
-import           PubGrub.SetOps                 (equivalent)
-import           PubGrub.Solver                 (Assignment (..),
-                                                 AssignmentKind (..),
-                                                 PartialSolution (..),
-                                                 addDecision, addDerivation,
-                                                 assignmentTerm, backtrack,
-                                                 decidedInstance,
-                                                 emptyPS, extractSolution,
-                                                 packageHistory,
-                                                 termIntersectionForPackage,
-                                                 undecidedPositive)
-import           PubGrub.Term                   (Term (..), intersectTerm,
-                                                 negateTerm)
-import qualified PubGrub.VersionSet             as VersionSet
-import           Test.Tasty                     (TestTree, testGroup)
-import           Test.Tasty.QuickCheck          (Arbitrary (..), Gen, Property,
-                                                 conjoin, counterexample,
-                                                 elements, frequency,
-                                                 testProperty)
+import qualified Data.Map.Strict                 as Map
+import           Data.Maybe                      (mapMaybe)
+import qualified Data.Set                        as Set
+import           Distribution.Types.Flag         (mkFlagAssignment)
+import           Distribution.Types.PackageName  (PackageName, mkPackageName)
+import           Distribution.Types.Version      (mkVersion)
+import           Distribution.Types.VersionRange (earlierVersion,
+                                                  orLaterVersion, thisVersion)
+import           PubGrub.Incompatibility         (Incompatibility, anyTerm,
+                                                  fromDependency, incompGet,
+                                                  noInstances, notRoot)
+import           PubGrub.InstanceSet             (Instance (..),
+                                                  InstanceSet (..))
+import           PubGrub.InstanceSet.SourceCell  (SourceCell (..))
+import           PubGrub.SetOps                  (equivalent)
+import           PubGrub.Solver                  (Assignment (..),
+                                                  AssignmentKind (..),
+                                                  PartialSolution (..),
+                                                  addDecision, addDerivation,
+                                                  assignmentTerm, backtrack,
+                                                  decidedInstance, emptyPS,
+                                                  extractSolution,
+                                                  packageHistory,
+                                                  termIntersectionForPackage,
+                                                  undecidedPositive)
+import           PubGrub.Term                    (Term (..), intersectTerm,
+                                                  negateTerm)
+import qualified PubGrub.VersionSet              as VersionSet
+import           Test.Tasty                      (TestTree, testGroup)
+import           Test.Tasty.QuickCheck           (Arbitrary (..), Gen, Property,
+                                                  conjoin, counterexample,
+                                                  elements, frequency,
+                                                  testProperty)
 
 -- --------------------------------------------------------------------------
 -- The universe the scripts draw from
@@ -81,7 +82,7 @@ incompatibilities :: [Incompatibility]
 incompatibilities =
     [notRoot p i | p <- packages, i <- instances]
         ++ [noInstances p s | p <- packages, s <- sets]
-        ++ [ fromDependency p s (q, t)
+        ++ [ fromDependency p s q t
            | (p, q) <- zip packages (drop 1 packages)
            , s <- take 1 sets
            , t <- sets
@@ -118,8 +119,8 @@ instance Arbitrary Op where
             ]
       where
         ix = elements [0 .. 11] :: Gen Int
-    shrink (OpDecide a b) = [OpDecide a' b' | (a', b') <- shrink (a, b)]
-    shrink (OpDerive a b) = [OpDerive a' b' | (a', b') <- shrink (a, b)]
+    shrink (OpDecide a b)  = [OpDecide a' b' | (a', b') <- shrink (a, b)]
+    shrink (OpDerive a b)  = [OpDerive a' b' | (a', b') <- shrink (a, b)]
     shrink (OpBacktrack a) = map OpBacktrack (shrink a)
 
 -- | The model: one flat chronological list of assignments.
@@ -209,7 +210,7 @@ key :: Assignment -> (Int, Int, PackageName, Maybe Instance)
 key a = (aIndex a, aLevel a, aPackage a, decidedInstance a)
 
 check :: String -> Bool -> Property
-check what ok = counterexample ("mismatch: " ++ what) ok
+check what = counterexample ("mismatch: " ++ what)
 
 -- | Every query, on both, for every probe package.
 agree :: PartialSolution -> Model -> Property

@@ -20,7 +20,7 @@ module Bridge.Provider
 
 import           Bridge.Cabal.Flatten                         (GuardedDeps,
                                                                componentDeps,
-                                                               depsAt)
+                                                               expandGuard)
 import           Bridge.Cabal.InstalledPkg                    (getInstalledPackages)
 import           Bridge.Hackage                               (IndexHandle (..),
                                                                ParseError,
@@ -71,10 +71,13 @@ import           PubGrub.InstanceSet                          (HasVersion (..),
                                                                InstanceSet (..),
                                                                memberInstance,
                                                                singletonInstance,
-                                                               singletonUsePreInstalled)
+                                                               singletonUsePreInstalled,
+                                                               sourceInstances)
 import           PubGrub.InstanceSet.SourceCell               (SourceCell (..),
                                                                assignmentFrom)
 
+import           Distribution.Types.Dependency                (depPkgName,
+                                                               depVerRange)
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
 import           PubGrub.Provider                             (Provider (..))
 import           PubGrub.VersionSet                           (VersionSet,
@@ -214,8 +217,11 @@ mkExpand installedDb readRelease handle root = expand'
     expand' pn range
             | pn == rootName
             , memberInstance rootInstance range
-            = let incs = depIncs pn rootInstance root
-            in pure (Just (rootInstance, incs))
+            = pure (Just (rootInstance, incs))
+                where
+                    incs = [ fromDependency rootName (singletonInstance rootInstance) depName (widen depName vs)
+                           | (depName, vs) <- root
+                           ]
     expand' pn range = do
         let installedHere = [toPreInstalled u | u <- Map.findWithDefault [] pn (idbByName installedDb)]
             admissible = sortOn (Down . version) (filter (`Set.member` isInstalled range) installedHere)
@@ -223,7 +229,7 @@ mkExpand installedDb readRelease handle root = expand'
             Just chosen -> do
                 incs <- consequencesOfUsePreInstalled chosen
                 pure (Just (UsePreInstalled chosen, incs))
-            Nothing -> firstUsable (sortOn Down (versionsOf pn))
+            Nothing -> firstUsable (sortOn Down (rsVersionsOf source pn))
 
                 where
                     -- Releases newest first (@docs/flags-semantics.md@ §5,
@@ -252,16 +258,28 @@ mkExpand installedDb readRelease handle root = expand'
                                     )
                                 firstUsable rest
                             Right release ->
+                                -- Each guarded dependency becomes one incompatibility
+                                -- @{pn: D, dep: not T}@. The depender @D@ is every
+                                -- instance of @v@ whose flags satisfy the guard, not
+                                -- just @inst@, so refuting it rules out every flag
+                                -- assignment that shares the dependency at once. Only
+                                -- guards that @inst@ satisfies are emitted.
                                 case listToMaybe (usableAssignments v release) of
                                     Nothing -> firstUsable rest
-                                    Just flags ->
-                                        -- The guards are evaluated at @flags@ — the
-                                        -- same assignment the instance pins — so the
-                                        -- decision and the incompatibilities it
-                                        -- entails cannot disagree.
-                                        let inst = BuildSource v flags
-                                            deps = Map.toList (depsAt flags (relGuarded release))
-                                        in pure (Just (inst, depIncs pn inst deps))
+                                    Just flags -> pure (Just (inst, incs))
+                                        where
+                                            inst = BuildSource v flags
+                                            incs = [ fromDependency pn dependers (depPkgName dep) depInstanceSet
+                                                   | -- for each guarded dependency of the choosen release
+                                                     (guard, deps) <- relGuarded release
+                                                   , Just assignment <- [NE.nonEmpty (expandGuard guard)]
+                                                   , -- The depender's InstanceSet `D` from above
+                                                     let dependers = sourceInstances v assignment
+                                                   , -- and only if the depender's InstanceSet admits the instance
+                                                     inst `memberInstance` dependers
+                                                   , dep <- deps
+                                                   , let depInstanceSet = widen (depPkgName dep) (VersionSet.fromVersionRange (depVerRange dep))
+                                                   ]
 
                     -- The assignments this release could be built under, in
                     -- preference order, keeping only those the offered set
@@ -310,16 +328,11 @@ mkExpand installedDb readRelease handle root = expand'
                 [ fromDependency
                     fromName
                     (singletonUsePreInstalled fromPip)
-                    (toName, singletonUsePreInstalled toPip)
+                    toName
+                    (singletonUsePreInstalled toPip)
                 | InstalledEdge (fromName, fromPip) (toName, toPip) <-
                     closureEdges installedDb (pipUnitId pip)
                 ]
-
-    depIncs :: PackageName -> Instance -> [(PackageName, VersionSet)] -> [Incompatibility]
-    depIncs pn chosen deps =
-        [ fromDependency pn (singletonInstance chosen) (d, widen d vs)
-        | (d, vs) <- deps
-        ]
 
     -- Widen a dependency's version range into an instance set. The installed
     -- half is extensional: the compiler's database is small and fully known.

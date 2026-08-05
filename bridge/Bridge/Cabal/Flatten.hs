@@ -73,15 +73,32 @@ module Bridge.Cabal.Flatten (
     depsAt,
     flattenDeps,
     defaultFlags,
+    expandGuard,
+    prettyMap,
+    parseCondition,
+    Guard,
 ) where
 
+import           Control.Applicative                          (Alternative (..))
+import           Data.Bool                                    (bool)
+import           Data.Char                                    (isAlphaNum)
+import qualified Data.Map.Merge.Strict                        as Map
 import           Data.Map.Strict                              (Map)
 import qualified Data.Map.Strict                              as Map
-import           Data.Maybe                                   (fromMaybe,
+import           Data.Maybe                                   (catMaybes,
+                                                               fromMaybe,
                                                                maybeToList)
+import           Distribution.Compat.CharParsing              (CharParsing (..),
+                                                               between, munch1,
+                                                               sepByNonEmpty,
+                                                               spaces)
+import qualified Distribution.Compat.CharParsing              as P
 import           Distribution.Compiler                        (CompilerId (..),
                                                                CompilerInfo,
                                                                compilerInfoId)
+import           Distribution.Parsec                          (CabalParsing,
+                                                               Parsec (..))
+import           Distribution.Simple.Utils                    (lowercase)
 import           Distribution.System                          (Platform (..))
 import           Distribution.Types.Condition                 (Condition (..),
                                                                cAnd, cNot,
@@ -95,17 +112,21 @@ import           Distribution.Types.Dependency                (Dependency,
 import           Distribution.Types.Flag                      (FlagAssignment,
                                                                FlagName,
                                                                PackageFlag (..),
-                                                               lookupFlagAssignment)
+                                                               lookupFlagAssignment,
+                                                               mkFlagName,
+                                                               unFlagName)
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
 import           Distribution.Types.PackageName               (PackageName)
 import           Distribution.Version                         (withinRange)
 import           PubGrub.VersionSet                           (VersionSet)
 import qualified PubGrub.VersionSet                           as VS
 
+type Guard = Condition FlagName
+
 -- | A package's dependencies as flag-guarded groups: each dependency list is
 -- active exactly when its 'Condition' over flag names holds. The environment
 -- (OS, arch, compiler) is already resolved away, so guards mention only flags.
-type GuardedDeps = [(Condition FlagName, [Dependency])]
+type GuardedDeps = [(Guard, [Dependency])]
 
 -- | Resolve the fixed environment: OS, arch and compiler conditions become
 -- concrete @Right@ booleans; flag conditions stay symbolic as @Left flag@.
@@ -180,3 +201,65 @@ defaultFlags gpd = Map.fromList [(flagName f, flagDefault f) | f <- genPackageFl
 flattenDeps :: Platform -> CompilerInfo -> FlagAssignment -> GenericPackageDescription -> Map PackageName VersionSet
 flattenDeps platform compiler flags gpd =
     depsAt flags (componentDeps platform compiler gpd)
+
+-- | A guard in disjunctive normal form: a list of partial flag assignments
+-- whose disjunction is the guard. A flag an assignment does not mention is
+-- free, and the disjuncts may overlap. @[]@ means the guard never holds;
+-- @[Map.empty]@ means it always holds.
+expandGuard :: Condition FlagName -> [Map FlagName Bool]
+expandGuard = go
+  where
+    go (Var f)    = [Map.singleton f True]
+    go (Lit b)    = [Map.empty | b]
+    go (COr a b)  = go a ++ go b
+    go (CAnd a b) = catMaybes
+        [ Map.mergeA
+            Map.preserveMissing
+            Map.preserveMissing
+            (Map.zipWithAMatched (\_ a' b' -> if a' == b' then Just a' else Nothing))
+            x y
+        | x <- go a
+        , y <- go b
+        ]
+    go (CNot (Var f))    = [Map.singleton f False]
+    go (CNot (Lit b))    = [Map.empty | not b]
+    go (CNot (CAnd a b)) = go (COr (CNot a) (CNot b))
+    go (CNot (COr a b))  = go (CAnd (CNot a) (CNot b))
+    go (CNot (CNot c))   = go c
+
+parseCondition :: CabalParsing m => m (Condition FlagName)
+parseCondition = condOr
+  where
+    condOr = foldl1 COr <$> sepByNonEmpty condAnd (oper "||")
+    condAnd = foldl1 CAnd <$> sepByNonEmpty cond (oper "&&")
+    cond = sp >> (flagCond <|> boolLiteral <|> inparens condOr <|> notCond)
+    inparens = between (P.char '(' >> sp) (sp >> P.char ')' >> sp)
+    notCond = CNot <$> (P.char '!' >> sp >> cond)
+    flagCond = Var <$> (string "flag" >> sp >> inparens flagIdent)
+    boolLiteral = Lit <$> parsec
+    flagIdent = mkFlagName . lowercase <$> munch1 isIdentChar
+    isIdentChar c = isAlphaNum c || c == '_' || c == '-'
+    oper s = sp >> string s >> sp
+    sp = spaces
+
+prettyMap :: [Map FlagName Bool] -> String
+prettyMap = unwords . map (\m -> "{" ++ unwords [ bool "-" "+" b ++ unFlagName f | (f, b) <- Map.toList m ] ++ "}")
+
+-- >>> import Distribution.Parsec (explicitEitherParsec)
+-- >>> test s = either error (prettyMap . expandGuard) (explicitEitherParsec parseCondition s)
+-- >>> test "flag(a) && !flag(b)"
+-- "{+a -b}"
+-- >>> test "True"
+-- "{}"
+-- >>> test "False"
+-- ""
+-- >>> test "flag(a) || flag(b)"
+-- "{+a} {+b}"
+-- >>> test "flag(a) && flag(b)"
+-- "{+a +b}"
+-- >>> test "flag(a) && !flag(b)"
+-- "{+a -b}"
+-- >>> test "!(flag(a) && flag(b))"
+-- "{-a} {-b}"
+-- >>> test "!(flag(a) || flag(b))"
+-- "{-a -b}"

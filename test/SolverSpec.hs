@@ -21,9 +21,9 @@ import           PubGrub.InstanceSet            (HasVersion (version),
                                                  emptyInstanceSet,
                                                  memberInstance,
                                                  singletonInstance)
-import           PubGrub.SetOps                 (union)
 import           PubGrub.Provider               (Provider (..))
 import           PubGrub.Report                 (reportConflict)
+import           PubGrub.SetOps                 (union)
 import           PubGrub.Solver                 (SolveError (..), SolverMsg,
                                                  solve)
 import           Test.Tasty                     (TestTree, testGroup)
@@ -59,7 +59,7 @@ mkProvider deps = Provider expand'
             candidates ->
                 let chosen = maximumBy (comparing version) candidates
                     incs =
-                        [ fromDependency p (singletonInstance chosen) (d, setOf ds)
+                        [ fromDependency p (singletonInstance chosen) d (setOf ds)
                         | (d, ds) <- deps chosen
                         ]
                  in pure (Just (chosen, incs))

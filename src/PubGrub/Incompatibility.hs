@@ -109,13 +109,13 @@ noInstances p s = Incompatibility (Map.singleton p (Positive s)) (CauseNoInstanc
 -- constrains versions; the provider widens that to instances). If @depSet@ is
 -- empty the dependency is unsatisfiable and the entry would be ⊤, so it is
 -- dropped, leaving a unit ban on @package@.
-fromDependency :: PackageName -> InstanceSet -> (PackageName, InstanceSet) -> Incompatibility
-fromDependency package instances (dep, depSet) =
+fromDependency :: PackageName -> InstanceSet -> PackageName -> InstanceSet -> Incompatibility
+fromDependency pkgName pkgSet depName depSet =
     Incompatibility
         (if isTopTerm (Negative depSet)
-            then Map.singleton package (Positive instances)
-            else Map.fromList [(package, Positive instances), (dep, Negative depSet)])
-        (CauseDependency package instances (dep, depSet))
+            then Map.singleton pkgName (Positive pkgSet)
+            else Map.fromList [(pkgName, Positive pkgSet), (depName, Negative depSet)])
+        (CauseDependency pkgName pkgSet (depName, depSet))
 
 -- Judging against the partial solution -----------------------------------------
 

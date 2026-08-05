@@ -15,42 +15,52 @@
 --  * for each 'SourceCell' of the offered set that contains that version, derive
 --    a /total/ assignment: the cell's pins, plus every remaining declared flag
 --    at its default;
---  * keep that candidate only if 'memberInstance' accepts it, and compute the
---    dependencies at exactly that assignment.
+--  * keep that candidate only if 'memberInstance' accepts it;
+--  * emit one incompatibility per /guarded dependency occurrence/ whose guard the
+--    decided assignment satisfies, with the guard itself, not the assignment, as
+--    the depender's flag component (@docs\/flags-semantics.md@ §4.2).
 --
 -- So a non-default assignment is tried only after the solver has learned an
 -- incompatibility that pins the flag the other way, which is what makes flags
 -- a search dimension rather than a constant.
+--
+-- The guard handling is not re-implemented here: these worlds carry real
+-- 'Condition' guards and go through the same 'expandGuard' and 'sourceInstances'
+-- the bridge uses, so what is under test is the production emission rule rather
+-- than a paraphrase of it.
 module FlagSolveSpec (tests) where
 
+import           Bridge.Cabal.Flatten           (expandGuard)
 import           Colog                          (LoggerT, usingLoggerT)
-import           Control.Monad.IO.Class          (liftIO)
-import           Data.Either                    (isLeft)
+import           Control.Monad.IO.Class         (liftIO)
+import           Data.Either                    (fromLeft, isLeft)
 import           Data.IORef                     (IORef, modifyIORef', newIORef,
                                                  readIORef)
-import           Data.List                       (sortOn)
+import           Data.List                      (sortOn)
+import           Data.List.NonEmpty             (nonEmpty)
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
-import           Data.Maybe                     (fromMaybe)
 import           Data.Ord                       (Down (..))
 import qualified Data.Set                       as Set
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
+import           Distribution.Types.Condition   (Condition (..))
 import           Distribution.Types.Flag        (FlagAssignment, FlagName,
-                                                 lookupFlagAssignment,
                                                  mkFlagAssignment, mkFlagName)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.Version     (Version, mkVersion)
-import           PubGrub.Incompatibility        (Incompatibility, fromDependency)
+import           PubGrub.Incompatibility        (Incompatibility,
+                                                 fromDependency)
 import           PubGrub.InstanceSet            (Instance (BuildSource),
                                                  InstanceSet (..),
                                                  memberInstance,
-                                                 singletonInstance)
-import           PubGrub.InstanceSet.SourceCell (SourceCell (..), assignmentFrom)
+                                                 sourceInstances)
+import           PubGrub.InstanceSet.SourceCell (SourceCell (..),
+                                                 assignmentFrom)
 import           PubGrub.Provider               (Provider (Provider, expand))
 import           PubGrub.Report                 (reportConflict)
-import           PubGrub.Solver                 (SolveError (..),
-                                                 SolverMsg, solve)
+import           PubGrub.Solver                 (SolveError (..), SolverMsg,
+                                                 solve)
 import           PubGrub.VersionSet             (VersionSet, contains,
                                                  fullVersionSet)
 import           Test.Tasty                     (TestTree, testGroup)
@@ -60,14 +70,20 @@ import           Test.Tasty.HUnit               (assertBool, testCase, (@?=))
 -- A toy world with flags
 -- --------------------------------------------------------------------------
 
--- | One source release: a version, and the dependencies it declares /at a given
--- flag assignment/. The function is the toy stand-in for a @.cabal@ file's
--- conditional tree, and it keeps the dependencies and the assignment that
--- produced them inseparable, as 'Bridge.Provider' does by flattening at the
--- assignment it has just pinned.
+-- | One source release: a version, and its dependencies as /flag-guarded groups/
+-- — the toy stand-in for @Bridge.Cabal.Flatten.GuardedDeps@, which is what a
+-- @.cabal@ file's conditional tree flattens to.
+--
+-- The guard is kept as a real 'Condition' rather than collapsed to a predicate on
+-- assignments, because the guard is what the emitted incompatibility names: a
+-- release that declares @simd@ and @docs@ but guards a dependency on @simd@ alone
+-- must produce a depender term mentioning @simd@ and /not/ @docs@. A
+-- @FlagAssignment -> [dep]@ function cannot express that: it answers only yes or
+-- no at one assignment, so every assignment of an irrelevant flag would have to
+-- be refuted on its own.
 data Release = Release
     { relVersion :: Version
-    , relDeps    :: FlagAssignment -> [(PackageName, VersionSet)]
+    , relGuarded :: [(Condition FlagName, [(PackageName, VersionSet)])]
     }
 
 -- | A package: the flags it declares (with their defaults) and its releases.
@@ -98,7 +114,7 @@ mkProvider world = Provider expand'
         -- — the same reason 'Bridge.Provider' loops instead of taking the head.
         go [] = Nothing
         go ((v, sc) : rest)
-            | memberInstance i range = Just (i, depIncs pn i (depsOf pn v flags))
+            | memberInstance i range = Just (i, depIncs pn v i)
             | otherwise = go rest
           where
             flags = assignmentFor pn sc
@@ -117,12 +133,22 @@ mkProvider world = Provider expand'
     -- leaves free. Total over the package's declared flags, which is the
     -- 'Instance' invariant 'singletonInstance' relies on.
     assignmentFor :: PackageName -> SourceCell -> FlagAssignment
-    assignmentFor pn sc = assignmentFrom (flagsOf pn) sc
+    assignmentFor pn = assignmentFrom (flagsOf pn)
 
-    depIncs :: PackageName -> Instance -> [(PackageName, VersionSet)] -> [Incompatibility]
-    depIncs pn chosen deps =
-        [ fromDependency pn (singletonInstance chosen) (d, widen vs)
-        | (d, vs) <- deps
+    -- One incompatibility per guarded dependency occurrence, exactly as
+    -- 'Bridge.Provider' does it: the depender is the guard's own region of this
+    -- version — /not/ the decided instance — so flags the guard never mentions
+    -- stay out of the term, and refuting it refutes every assignment that agrees
+    -- with the guard. An unsatisfiable guard denotes nothing, so it is dropped
+    -- rather than emitted as a vacuous incompatibility.
+    depIncs :: PackageName -> Version -> Instance -> [Incompatibility]
+    depIncs pn v chosen =
+        [ fromDependency pn dependers q (widen vs)
+        | (guard, deps) <- guardedOf pn v
+        , Just pins <- [nonEmpty (expandGuard guard)]
+        , let dependers = sourceInstances v pins
+        , chosen `memberInstance` dependers
+        , (q, vs) <- deps
         ]
 
     -- One cell carrying the declared range, so the range survives into the
@@ -134,8 +160,8 @@ mkProvider world = Provider expand'
     releasesOf pn = maybe [] pkgReleases (lookupPkg pn)
     versionsOf pn = map relVersion (releasesOf pn)
     flagsOf pn = maybe [] pkgFlags (lookupPkg pn)
-    depsOf pn v flags =
-        concat [relDeps r flags | r <- releasesOf pn, relVersion r == v]
+    guardedOf pn v =
+        concat [relGuarded r | r <- releasesOf pn, relVersion r == v]
 
 -- --------------------------------------------------------------------------
 -- Running a world
@@ -204,18 +230,26 @@ v2 = mkVersion [2, 0, 0]
 dep :: PackageName -> (PackageName, VersionSet)
 dep p = (p, fullVersionSet)
 
+-- | One guarded dependency group, the toy analogue of a @.cabal@ conditional
+-- block. @always@ is the unconditional block every component has — its guard is
+-- literally @Lit True@, which is a real guard and not the absence of one.
+type Group = (Condition FlagName, [(PackageName, VersionSet)])
+
+always :: [PackageName] -> Group
+always deps = (Lit True, map dep deps)
+
+-- | @if flag(f)@ / @else@ — the two branches a single flag produces.
+whenOn, whenOff :: FlagName -> [PackageName] -> Group
+whenOn f deps = (Var f, map dep deps)
+whenOff f deps = (CNot (Var f), map dep deps)
+
 -- | A flagless package with a single release at @1.0.0@ and no dependencies.
 leaf :: Pkg
-leaf = Pkg [] [Release v1 (const [])]
+leaf = Pkg [] [Release v1 []]
 
 -- | A flagless package with a single release at @1.0.0@ and fixed dependencies.
 plain :: [PackageName] -> Pkg
-plain deps = Pkg [] [Release v1 (const (map dep deps))]
-
--- | Is a flag on? The provider always supplies a total assignment, so an
--- unassigned flag would be a bug in the provider, not a case to handle.
-isOn :: FlagName -> FlagAssignment -> Bool
-isOn f fa = fromMaybe False (lookupFlagAssignment f fa)
+plain deps = Pkg [] [Release v1 [always deps]]
 
 -- | The expected decision map, written as @(package, version, flags)@ triples.
 solutionOf :: [(PackageName, Version, [(FlagName, Bool)])] -> Map PackageName Instance
@@ -236,6 +270,7 @@ tests =
         , unsatOverFlags
         , unusedFlag
         , irrelevantFlagRetried
+        , irrelevantFlagsDoNotCompound
         ]
 
 -- | 1. When the declared defaults already solve, they are what gets decided —
@@ -252,13 +287,13 @@ defaultsUsed =
                     ( pkg "foo"
                     , Pkg
                         [(fast, True)]
-                        [Release v1 (\fa -> [dep (if isOn fast fa then pkg "speedy" else pkg "slow")])]
+                        [Release v1 [whenOn fast [pkg "speedy"], whenOff fast [pkg "slow"]]]
                     )
                 ,
                     ( pkg "bar"
                     , Pkg
                         [(tidy, False)]
-                        [Release v1 (\fa -> [dep (pkg "neat") | isOn tidy fa])]
+                        [Release v1 [whenOn tidy [pkg "neat"]]]
                     )
                 , (pkg "speedy", leaf)
                 , (pkg "slow", leaf)
@@ -298,7 +333,7 @@ flagFlip =
                     ( pkg "foo"
                     , Pkg
                         [(fast, True)]
-                        [Release v1 (\fa -> [dep (if isOn fast fa then pkg "speedy" else pkg "slow")])]
+                        [Release v1 [whenOn fast [pkg "speedy"], whenOff fast [pkg "slow"]]]
                     )
                 , (pkg "slow", leaf)
                 ]
@@ -329,13 +364,10 @@ twoFlags =
                         [(a, True), (b, True)]
                         [ Release
                             v1
-                            ( \fa ->
-                                concat
-                                    [ [dep (pkg "needs-a") | isOn a fa]
-                                    , [dep (pkg "needs-b") | isOn b fa]
-                                    , [dep (pkg "always")]
-                                    ]
-                            )
+                            [ whenOn a [pkg "needs-a"]
+                            , whenOn b [pkg "needs-b"]
+                            , always [pkg "always"]
+                            ]
                         ]
                     )
                 , (pkg "always", leaf)
@@ -365,12 +397,12 @@ unsatOverFlags =
                     ( pkg "foo"
                     , Pkg
                         [(fast, True)]
-                        [Release v1 (\fa -> [dep (if isOn fast fa then pkg "speedy" else pkg "slow")])]
+                        [Release v1 [whenOn fast [pkg "speedy"], whenOff fast [pkg "slow"]]]
                     )
                 ]
         result <- solveWorld world
         assertBool "expected no solution" (isLeft result)
-        let report = either id (const T.empty) result
+        let report = fromLeft T.empty result
         assertBool
             ("report should mention +fast; got:\n" <> T.unpack report)
             (T.pack "+fast" `T.isInfixOf` report)
@@ -389,7 +421,7 @@ unusedFlag =
         let unused = flg "unused"
             world =
                 [ (pkg "root", plain [pkg "foo"])
-                , (pkg "foo", Pkg [(unused, True)] [Release v1 (const [dep (pkg "bar")])])
+                , (pkg "foo", Pkg [(unused, True)] [Release v1 [always [pkg "bar"]]])
                 , (pkg "bar", leaf)
                 ]
         (result, asks) <- solveCounting world
@@ -403,23 +435,23 @@ unusedFlag =
                 )
         asks @?= Map.fromList [(pkg "root", 1), (pkg "foo", 1), (pkg "bar", 1)]
 
--- | 5b. An irrelevant flag /does/ multiply the search once something else
--- conflicts.
+-- | 5b. An irrelevant flag does not multiply a version-level retry.
 --
 -- Here @foo 2.0.0@ is unusable for a reason that has nothing to do with @unused@
--- (it needs a package that does not exist), and @foo 1.0.0@ is fine. But what
--- conflict resolution learns is @foo ==2.0.0+unused is forbidden@ — one
--- /instance/, not the version — so @==2.0.0 -unused@ is still in @foo@'s range
--- and the provider is asked to try it. @foo@ is therefore expanded three times,
--- not two, and the dead version @2.0.0@ is flattened twice.
+-- (it needs a package that does not exist), and @foo 1.0.0@ is fine. Because the
+-- dependency is /unconditional/, its guard is @Lit True@ and the depender term is
+-- @==2.0.0@ with no flag pins at all — so conflict resolution learns
+-- @foo ==2.0.0 is forbidden@ for every assignment of @unused@ at once, and
+-- @==2.0.0 -unused@ is never offered. @foo@ is expanded twice: the dead version,
+-- then the good one.
 --
--- This is the per-version-depender divergence CLAUDE.md records under
--- "Depender-range collapsing", seen from the flag side: nothing here is unsound,
--- but the cost is @2^(unused flags)@ retries per rejected version, so the
--- collapsing is a performance item and not a cosmetic one.
+-- **The count below is the assertion.** If it rises to 3, the depender has become
+-- the decided instance instead of the guard's region: what is learned is then
+-- @foo ==2.0.0+unused is forbidden@, one /instance/ rather than the version, and
+-- each of the @2^(irrelevant flags)@ assignments is tried and rejected in turn.
 irrelevantFlagRetried :: TestTree
 irrelevantFlagRetried =
-    testCase "an irrelevant flag still multiplies a version-level retry" $ do
+    testCase "an irrelevant flag does not multiply a version-level retry" $ do
         let unused = flg "unused"
             world =
                 [ (pkg "root", plain [pkg "foo"])
@@ -427,8 +459,8 @@ irrelevantFlagRetried =
                     ( pkg "foo"
                     , Pkg
                         [(unused, True)]
-                        [ Release v2 (const [dep (pkg "gone")])
-                        , Release v1 (const [dep (pkg "here")])
+                        [ Release v2 [always [pkg "gone"]]
+                        , Release v1 [always [pkg "here"]]
                         ]
                     )
                 , (pkg "here", leaf)
@@ -442,5 +474,46 @@ irrelevantFlagRetried =
                     , (pkg "here", v1, [])
                     ]
                 )
-        -- foo: 2.0.0+unused, then 2.0.0-unused, then 1.0.0+unused.
-        Map.lookup (pkg "foo") asks @?= Just 3
+        -- foo: 2.0.0+unused, then 1.0.0+unused. The banned version is banned
+        -- outright, not one assignment at a time.
+        Map.lookup (pkg "foo") asks @?= Just 2
+
+-- | 5c. The same world as 5b with a /second/ irrelevant flag, which is what would
+-- turn the cost into an exponent rather than a constant.
+--
+-- With the decided instance as the depender, the dead version would be rejected
+-- once per assignment of the flags no guard mentions: @2^k@ times, four here,
+-- before @1.0.0@ is reached. With the guard's region as the depender, the ban on
+-- @==2.0.0@ mentions no flag at all, so the count is **the same as with one
+-- irrelevant flag, and the same as with none**: the dead version, then the good
+-- one.
+--
+-- 5b alone cannot tell a fixed cost from a smaller exponent; this case shows the
+-- cost does not scale with @k@.
+irrelevantFlagsDoNotCompound :: TestTree
+irrelevantFlagsDoNotCompound =
+    testCase "two irrelevant flags cost no more than none" $ do
+        let u1 = flg "u1"
+            u2 = flg "u2"
+            world =
+                [ (pkg "root", plain [pkg "foo"])
+                ,
+                    ( pkg "foo"
+                    , Pkg
+                        [(u1, True), (u2, True)]
+                        [ Release v2 [always [pkg "gone"]]
+                        , Release v1 [always [pkg "here"]]
+                        ]
+                    )
+                , (pkg "here", leaf)
+                ]
+        (result, asks) <- solveCounting world
+        result
+            @?= Right
+                ( solutionOf
+                    [ (pkg "root", v1, [])
+                    , (pkg "foo", v1, [(u1, True), (u2, True)])
+                    , (pkg "here", v1, [])
+                    ]
+                )
+        Map.lookup (pkg "foo") asks @?= Just 2

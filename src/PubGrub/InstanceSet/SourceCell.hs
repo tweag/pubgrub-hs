@@ -4,12 +4,11 @@ import           Data.List                  (sortOn)
 import qualified Data.Map.Merge.Strict      as Map
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
+import           Data.Maybe                 (fromMaybe)
 import           Data.Ord                   (Down (..))
 import qualified Data.Text                  as T
-import           Data.Maybe                 (fromMaybe)
 import           Distribution.Types.Flag    (FlagAssignment, FlagName,
-                                             mkFlagAssignment, unFlagAssignment,
-                                             unFlagName)
+                                             mkFlagAssignment, unFlagName)
 import           Distribution.Types.Version (Version)
 import           PubGrub.Pretty             (Pretty (..))
 import           PubGrub.SetOps             (SetOps (..), isSubsetOf)
@@ -214,11 +213,11 @@ assignmentFrom declared sc =
 -- the assignment /is/ that version's declared flags, so there is nothing else to
 -- say about it. (Genuinely a singleton only if the assignment is total, which is
 -- a provider obligation, not something checked here.)
-singletonCell :: Version -> FlagAssignment -> SourceCell
+singletonCell :: Version -> Map FlagName Bool -> SourceCell
 singletonCell v flags =
   SourceCell
       { scVersionSet = VersionSet.singletonVersionSet v
-      , scFlags = Map.fromList [(f, PinnedTo b) | (f, b) <- unFlagAssignment flags]
+      , scFlags = Map.fromList [(f, PinnedTo b) | (f, b) <- Map.toList flags]
       }
 
 instance Pretty SourceCell where

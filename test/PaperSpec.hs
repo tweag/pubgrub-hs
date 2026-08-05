@@ -18,8 +18,8 @@ import           Data.Functor.Identity          (Identity, runIdentity)
 import           Data.List                      (maximumBy)
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
-import qualified Data.Set                       as Set
 import           Data.Ord                       (comparing)
+import qualified Data.Set                       as Set
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Types.Flag        (mkFlagAssignment)
@@ -33,11 +33,11 @@ import           PubGrub.InstanceSet            (HasVersion (version),
                                                  InstanceSet (..),
                                                  memberInstance,
                                                  singletonInstance)
-import           PubGrub.InstanceSet.SourceCell  (SourceCell (..))
+import           PubGrub.InstanceSet.SourceCell (SourceCell (..))
 import           PubGrub.Provider               (Provider (Provider))
 import           PubGrub.Report                 (reportConflict)
-import           PubGrub.Solver                 (SolveError (..),
-                                                 SolverMsg, solve)
+import           PubGrub.Solver                 (SolveError (..), SolverMsg,
+                                                 solve)
 import           PubGrub.VersionSet             (VersionSet, fromVersionRange)
 import           Test.Tasty                     (TestTree, testGroup)
 import           Test.Tasty.HUnit               (assertBool, testCase, (@?=))
@@ -123,7 +123,7 @@ mkProvider world = Provider expand'
             candidates ->
                 let chosen = maximumBy (comparing version) candidates
                     incs =
-                        [ fromDependency p (singletonInstance chosen) (d, widen d vs)
+                        [ fromDependency p (singletonInstance chosen) d (widen d vs)
                         | (d, vs) <- depsOf p chosen
                         ]
                  in pure (Just (chosen, incs))

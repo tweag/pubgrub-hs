@@ -1,5 +1,7 @@
 module PubGrub.InstanceSet where
 
+import           Data.List.NonEmpty             (NonEmpty)
+import qualified Data.List.NonEmpty             as NE
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Data.Set                       (Set)
@@ -119,7 +121,15 @@ singletonUsePreInstalled pip =
 
 singletonBuildSource :: Version -> FlagAssignment -> InstanceSet
 singletonBuildSource v flags =
-    InstanceSet { isInstalled = Set.empty, isSource = [singletonCell v flags] }
+    sourceInstances v (NE.singleton (Map.fromList (unFlagAssignment flags)))
+
+-- | The instances of source release @v@ that satisfy any of the given pin maps
+-- (a disjunction of flag pins): one cell per map, all at version @v@.
+sourceInstances :: Version -> NonEmpty (Map FlagName Bool) -> InstanceSet
+sourceInstances v flags = InstanceSet
+    { isInstalled = Set.empty
+    , isSource = [ singletonCell v m | m <- NE.toList flags ]
+    }
 
 -- | Does the set contain this instance?
 memberInstance :: Instance -> InstanceSet -> Bool
@@ -145,7 +155,7 @@ memberFlagAssignment :: Map FlagName FlagPin -> FlagAssignment -> Bool
 memberFlagAssignment pins fa = all satisfied (Map.toList pins)
   where
     assigned = Map.fromList (unFlagAssignment fa)
-    satisfied (f, PinnedTo b) = Map.lookup f assigned == Just b
+    satisfied (f, PinnedTo b)  = Map.lookup f assigned == Just b
     satisfied (f, NotDeclared) = Map.notMember f assigned
 
 instance Pretty InstanceSet where
