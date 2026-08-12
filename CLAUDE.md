@@ -140,7 +140,17 @@ time; each rung leaves a runnable solver and we measure both deliverables at eac
   its §9. Known cost, not yet paid down: a version rejected for a
   flag-irrelevant reason is re-offered once per irrelevant assignment (2^k), which
   is what depender-range collapsing fixes — see Reporting gap 1 below.
-- **Rung 3** — ✅ `base`/GHC pinning (installed db → `PreInstalled` instances, strict prefer-installed).
+- **Rung 3** — ⚠️ `base`/GHC pinning (installed db → `PreInstalled` instances, strict
+  prefer-installed). **Incomplete, found 2026-08-12 by the baseline.** Strict
+  prefer-installed says what to do when an installed unit is admissible; it says
+  nothing about the case where a constraint *excludes* it, and there we fall through to
+  a source release — so `aeson <2` resolves by planning to build `base 4.15.1.0` from
+  Hackage. cabal forbids that (its non-reinstallable list: `base`, `ghc-bignum`,
+  `ghc-internal`, `ghc-prim`, `ghc`, `integer-gmp`, `integer-simple`,
+  `template-haskell`, mirrored in `Bridge.Cabal.Baseline.nonReinstallablePackages`) and
+  reports no plan. Three of the five benchmark problems disagree for exactly this
+  reason, and they are not comparable until the provider carries the same rule: a
+  non-reinstallable package must offer installed units only, never a source release.
 - **Rung 4** — setup / build-tool deps (see reference's `SetupDeps.hs`). Note what
   cabal does here that we have no model for at all: it solves **qualified goals**, so
   each executable and setup dependency gets its **own domain**. `Setup.hs` is an

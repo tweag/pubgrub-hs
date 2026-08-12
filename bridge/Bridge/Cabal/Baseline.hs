@@ -34,6 +34,8 @@ module Bridge.Cabal.Baseline
     , sourcePackageIndex
     , defaultSolverConfig
     , targetConstraints
+    , nonReinstallableConstraints
+    , nonReinstallablePackages
     , preferences
     ) where
 
@@ -51,7 +53,8 @@ import           Distribution.Solver.Modular      (PruneAfterFirstSuccess (..),
 import           Distribution.Solver.Types.ConstraintSource (ConstraintSource (..))
 import           Distribution.Solver.Types.InstalledPreference (InstalledPreference (..))
 import           Distribution.Solver.Types.LabeledPackageConstraint (LabeledPackageConstraint (..))
-import           Distribution.Solver.Types.PackageConstraint (PackageConstraint (..),
+import           Distribution.Solver.Types.PackageConstraint (ConstraintScope (..),
+                                                              PackageConstraint (..),
                                                               PackageProperty (..),
                                                               scopeToplevel)
 import           Distribution.Solver.Types.PackageIndex (PackageIndex)
@@ -73,7 +76,7 @@ import           Distribution.Solver.Types.Settings (AvoidReinstalls (..),
 import           Distribution.Solver.Types.SourcePackage (SourcePackage (..))
 import           Distribution.System              (Platform)
 import           Distribution.Types.PackageId    (PackageIdentifier (..))
-import           Distribution.Types.PackageName  (PackageName)
+import           Distribution.Types.PackageName  (PackageName, mkPackageName)
 import           Distribution.Types.Version      (Version)
 import           Distribution.Types.VersionRange (VersionRange)
 import qualified Distribution.Verbosity          as Verbosity
@@ -102,7 +105,7 @@ solveWithCabal config platform cinfo installed source targets =
         source
         Nothing -- no pkg-config db: we do not model pkgconfig-depends
         (preferences targetNames)
-        (targetConstraints targets)
+        (targetConstraints targets ++ nonReinstallableConstraints)
         targetNames
   where
     targetNames = Set.fromList (map fst targets)
@@ -212,6 +215,49 @@ targetConstraints targets =
         ConstraintSourceUserTarget
     | (pn, range) <- targets
     ]
+
+-- | Packages that may never be built from source, as constraints.
+--
+-- Without them the baseline is __more permissive than cabal-install__: on
+-- @aeson '<2'@ it planned to build @base-4.15.1.0@, @ghc-prim-0.7.0@ and
+-- @ghc-bignum-1.3@ from Hackage, none of which can be rebuilt against a given
+-- GHC. That changes verdicts, not just plans: a problem whose only solution
+-- needs an older @base@ has none once @base@ is pinned.
+--
+-- The shape is cabal-install's own: 'ScopeAnyQualifier' binds in /every/
+-- qualified domain (the library's and @Setup.hs@'s alike), and
+-- 'PackagePropertyInstalled' means "an installed instance or nothing".
+nonReinstallableConstraints :: [LabeledPackageConstraint]
+nonReinstallableConstraints =
+    [ LabeledPackageConstraint
+        (PackageConstraint (ScopeAnyQualifier pn) PackagePropertyInstalled)
+        ConstraintSourceNonReinstallablePackage
+    | pn <- nonReinstallablePackages
+    ]
+
+-- | The names, copied verbatim from
+-- @Distribution.Client.Dependency.nonReinstallablePackages@ in cabal-install
+-- 3.14.2.0, which we do not depend on.
+--
+-- Deliberately a snapshot rather than a derivation: how cabal decides what is
+-- reinstallable is in flux, and a snapshot is easy to check and update. cabal's
+-- reasons for each name: the package overrides its unit id, defines wired-in
+-- declarations that tie it to one compiler, or has no buildable source
+-- distribution. @rts@ is /not/ on cabal's list, although it is equally
+-- unbuildable.
+nonReinstallablePackages :: [PackageName]
+nonReinstallablePackages =
+    map
+        mkPackageName
+        [ "base"
+        , "ghc-bignum"
+        , "ghc-internal"
+        , "ghc-prim"
+        , "ghc"
+        , "integer-gmp"
+        , "integer-simple"
+        , "template-haskell"
+        ]
 
 -- | Prefer the newest release of a target and the installed unit of anything
 -- else: cabal's @PreferLatestForSelected@ default, and the closest match to our

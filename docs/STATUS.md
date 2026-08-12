@@ -670,7 +670,8 @@ installed-db read.
 
 (ours / cabal's; single unrepeated runs, ±25% machine noise, trace off, warm index
 cache. Both figures include index loading, which is not the same work for the two —
-see below.)
+see below. **These verdicts predate the non-reinstallable constraints**; with those
+added, three of the five disagree — see below.)
 
 **The shape of it, stated plainly: cabal is 2.7–4.3× faster on the three problems
 with real search, we are 2–3× leaner in memory, and the verdicts agree everywhere.**
@@ -731,22 +732,63 @@ than a fault. **We have no model for this at all**: our decisions are per packag
 name, so one solve yields one version of `mtl`, full stop. It needs specifying before
 rung 4 — see the rung 4 note in `CLAUDE.md`.
 
-### But this exposed a real fidelity gap in the baseline
+### Non-reinstallable boot packages — and three verdict disagreements
 
-cabal is choosing to **build `base`, `ghc-prim` and `ghc-bignum` from source**. Real
-cabal-install never does: it adds constraints marking boot packages
-non-reinstallable (`ConstraintSourceNonReinstallablePackage`, from
-`nonReinstallablePackages` in `Distribution.Client.Dependency`). Those constraints
-live in `cabal-install`, so `defaultSolverConfig` here does not have them, and the
-baseline is currently **more permissive than the thing it is meant to be a baseline
-for**.
+The rendering above showed cabal planning to **build `base`, `ghc-prim` and
+`ghc-bignum` from source**, which cabal-install never does: it constrains boot
+packages as non-reinstallable. Those constraints live in `cabal-install`, so the
+baseline lacked them and was **more permissive than the thing it is a baseline for**.
 
-This is not cosmetic — it may change verdicts. `aeson 1.5.6.0` needs `base <4.16`; pin
-`base` to the installed 4.21.0.0 and cabal should report *no plan*, where it currently
-reports one. If so, `aeson <2` becomes the first **verdict disagreement** and the first
-**unsat** case in the set, which is exactly what the explanation showcase has been
-missing. Until the constraints are added, every verdict in the table above should be
-read as "agrees, with cabal solving a laxer problem than cabal-install would".
+Added as `Bridge.Cabal.Baseline.nonReinstallableConstraints` — cabal-install's own
+shape (`ScopeAnyQualifier` so it binds in every qualified domain,
+`PackagePropertyInstalled` meaning "an installed instance or nothing") over a
+baked-in copy of its eight names (`base`, `ghc-bignum`, `ghc-internal`, `ghc-prim`,
+`ghc`, `integer-gmp`, `integer-simple`, `template-haskell`). A list of names rather
+than a derivation on purpose: how cabal decides reinstallability is itself in flux, so
+a snapshot that is obviously a snapshot beats tracking a moving target. Note `rts` is
+not on cabal's list although it is equally unbuildable.
+
+**It changes three of five verdicts:**
+
+| problem | ours | cabal | time | max residency |
+|---|---|---|---|---|
+| `vector` | sat | sat | 0.55 / 1.01 | 22.9 / 54.0 MB |
+| `pandoc` | sat | sat | 1.34 / 1.58 | 22.9 / 80.5 MB |
+| `conduit <1.3` | sat | **UNSAT** | 3.36 / 1.18 | 22.9 / 50.7 MB |
+| `lens <4` | sat | **UNSAT** | 5.07 / 1.56 | 39.1 / 76.0 MB |
+| `aeson <2` | sat | **UNSAT** | 6.85 / 1.94 | 22.9 / 75.1 MB |
+
+**The disagreement is ours, not cabal's.** We answer sat by planning to build a boot
+package from source. Rung 3 is "strict prefer-installed", which says what to do when
+an installed unit is admissible and nothing about the case where a constraint excludes
+it — and there we fall through to a source release of `base`. cabal treats that as
+impossible, and it is. So the `base 4.15.1.0` oddity was a real bug in our model all
+along, and the baseline is what surfaced it. Until our provider carries the same rule,
+these three problems are not comparable: we are answering a laxer question.
+
+### The explanation target, now concrete
+
+cabal's `aeson <2` failure is 25 lines of search trace ending in a list of suspects:
+
+```
+[__5] rejecting: template-haskell-2.23.0.0/installed-41f7 (conflict: aeson => template-haskell>=2.9.0.0 && <2.18)
+[__5] skipping: template-haskell; 2.24.0.0, … (has the same characteristics …)
+[__5] rejecting: template-haskell; 2.17.0.0, 2.16.0.0, … (constraint from non-reinstallable package requires installed instance)
+[__5] fail (backjumping, conflict set: aeson, template-haskell)
+After searching the rest of the dependency tree exhaustively, these were the goals
+I've had most trouble fulfilling: base, template-haskell, ghc-boot-th, pretty, aeson,
+primitive, time, tagged, vector, tagged:template-haskell, tasty, text, regex-posix,
+regex-base, th-abstraction
+Try running with --minimize-conflict-set to improve the error message.
+```
+
+The actual cause is two facts: `aeson <2` forces `aeson 1.5.6.0`, which needs
+`template-haskell <2.18`; the only `template-haskell` that may be used is the installed
+2.23.0.0. Everything else in those 25 lines is the search that found it, and the
+closing list of fifteen "goals I've had most trouble fulfilling" is a heuristic, not a
+cause. **This is the side-by-side the explanation deliverable exists to produce**, and
+it is the first real specimen — see `memory/demo-showcase-failure-cases.md`. It only
+becomes a fair comparison once our solver reports the same failure rather than a plan.
 
 ### One incidental oddity — still open
 
