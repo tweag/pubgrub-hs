@@ -459,9 +459,25 @@ the depth) and **`Learned`** (the root cause, as distinct from the conflict that
 started it). `conflictResolution` became monadic for `Resolving` only; the algorithm
 is unchanged.
 
-**Caveat for timing.** Tracing renders to stdout, so `aeson <2` prints ~1500 lines
-and the 8.5 s above includes that. A timed run should discard the log, or the CLI
-needs a verbosity switch. There isn't one.
+**Caveat for timing.** Tracing renders to stdout, so `aeson <2` prints thousands
+of lines and the 8.5 s above includes that. The trace is now behind `-v` /
+`--verbose` and **off by default**, so the numbers above were taken in what is no
+longer the default mode — anything wanting them comparable should be re-run.
+
+Two things that pass came out of adding the switch, both worth knowing before the
+next measurement pass:
+
+- **The trace is not where the time goes.** With stdout redirected to a file,
+  `aeson <2` runs the same with and without it (3396 lines vs 179). The switch buys
+  output hygiene and a terminal-free measurement, not a speed-up.
+- **Run-to-run noise on this machine is ±25%** — four runs of `aeson <2` came in at
+  5.2, 6.5, 6.9 and 7.8 s. Single unrepeated timings, including every number in the
+  table above, cannot distinguish anything smaller than that.
+
+Also unfixed: with `-v` off there is no way to get the conflict/backjump/depth
+counts, because those are *derived by counting trace lines*. A `--stats` mode that
+consumes `SolverMsg` into counters and prints one summary line is the missing piece
+for a timed run that also wants the search columns.
 
 ### One incidental oddity, unexplained
 

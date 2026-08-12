@@ -10,7 +10,8 @@
 --
 -- Everything runs in one 'App' monad whose environment carries two co-log
 -- channels — @Text@ (the bridge's own messages and the provider's warnings)
--- and 'SolverMsg' (the solver's search trace) — both rendered to stdout.
+-- and 'SolverMsg' (the solver's search trace). The @Text@ channel always
+-- renders to stdout; the trace only under @--verbose@ (see 'Verbosity').
 module Main (main) where
 
 import           Bridge.Hackage                  (mkCache)
@@ -57,6 +58,18 @@ import           UnliftIO                        (MonadIO (liftIO),
 -- The application monad: two log channels rendered to stdout
 -- --------------------------------------------------------------------------
 
+-- | How much of the run to narrate. Only the solver trace is switched: the
+-- @Text@ channel is a handful of lines (index status, the read counts) and
+-- carries the answer itself, so it always prints.
+--
+-- The trace defaults to /off/ so that a run can be timed without a terminal in
+-- the measurement: @aeson '<2'@ emits 3396 lines with it and 179 without. Note
+-- that the saving is in the /rendering/, not in the solve — redirected to a
+-- file the two are the same speed within run-to-run noise. Turn it on with
+-- @-v@ when you want to watch or count the search.
+data Verbosity = Normal | Verbose
+    deriving stock (Eq, Show)
+
 data Env = Env
     { envText   :: LogAction App Text
     , envSolver :: LogAction App SolverMsg
@@ -73,15 +86,22 @@ instance HasLog Env SolverMsg App where
     getLogAction = envSolver
     setLogAction a e = e {envSolver = a}
 
-runApp :: App a -> IO a
-runApp app = runReaderT (unApp app) env
+runApp :: Verbosity -> App a -> IO a
+runApp verbosity app = runReaderT (unApp app) env
   where
     toStdout :: LogAction App Text
     toStdout = LogAction (liftIO . TIO.putStrLn)
     env =
         Env
             { envText = toStdout
-            , envSolver = cmap renderSolverMsg toStdout
+            , envSolver = case verbosity of
+                Verbose -> cmap renderSolverMsg toStdout
+                -- 'mempty' is co-log's do-nothing action. The solver still
+                -- constructs each 'SolverMsg' (one constructor application,
+                -- with unforced fields) but nothing renders it, so the cost
+                -- that matters for a timed run — pretty-printing an
+                -- 'Incompatibility' and writing a line — is gone.
+                Normal -> mempty
             }
 
 renderSolverMsg :: SolverMsg -> Text
@@ -112,13 +132,39 @@ prettyIncompat i =
 -- Argument parsing
 -- --------------------------------------------------------------------------
 
-parseArgs :: [String] -> Either String (PackageName, VersionSet)
-parseArgs [name] = (\p -> (p, fullVersionSet)) <$> eitherParsec name
-parseArgs [name, range] = do
-    p <- eitherParsec name
-    vr <- eitherParsec range :: Either String VersionRange
-    pure (p, fromVersionRange vr)
-parseArgs _ = Left "usage: pubgrub <package> [version-range]"
+data Options = Options
+    { optVerbosity :: Verbosity
+    , optTarget    :: PackageName
+    , optRange     :: VersionSet
+    }
+
+usage :: String
+usage = "usage: pubgrub [-v|--verbose] <package> [version-range]"
+
+parseArgs :: [String] -> Either String Options
+parseArgs args = do
+    (verbosity, positional) <- takeFlags Normal [] args
+    case positional of
+        [name] -> options verbosity name Nothing
+        [name, range] -> options verbosity name (Just range)
+        _ -> Left usage
+  where
+    takeFlags v acc [] = Right (v, reverse acc)
+    takeFlags v acc (a : as)
+        | a == "-v" || a == "--verbose" = takeFlags Verbose acc as
+        -- Only long options are rejected as unknown. A leading @-@ alone does
+        -- not make an argument a flag — this is the position a version range
+        -- appears in, and range syntax has historically included @-any@ — so
+        -- anything else is handed to the range parser to accept or reject.
+        | take 2 a == "--" = Left ("unknown flag: " ++ a ++ "\n" ++ usage)
+        | otherwise = takeFlags v (a : acc) as
+
+    options v name mRange = do
+        p <- eitherParsec name
+        vs <- case mRange of
+            Nothing -> pure fullVersionSet
+            Just range -> fromVersionRange <$> (eitherParsec range :: Either String VersionRange)
+        pure (Options {optVerbosity = v, optTarget = p, optRange = vs})
 
 -- --------------------------------------------------------------------------
 -- Driver
@@ -129,14 +175,15 @@ main = do
     args <- getArgs
     case parseArgs args of
         Left err -> putStrLn ("error: " ++ err)
-        Right (target, range) -> do
+        Right opts -> do
+            let target = optTarget opts
             cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
             manager <- newManager defaultManagerSettings
             -- The provider needs the root's targets up front: it is asked to
             -- expand the root like any other package, but has no index entry
             -- to look its dependencies up in.
-            runApp $
-                withProvider cache manager [(target, range)] $ \provider -> do
+            runApp (optVerbosity opts) $
+                withProvider cache manager [(target, optRange opts)] $ \provider -> do
                     logMsg (T.pack ("Solving for " ++ prettyShow target))
                     result <- solve provider rootName rootInstance
                     report provider result

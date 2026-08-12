@@ -33,7 +33,7 @@ The `pubgrub` executable resolves a package's dependency closure against
 Hackage plus your installed GHC:
 
 ```sh
-cabal run pubgrub -- <package> [version-range]
+cabal run pubgrub -- [-v|--verbose] <package> [version-range]
 ```
 
 Examples:
@@ -41,22 +41,28 @@ Examples:
 ```sh
 cabal run pubgrub -- hashable          # any version
 cabal run pubgrub -- aeson '>=2'       # constrained (quote ranges for the shell)
+cabal run pubgrub -- -v aeson '<2'     # ... plus the solver's search trace
 ```
 
 On the first run you'll see the index being bootstrapped/updated; then the
-solver streams its search trace and finishes with the resolved plan:
+resolved plan:
 
 ```
 Solving for hashable
-  · Deciding (PackageName "hashable") ...
-  · Deciding (PackageName "base") ...
-  ...
 Solution:
-  base 4.21.0.0            -- pinned to the installed unit
-  bytestring 0.12.2.0      -- installed
-  hashable 1.5.1.0         -- newest source release
-  ...
+ root 0
+└─ hashable 1.5.1.0 -arch-native -random-initial-seed
+   ├─ base 4.21.0.0 (installed)
+   │  ├─ ghc-internal 9.1202.0 (installed)
+   │  ...
+   ├─ bytestring 0.12.2.0 (installed) (*)
+   ...
+read 1 .cabal files, served 1 repeat lookups from cache
 ```
+
+Each node shows the decided *instance*: a source release with the flag
+assignment it was decided under, or an installed unit as such. `(*)` marks a
+subtree already printed higher up.
 
 Installed/boot packages resolve to the exact unit from your GHC (strict
 prefer-installed); everything else resolves to the newest source release in
