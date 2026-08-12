@@ -4,12 +4,15 @@
 module Bridge.Cabal.InstalledPkg
     ( InstalledPkg (..)
     , getInstalledPackages
+    , getInstalledPackageIndex
+    , reduceIndex
     ) where
 
 import           Distribution.Simple.Compiler            (Compiler,
                                                           PackageDBX (..))
 import qualified Distribution.Simple.GHC                 as Cabal
-import           Distribution.Simple.PackageIndex        (allPackages)
+import           Distribution.Simple.PackageIndex        (InstalledPackageIndex,
+                                                          allPackages)
 import           Distribution.Simple.Program.Db          (ProgramDb)
 import           Distribution.Types.InstalledPackageInfo (InstalledPackageInfo (..))
 import           Distribution.Types.PackageId            (PackageIdentifier (..))
@@ -27,9 +30,25 @@ data InstalledPkg = InstalledPkg
     deriving (Eq, Show)
 
 getInstalledPackages :: Verbosity -> Compiler -> ProgramDb -> IO [InstalledPkg]
-getInstalledPackages verbosity compiler programDb = do
-    iidx <- Cabal.getInstalledPackages verbosity compiler Nothing [GlobalPackageDB] programDb
-    return [ InstalledPkg (installedUnitId ipi) n v (depends ipi)
-            | ipi <- allPackages iidx
-            , let PackageIdentifier n v = sourcePackageId ipi
-            ]
+getInstalledPackages verbosity compiler programDb =
+    reduceIndex <$> getInstalledPackageIndex verbosity compiler programDb
+
+-- | Keep only what our solver models: a unit's id, name, version and direct
+-- dependencies. The cabal baseline takes the whole index instead, so the db is
+-- read once and this reduction is applied to that one read.
+reduceIndex :: InstalledPackageIndex -> [InstalledPkg]
+reduceIndex iidx =
+    [ InstalledPkg (installedUnitId ipi) n v (depends ipi)
+    | ipi <- allPackages iidx
+    , let PackageIdentifier n v = sourcePackageId ipi
+    ]
+
+-- | The global package db as Cabal's own index, unreduced.
+--
+-- The cabal baseline ('Bridge.Cabal.Baseline') needs the whole
+-- 'InstalledPackageIndex', because that is what its resolver takes, and both
+-- solvers must see the /same/ db. So the db is read once, here, and
+-- 'reduceIndex' cuts it down for our solver.
+getInstalledPackageIndex :: Verbosity -> Compiler -> ProgramDb -> IO InstalledPackageIndex
+getInstalledPackageIndex verbosity compiler programDb =
+    Cabal.getInstalledPackages verbosity compiler Nothing [GlobalPackageDB] programDb

@@ -14,6 +14,8 @@
 -- open index bracket.
 module Bridge.Provider
     ( withProvider
+    , withWorld
+    , World (..)
     , rootName
     , rootInstance
 
@@ -31,7 +33,8 @@ module Bridge.Provider
 import           Bridge.Cabal.Flatten                         (GuardedDeps,
                                                                componentDeps,
                                                                expandGuard)
-import           Bridge.Cabal.InstalledPkg                    (getInstalledPackages)
+import           Bridge.Cabal.InstalledPkg                    (getInstalledPackageIndex,
+                                                               reduceIndex)
 import           Bridge.Hackage                               (IndexHandle (..),
                                                                ParseError,
                                                                withHackageIndex)
@@ -59,6 +62,7 @@ import           Distribution.Compiler                        (CompilerInfo)
 import           Distribution.Pretty                          (prettyShow)
 import           Distribution.Simple.Compiler                 (compilerInfo)
 import           Distribution.Simple.GHC                      (configure)
+import           Distribution.Simple.PackageIndex             (InstalledPackageIndex)
 import           Distribution.Simple.Program.Db               (defaultProgramDb)
 import           Distribution.System                          (Platform,
                                                                buildPlatform)
@@ -109,12 +113,11 @@ withProvider
     :: (MonadUnliftIO m, WithLog env Text m)
     => Cache -> Manager -> [(PackageName, VersionSet)] -> (Provider m -> m a) -> m a
 withProvider cache manager root act =
-    withHackageIndex cache manager $ \handle -> do
-        (compiler, mPlatform, programDb) <-
-            liftIO $ configure Verbosity.normal Nothing Nothing defaultProgramDb
-        installed <- liftIO $ getInstalledPackages Verbosity.normal compiler programDb
-        let platform = fromMaybe buildPlatform mPlatform
-            cInfo = compilerInfo compiler
+    withWorld cache manager $ \world -> do
+        let handle = wIndex world
+            platform = wPlatform world
+            cInfo = wCompiler world
+            installed = reduceIndex (wInstalled world)
         (readRelease, lookupStats) <- liftIO (releaseReader platform cInfo handle)
         let provider =
                 Provider
@@ -139,6 +142,42 @@ withProvider cache manager root act =
                 )
             )
         pure result
+
+-- | Everything a solve needs to be run against: the open index, and the compiler
+-- world its results are relative to.
+--
+-- It exists so that the two solvers can be driven from __one__ of each. Both take
+-- an installed db and a set of source releases, and if either got its own the
+-- comparison between them would include the difference between two reads (see
+-- @Bridge.Cabal.Baseline@).
+data World = World
+    { wIndex     :: IndexHandle
+    -- ^ open, and only valid inside 'withWorld'
+    , wPlatform  :: Platform
+    , wCompiler  :: CompilerInfo
+    , wInstalled :: InstalledPackageIndex
+    -- ^ the global db as Cabal models it; 'reduceIndex' cuts it down to what our
+    -- own solver uses
+    }
+
+-- | Open the index and resolve the compiler world, then run @act@. The index
+-- bracket closes on the way out, so nothing that reads a @.cabal@ lazily may
+-- escape.
+withWorld
+    :: (MonadUnliftIO m, WithLog env Text m)
+    => Cache -> Manager -> (World -> m a) -> m a
+withWorld cache manager act =
+    withHackageIndex cache manager $ \handle -> do
+        (compiler, mPlatform, programDb) <-
+            liftIO $ configure Verbosity.normal Nothing Nothing defaultProgramDb
+        installedIndex <- liftIO $ getInstalledPackageIndex Verbosity.normal compiler programDb
+        act
+            World
+                { wIndex = handle
+                , wPlatform = fromMaybe buildPlatform mPlatform
+                , wCompiler = compilerInfo compiler
+                , wInstalled = installedIndex
+                }
 
 -- | The synthetic root package name, chosen so it cannot collide with a real
 -- Hackage package.

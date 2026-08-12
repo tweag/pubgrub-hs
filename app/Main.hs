@@ -14,9 +14,13 @@
 -- renders to stdout; the trace only under @--verbose@ (see 'Verbosity').
 module Main (main) where
 
+import           Bridge.Cabal.Baseline           (defaultSolverConfig, outcome,
+                                                  solveWithCabal,
+                                                  sourcePackageIndex)
 import           Bridge.Hackage                  (mkCache)
-import           Bridge.Provider                 (rootInstance, rootName,
-                                                  withProvider)
+import           Bridge.Provider                 (World (..), rootInstance,
+                                                  rootName, withProvider,
+                                                  withWorld)
 import           Colog                           (HasLog (..), LogAction (..),
                                                   cmap, logMsg)
 import           Control.Monad.Reader            (MonadReader, ReaderT,
@@ -32,8 +36,11 @@ import qualified Data.Text.IO                    as TIO
 import           Distribution.Parsec             (eitherParsec)
 import           Distribution.Pretty             (prettyShow)
 import           Distribution.Types.Flag         (showFlagAssignment)
+import           Distribution.Solver.Types.ResolverPackage (ResolverPackage (..))
+import           Distribution.Package            (packageId)
+import           Distribution.Types.PackageId    (pkgName)
 import           Distribution.Types.PackageName  (PackageName)
-import           Distribution.Types.VersionRange (VersionRange)
+import           Distribution.Types.VersionRange (VersionRange, anyVersion)
 import           Hackage.Security.Util.Path      (fromFilePath, makeAbsolute)
 import           Network.HTTP.Client             (defaultManagerSettings,
                                                   newManager)
@@ -48,8 +55,7 @@ import           PubGrub.Pretty                  (Pretty (pretty))
 import           PubGrub.Report                  (reportConflict)
 import           PubGrub.Solver                  (SolveError (..),
                                                   SolverMsg (..), solve)
-import           PubGrub.VersionSet              (VersionSet, fromVersionRange,
-                                                  fullVersionSet)
+import           PubGrub.VersionSet              (VersionSet, fromVersionRange)
 import           System.Environment              (getArgs)
 import           UnliftIO                        (MonadIO (liftIO),
                                                   MonadUnliftIO)
@@ -132,39 +138,56 @@ prettyIncompat i =
 -- Argument parsing
 -- --------------------------------------------------------------------------
 
+-- | Which solver to run. Both are fed from a world opened the same way
+-- ('Bridge.Provider.withWorld'), so this switches the solver and nothing else.
+data Which = Ours | Cabal
+    deriving stock (Eq, Show)
+
 data Options = Options
     { optVerbosity :: Verbosity
+    , optWhich     :: Which
     , optTarget    :: PackageName
     , optRange     :: VersionSet
+    , optRawRange  :: VersionRange
+    -- ^ the same constraint unconverted: cabal's solver takes a 'VersionRange',
+    -- ours a 'VersionSet', and both must come from the one argument
     }
 
 usage :: String
-usage = "usage: pubgrub [-v|--verbose] <package> [version-range]"
+usage = "usage: pubgrub [-v|--verbose] [--cabal] <package> [version-range]"
 
 parseArgs :: [String] -> Either String Options
 parseArgs args = do
-    (verbosity, positional) <- takeFlags Normal [] args
+    (verbosity, which, positional) <- takeFlags Normal Ours [] args
     case positional of
-        [name] -> options verbosity name Nothing
-        [name, range] -> options verbosity name (Just range)
+        [name] -> options verbosity which name Nothing
+        [name, range] -> options verbosity which name (Just range)
         _ -> Left usage
   where
-    takeFlags v acc [] = Right (v, reverse acc)
-    takeFlags v acc (a : as)
-        | a == "-v" || a == "--verbose" = takeFlags Verbose acc as
+    takeFlags v w acc [] = Right (v, w, reverse acc)
+    takeFlags v w acc (a : as)
+        | a == "-v" || a == "--verbose" = takeFlags Verbose w acc as
+        | a == "--cabal" = takeFlags v Cabal acc as
         -- Only long options are rejected as unknown. A leading @-@ alone does
         -- not make an argument a flag — this is the position a version range
         -- appears in, and range syntax has historically included @-any@ — so
         -- anything else is handed to the range parser to accept or reject.
         | take 2 a == "--" = Left ("unknown flag: " ++ a ++ "\n" ++ usage)
-        | otherwise = takeFlags v (a : acc) as
+        | otherwise = takeFlags v w (a : acc) as
 
-    options v name mRange = do
+    options v w name mRange = do
         p <- eitherParsec name
-        vs <- case mRange of
-            Nothing -> pure fullVersionSet
-            Just range -> fromVersionRange <$> (eitherParsec range :: Either String VersionRange)
-        pure (Options {optVerbosity = v, optTarget = p, optRange = vs})
+        range <- case mRange of
+            Nothing -> pure anyVersion
+            Just r -> eitherParsec r :: Either String VersionRange
+        pure
+            Options
+                { optVerbosity = v
+                , optWhich = w
+                , optTarget = p
+                , optRange = fromVersionRange range
+                , optRawRange = range
+                }
 
 -- --------------------------------------------------------------------------
 -- Driver
@@ -179,15 +202,54 @@ main = do
             let target = optTarget opts
             cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
             manager <- newManager defaultManagerSettings
-            -- The provider needs the root's targets up front: it is asked to
-            -- expand the root like any other package, but has no index entry
-            -- to look its dependencies up in.
-            runApp (optVerbosity opts) $
-                withProvider cache manager [(target, optRange opts)] $ \provider -> do
-                    logMsg (T.pack ("Solving for " ++ prettyShow target))
-                    result <- solve provider rootName rootInstance
-                    report provider result
+            runApp (optVerbosity opts) $ case optWhich opts of
+                -- The provider needs the root's targets up front: it is asked to
+                -- expand the root like any other package, but has no index entry
+                -- to look its dependencies up in.
+                Ours ->
+                    withProvider cache manager [(target, optRange opts)] $ \provider -> do
+                        logMsg (T.pack ("Solving for " ++ prettyShow target))
+                        result <- solve provider rootName rootInstance
+                        report provider result
+                Cabal ->
+                    withWorld cache manager $ \world -> do
+                        logMsg (T.pack ("Solving for " ++ prettyShow target ++ " (cabal's solver)"))
+                        runBaseline world [(target, optRawRange opts)]
 
+
+-- | Run cabal's solver over the same world and render its answer in the same
+-- shape ours is rendered in: a plan, or the solver's own failure text.
+--
+-- Both solvers' indexes come from one 'World' (see @Bridge.Cabal.Baseline@).
+-- Ours reads a @.cabal@ only when it expands a package, while cabal's wants a
+-- 'SourcePackage' record for every release in the index before it starts, so
+-- 'sourcePackageIndex' is where a large part of a baseline run's time and memory
+-- goes. It is called here rather than inside 'solveWithCabal' so that the two
+-- costs can be measured apart.
+runBaseline :: World -> [(PackageName, VersionRange)] -> App ()
+runBaseline world targets = do
+    sourceIdx <- liftIO (sourcePackageIndex (wIndex world))
+    let progress =
+            solveWithCabal
+                defaultSolverConfig
+                (wPlatform world)
+                (wCompiler world)
+                (wInstalled world)
+                sourceIdx
+                targets
+        (steps, result) = outcome progress
+    case result of
+        Left err -> do
+            logMsg (T.pack ("cabal found no plan after " ++ show steps ++ " log steps:"))
+            logMsg (T.pack err)
+        Right plan -> do
+            logMsg (T.pack ("cabal's plan (" ++ show steps ++ " log steps):"))
+            mapM_ (logMsg . T.pack . renderResolved) (sortOn resolvedName plan)
+  where
+    resolvedName p = prettyShow (pkgName (packageId p))
+    renderResolved p = case p of
+        PreExisting _ -> "  " ++ prettyShow (packageId p) ++ " (installed)"
+        Configured _  -> "  " ++ prettyShow (packageId p)
 
 report :: Provider App -> Either SolveError (Map PackageName Instance) -> App ()
 report _ (Left (NoSolution incompat)) =

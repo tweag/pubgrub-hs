@@ -43,6 +43,7 @@ library bridge
     visibility:         private
     hs-source-dirs:     bridge
     exposed-modules:
+        Bridge.Cabal.Baseline
         Bridge.Cabal.Flatten
         Bridge.Cabal.InstalledPkg
         Bridge.Hackage
@@ -55,6 +56,7 @@ library bridge
         , binary
         , bytestring
         , Cabal
+        , cabal-install-solver ^>=3.14.2.0
         , Cabal-syntax
         , containers
         , co-log
@@ -81,6 +83,8 @@ executable pubgrub
     main-is:            Main.hs
     build-depends:
         , base
+        , Cabal
+        , cabal-install-solver
         , Cabal-syntax
         , co-log
         , containers

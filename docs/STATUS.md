@@ -8,7 +8,7 @@
 > table below decide. If this file contradicts one of them, that one is right and
 > this file is stale — fix it.
 >
-> **Last checked against the tree:** 2026-08-05, 95 tests passing.
+> **Last checked against the tree:** 2026-08-12, 103 tests passing.
 >
 > History lives in [decision-log.md](decision-log.md) (how we got here);
 > abandoned ideas live in [attic/](attic/) (what we tried and dropped).
@@ -27,12 +27,13 @@ correctly is table stakes. It exists to answer two questions:
 ranges, Cabal flags, and installed/boot-package pinning. 95 tests pass, including
 both worked examples from the PubGrub spec.
 
-**Neither deliverable has been delivered.** There is no benchmark harness and no
-cabal baseline wired in, so nothing has been *compared* to anything. A first cut of
-our own numbers exists — see [Measurement](#measurement--first-results) — and its
-main result is about the apparatus rather than the solver: the standing stress case
-has one conflict in it, and peak residency currently measures the index reader.
-The interesting half of the project has barely started.
+**Neither deliverable has been delivered, but the comparison has started.** As of
+2026-08-12 cabal's own solver runs over our index (`pubgrub --cabal`, no
+`cabal-install` dependency), and the first five-problem comparison is in
+[First baseline comparison](#first-baseline-comparison-2026-08-12): **verdicts agree
+everywhere, cabal is 2.7–4.3× faster where there is real search, we use 2–3× less
+memory.** What is missing is the harness — one run doing both, diffing plans,
+repeating for timing — and the explanation side-by-side.
 
 ---
 
@@ -642,13 +643,86 @@ the term the solver reasons with and the range the report quotes
 `base >=4.7 && <5` gets quoted back to its author as `>=4.7.0.0 && <=4.21.0.0`.
 Narrowing a dependee term is not safe for reports on its own.
 
-### One incidental oddity, unexplained
+## First baseline comparison (2026-08-12)
+
+`Bridge.Cabal.Baseline` drives cabal's own modular solver over our index;
+`pubgrub --cabal <target> [range]` runs it. **No `cabal-install` dependency** —
+`cabal-install-solver` exposes everything needed (`Distribution.Solver.Modular.*` are
+all exposed modules, and its own deps are just `Cabal`/`Cabal-syntax` plus ordinary
+libraries). The entry point used is `modularResolver`, which is resolver-shaped: it
+runs `convPIs`, builds the constraint map and converts the log to a `Progress`, all
+of which `../cabal-solver-plan` reproduces by hand because it calls
+`Distribution.Solver.Modular.Solver.solve` directly. What `Distribution.Client.*`
+would have supplied — CLI constraint syntax, a preference intermediate language,
+`defaultSolverConfig`, and index acquisition — is either restated in ~20 lines or
+ours already.
+
+Both solvers are fed from one `Bridge.Provider.withWorld`: one index bracket, one
+installed-db read.
+
+| problem | verdict | time | peak RSS | max residency |
+|---|---|---|---|---|
+| `vector` | both sat | **0.53** / 0.82 | **83** / 129 MB | **22.9** / 54.0 MB |
+| `pandoc` | both sat | **1.29** / 1.66 | **83** / 238 MB | **22.9** / 80.5 MB |
+| `conduit <1.3` | both sat | 3.20 / **1.17** | **83** / 121 MB | **22.9** / 50.7 MB |
+| `lens <4` | both sat | 4.65 / **1.32** | **100** / 185 MB | **39.1** / 75.5 MB |
+| `aeson <2` | both sat | 6.57 / **1.51** | **83** / 183 MB | **28.1** / 74.5 MB |
+
+(ours / cabal's; single unrepeated runs, ±25% machine noise, trace off, warm index
+cache. Both figures include index loading, which is not the same work for the two —
+see below.)
+
+**The shape of it, stated plainly: cabal is 2.7–4.3× faster on the three problems
+with real search, we are 2–3× leaner in memory, and the verdicts agree everywhere.**
+Our advantage on `vector` and `pandoc` is the lazy index, not the solve.
+
+Two caveats that keep this from being the benchmark report:
+
+- **The index work differs by design.** Ours parses a `.cabal` only when it expands
+  a package (13 reads on `vector`); cabal's resolver needs a `SourcePackage` record
+  for all ~152k releases before it starts, which is most of its memory and a chunk of
+  its floor time. Descriptions are still parsed lazily
+  (`unsafeInterleaveIO` + `srcpkgDescription` being documented lazy), so it is the
+  *spine* that costs. Splitting index build from solve is now the first thing the
+  harness must do.
+- **`solveExecutables = True`** in cabal's defaults means it solves setup and
+  build-tool depends; our rung 4 is unbuilt. That is visible in the plans below and
+  means the two are not solving quite the same problem on any package with a custom
+  setup.
+
+### The plans agree on the interesting part, and diverge in two known ways
+
+On `aeson <2` both pick **`aeson 1.5.6.0`**. cabal's plan carries 63 packages against
+our 41, and the extra ones are exactly the two gaps we know about:
+
+- the **setup closure** — `Cabal`, `Cabal-syntax`, `directory`, `process`, `time`,
+  `unix`, `file-io`, `parsec` — which is rung 4, unbuilt here;
+- boot packages our tree-renderer collapses under `(*)` rather than omits, so part of
+  the 41-vs-63 gap is presentation, not resolution. A real plan diff is harness work.
+
+**This bears on the oddity below, but does not settle it yet.** cabal's `aeson <2`
+plan contains a source **`base-4.15.1.0`** alongside the installed `base-4.21.0.0`.
+Two entries for one package is not in itself a contradiction — cabal solves
+**qualified goals**, so a setup or executable dependency lives in its own domain and
+may take a different version of a package than the library does. Our renderer
+flattens that away (`modularResolver` applies `convCP`, which strips qualifiers), so
+what looks like one plan with two `base`es may be two domains with one each. Until the
+scopes are rendered, no conclusion should be drawn about either solver from this —
+including the reading, briefly recorded here and withdrawn, that the plan could not be
+built.
+
+### One incidental oddity — still open
 
 `aeson <2` resolves with **`base 4.15.1.0`** in the plan — a *source* release of
-`base`, not the installed 4.21.0.0. Rung 3 is described as **strict
-prefer-installed**, so this may be outside the intended model, or may be correct
-because the constraint excludes the installed unit and a source `base` is then the
-only option. Not investigated. Worth settling before a benchmark set bakes it in.
+`base`, not the installed 4.21.0.0. Rung 3 is **strict prefer-installed**, so this
+looks like it might be outside the intended model.
+
+cabal's solver, on the same problem and index, also emits a source `base 4.15.1.0`.
+That is suggestive but not conclusive, for two reasons, both open: cabal may be
+placing it in a *different qualified domain* than ours is (see "First baseline
+comparison"), and our baseline does not add cabal-install's constraints against
+reinstalling boot packages, which is what would normally stop a source `base` being
+chosen at all. Still unsettled; retitled from "settled" once those were noticed.
 
 ## Resolved contradictions
 
@@ -719,9 +793,13 @@ moves; treat a cited line number as a hint, and grep for the identifier.
 
 | deliverable | state |
 |---|---|
-| **Explanation showcase** — real failing problems, pubgrub-hs vs cabal side by side | solver produces numbered proofs; no side-by-side, no cabal baseline, wording gaps open |
-| **Benchmark report** — time + peak residency on real sat/unsat problems | **not started** as a comparison. Our own first numbers exist ([Measurement](#measurement--first-results)); peak residency is not yet a usable metric |
+| **Explanation showcase** — real failing problems, pubgrub-hs vs cabal side by side | solver produces numbered proofs, and cabal's failure text is now reachable (`--cabal` returns its `Fail` message); no side-by-side rendering, no *unsat* problem set, wording gaps open |
+| **Benchmark report** — time + peak residency on real sat/unsat problems | **first comparison exists** ([First baseline comparison](#first-baseline-comparison-2026-08-12)), on five sat problems, single runs. Not a report: no repetition, index build not separated from solve, no unsat cases, and what peak residency consists of is unestablished |
 
-Both need `cabal-install-solver` wired in as a baseline and both solvers driven from
-the one shared index. That structural sharing is the point of the bridge design, and
-it is the piece that makes the comparison apples-to-apples.
+The baseline and the shared index are done — `cabal-install-solver` drives cabal's
+resolver from the same `withWorld`, which is what makes the comparison
+apples-to-apples rather than arranged. What remains for both deliverables is the
+**harness**: one process running both solvers per problem, diffing plans rather than
+eyeballing them, separating index build from solve, repeating runs, and rendering the
+two failure explanations side by side. Plus an unsat problem set, which neither
+deliverable can be evidenced without and which does not exist yet.

@@ -93,9 +93,9 @@ Current layout (4 cabal components):
   plus `Index/PreInstalled.hs` (the installed-unit model) and
   `InstanceSet{,/SourceCell}.hs` (the solver's set type).
 - `bridge/` — private library `bridge`. `Bridge/{Hackage,Installed,Provider}.hs`
-  plus `Bridge/Cabal/{Flatten,InstalledPkg}.hs`: index reader, installed-db
-  reader, flag-parametric `GenericPackageDescription` flattening, and the real
-  `Provider`. `Provider.releaseReader` memoises, per release, only the *reduced*
+  plus `Bridge/Cabal/{Baseline,Flatten,InstalledPkg}.hs`: index reader, installed-db
+  reader, the cabal-solver baseline, flag-parametric `GenericPackageDescription`
+  flattening, and the real `Provider`. `Provider.releaseReader` memoises, per release, only the *reduced*
   form the provider needs (declared flags + flag-guarded deps) — never the parsed
   description. Retaining those instead cost 27.2s / 904MB on `pandoc` against
   3.7s / 83MB uncached: ~170 parse trees pinning their slices of the index is
@@ -103,17 +103,26 @@ Current layout (4 cabal components):
 - `app/Main.hs` — executable `pubgrub`: the CLI driver.
 - `test/` — `{VersionSet,InstanceSet,Solver,Paper,Flatten,FlagSolve}Spec.hs`.
 
-Note the diagram above still describes the *intended* end state. The cabal
-baseline and the harness do not exist yet: nothing in the tree depends on
-`cabal-install-solver`, and the driver runs only our solver.
+The cabal baseline landed 2026-08-12: `bridge` depends on `cabal-install-solver`
+(and **not** `cabal-install`), `Bridge.Cabal.Baseline` drives
+`Distribution.Solver.Modular.modularResolver` over our index, and `Bridge.Provider`'s
+`withWorld` opens the index and compiler world once so both solvers are fed from one
+read. The *harness* is what is still missing: a single run that does both, diffs the
+plans, and repeats for timing.
 
 **Dependency boundary note.** The `../cabal-solver-plan` reference depends on
-`cabal-install`, but only for *index acquisition* (`IndexUtils`, `RepoContext`,
-hackage-security) plus some CLI-convenience types. We avoid `cabal-install` and
-`hackage-security` entirely by writing our own minimal index reader (`tar` +
-`Cabal-syntax`'s `parseGenericPackageDescription`), taking care to handle
-**.cabal revisions (last wins)** and **`preferred-versions`**. The single shared
-index reader feeds both solvers, making the apples-to-apples comparison structural.
+`cabal-install`, but only for *index acquisition* (`IndexUtils`, `RepoContext`) plus
+some CLI-convenience types. We avoid `cabal-install` — including for the baseline,
+see `Bridge.Cabal.Baseline` — by talking to `hackage-security` ourselves:
+`Bridge.Hackage` bootstraps and refreshes the index, keeps a disk-cached
+package→versions map, and reads one release's `.cabal` on demand through
+`indexLookupCabal` + `Cabal-syntax`'s `parseGenericPackageDescription`. (An earlier
+version of this note claimed we avoid `hackage-security` too and read the tar
+directly with `tar`; we do not, and there is no `tar` dependency.) Still to handle:
+**`preferred-versions`**. **.cabal revisions** need no work — the index
+`hackage-security` hands us already carries only the last revision of each release,
+verified 2026-08-12 (152,746 entries, 152,746 distinct). The single shared index
+reader feeds both solvers, making the apples-to-apples comparison structural.
 
 ## Roadmap — rung-by-rung fidelity ladder
 
@@ -132,7 +141,15 @@ time; each rung leaves a runnable solver and we measure both deliverables at eac
   flag-irrelevant reason is re-offered once per irrelevant assignment (2^k), which
   is what depender-range collapsing fixes — see Reporting gap 1 below.
 - **Rung 3** — ✅ `base`/GHC pinning (installed db → `PreInstalled` instances, strict prefer-installed).
-- **Rung 4** — setup / build-tool deps (see reference's `SetupDeps.hs`).
+- **Rung 4** — setup / build-tool deps (see reference's `SetupDeps.hs`). Note what
+  cabal does here that we have no model for at all: it solves **qualified goals**, so
+  each executable and setup dependency gets its **own domain**. `Setup.hs` is an
+  executable that is never linked against the library, so it may be built against a
+  different `mtl` than the library uses, and cabal's plan can legitimately contain two
+  versions of one package. Our decisions are per package name, full stop — one version
+  of `mtl` per solve. This has to be specified before rung 4 is built; the immediate
+  job is to understand what cabal actually emits (its plan loses the qualifiers to
+  `convCP` on the way out, so reading a flat plan will mislead).
 - **Rung 5** — public sublibraries.
 
 **Caveat on "measure both deliverables at each rung".** We have not been doing
@@ -143,9 +160,14 @@ and they are not rungs:
 - **Explanations** — cause tracking is reinstated (`IncompatCause`) and
   `PubGrub.Report` renders a numbered proof. Next: `collapseNoInstances`, then
   the spec's human-friendly wording. See "Reporting" below.
-- **Benchmark** — nothing exists. Needs `cabal-install-solver` wired in as a
-  baseline, both solvers driven from the one index, and time + peak residency
-  measured. This is the larger of the two and has not been started.
+- **Benchmark** — the baseline exists as of 2026-08-12: `Bridge.Cabal.Baseline`
+  drives cabal's own modular solver over *our* index, and `pubgrub --cabal <target>`
+  runs it. **Without `cabal-install`** — see the module haddock for what the
+  `Distribution.Client.*` modules would have supplied and why none of it is needed.
+  First numbers, verdict agreement, and the two plan divergences are in
+  `docs/STATUS.md` ("First baseline comparison"). What is still missing is the
+  harness proper: one process running both, diffing plans rather than eyeballing
+  them, and repeating runs.
 
 ## The set representation (`InstanceSet`)
 
