@@ -18,6 +18,7 @@ import           PubGrub.InstanceSet.SourceCell (FlagPin (..), SourceCell (..),
                                                  pinnedCell, pruneCells)
 import           PubGrub.Pretty                 (Pretty (..))
 import           PubGrub.SetOps                 (SetOps (..))
+import           PubGrub.VersionSet             (VersionSet)
 import qualified PubGrub.VersionSet             as VersionSet
 
 -- | A pre-installed unit carries a version, and so does an 'Instance' — this is
@@ -123,24 +124,27 @@ singletonUsePreInstalled pip =
 -- singleton only if the assignment is total over the version's declared flags.
 singletonBuildSource :: Version -> FlagAssignment -> InstanceSet
 singletonBuildSource v flags =
-    sourceInstances v (NE.singleton (Map.fromList (unFlagAssignment flags)))
+    sourceInstances
+        (VersionSet.singletonVersionSet v)
+        (NE.singleton (Map.fromList (unFlagAssignment flags)))
 
--- | Instances of one source version, as a union of pinned regions: one cell per
--- pin set, pinning the flags it names and leaving the rest free.
+-- | Instances of one source version range, as a union of pinned regions: one
+-- cell per pin set, pinning the flags it names and leaving the rest free.
 --
 -- A pin set need not mention every declared flag, and how much the result
 -- denotes follows from how much it pins (see 'pinnedCell'). The two callers sit
--- at the extremes: 'singletonBuildSource' passes one total assignment and gets
--- one instance, while the provider passes a guard's disjuncts and gets every
--- instance of the version satisfying that guard.
+-- at the extremes: 'singletonBuildSource' passes one version and one total
+-- assignment and gets one instance, while the provider passes a release's
+-- version /slot/ (the range from the release up to the next one) and a guard's
+-- disjuncts, and gets every instance of that release satisfying the guard.
 --
 -- 'NonEmpty' because an empty union is the empty set: a guard that no
 -- assignment satisfies is dropped before it gets here, since an incompatibility
 -- with a ⊥ term is vacuous.
-sourceInstances :: Version -> NonEmpty (Map FlagName Bool) -> InstanceSet
-sourceInstances v pinSets = InstanceSet
+sourceInstances :: VersionSet -> NonEmpty (Map FlagName Bool) -> InstanceSet
+sourceInstances vs pinSets = InstanceSet
     { isInstalled = Set.empty
-    , isSource = [ pinnedCell v pins | pins <- NE.toList pinSets ]
+    , isSource = [ pinnedCell vs pins | pins <- NE.toList pinSets ]
     }
 
 -- | Does the set contain this instance?

@@ -258,14 +258,14 @@ mkExpand installedDb source root = expand'
             Just chosen -> do
                 incs <- consequencesOfUsePreInstalled chosen
                 pure (Just (UsePreInstalled chosen, incs))
-            Nothing -> firstUsable (sortOn Down (rsVersionsOf source pn))
+            Nothing -> firstUsable (withSlots (sortOn Down (rsVersionsOf source pn)))
 
                 where
                     -- Releases newest first (@docs/flags-semantics.md@ §5,
                     -- between-releases half). One @.cabal@ read per release, not
                     -- per candidate assignment.
                     firstUsable [] = pure Nothing
-                    firstUsable (v:rest) = do
+                    firstUsable ((v, slot):rest) = do
                         result <- rsReadRelease source pn v
                         case result of
                             -- A .cabal that fails to parse: warn and skip. The
@@ -303,7 +303,7 @@ mkExpand installedDb source root = expand'
                                                      (guard, deps) <- relGuarded release
                                                    , Just assignment <- [NE.nonEmpty (expandGuard guard)]
                                                    , -- The depender's InstanceSet `D` from above
-                                                     let dependers = sourceInstances v assignment
+                                                     let dependers = sourceInstances slot assignment
                                                    , -- and only if the depender's InstanceSet admits the instance
                                                      inst `memberInstance` dependers
                                                    , dep <- deps
@@ -386,4 +386,23 @@ mkExpand installedDb source root = expand'
             , isSource = [SourceCell vs Map.empty]
             }
 
-    versionsOf = rsVersionsOf source
+-- | Pair each release with its __version slot__: the half-open range from it up
+-- to the next release that exists, unbounded for the newest. Expects the list
+-- newest first, the order candidates are tried in.
+--
+-- A slot contains exactly one existing release, so @p ∈ slot(v) × C@ denotes the
+-- same instances as @p ∈ {v} × C@ over anything that can be offered: the claim is
+-- about @v@ alone, and it costs no @.cabal@ reads. What the slot adds is that
+-- adjacent slots /touch/, so 'PubGrub.VersionSet.unionVersionSet' coalesces them
+-- and 'SetOps.difference' leaves no empty hole between releases (see
+-- 'PubGrub.VersionSet.halfOpenVersionSet').
+--
+-- The bound is the next release in the __index__, not the next /usable/ one: a
+-- release that is skipped (unparseable, or admitted by no offered assignment)
+-- still has its own dependencies, and widening across it would attribute this
+-- release's dependencies to it.
+withSlots :: [Version] -> [(Version, VersionSet)]
+withSlots newestFirst =
+    [ (v, VersionSet.halfOpenVersionSet v above)
+    | (v, above) <- zip newestFirst (Nothing : map Just newestFirst)
+    ]

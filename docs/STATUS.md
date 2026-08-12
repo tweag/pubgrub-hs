@@ -479,6 +479,59 @@ counts, because those are *derived by counting trace lines*. A `--stats` mode th
 consumes `SolverMsg` into counters and prints one summary line is the missing piece
 for a timed run that also wants the search columns.
 
+### Second pass: version slots (2026-08-12)
+
+The depender term's version component is now a release's **slot** — the half-open
+range up to the next release that exists in the index — rather than the single
+version (`Bridge.Provider.withSlots`, `PubGrub.VersionSet.halfOpenVersionSet`). Free,
+because the package→versions map is already resident; sound, because a slot holds
+exactly one real release. See `flags-semantics.md` §4.2, first bullet.
+
+Counts are deterministic, so these are noise-free comparisons against the table
+above (which is the immediately preceding commit):
+
+| problem | decisions | conflicts | no-version | reads |
+|---|---|---|---|---|
+| `vector` | 39 → 39 | 0 → 0 | 0 → 0 | 13 → 13 |
+| `pandoc` | 266 → 266 | 1 → 1 | 0 → 0 | 167 → 167 |
+| `conduit <1.3` | 127 → 127 | 34 → 34 | 1 → 1 | 142 → 142 |
+| `lens <4` | 1059 → 1059 | 63 → 63 | 1 → 1 | 557 → 557 |
+| `aeson <2` | 1443 → **1376** | 98 → **92** | 6 → **0** | 350 → **250** |
+
+`aeson <2`'s depth histogram went `0×95, 9, 10, 18` → `0×89, 8, 9, 16`. Timed with
+the trace off: 4.17 / 4.89 / 5.92 s — inside the same ±25% noise band, so read count
+is the honest measure of the win, not elapsed time. `yesod` still does not finish
+(5988 decisions in 90 s, all conflicts depth 0 — its problem is churn, not depth).
+
+**What changed qualitatively is the more interesting half.** Finding 3's conflict
+term was a union of eleven *empty* gaps between real `bytestring` releases. It now
+reads as one contiguous interval that grows by absorbing the next slot:
+
+```
+Conflict {base ¬(>=4.2 && <4.15), bytestring >=0.10.8.1 && <0.10.8.2}
+  resolving at bytestring -> {base ¬(>=4.2 && <4.15), bytestring >=0.10.8.1 && <0.10.9.0}
+  resolving at bytestring -> {base ¬(>=4.2 && <4.16), bytestring >=0.10.8.1 && <0.10.10.0}
+  … 14 more, each absorbing one release's slot
+```
+
+That is `unionVersionSet` coalescing touching intervals, with no hole left to learn
+about — which is why `no-version` fell to zero. **And it reclassifies the deep
+chain**: the remaining 16 iterations are not an artifact, they are one step per real
+`bytestring` release, each contributing its own `base` upper bound. Nothing but
+genuine multi-release depender collapsing can shorten that, and the dependencies
+here really do differ per release, so it may be irreducible. Finding 3's "this is
+also a search-depth item" therefore stands only for the hole half, which is now
+fixed; the depth that remains has a cause we can name.
+
+Every multi-interval set left in the traces holds real releases (survivors of
+banning, e.g. `bytestring >=0.10.9.0 && <0.10.10.0 || >=0.10.12.1 && <0.11.0.0 ||
+>=0.11.1.0 && <0.11.2`), not empty regions.
+
+Still to do on the same free resource: `Bridge.Provider.widen` emits a *declared*
+dependency range verbatim, so dead space above a package's newest release survives
+into terms. Snapping that to the version map is the other half, and is what remains
+of Reporting gap 2.
+
 ### One incidental oddity, unexplained
 
 `aeson <2` resolves with **`base 4.15.1.0`** in the plan — a *source* release of

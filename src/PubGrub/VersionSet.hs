@@ -17,6 +17,7 @@ module PubGrub.VersionSet (
     emptyVersionSet,
     fullVersionSet,
     singletonVersionSet,
+    halfOpenVersionSet,
     fromVersionRange,
     toVersionRange,
     complementVersionSet,
@@ -143,6 +144,22 @@ fullVersionSet = fromVersionRange anyVersion
 -- | The set containing exactly one version.
 singletonVersionSet :: Version -> VersionSet
 singletonVersionSet = fromVersionRange . thisVersion
+
+-- | The half-open interval @[lo, hi)@, unbounded above when there is no @hi@.
+-- Empty if @hi <= lo@ ('fromCuts' drops it).
+--
+-- This is the shape to reach for when naming /one release/ out of an index whose
+-- version list you know: pass the release and the next existing release above it.
+-- The interval then contains exactly that one real release, so it denotes the same
+-- instances as @'singletonVersionSet' lo@ over anything that can actually be
+-- offered — but unlike the singleton it __touches its neighbour__, and touching
+-- intervals coalesce (see 'unionVersionSet'). So @[v1,v2)@ and @[v2,v3)@ join into
+-- @[v1,v3)@ on their own, while @{v1}@ and @{v2}@ stay two fragments forever, and
+-- removing @[v1,v2)@ leaves no empty @(v1,v2)@ hole behind to be learned about
+-- later. Both matter to a solver: singleton fragments cannot express a depender
+-- term such as @>=1.0 && <1.3@, and each hole in a range is refuted on its own.
+halfOpenVersionSet :: Version -> Maybe Version -> VersionSet
+halfOpenVersionSet lo hi = fromCuts [(Cut lo Before, maybe Unbounded (`Cut` Before) hi)]
 
 -- | Merge two sorted interval lists, joining any that overlap or touch.
 --

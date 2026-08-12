@@ -524,10 +524,24 @@ at all. Several occurrences may constrain the same `q` (an unconditional
 `q >=1`, a guarded `q <3`, a guarded `q /=2`); emit them as separate facts and let
 propagation intersect them, rather than computing one effective range per
 assignment, whose region would need a Boolean combination of guards. What remains
-genuinely to be done is the **version** axis: widening `D` across releases still
-requires inspecting the intervening ones — including checking whether each
-declares the flag the guard mentions at all, since where it does not, the guard is
-not merely false but inapplicable (§2.2).
+genuinely to be done is the **version** axis, and it splits in two:
+
+- **The release's slot — free, and done (2026-08-12).** The version component of `D`
+  is the half-open range from the release up to the next release *that exists in the
+  index*, rather than the single version. The index's package→versions map is
+  already resident, so this costs no `.cabal` read, and soundness is unaffected: the
+  slot contains exactly one existing release, so the claim is still about that
+  release alone and nothing is asserted about a release we have not read. What it
+  buys is that adjacent slots **touch**, so the version algebra coalesces them
+  instead of accumulating fragments, and a `difference` never leaves an empty
+  between-releases hole for the solver to learn about separately.
+- **Several releases — still open, and still needs reads.** Widening `D` across
+  *distinct* releases requires knowing they have the same dependency, which means
+  inspecting them — including whether each declares the flag the guard mentions at
+  all, since where it does not the guard is not merely false but inapplicable
+  (§2.2). Slots make this cheaper rather than harder: two adjacent slots union into
+  one contiguous range with no gap to justify, so the only remaining question is the
+  dependency-identity one.
 
 ### 4.3 Reports
 
@@ -818,10 +832,15 @@ with a different starting instance; the *verdict* is unchanged, as §5 claims.
 here. Add a `parser 1.1` that dropped the `simd` flag and it is admitted by the
 `parser ≠ 1.0` disjunct, whatever it declares; the not-applicable disjunct does no
 work in this trace. That is worth stating explicitly because it explains how a
-two-valued pin survived so long: **while a depender term is a single
-release-and-assignment, negating a learned decision never needs the
-not-applicable case** — the version disjunct always covers the other releases, and
-every pin the algebra produces is attached to a single version's range.
+two-valued pin survived so long: **while a depender term names a single
+release, negating a learned decision never needs the not-applicable case** — the
+version disjunct always covers the other releases, and every pin the algebra
+produces is attached to a range holding just the one release.
+
+Note the hinge is "one release", not "one version": the slot form above spans a
+range of version *numbers* while still holding exactly one release, so it keeps
+this property intact. What breaks it is spanning two releases that disagree about
+which flags they declare, which only the second bullet of §4.2 does.
 
 The case becomes load-bearing exactly when a depender term spans several versions
 while carrying a flag condition, which is what §4.2's collapsing creates. In

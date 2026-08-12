@@ -9,11 +9,9 @@ import           Data.Ord                   (Down (..))
 import qualified Data.Text                  as T
 import           Distribution.Types.Flag    (FlagAssignment, FlagName,
                                              mkFlagAssignment, unFlagName)
-import           Distribution.Types.Version (Version)
 import           PubGrub.Pretty             (Pretty (..))
 import           PubGrub.SetOps             (SetOps (..), isSubsetOf)
 import           PubGrub.VersionSet         (VersionSet)
-import qualified PubGrub.VersionSet         as VersionSet
 
 -- | What a cell says about one flag. Three states, because a flag is declared by
 -- a @(package, version)@ rather than by a package, so "the version has no such
@@ -207,7 +205,7 @@ assignmentFrom declared sc =
         Just NotDeclared  -> Nothing
         Nothing           -> Nothing
 
--- | The cell of exactly one version, with these flags pinned. Flags absent from
+-- | The cell of one version range, with these flags pinned. Flags absent from
 -- the map are left __free__, not pinned 'NotDeclared', so how much the cell
 -- denotes is decided entirely by how much the caller pins:
 --
@@ -219,14 +217,18 @@ assignmentFrom declared sc =
 --    whatever the flags the guard never mentions are set to. That is what keeps
 --    irrelevant flags out of a depender term.
 --
--- Leaving unmentioned flags free is exact in both cases because the version set is
--- a single version, so there is no release in the cell whose declared flags differ.
--- 'NotDeclared' becomes necessary only once a cell spans versions that disagree
+-- Leaving unmentioned flags free is exact in both cases as long as the range holds
+-- __one existing release__, since then there is no release in the cell whose
+-- declared flags differ. That is why the provider passes a release's
+-- 'PubGrub.VersionSet.halfOpenVersionSet' slot rather than the whole declared
+-- range: the slot reaches up to the next release in the index, so it contains the
+-- same single release a singleton would, while still touching its neighbour.
+-- 'NotDeclared' becomes necessary only once a cell spans releases that disagree
 -- about which flags exist.
-pinnedCell :: Version -> Map FlagName Bool -> SourceCell
-pinnedCell v pins =
+pinnedCell :: VersionSet -> Map FlagName Bool -> SourceCell
+pinnedCell vs pins =
     SourceCell
-        { scVersionSet = VersionSet.singletonVersionSet v
+        { scVersionSet = vs
         , scFlags = PinnedTo <$> pins
         }
 

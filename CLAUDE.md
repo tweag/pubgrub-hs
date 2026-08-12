@@ -300,18 +300,37 @@ Known gaps, in the order worth fixing:
    depender term still names the irrelevant flag and the 2^k cost survives intact.
    (This file prescribed the rejected form until 2026-08-05.)
 
-   What genuinely remains is the **version** axis: widening the depender across
-   adjacent releases still requires inspecting the intervening ones — including
-   whether each declares the flag the guard mentions at all, since where it does not
-   the guard is not merely false but *inapplicable*, which is the third pin state's
-   job. See also `docs/decision-semantics.md`, which builds on this emission shape
-   and treats it as its prerequisite.
+   On the **version** axis, the free half landed 2026-08-12: the depender's version
+   component is a release's **slot** — `halfOpenVersionSet v next`, reaching up to
+   the next release *present in the index* — instead of the single version
+   (`Bridge.Provider.withSlots`). This costs no `.cabal` read (the package→versions
+   map is already resident and is what dominates peak residency) and asserts nothing
+   about an unread release, since a slot holds exactly one real release. The point is
+   that adjacent slots **touch**, so `unionVersionSet` coalesces them and
+   `difference` stops manufacturing empty between-releases holes. Measured on
+   `aeson <2`: reads 350 → 250, no-version events 6 → 0, and the gappy eleven-way
+   conflict term became one contiguous interval (`docs/STATUS.md`, "Second pass").
+
+   What still requires reads is widening across *distinct* releases — that needs to
+   know they share the dependency, and whether each declares the guard's flag at all,
+   since where it does not the guard is not merely false but *inapplicable*, which is
+   the third pin state's job. Slots make it cheaper, not harder: two adjacent slots
+   already union into a contiguous range, so only dependency-identity is left. See
+   also `docs/decision-semantics.md`, which builds on this emission shape and treats
+   it as its prerequisite.
 2. **`collapseNoInstances`** — intensional ranges mean the solver must separately
    learn that a range's *holes* are empty, so `no version for bar in >2.0.0 && <3`
    leaves clutter the proof. pubgrub-rs has a dedicated post-pass for exactly
    this: `DerivationTree::collapse_no_versions` (`references/pubgrub/src/report.rs:102`,
    with the merge rule at `:132`). Absorb the range into the sibling cause's term
    by union and drop the node.
+
+   Mostly overtaken by slots (gap 1): holes *between* releases no longer form, and
+   `aeson <2`'s no-version events went 6 → 0. What is left comes from the other
+   direction — `Bridge.Provider.widen` puts a **declared** dependency range into a
+   term verbatim, so dead space (e.g. above a package's newest release) still
+   survives. Snapping that to the same resident version map is the remaining work,
+   and it is again at generation time rather than in a report post-pass.
 3. **Chain collapsing** — the spec fuses "depends on X *which depends on* Y" into
    one sentence; this is most of the remaining line-count gap.
 4. Cosmetic: `So,` on the final line; terminal periods on non-final lines; omit

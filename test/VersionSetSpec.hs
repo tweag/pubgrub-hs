@@ -3,6 +3,7 @@
 
 module VersionSetSpec (tests) where
 
+import           Data.List                         (nub, sort)
 import           Distribution.Types.VersionInterval (Bound (..),
                                                     LowerBound (..),
                                                     UpperBound (..),
@@ -78,6 +79,35 @@ tests =
                     )
         , testProperty "isSubsetOf agrees with intersection" $ \(a :: VersionSet) (b :: VersionSet) ->
             isSubsetOf a b === (intersectionVersionSet a b == a)
+        , testGroup
+            -- What the provider's version /slots/ rest on. A slot is
+            -- @halfOpenVersionSet release (next release in the index)@. Slots
+            -- touch, so they coalesce and tile without gaps, and an empty
+            -- region between releases never becomes a term the solver has to
+            -- learn about.
+            "half-open ranges (version slots)"
+            [ testProperty "holds its lower bound, up to but excluding the upper" $
+                forAll (twoAscending genVersion) $ \(lo, hi) ->
+                    conjoinV $ \v ->
+                        contains (halfOpenVersionSet lo (Just hi)) v === (lo <= v && v < hi)
+            , testProperty "adjacent ranges coalesce" $
+                forAll (threeAscending genVersion) $ \(a, b, c) ->
+                    unionVersionSet (halfOpenVersionSet a (Just b)) (halfOpenVersionSet b (Just c))
+                        === halfOpenVersionSet a (Just c)
+            , testProperty "consecutive ranges tile from the first bound up, with no holes" $
+                forAll (ascendingList genVersion) $ \vs -> case vs of
+                    [] -> property True
+                    (first : _) ->
+                        foldr
+                            (unionVersionSet . uncurry halfOpenVersionSet)
+                            emptyVersionSet
+                            (zip vs (map Just (drop 1 vs) ++ [Nothing]))
+                            === fromVersionRange (orLaterVersion first)
+            , testProperty "empty when the bounds cross or meet" $
+                forAll (twoAscending genVersion) $ \(lo, hi) ->
+                    (halfOpenVersionSet hi (Just lo) === emptyVersionSet)
+                        .&&. (halfOpenVersionSet lo (Just lo) === emptyVersionSet)
+            ]
         , testGroup
             -- The operations work on the intervals directly. The reference is
             -- Cabal's combinators on 'VersionRange' syntax followed by Cabal's
@@ -160,3 +190,21 @@ genViaRange = fromVersionRange <$> sized (\n -> genRange (min n 4))
 newtype NonEmptyVer = NonEmptyVer Version deriving Show
 instance Arbitrary NonEmptyVer where
     arbitrary = NonEmptyVer <$> genVersion
+
+-- | Distinct, strictly ascending draws — what a package's version list looks
+-- like. Retried rather than sorted-and-nubbed so the generator cannot quietly
+-- shrink the tuple to fewer distinct versions than the property asks for.
+twoAscending :: Gen Version -> Gen (Version, Version)
+twoAscending g = do
+    (a, b) <- (,) <$> g <*> g
+    if a == b then twoAscending g else pure (min a b, max a b)
+
+threeAscending :: Gen Version -> Gen (Version, Version, Version)
+threeAscending g = do
+    (a, b, c) <- (,,) <$> g <*> g <*> g
+    case nub (sort [a, b, c]) of
+        [x, y, z] -> pure (x, y, z)
+        _         -> threeAscending g
+
+ascendingList :: Gen Version -> Gen [Version]
+ascendingList g = nub . sort <$> listOf g

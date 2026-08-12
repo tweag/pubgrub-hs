@@ -41,7 +41,6 @@ import           Control.Monad.Reader           (MonadReader, ReaderT,
 import           Data.Either                    (fromLeft, isLeft)
 import           Data.IORef                     (IORef, modifyIORef', newIORef,
                                                  readIORef)
-import           Data.List.NonEmpty             (nonEmpty)
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Data.Text                      (Text)
