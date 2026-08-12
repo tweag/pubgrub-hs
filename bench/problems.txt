@@ -1,0 +1,26 @@
+# The benchmark problem set: one problem per line, "<package> [version-range]".
+# Blank lines and #-comments are ignored. Quote nothing — the range is the rest of
+# the line.
+#
+# Why these. Constraining a package to an OLDER release is what forces conflicts:
+# the old bounds have to be reconciled against everything else. Unconstrained
+# popular packages mostly do not conflict at all, which is how a benchmark set can
+# report a search improvement as worthless — see docs/STATUS.md, "Three findings
+# that change what to do next".
+#
+# Keep the two kinds separate when reading results. The first two measure index
+# throughput; the next three measure search.
+
+# --- index throughput: little or no search ---
+vector                  # 39 decisions, 0 conflicts. The floor.
+pandoc                  # 266 decisions, 1 conflict. Reads dominate; cannot show a
+                        # search win, and regressions in read count show up here first.
+
+# --- real search, all three currently UNSAT for both solvers ---
+conduit <1.3
+lens <4
+aeson <2                # the deepest resolution chain in the set
+
+# --- does not finish; kept so it is not forgotten ---
+# yesod                 # >90 s, thousands of decisions, all conflicts depth 0.
+                        # Uncomment only when you are prepared to wait or to time out.

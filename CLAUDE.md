@@ -62,9 +62,19 @@ is a summary and not authoritative; the documents below decide. Project history 
 
 ```sh
 cabal build
-cabal test
-cabal run pubgrub-hs
+cabal test                      # 103 tests, ~0.3 s
+cabal run pubgrub -- aeson      # the driver; add -v for the search trace
+cabal run pubgrub -- --cabal aeson   # cabal's solver, same index (the baseline)
+bench/compare.sh                # both solvers over bench/problems.txt
 ```
+
+**[`docs/benchmarking.md`](docs/benchmarking.md) is the reference for measuring
+anything** — how to run a subset of the tests, what `bench/compare.sh` and
+`bench/summarise.awk` report, how to reproduce the numbers in `docs/STATUS.md`, and
+which of those numbers are trustworthy. The short version of the last part: counts are
+deterministic and times are not (±25% on this desktop), total allocation from
+`+RTS -s` is the stable stand-in for time, and a run cannot be both quiet and counted
+because every count is derived by counting trace lines.
 
 ## Architecture
 

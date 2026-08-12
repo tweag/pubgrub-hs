@@ -55,6 +55,7 @@ the "authoritative on" column says who owns the question.
 | [`bridge-and-problem-model.md`](bridge-and-problem-model.md) | why the bridge is shaped as it is | 2026-07-23 notes, partly pre-reboot |
 | [`pubgrub-intro.md`](pubgrub-intro.md) | tutorial introduction to PubGrub | useful, three stale sections (flagged in it) |
 | [`flags-semantics-review.md`](flags-semantics-review.md) | an independent review of the flag spec | 2026-08-05; findings folded in, kept as the record |
+| [`benchmarking.md`](benchmarking.md) | **how to run the tests and benchmarks**, and which numbers to trust | current, 2026-08-12 |
 | [`decision-log.md`](decision-log.md) | project history | narrative, not authoritative |
 | this file | current state | summary, not authoritative |
 
@@ -371,6 +372,11 @@ collapsing would otherwise have to preserve.
 ---
 
 ## Measurement — first results
+
+> **To reproduce anything below, see [benchmarking.md](benchmarking.md).** It documents
+> `bench/compare.sh` and `bench/summarise.awk`, the problem set and why it is those
+> problems, and which of these numbers are deterministic (counts) rather than noisy
+> (times).
 
 First cut, 2026-08-05, one machine, warm cached index. Not a benchmark report: no
 cabal baseline, no repetition, no controlled environment. Enough to decide what to
