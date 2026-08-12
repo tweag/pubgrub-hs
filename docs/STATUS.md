@@ -843,6 +843,58 @@ than a derivation. Ours is a genuine proof and on `lens <4` reads far better; it
 has no bound on length. Fixing (1) and (2) is what makes the comparison the one the
 project claims.
 
+### Generation-time depender collapsing: landed, and it is a trade (2026-08-12)
+
+`Bridge.Provider.spanningOccurrence` implements `references/pubgrub.md:456` where the
+spec asks for it. For each guarded dependency occurrence of the chosen release, walk
+neighbouring releases in both directions while each carries the *same* occurrence
+(same guard, same `Dependency` — compared per dependency, not per group, which is
+`flags-semantics.md` §4.2's unit), then emit one incompatibility over the contiguous
+half-open range. Requiring an identical guard is what keeps the flag axis sound: every
+release in the span declares the flags the guard mentions, so no third pin state is
+needed and unmentioned flags stay free.
+
+| problem | time | reads | proof lines | decisions |
+|---|---|---|---|---|
+| `vector` | 0.63 → 0.90 | 13 → **108** | — | 39 → 39 |
+| `pandoc` | 1.59 → **10.57** | 167 → **2834** | — | 266 → 266 |
+| `conduit <1.3` | 1.62 → **0.99** | 142 → 287 | 1061 → **74** | 127 → 60 |
+| `lens <4` | 1.84 → 2.25 | 557 → **317** | 9 → **80** | — → 93 |
+| `aeson <2` | 11.12 → **2.37** | 250 → 423 | 2833 → **277** | 1376 → 438 |
+
+**What it bought.** Exactly what it was for, on the two problems that were unusable:
+`aeson <2` is **4.7× faster** with a proof **10× shorter** and a third of the decisions;
+`conduit <1.3`'s proof is **14× shorter**. cabal's `aeson <2` message is 30 lines, so
+277 is still far off — but 2833 was not a starting point, and the remaining lines are
+now mostly chain-collapsing (gap 3) and flag-cell (gap 5) work rather than
+release-by-release merging.
+
+**What it cost, and this is not small.** The walk is O(#releases of the depender) per
+expansion, and it pulls in releases the solver never needed. `pandoc` — the
+index-throughput case with one conflict — went **1.59 s to 10.57 s and 167 reads to
+2834**. `vector` went 13 reads to 108. Read-dominated problems are hurt badly, and
+`lens <4`'s proof got *longer* (9 → 80) because the search takes a different path.
+
+So it is a genuine trade, not a win: **conflict-heavy problems get much better,
+read-heavy problems get much worse.** Four ways out, none tried:
+
+1. **Walk downward only.** The solver tries newest-first, so the older direction is
+   where the useful span is; halves the reads at some loss of span.
+2. **Cache the span** per `(package, guard, dependency)`. The same occurrence is
+   re-walked on every expansion of that package, which is pure repetition.
+3. **Bound the walk** to k steps. Cheap, but the benefit came from long runs.
+4. **Merge on insert into the store instead** (pubgrub-rs's `merge_dependents`,
+   `references/pubgrub/src/internal/core.rs:322`): keep per-slot emission and union
+   adjacent clauses as they arrive, which needs **no extra reads at all** because slots
+   touch. It only merges releases actually expanded, so it is weaker than the spec's
+   rule, but it is the variant with no downside on `pandoc`. Needs the store keyed by
+   (depender, dependee), which our list-shaped store is not — and clause position
+   dominates propagation cost here, so it wants measuring rather than assuming.
+
+Option 4 with option 2 is probably the endgame. Before any of it: `noversion` events
+rose on all three unsat problems (`conduit` 1 → 6, `lens` 1 → 8, `aeson` 0 → 9), which
+is unexplained and might be a hole the collapsing opened.
+
 ### The explanation target, now concrete
 
 cabal's `aeson <2` failure is 25 lines of search trace ending in a list of suspects:
