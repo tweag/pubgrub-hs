@@ -766,6 +766,83 @@ impossible, and it is. So the `base 4.15.1.0` oddity was a real bug in our model
 along, and the baseline is what surfaced it. Until our provider carries the same rule,
 these three problems are not comparable: we are answering a laxer question.
 
+### Both solvers now carry the rule, and all five verdicts agree
+
+`Bridge.Installed.nonReinstallablePackages` is now the single list both solvers read —
+the baseline as constraints, our provider as a rule in `expand'`: a non-reinstallable
+package offers installed units only, and when none is admissible there are no instances
+at all rather than a fall-through to Hackage. That is the difference between
+*prefer*-installed and *only*-installed, and it was the whole content of the
+`base 4.15.1.0` oddity.
+
+| problem | verdict | time (ours / cabal) | max residency |
+|---|---|---|---|
+| `vector` | both sat | 0.63 / 0.96 | 22.9 / 54.0 MB |
+| `pandoc` | both sat | 1.59 / 1.84 | 22.9 / 80.5 MB |
+| `conduit <1.3` | **both UNSAT** | 1.62 / 1.06 | 22.9 / 50.7 MB |
+| `lens <4` | **both UNSAT** | 1.84 / 1.49 | 26.5 / 75.9 MB |
+| `aeson <2` | **both UNSAT** | 11.12 / 1.90 | 28.3 / 75.1 MB |
+
+Two of the three unsat problems now run *faster* than when we wrongly answered sat
+(`conduit` 3.36 → 1.62, `lens` 5.07 → 1.84) and land within 1.2–1.5× of cabal.
+`aeson <2` goes the other way: **11.12 s against cabal's 1.90 s**, 5.9× slower, and
+worse than the 6.85 s it took to produce the wrong answer. Proving unsat is where we
+are weakest.
+
+### The explanation deliverable is currently losing, and now we know why
+
+This is the first time the two explanations can be put side by side, and the result is
+the opposite of the project's thesis:
+
+| problem | our proof | cabal's message |
+|---|---|---|
+| `lens <4` | **9 lines** | 22 lines |
+| `conduit <1.3` | **1061 lines** | 16 lines |
+| `aeson <2` | **2833 lines** | 30 lines |
+
+`lens <4` is the shape we promised. The other two are unusable, and the causes are all
+already-known gaps, now with evidence behind them:
+
+1. **Reporting gap 1's version axis, in the proof.** Long runs of lines do nothing but
+   merge adjacent releases of one package pairwise:
+
+   ```
+   13. Because transformers >=0.4.3.0 && <0.5.0.0 depends on base >=2 && <4.9 and
+       transformers >=0.4.2.0 && <0.4.3.0 depends on base >=2 && <4.9,
+       transformers >=0.4.2.0 && <0.5.0.0 depends on base >=2 && <4.9
+   14. Because (13) and transformers >=0.4.1.0 && <0.4.2.0 +applicativeinbase …
+   ```
+
+   That is `references/pubgrub.md:456`'s collapsing happening **at derivation time, one
+   release per line**, because we do not do it at generation time. Every such line
+   would not exist if the incompatibility had been emitted over the adjacent range in
+   the first place. This is now the top item for both deliverables: it is also most of
+   why `aeson <2` takes 11 s.
+
+2. **Flag cells that cover every state, unsimplified.** Terms like
+
+   ```
+   aeson >=1.2.2.0 && <1.4.2.0 -bytestring-builder
+     or >=1.2.2.0 && <1.4.2.0 +bytestring-builder
+     or >=1.2.2.0 && <1.4.2.0 (no bytestring-builder flag)
+   ```
+
+   are three cells over one range covering all three pin states — semantically "any
+   instance of `aeson` in that range", and printable as such. A cell set that exhausts a
+   flag's states at identical version sets should collapse to the flag being
+   unconstrained. That is a `mergeCells` sibling and cheap; nothing about it needs the
+   report layer.
+
+3. **Chain collapsing (gap 3), unstarted**, which is what turns "A depends on B" +
+   "B depends on C" into one sentence.
+
+**What cabal does better, stated honestly.** Its message is not a proof and its closing
+"goals I've had most trouble fulfilling" is a heuristic list rather than a cause — but
+it is 16–30 lines whatever the problem, because it reports the search it did rather
+than a derivation. Ours is a genuine proof and on `lens <4` reads far better; it just
+has no bound on length. Fixing (1) and (2) is what makes the comparison the one the
+project claims.
+
 ### The explanation target, now concrete
 
 cabal's `aeson <2` failure is 25 lines of search trace ending in a list of suspects:

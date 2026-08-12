@@ -39,6 +39,7 @@ import           Bridge.Hackage                               (IndexHandle (..),
                                                                ParseError,
                                                                withHackageIndex)
 import           Bridge.Installed                             (InstalledDb (..),
+                                                               isNonReinstallable,
                                                                InstalledEdge (..),
                                                                closureEdges,
                                                                installedInstancesOf,
@@ -300,7 +301,16 @@ mkExpand installedDb source root = expand'
             Just chosen -> do
                 incs <- consequencesOfUsePreInstalled chosen
                 pure (Just (UsePreInstalled chosen, incs))
-            Nothing -> firstUsable (withSlots (rsVersionsOf source pn))
+            -- No admissible installed unit. For most packages that means falling
+            -- through to source releases; for a non-reinstallable one it means
+            -- nothing at all, because its Hackage releases cannot be built against
+            -- this compiler (@Bridge.Installed.nonReinstallablePackages@). This is
+            -- the difference between preferring installed units and allowing only
+            -- installed ones. Without it @aeson '<2'@ resolves by planning to build
+            -- @base 4.15.1.0@ from Hackage, which cabal rejects.
+            Nothing
+                | isNonReinstallable pn -> pure Nothing
+                | otherwise -> firstUsable (withSlots (rsVersionsOf source pn))
 
                 where
                     -- Releases newest first (@docs/flags-semantics.md@ §5,

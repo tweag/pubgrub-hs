@@ -11,6 +11,8 @@ module Bridge.Installed
     , toPreInstalled
     , InstalledEdge(..)
     , closureEdges
+    , nonReinstallablePackages
+    , isNonReinstallable
     ) where
 
 import           Bridge.Cabal.InstalledPkg      (InstalledPkg (..))
@@ -20,7 +22,7 @@ import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Data.Set                       (Set)
 import qualified Data.Set                       as Set
-import           Distribution.Types.PackageName (PackageName)
+import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.UnitId      (UnitId)
 import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
 import           PubGrub.InstanceSet            (Instance (..))
@@ -102,3 +104,39 @@ closureEdges db root = go (Set.singleton root) (lookupUnit root)
 
     lookupUnit uid = maybe [] pure (Map.lookup uid (idbById db))
     named u = (ipName u, toPreInstalled u)
+
+-- | Packages that may only ever come from the installed db, never be built from a
+-- Hackage release.
+--
+-- Not a preference — an impossibility. These are tied to the compiler that produced
+-- them: they override their unit id, or define wired-in declarations, or have no
+-- buildable source distribution (cabal's own reasons). Planning to build one is
+-- planning something that cannot happen.
+--
+-- Verbatim from @Distribution.Client.Dependency.nonReinstallablePackages@ in
+-- cabal-install 3.14.2.0, and __both__ solvers read it from here so the comparison
+-- cannot drift: our provider through 'isNonReinstallable', the cabal baseline through
+-- 'Bridge.Cabal.Baseline.nonReinstallableConstraints'.
+--
+-- Deliberately a list of names rather than a derivation. How cabal decides
+-- reinstallability is itself in flux, so anything cleverer would be tracking a moving
+-- target; a snapshot that is obviously a snapshot is easier to check and to update.
+-- Note @rts@ is /not/ on cabal's list even though it is equally unbuildable — kept
+-- faithful rather than corrected, since the baseline has to agree.
+nonReinstallablePackages :: Set PackageName
+nonReinstallablePackages =
+    Set.fromList
+        (map
+            mkPackageName
+            [ "base"
+            , "ghc-bignum"
+            , "ghc-internal"
+            , "ghc-prim"
+            , "ghc"
+            , "integer-gmp"
+            , "integer-simple"
+            , "template-haskell"
+            ])
+
+isNonReinstallable :: PackageName -> Bool
+isNonReinstallable = (`Set.member` nonReinstallablePackages)

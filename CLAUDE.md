@@ -287,7 +287,14 @@ incompatibility and emits a numbered proof with backward references. The two
 unsatisfiable `PaperSpec` examples are the reference cases; the spec publishes
 their exact expected English (`references/pubgrub.md:1005` and `:1150`).
 
-Known gaps, in the order worth fixing:
+Known gaps, in the order worth fixing. **The order is now evidence-backed** (2026-08-12,
+first side-by-side against cabal): our proof for `lens <4` is 9 lines against cabal's
+22, but `conduit <1.3` is **1061** against 16 and `aeson <2` is **2833** against 30.
+Gap 1's version axis is most of that — whole runs of proof lines do nothing but merge
+adjacent releases pairwise at derivation time, which is the collapsing
+`references/pubgrub.md:456` asks for at generation time — followed by unsimplified flag
+cells (see 5 below) and then chain collapsing. See `docs/STATUS.md`, "The explanation
+deliverable is currently losing".
 
 1. **Depender-range collapsing** — the one gap that is a *spec divergence*, not a
    cosmetic choice, and the only one fixed outside the report layer. The spec
@@ -378,6 +385,14 @@ Known gaps, in the order worth fixing:
    one sentence; this is most of the remaining line-count gap.
 4. Cosmetic: `So,` on the final line; terminal periods on non-final lines; omit
    the synthetic root's version; number only lines actually referenced.
+5. **Collapse cells that exhaust a flag's states.** Real proof lines read
+   `aeson >=1.2.2.0 && <1.4.2.0 -bytestring-builder or … +bytestring-builder or …
+   (no bytestring-builder flag)` — three cells over one version range covering all
+   three pin states, which denotes "any instance in that range" with the flag
+   unconstrained. A `mergeCells` sibling: where cells share a version set and their
+   pins for one flag exhaust `PinnedTo True`, `PinnedTo False` and `NotDeclared`, drop
+   that flag from the pin map and merge. Not a report-layer fix, and it shortens the
+   terms the solver carries as well as the ones it prints.
 
 Do **not** chase byte-parity with pub's output: `^1.0.0` is Dart syntax and cabal
 writes `>=1.0.0 && <2`. The target is the same sentences and information in
