@@ -700,16 +700,53 @@ our 41, and the extra ones are exactly the two gaps we know about:
 - boot packages our tree-renderer collapses under `(*)` rather than omits, so part of
   the 41-vs-63 gap is presentation, not resolution. A real plan diff is harness work.
 
-**This bears on the oddity below, but does not settle it yet.** cabal's `aeson <2`
-plan contains a source **`base-4.15.1.0`** alongside the installed `base-4.21.0.0`.
-Two entries for one package is not in itself a contradiction — cabal solves
-**qualified goals**, so a setup or executable dependency lives in its own domain and
-may take a different version of a package than the library does. Our renderer
-flattens that away (`modularResolver` applies `convCP`, which strips qualifiers), so
-what looks like one plan with two `base`es may be two domains with one each. Until the
-scopes are rendered, no conclusion should be drawn about either solver from this —
-including the reading, briefly recorded here and withdrawn, that the plan could not be
-built.
+### What cabal's plan for `aeson <2` actually is
+
+Printing each entry's dependencies **by component** rather than flattening the plan
+answers this. Two entries for one package is not a contradiction: cabal solves
+**qualified goals**, so a setup or executable dependency is solved in its own domain
+and may take a different version of a package than the library does — `Setup.hs` is an
+executable that is never linked against the library, so it can be built against a
+different `mtl`. `modularResolver` applies `convCP` on the way out, which strips the
+qualifiers from the *identities*, so a flat list cannot tell one inconsistent plan from
+two consistent domains. (An earlier note here read it as the former. Withdrawn.)
+
+What is actually there:
+
+```
+  aeson-1.5.6.0 [-bytestring-builder -cffi -developer -fast]
+      lib: attoparsec-0.14.4 base-4.15.1.0 … text-1.2.5.0 …
+      setup: Cabal-3.14.1.0 base-4.21.0.0
+```
+
+- **one `setup:` line in the whole plan**, and it uses the *installed* `base-4.21.0.0`;
+- the **library** domain is built against source `base-4.15.1.0`, and with it source
+  `ghc-prim-0.7.0`, `ghc-bignum-1.3`, `array`, `binary`, `pretty`;
+- **four packages appear twice at the same version** — `array-0.5.8.0`,
+  `binary-0.8.9.3`, `ghc-bignum-1.3`, `pretty-1.1.3.6` — once installed, once to be
+  built. That is the two domains showing through after the qualifiers are stripped.
+
+So the plan is coherent, and the duplicates are the qualified-goal structure rather
+than a fault. **We have no model for this at all**: our decisions are per package
+name, so one solve yields one version of `mtl`, full stop. It needs specifying before
+rung 4 — see the rung 4 note in `CLAUDE.md`.
+
+### But this exposed a real fidelity gap in the baseline
+
+cabal is choosing to **build `base`, `ghc-prim` and `ghc-bignum` from source**. Real
+cabal-install never does: it adds constraints marking boot packages
+non-reinstallable (`ConstraintSourceNonReinstallablePackage`, from
+`nonReinstallablePackages` in `Distribution.Client.Dependency`). Those constraints
+live in `cabal-install`, so `defaultSolverConfig` here does not have them, and the
+baseline is currently **more permissive than the thing it is meant to be a baseline
+for**.
+
+This is not cosmetic — it may change verdicts. `aeson 1.5.6.0` needs `base <4.16`; pin
+`base` to the installed 4.21.0.0 and cabal should report *no plan*, where it currently
+reports one. If so, `aeson <2` becomes the first **verdict disagreement** and the first
+**unsat** case in the set, which is exactly what the explanation showcase has been
+missing. Until the constraints are added, every verdict in the table above should be
+read as "agrees, with cabal solving a laxer problem than cabal-install would".
 
 ### One incidental oddity — still open
 

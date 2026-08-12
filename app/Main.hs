@@ -36,7 +36,9 @@ import qualified Data.Text.IO                    as TIO
 import           Distribution.Parsec             (eitherParsec)
 import           Distribution.Pretty             (prettyShow)
 import           Distribution.Types.Flag         (showFlagAssignment)
+import qualified Distribution.Solver.Types.ComponentDeps as CD
 import           Distribution.Solver.Types.ResolverPackage (ResolverPackage (..))
+import           Distribution.Solver.Types.SolverPackage (SolverPackage (..))
 import           Distribution.Package            (packageId)
 import           Distribution.Types.PackageId    (pkgName)
 import           Distribution.Types.PackageName  (PackageName)
@@ -244,12 +246,39 @@ runBaseline world targets = do
             logMsg (T.pack err)
         Right plan -> do
             logMsg (T.pack ("cabal's plan (" ++ show steps ++ " log steps):"))
-            mapM_ (logMsg . T.pack . renderResolved) (sortOn resolvedName plan)
+            mapM_ (mapM_ (logMsg . T.pack) . renderResolved) (sortOn resolvedName plan)
   where
     resolvedName p = prettyShow (pkgName (packageId p))
+
+    -- A plan entry with the /component/ each of its dependencies belongs to.
+    --
+    -- Do not flatten this to a package list. cabal solves __qualified goals__: a
+    -- setup or executable dependency is solved in its own domain, so @Setup.hs@
+    -- may be built against a different @mtl@ than the library, and one plan can
+    -- legitimately name two versions of a package.
+    -- 'Distribution.Solver.Modular.modularResolver' applies @convCP@ on the way
+    -- out, which strips the qualifiers from the /identities/, but the component
+    -- structure survives in each package's 'ComponentDeps', which is what this
+    -- prints. @setup:@ lines are the other domain.
     renderResolved p = case p of
-        PreExisting _ -> "  " ++ prettyShow (packageId p) ++ " (installed)"
-        Configured _  -> "  " ++ prettyShow (packageId p)
+        PreExisting _ -> ["  " ++ prettyShow (packageId p) ++ " (installed)"]
+        Configured sp ->
+            ("  " ++ prettyShow (packageId p) ++ flags sp)
+                : [ "      " ++ component c ++ ": " ++ unwords (map (prettyShow . packageId) ids)
+                  | (c, ids) <- CD.toList (CD.zip (solverPkgLibDeps sp) (solverPkgExeDeps sp)) >>= split
+                  , not (null ids)
+                  ]
+      where
+        split (c, (libs, exes)) = [(c, libs), (c, exes)]
+
+    flags sp = case showFlagAssignment (solverPkgFlags sp) of
+        "" -> ""
+        fa -> " [" ++ fa ++ "]"
+
+    component CD.ComponentLib     = "lib"
+    component CD.ComponentSetup   = "setup"
+    component (CD.ComponentExe n) = "exe:" ++ prettyShow n
+    component c                   = show c
 
 report :: Provider App -> Either SolveError (Map PackageName Instance) -> App ()
 report _ (Left (NoSolution incompat)) =
