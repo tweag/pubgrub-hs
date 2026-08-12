@@ -56,6 +56,7 @@ the "authoritative on" column says who owns the question.
 | [`pubgrub-intro.md`](pubgrub-intro.md) | tutorial introduction to PubGrub | useful, three stale sections (flagged in it) |
 | [`flags-semantics-review.md`](flags-semantics-review.md) | an independent review of the flag spec | 2026-08-05; findings folded in, kept as the record |
 | [`benchmarking.md`](benchmarking.md) | **how to run the tests and benchmarks**, and which numbers to trust | current, 2026-08-12 |
+| [`collapsing.md`](collapsing.md) | **depender collapsing**: what landed, its cost, and the five ways to finish it | design note, 2026-08-12 — the next thing to work on |
 | [`decision-log.md`](decision-log.md) | project history | narrative, not authoritative |
 | this file | current state | summary, not authoritative |
 
@@ -897,9 +898,16 @@ read-heavy problems get much worse.** Four ways out, none tried:
    (depender, dependee), which our list-shaped store is not — and clause position
    dominates propagation cost here, so it wants measuring rather than assuming.
 
-Option 4 with option 2 is probably the endgame. Before any of it: `noversion` events
-rose on all three unsat problems (`conduit` 1 → 6, `lens` 1 → 8, `aeson` 0 → 9), which
-is unexplained and might be a hole the collapsing opened.
+**All of this is written up properly in [collapsing.md](collapsing.md)**, which is
+self-contained and is where to start: the five options with what each actually fixes
+(option 1's "halves the reads" was wrong and is corrected there), why term equality
+turns out to be *exact* for the terms option 4 would compare, the three possible store
+shapes, and the one measurement that is the only open question — price the store change
+with no merging in it, and see what the indirection costs on `pandoc` against `aeson`.
+
+Before any of it: `noversion` events rose on all three unsat problems (`conduit` 1 → 6,
+`lens` 1 → 8, `aeson` 0 → 9), which is unexplained and might be a hole the collapsing
+opened.
 
 ### The explanation target, now concrete
 

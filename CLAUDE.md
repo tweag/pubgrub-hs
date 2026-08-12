@@ -349,6 +349,13 @@ deliverable is currently losing".
    depender term still names the irrelevant flag and the 2^k cost survives intact.
    (This file prescribed the rejected form until 2026-08-05.)
 
+   **Landed 2026-08-12, and unfinished — see [`docs/collapsing.md`](docs/collapsing.md)
+   before touching it.** `Bridge.Provider.spanningOccurrence` now emits over adjacent
+   releases carrying the same occurrence, which cut `aeson <2` from 11.1s to 2.4s and its
+   proof from 2833 lines to 277, but cost `pandoc` 6.6× in time and 17× in reads. That
+   file has the five ways out, the settled term-equality question, and the one
+   measurement to take first.
+
    On the **version** axis, the free half landed 2026-08-12: the depender's version
    component is a release's **slot** — `halfOpenVersionSet v next`, reaching up to
    the next release *present in the index* — instead of the single version
