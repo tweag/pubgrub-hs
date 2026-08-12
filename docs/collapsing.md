@@ -85,9 +85,10 @@ keeps most of the cost. A dial, not a fix.
 
 ### 4. Merge on insert into the store
 
-pubgrub-rs's approach (`merge_dependents`,
-`references/pubgrub/src/internal/incompatibility.rs:173`, called from
-`internal/core.rs:322`). Keep per-slot emission — **zero extra reads** — and when a
+pubgrub-rs's approach: `Incompatibility::merge_dependents`
+(`references/pubgrub/src/internal/incompatibility.rs:173` at rev `4dbe916`), called from
+`State::merge_incompatibility` (`internal/core.rs:322`, the call itself at `:328`).
+Keep per-slot emission — **zero extra reads** — and when a
 dependency incompatibility enters the store, find an existing one with the same
 (depender, dependee) and an identical dependee term, and replace it with the union of
 the depender terms. Because slots are half-open they **touch**, so `unionVersionSet`

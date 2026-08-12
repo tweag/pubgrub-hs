@@ -122,13 +122,18 @@ comparison is therefore: a shared flag variable may generalise more but imposes 
 identity Cabal does not have; a version-keyed one keeps the semantics and needs
 conditional-existence machinery.
 
-Here, each `(version, assignment)` pair is its own atom, so an irrelevant flag
-*does* enter the learned incompatibility, and a version rejected for a
-flag-irrelevant reason is re-offered once per irrelevant assignment. That is the
+Here, each `(version, assignment)` pair is its own atom, so — *absent §4.2* — an
+irrelevant flag enters the learned incompatibility, and a version rejected for a
+flag-irrelevant reason is re-offered once per irrelevant assignment. That was the
 price. It is recoverable **inside this model** — per-fact dependency collapsing
 (§4.2) keeps irrelevant flags out of the depender term, which is precisely the
 alternative's advantage — so the answer to the cost is collapsing, not a change of
 model.
+
+**And that answer has now been carried out** (§4.2 is implemented, §10), which
+settles the argument of this section empirically: the cost the rejected alternative
+was supposed to avoid was removed without adopting it. Read the rest of §1.4 as the
+reasoning that led there, not as a description of current behaviour.
 
 **Status.** Revisited 2026-08-04:
 [decision-semantics.md](decision-semantics.md) collects the alternative's
@@ -863,14 +868,20 @@ declares `simd` and 1.1 does not, `A ∖ B` must contain both `parser 1.0 -simd`
 `parser 1.1`. Note it needs a world where versions differ in what they declare —
 per §6, the same requirement the property suite has.
 
-**The price from §1.4, made concrete.** Give `parser 1.0` a second, irrelevant
-flag `docs`. Then (2) and (6) name `parser 1.0 +simd +docs`, so propagation
-leaves `+simd -docs` open: the solver offers it, re-reads the same dependency,
-fails identically, learns `{parser 1.0 +simd -docs}`, and only then reaches
-`-simd`. Two flags, two wasted rounds; k irrelevant flags, 2^k. Dependency
-collapsing (§4.2) is what removes it — the depender term becomes "1.0 with simd
-on, any `docs`" — which is why §1.4 names collapsing as the answer to this cost
-rather than a change of model.
+**The price from §1.4, made concrete — and since fixed.** Give `parser 1.0` a
+second, irrelevant flag `docs`. *Before §4.2*, (2) and (6) named
+`parser 1.0 +simd +docs`, so propagation left `+simd -docs` open: the solver offered
+it, re-read the same dependency, failed identically, learned
+`{parser 1.0 +simd -docs}`, and only then reached `-simd`. Two flags, two wasted
+rounds; k irrelevant flags, 2^k. Dependency collapsing (§4.2) is what removes it —
+the depender term becomes "1.0 with simd on, any `docs`" — which is why §1.4 names
+collapsing as the answer to this cost rather than a change of model.
+
+**Implemented 2026-08-05**, and this trace is the acceptance test for it: measured 2
+expansions where it had been 3 with one irrelevant flag and 5 with two
+(`test/FlagSolveSpec.hs`). The residue is bounded by the number of *guard regions*,
+not 2^k over declared flags — see [decision-semantics.md](decision-semantics.md) §0
+for the three costs that survive, all from a decision still being a point instance.
 
 **If `-simd` also failed**, the same machinery yields the failure report and the
 flag appears in both polarities, as separate causes. That shape is already
@@ -879,8 +890,9 @@ observable today.
 ## 10. What holds today
 
 A specification nobody has checked against the code is how the last round of
-confusion started, so: this is the state as of 2026-08-03, and it is expected to
-be edited whenever the tree moves.
+confusion started, so: this is the state as of **2026-08-12** (re-checked against the
+tree that day; 103 tests passing), and it is expected to be edited whenever the tree
+moves.
 
 | obligation | status |
 |---|---|
@@ -897,7 +909,7 @@ be edited whenever the tree moves.
 | §1.5 manual flags | not implemented; the rule is now settled and lives in §1.6's translation, not in admissibility |
 | §1.6 lenient user constraints | not implemented (no user flag constraints yet) |
 | §4.1 dependencies at the decided assignment | holds |
-| §4.2 per-fact collapsing | not implemented — dependers are single instances |
+| §4.2 per-fact collapsing | **implemented.** Flag axis 2026-08-05, version axis 2026-08-12: `Bridge.Provider.dependencyInc` emits one guarded occurrence, the depender term pinning only the guard's flags (`sourceInstances`) and spanning adjacent releases that carry the identical occurrence (`spanningOccurrence`). Its cost is not settled — see [collapsing.md](collapsing.md) |
 | §4.3 report wording | partial: constraints render, the not-applicable wording is not aligned |
 | §5 choice policy | implemented as release-major then fewest deviations, but over a **one-completion-per-cell** search — correct only while admissibility is assignment-independent (below) |
 | §6 non-uniform universe, one-sided properties | in place |

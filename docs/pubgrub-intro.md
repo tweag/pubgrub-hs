@@ -44,7 +44,13 @@ The naive approach — enumerate every combination of versions and test consiste
 - a `Map PackageName Version` assigning exactly one version to every required package, or
 - a human-readable derivation tree explaining why no such assignment exists.
 
-> **Scope note.** Cabal already ships its own solver. This project reimplements PubGrub for research and learning, following the algorithm used by Dart's `pub` package manager, Python's `uv`, and others. The goal is to understand the algorithm deeply and explore its relationship to Answer Set Programming.
+> **Scope note, corrected.** Cabal already ships its own solver. This project
+> reimplements PubGrub — the algorithm used by Dart's `pub`, Python's `uv` and others —
+> as a proof of concept whose two questions are **explanation quality** and
+> **performance** against cabal-install's solver (`../CLAUDE.md`, "Project goal").
+> An earlier version of this note said the goal was "to understand the algorithm deeply
+> and explore its relationship to Answer Set Programming". The ASP half of that was
+> abandoned before any code existed — see the banner at the top of this file and §8.
 
 ---
 

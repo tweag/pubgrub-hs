@@ -24,8 +24,8 @@ correctly is table stakes. It exists to answer two questions:
 2. Can it **match cabal-install on time and peak memory** on real problems?
 
 **The solver works.** It resolves real Hackage packages end to end, with version
-ranges, Cabal flags, and installed/boot-package pinning. 95 tests pass, including
-both worked examples from the PubGrub spec.
+ranges, Cabal flags, and installed/boot-package pinning. 103 tests pass, including
+all six worked examples from the PubGrub spec.
 
 **Neither deliverable has been delivered, but the comparison has started.** As of
 2026-08-12 cabal's own solver runs over our index (`pubgrub --cabal`, no
@@ -46,10 +46,10 @@ the "authoritative on" column says who owns the question.
 
 | file | authoritative on | status |
 |---|---|---|
-| [`references/pubgrub.md`](../references/pubgrub.md) | **the algorithm.** Vendored copy of pub's spec | reference — never edit |
+| [`references/pubgrub.md`](../references/pubgrub.md) | **the algorithm.** Vendored copy of pub's spec | present and now tracked (1233 lines); all cited line numbers verified 2026-08-12. Reference — never edit |
 | [`flags-semantics.md`](flags-semantics.md) | **flags**, and the value/set language | spec, 2026-08-03, largely implemented |
 | [`decision-semantics.md`](decision-semantics.md) | what a **decision** is (condition decisions) | spec, drafted 2026-08-04, **nothing implemented** |
-| [`../specification/`](../specification/) | the formal kernel model, in Lean | executable; **Lean code is normative over its own prose** |
+| [`../specification/`](../specification/) | **nothing — it is not authoritative.** Our own draft attempt at formalising the kernel, in Lean | executable and machine-checked; **a draft.** Where it disagrees with `references/pubgrub.md` or `flags-semantics.md`, it is wrong. Lean code is normative only over its own prose |
 | [`../CLAUDE.md`](../CLAUDE.md) | architecture, the rung ladder, conventions | current |
 | [`specification.md`](specification.md) | Cabal's **build model** (components, scopes, Backpack) | reference for rungs 4–5, nothing implemented |
 | [`bridge-and-problem-model.md`](bridge-and-problem-model.md) | why the bridge is shaped as it is | 2026-07-23 notes, partly pre-reboot |
@@ -58,13 +58,52 @@ the "authoritative on" column says who owns the question.
 | [`benchmarking.md`](benchmarking.md) | **how to run the tests and benchmarks**, and which numbers to trust | current, 2026-08-12 |
 | [`collapsing.md`](collapsing.md) | **depender collapsing**: what landed, its cost, and the five ways to finish it | design note, 2026-08-12 — the next thing to work on |
 | [`decision-log.md`](decision-log.md) | project history | narrative, not authoritative |
+| [`related-work.md`](related-work.md) | external literature → our problems | reading map, not authoritative |
 | this file | current state | summary, not authoritative |
+
+### `references/` — how much of the authority is actually in the repo
+
+`references/` went missing from one machine on 2026-08-12 and was restored by hand,
+which exposed that it had **never been checked in** while **60 citations across 13
+documents** point into it. Current state:
+
+| under `references/` | tracked? | citations verified |
+|---|---|---|
+| `pubgrub.md` — pub's spec, 1233 lines | ✅ now tracked | ✅ **all 13 line numbers exact** (2026-08-12): `:131 :169 :184 :443 :451 :456 :465 :476 :492 :499 :1005 :1150 :1172` |
+| two ASP papers (PDF) | ✅ now tracked | — (prose only; see [related-work.md](related-work.md)) |
+| `pubgrub/` — the Rust implementation | ❌ **nested git repo, contents not tracked** | 8 of 9 exact (`report.rs:102`, `incompatibility.rs:173,191`, `version_set.rs:29`, `core.rs:322`, `provider.rs:91,119`); `report.rs:132` was a blank line, now `:133` |
+| `pubgrub-guide/` — the internals guide | ❌ **nested git repo, contents not tracked** | not cited by line |
+
+**What this means in practice.** Citations into `pubgrub.md` are now trustworthy and
+reproducible — that was the load-bearing risk (`:456` is the whole basis of depender
+collapsing, `:1172` of intensional version sets) and it is discharged. Citations into
+`pubgrub/src/*.rs` are **still not reproducible for anyone else**: the checkout is a
+nested repo, so cloning this repository does not get it, and its line numbers move with
+upstream. The revisions the current citations were checked against:
+
+- `references/pubgrub` at `4dbe916`
+- `references/pubgrub-guide` at `1be2365`
+
+**Still owed:** vendor the Rust checkout properly (submodule, subtree, or extract just
+the cited functions into a note) and record the revision alongside it. Until then, treat
+a `references/pubgrub/src/…:NNN` citation as pinned to `4dbe916` and re-check it before
+leaning on it. Prefer citing the *function name* over the line: `merge_dependents` and
+`collapse_no_versions` will survive a rebase; `:173` will not.
 
 **Only one document is authoritative on flags: `flags-semantics.md`.** The other
 two flag documents were the confusing part and have moved to
 [`attic/`](attic/) — `flags-design.md` (superseded on semantics; it chose a rule
 that turned out to be wrong) and `flags-spike.hs` (the spike whose test universe
 hid the bug).
+
+**`../specification/` is a draft and settles nothing.** It is *our own attempt* at
+formalising PubGrub in Lean, not an independent authority — that it builds means our
+model is internally consistent, not that the model is right. Nothing proves it
+faithfully renders `references/pubgrub.md` or `flags-semantics.md`, and that unproven
+gap is precisely where an error would sit. So do not close a design argument by citing
+it, and do not change the solver because a theorem there permits it. Its "authoritative
+on" column is empty deliberately. The value is real but narrow: it is machine-checked,
+and writing it forces questions the prose leaves implicit.
 
 ### The one-sentence version of each spec
 
@@ -254,12 +293,18 @@ Full arguments in the linked sections; this is the index.
    **Note the interaction:** [`decision-semantics.md`](decision-semantics.md) §10 says
    the condition-decision model *inherits all three benefits* of the split, and that
    the two should be scheduled as one item.
-2. **Depender-range collapsing, version axis** — the remaining half of the outright
-   **divergence from the PubGrub spec** (`references/pubgrub.md:456`). The flag axis
-   landed on 2026-08-05: the 2^k re-offer is gone (measured — 2 expansions where it
-   was 3 with one irrelevant flag and 5 with two), and depender terms now carry the
-   guard rather than the whole assignment. What remains is widening a depender across
-   *adjacent releases* — see the notes below before starting it.
+2. **Depender collapsing — both axes have landed; the open question is now its
+   cost.** The divergence from `references/pubgrub.md:456` is closed. The flag axis
+   landed 2026-08-05 (the 2^k re-offer is gone — measured: 2 expansions where it was
+   3 with one irrelevant flag and 5 with two; depender terms carry the guard, not the
+   whole assignment). The version axis landed 2026-08-12 in
+   `Bridge.Provider.spanningOccurrence`. **It is a trade, not a win** — `aeson <2`
+   11.1s → 2.4s with its proof 2833 → 277 lines, but `pandoc` 6.6× slower on 17× the
+   reads. [`collapsing.md`](collapsing.md) is authoritative on where it stands and
+   holds the five ways to finish it, the recommendation (options 2 + 4), and the one
+   measurement to take first. **Also unexplained and to be understood before
+   optimising: `noversion` events rose on all three unsat problems.** The notes below
+   are kept as background on what the version axis had to do.
 3. **Should the set algebra be allowed to read flag declarations?** Would make
    emptiness exact and remove the one-sided slack, at the cost of the core/bridge
    boundary. Cost/benefit, not correctness.

@@ -37,6 +37,15 @@ is a summary and not authoritative; the documents below decide. Project history 
   PubGrub or a choice of ours?", answer it by citing this file with a line number —
   not from our own haddocks or from this CLAUDE.md, both of which describe our
   encoding of the spec and have been wrong about which is which.
+
+  It had **never been checked in** until 2026-08-12, when it went missing from one
+  machine and had to be restored by hand. `pubgrub.md` is now tracked and all 13 line
+  numbers cited across the docs were verified exact. **The Rust checkout is not**:
+  `references/pubgrub` and `references/pubgrub-guide` are nested git repos, so cloning
+  this repository does not get them, and their line numbers move with upstream. Cite
+  Rust by **function name**, not line — `merge_dependents`, not `:173`. Current
+  revisions and what is still owed: `docs/STATUS.md`, "`references/` — how much of the
+  authority is actually in the repo".
 - **Flag semantics: `docs/flags-semantics.md`.** Same role for flags that
   `references/pubgrub.md` has for the algorithm: what must be *true*, with no
   types in it. Cite it for any question about what a constraint mentioning a flag
@@ -44,14 +53,24 @@ is a summary and not authoritative; the documents below decide. Project history 
   and `docs/attic/flags-design.md` (a pre-reboot design doc, superseded on
   semantics).
 - **Decision semantics: `docs/decision-semantics.md`** (drafted 2026-08-04,
-  **nothing implemented**). Specifies *condition decisions*: decide the version
+  **nothing in §2–§9 implemented**). Specifies *condition decisions*: decide the version
   first, then only the flag conditions some dependency guards. It registers its
   deviations from `references/pubgrub.md` in its §1 and defers to
-  `docs/flags-semantics.md` on flags. Its §11 proposes four amendments to that file
-  which are **not applied**, and its §10 notes it subsumes the `expand`-split
-  question.
-- **Formal kernel model: `specification/`** — Lean 4. Its own README states the Lean
-  code is normative where its prose disagrees.
+  `docs/flags-semantics.md` on flags. Its §11 lists five amendments to other files, and
+  **all five were applied 2026-08-05** — this file claimed for a week that there were
+  four and that none were applied. Its §10 notes it subsumes the `expand`-split
+  question, and its **prerequisite (§4.2 guarded emission) is now built**, so it is no
+  longer inert; §0's three costs are the live argument for or against building it.
+- **Formal kernel model: `specification/`** — Lean 4, and **a draft that is not
+  authoritative.** It is *our own attempt* at specifying PubGrub, so it never settles a
+  question: where it disagrees with `references/pubgrub.md` or `docs/flags-semantics.md`,
+  those are right and it is wrong. A theorem there is evidence about that model, and
+  nothing proves the model renders either source faithfully. Do not cite it to win an
+  argument, and do not change the solver on its authority. (Within the directory, the
+  Lean code is normative over its own prose — an internal tie-break only.)
+- **Related work: `docs/related-work.md`** — external literature (Potassco/ASP) mapped
+  onto specific problems in this repo, with what each paper does *not* settle. A
+  reading map; authoritative on nothing.
 - PubGrub internals guide: https://pubgrub-rs-guide.pages.dev/internals/intro
 - Reference Rust implementation: https://github.com/pubgrub-rs/pubgrub (a second
   implementation's choices, not a specification)
@@ -82,28 +101,33 @@ Three components with a hard dependency boundary — the cabal-install entanglem
 is quarantined so the core stays lightweight:
 
 ```
-pubgrub-hs (library) ──── deps: Cabal-syntax ONLY
+pubgrub-hs (library) ──── no cabal-install, no cabal-install-solver
   native PubGrub: Term, VersionSet, Incompatibility, Relation, Solver, Report
-  pure algorithm + types; no cabal-install, no cabal-install-solver
+  pure algorithm + types; of the cabal ecosystem it needs Cabal-syntax only
+  (plus base, containers, text, co-log)
         ▲  consumes a neutral problem type
-pubgrub-bridge (executable) ──── deps: cabal-install-solver, Cabal, Cabal-syntax, tar
-  our own minimal index reader (read cached 01-index.tar + parse .cabal)
+bridge (private library) ──── cabal-install-solver, Cabal, Cabal-syntax,
+                              hackage-security, http-client
+  index acquisition + lazy .cabal reads via hackage-security's random-access index
   builds a cabal solver `Index` (convPIs) and feeds it to BOTH:
-    ├─ cabal's Distribution.Solver.Modular.Solver.solve   (baseline)
+    ├─ cabal's modularResolver, via Bridge.Cabal.Baseline   (baseline)
     └─ a translation into pubgrub-hs's problem input
-  NB: NO cabal-install, NO hackage-security (see boundary note below)
+  NB: NO cabal-install (see boundary note below)
         ▲
-harness — runs both solvers, diffs verdicts, renders explanations side by side,
-  measures wall-clock + peak residency
+app/Main.hs — the `pubgrub` driver: runs either solver (`--cabal` picks the baseline)
+        ▲
+harness — NOT BUILT. One run doing both, diffing plans, repeating for timing
 ```
 
 Current layout (4 cabal components):
 
-- `src/` — library. `PubGrub/{Term,VersionSet,SetOps,Relation,Incompatibility,Solver,Provider,Report,Pretty}.hs`,
-  plus `Index/PreInstalled.hs` (the installed-unit model) and
+- `src/` — library. `PubGrub.hs` (umbrella) plus
+  `PubGrub/{Term,VersionSet,SetOps,Relation,Incompatibility,Solver,Provider,Report,Pretty}.hs`,
+  `Index/PreInstalled.hs` (the installed-unit model) and
   `InstanceSet{,/SourceCell}.hs` (the solver's set type).
-- `bridge/` — private library `bridge`. `Bridge/{Hackage,Installed,Provider}.hs`
-  plus `Bridge/Cabal/{Baseline,Flatten,InstalledPkg}.hs`: index reader, installed-db
+- `bridge/` — private library `bridge`. `Bridge/{Hackage,Installed,Provider}.hs`,
+  `Bridge/Hackage/{HttpClient,Unlifted}.hs`, and
+  `Bridge/Cabal/{Baseline,Flatten,InstalledPkg}.hs`: index reader, installed-db
   reader, the cabal-solver baseline, flag-parametric `GenericPackageDescription`
   flattening, and the real `Provider`. `Provider.releaseReader` memoises, per release, only the *reduced*
   form the provider needs (declared flags + flag-guarded deps) — never the parsed
@@ -111,7 +135,7 @@ Current layout (4 cabal components):
   3.7s / 83MB uncached: ~170 parse trees pinning their slices of the index is
   enough live data to make every major GC copy it.
 - `app/Main.hs` — executable `pubgrub`: the CLI driver.
-- `test/` — `{VersionSet,InstanceSet,Solver,Paper,Flatten,FlagSolve}Spec.hs`.
+- `test/` — `{VersionSet,InstanceSet,Solver,PartialSolution,Paper,Flatten,FlagSolve,Installed}Spec.hs`.
 
 The cabal baseline landed 2026-08-12: `bridge` depends on `cabal-install-solver`
 (and **not** `cabal-install`), `Bridge.Cabal.Baseline` drives
@@ -139,7 +163,7 @@ reader feeds both solvers, making the apples-to-apples comparison structural.
 Build the full end-to-end loop early, then add cabal-model fidelity one rung at a
 time; each rung leaves a runnable solver and we measure both deliverables at each.
 
-- **Rung 0** — ✅ plumbing: own index reader running on real Hackage data. (No cabal baseline — see the caveat below.)
+- **Rung 0** — ✅ plumbing: index reading running on real Hackage data.
 - **Rung 1** — ✅ version ranges. Solver resolves real Hackage packages end to end.
 - **Rung 2** — ✅ flags + conditional deps, as a search dimension. A decision is an
   *instance* (version × total flag assignment); `Bridge.Cabal.Flatten` flattens the
@@ -147,9 +171,11 @@ time; each rung leaves a runnable solver and we measure both deliverables at eac
   assignment; the provider tries the all-default assignment of a release first and
   considers deviations only once the accumulated constraint excludes it, fewest
   deviations first. Semantics: `docs/flags-semantics.md`, with a worked trace in
-  its §9. Known cost, not yet paid down: a version rejected for a
-  flag-irrelevant reason is re-offered once per irrelevant assignment (2^k), which
-  is what depender-range collapsing fixes — see Reporting gap 1 below.
+  its §9. **The cost that trace describes has been paid** (flag axis of §4.2,
+  2026-08-05): a version rejected for a flag-irrelevant reason is no longer re-offered
+  per irrelevant assignment, because the depender term carries the guard rather than
+  the assignment. What survives is smaller and differently shaped — Reporting gap 1
+  below, and `docs/decision-semantics.md` §0.
 - **Rung 3** — ⚠️ `base`/GHC pinning (installed db → `PreInstalled` instances, strict
   prefer-installed). **Incomplete, found 2026-08-12 by the baseline.** Strict
   prefer-installed says what to do when an installed unit is admissible; it says
@@ -172,10 +198,11 @@ time; each rung leaves a runnable solver and we measure both deliverables at eac
   `convCP` on the way out, so reading a flat plan will mislead).
 - **Rung 5** — public sublibraries.
 
-**Caveat on "measure both deliverables at each rung".** We have not been doing
-this, because neither deliverable has a harness yet. Rungs 0–3 are done but
-unmeasured. The two workstreams below are what actually gate the deliverables,
-and they are not rungs:
+**Caveat on "measure both deliverables at each rung".** We did not do this for
+rungs 0–3, which were built unmeasured; measurement only started 2026-08-12, once the
+baseline existed, and it immediately found rung 3 incomplete (above) — which is the
+argument for the discipline rather than against it. There is still no harness. The two
+workstreams below are what actually gate the deliverables, and they are not rungs:
 
 - **Explanations** — cause tracking is reinstated (`IncompatCause`) and
   `PubGrub.Report` renders a numbered proof. Next: `collapseNoInstances`, then
@@ -315,33 +342,49 @@ deliverable is currently losing".
    (`references/pubgrub.md:456`). The same adjacency collapsing applies to
    unbuildable instances (`:476`).
 
-   We emit the per-version form the spec tells us not to: `Bridge.Provider.depIncs`
-   uses `singletonInstance chosen` as the depender
-   (`bridge/Bridge/Provider.hs:332`). ("No instances" is not affected — the solver
-   raises that itself from the provider's `Nothing`, `src/PubGrub/Solver.hs:416`.)
-   This costs *both* deliverables — more incompatibilities to propagate, and proof
-   lines reading `foo 1.2.3 depends on …` where the spec's own examples read
-   `foo >=1.0 && <1.3 depends on …`. `mergeCells` recovers some of it incidentally,
-   but only after unions during derivation, never at generation time, which is
-   where the spec puts it.
+   **Both axes have now landed** (flag axis 2026-08-05, version axis 2026-08-12), so
+   the paragraphs below are the *history* of the divergence, not its current state.
+   The live emission path is `Bridge.Provider.dependencyInc` — the depender term is
+   `sourceInstances <span> <guard disjuncts>`, so it pins only the flags the guard
+   mentions and spans adjacent releases carrying the same occurrence. There is no
+   `depIncs` and no `singletonInstance chosen` any more. ("No instances" was never
+   affected — the solver raises that itself from the provider's `Nothing`.)
 
-   With flags in the value it is also the fix for a *performance* bug, not only a
-   wording one: because the depender is one instance, refuting a version teaches
-   the solver nothing about that version under a different assignment, so a
-   version rejected for a flag-irrelevant reason is re-offered once per irrelevant
-   flag assignment — 2^k. `test/FlagSolveSpec.hs` records the k=1 case (three
-   expansions of a package with one dead version), and
-   `docs/flags-semantics.md` §9 traces it.
+   *What it was.* We emitted the per-version form the spec tells us not to, with
+   `singletonInstance chosen` as the depender. That cost *both* deliverables — more
+   incompatibilities to propagate, and proof lines reading `foo 1.2.3 depends on …`
+   where the spec's own examples read `foo >=1.0 && <1.3 depends on …`. `mergeCells`
+   recovered some of it incidentally, but only after unions during derivation, never
+   at generation time, which is where the spec puts it.
 
-   Fix at generation, and the shape is fixed by `docs/flags-semantics.md` §4.2,
-   which overrules this file: the unit is **one guarded dependency occurrence**
+   *And it was a performance bug, not only a wording one.* Because the depender was
+   one instance, refuting a version taught the solver nothing about that version
+   under a different assignment, so a version rejected for a flag-irrelevant reason
+   was re-offered once per irrelevant flag assignment — the "2^k" cost. The accurate
+   name for the defect is an **over-specific learned clause**: the term named a point
+   in the version × assignment space, so a refutation failed to generalise to the
+   sibling assignments. `test/FlagSolveSpec.hs` records the k=1 case and
+   `docs/flags-semantics.md` §9 traces it; the flag axis fixed it (measured: 2
+   expansions where it was 3 with one irrelevant flag, 5 with two).
+
+   **What survives, and it is no longer 2^k in the declared flags.** Three costs
+   remain, all because a decision is still a *point instance* — see
+   `docs/decision-semantics.md` §0: whole-instance backjumps re-offer a version the
+   conflict never questioned; the provider re-derives outside the store what
+   guard-shaped terms would narrow inside it; and decisions still name inert flags in
+   every trace. The residue is bounded by the number of **guard regions** (cells over
+   the flags guards actually mention), not by 2^k over every declared flag. Do not
+   call it "the 2^k blow-up" — that name now overstates it.
+
+   *The shape that was built*, fixed by `docs/flags-semantics.md` §4.2, which
+   overrules this file: the unit is **one guarded dependency occurrence**
    `C ⇒ q ∈ R`, read straight off the flattened conditional tree. Emit
    `{p ∈ V × C, not q ∈ R}` with the guard `C` used **verbatim** as the depender's
    flag component. That is what keeps flags the guard never mentions out of the
    term, which is the entire point — and it needs no enumeration of assignments and
    no per-assignment dependency sets. Where several occurrences constrain the same
-   `q` (an unconditional `q >=1`, a guarded `q <3`), emit them as separate facts and
-   let propagation intersect them.
+   `q` (an unconditional `q >=1`, a guarded `q <3`), they are emitted as separate facts
+   and propagation intersects them.
 
    **Do not group instances by identical flattened dependency *set*.** §4.2 rejects
    that explicitly, as "a serious mistake, not a conservative one": two assignments
@@ -367,18 +410,21 @@ deliverable is currently losing".
    `aeson <2`: reads 350 → 250, no-version events 6 → 0, and the gappy eleven-way
    conflict term became one contiguous interval (`docs/STATUS.md`, "Second pass").
 
-   What still requires reads is widening across *distinct* releases — that needs to
-   know they share the dependency, and whether each declares the guard's flag at all,
-   since where it does not the guard is not merely false but *inapplicable*, which is
-   the third pin state's job. Slots make it cheaper, not harder: two adjacent slots
-   already union into a contiguous range, so only dependency-identity is left. See
-   also `docs/decision-semantics.md`, which builds on this emission shape and treats
-   it as its prerequisite.
+   Widening across *distinct* releases — the part that requires reads — then landed on
+   top of slots later the same day, as `spanningOccurrence` above. Slots made it
+   cheaper, not harder: two adjacent slots already union into a contiguous range, so
+   only dependency-identity was left to establish, and that is the read. Note the
+   third pin state turned out **not** to be needed on this path: requiring the guard to
+   be *identical* means every release in the span declares the flags the guard mentions,
+   since one that did not could not have produced that guard
+   (`docs/collapsing.md` §1). See also `docs/decision-semantics.md`, which builds on
+   this emission shape and treated it as its prerequisite — now paid.
 2. **`collapseNoInstances`** — intensional ranges mean the solver must separately
    learn that a range's *holes* are empty, so `no version for bar in >2.0.0 && <3`
    leaves clutter the proof. pubgrub-rs has a dedicated post-pass for exactly
-   this: `DerivationTree::collapse_no_versions` (`references/pubgrub/src/report.rs:102`,
-   with the merge rule at `:132`). Absorb the range into the sibling cause's term
+   this: `DerivationTree::collapse_no_versions` (`references/pubgrub/src/report.rs:102`
+   at rev `4dbe916`), with the merge rule in `merge_no_versions` (`:133` — this said
+   `:132`, which is a blank line). Absorb the range into the sibling cause's term
    by union and drop the node.
 
    Mostly overtaken by slots (gap 1): holes *between* releases no longer form, and
@@ -417,8 +463,10 @@ cabal's range syntax.
 
 ## Conventions
 
-- GHC 9.x, `cabal-version: 3.8`
-- `default-language: Haskell2010` (upgrade to GHC2021 when adding extensions)
+- GHC 9.12.x (`base ^>=4.21`), `cabal-version: 3.8`
+- `default-language: GHC2021` on all four components, with
+  `default-extensions: ImportQualifiedPost` (this said `Haskell2010` long after the
+  tree moved to GHC2021)
 - `-Wall` on all components; treat warnings as errors once the API stabilises
 - No partial functions (`head`, `fromJust`, etc.) — use pattern matching or `Maybe`/`Either`
 - Prefer `newtype` wrappers over type aliases for domain types (Package, Version, etc.)

@@ -10,10 +10,10 @@
 > **Scope:** how the solver comes to *choose* Cabal flags, in addition to versions and
 > installed unit-ids. It was written as a companion to a `TODO.md` that no longer
 > exists; the problem statement now lives in `CLAUDE.md` (rung 2) and the semantics
-> in [flags-semantics.md](flags-semantics.md).
+> in [flags-semantics.md](../flags-semantics.md).
 >
 > **Superseded on semantics:** what a constraint mentioning a flag some version does
-> not declare *means* is now specified in [flags-semantics.md](flags-semantics.md).
+> not declare *means* is now specified in [flags-semantics.md](../flags-semantics.md).
 > §2's "Domain-freedom principle" chose the lenient reading (an undeclared flag
 > vacuously satisfies a pin); that specification rejects both two-valued readings and
 > requires a third case, "not declared". The rest of §2 — DNF over cells, why not
@@ -80,7 +80,7 @@ fold gets it for free, by absorbing the domain dependence into what an element *
 Note what that argument does and does not claim. The fold does not remove the version-dependence
 of flag domains; it *relocates* it — out of explicit clauses and into the set algebra, which is
 where every flag bug so far has lived. The three-case flag atom required by
-[flags-semantics.md](flags-semantics.md) §2.3 is the bill for that relocation.
+[flags-semantics.md](../flags-semantics.md) §2.3 is the bill for that relocation.
 
 And the alternative's advantage belongs on the record, since it was never written down. A clause
 `{foo 1.2, foo:fast, not vector >=0.12}` names the flag as a *literal*, so conflict resolution

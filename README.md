@@ -42,7 +42,12 @@ Examples:
 cabal run pubgrub -- hashable          # any version
 cabal run pubgrub -- aeson '>=2'       # constrained (quote ranges for the shell)
 cabal run pubgrub -- -v aeson '<2'     # ... plus the solver's search trace
+cabal run pubgrub -- --cabal aeson     # cabal's own solver, over the same index
 ```
+
+`--cabal` runs cabal-install's modular solver instead of ours, fed from the very
+same index read — that shared read is what makes the comparison apples-to-apples.
+It is the baseline half of both deliverables.
 
 On the first run you'll see the index being bootstrapped/updated; then the
 resolved plan:
@@ -82,11 +87,13 @@ the PubGrub paper (`references/pubgrub.md`).
 
 ```
 src/PubGrub/        core library — the pure PubGrub algorithm and types
-                    (Term, VersionSet, Incompatibility, Solver, …).
-                    depends on Cabal-syntax only.
+                    (Term, VersionSet, Incompatibility, Solver, …). Of the
+                    cabal ecosystem it depends on Cabal-syntax only — no
+                    cabal-install, no cabal-install-solver.
 bridge/Bridge/      the Cabal bridge (private sublibrary): reads the Hackage
-                    index, resolves the compiler + installed packages, and
-                    builds a Provider the core solver consumes.
+                    index, resolves the compiler + installed packages, builds
+                    a Provider the core solver consumes, and drives cabal's
+                    own solver over the same index as the baseline.
 app/Main.hs         the `pubgrub` executable that wires it together.
 test/               the test suite.
 ```
@@ -104,6 +111,13 @@ should be pinned to their defaults and currently are not distinguished).
 Targets that pull in only already-installed boot packages resolve quickly; a
 target requiring source-only builds of heavily-versioned packages may explore a
 large space.
+
+Also working, as of 2026-08-12: the **baseline**. `--cabal` runs cabal's own solver
+over our index, so verdicts and plans can be compared directly. Two things that
+comparison immediately found, and that are open: boot-package handling is not yet
+strict enough (we will plan to *build* `base` where cabal refuses to), and our failure
+proofs are far longer than cabal's on some problems. The harness that would run both
+and diff them automatically does not exist yet. `docs/STATUS.md` has the numbers.
 
 The solver trace is currently a raw dump of internal events — readable enough
 to follow, not yet polished.

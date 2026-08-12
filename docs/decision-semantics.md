@@ -697,17 +697,30 @@ gap. Implement it first, measure on real problems, and only then decide
 whether costs 1–3 of §0 justify the kernel generalisation. If they do, the
 oracle (§9) lands before or with it, not after.
 
+**Where that sequence now stands (2026-08-12).** Steps one and two are done: §4.2 is
+implemented on both axes and measured — the re-offer is gone, and the wording gap with
+it, but the version axis is a *trade* rather than a win ([collapsing.md](collapsing.md)
+§1). So the decision this note defers to is now live, and it is the third step: do §0's
+costs 1–3 justify the kernel generalisation? Two things should be settled first, because
+both change the answer — `collapsing.md`'s open cost question, and §6's verdict oracle,
+which is still owed and still blocking.
+
 ## 12. What holds today
 
-As of 2026-08-04. Everything in §2–§9: **specified, not implemented.** The
-code this document generalises:
+Re-checked against the tree **2026-08-12**. Everything in §2–§9: **specified, not
+implemented.** But note the headline change since 2026-08-04: **the prerequisite is
+now built.** §4.2 per-fact guarded emission is implemented on both axes, so the row
+that used to read "dependers are singleton instances" is gone — this document is no
+longer inert, and its §0 costs 1–3 are the live argument for or against it.
+
+The code this document generalises:
 
 | fact | where |
 |---|---|
 | decisions are point instances, at most one per package | `paDecision :: Maybe Instance`, `src/PubGrub/Solver.hs:124`; `addDecision` `:171` |
-| the solution is read off decisions | `extractSolution`, `src/PubGrub/Solver.hs:220` — the concept §2.4 deletes |
-| success = no undecided positive term | `undecidedPositive`, `src/PubGrub/Solver.hs:225`; decision loop `:397`–`:418` — the criterion D1 replaces |
-| dependers are singleton instances (§4.2 not yet implemented — the prerequisite) | `depIncs`, `bridge/Bridge/Provider.hs:330`–`:332` |
-| the provider searches completions per cell — the machinery §2–§3 makes mostly redundant | `usableAssignments`, `bridge/Bridge/Provider.hs:287`; `preferDefaults` `:307` |
-| guards exist per release, environment resolved, flags-only | `GuardedDeps`, `bridge/Bridge/Cabal/Flatten.hs:49`; `flattenComponent` `:76` |
+| the solution is read off decisions | `extractSolution`, `src/PubGrub/Solver.hs:219` — the concept §2.4 deletes |
+| success = no undecided positive term | `undecidedPositive`, `src/PubGrub/Solver.hs:225`; `solve` `:428` — the criterion D1 replaces |
+| **dependers are guarded occurrences over a release span** — §4.2 implemented, so this row records the prerequisite as *paid*, not owed | `dependencyInc`, `bridge/Bridge/Provider.hs:453`; `spanningOccurrence` `:483` |
+| the provider searches completions per cell — the machinery §2–§3 makes mostly redundant | `usableAssignments`, `bridge/Bridge/Provider.hs:397`; `preferDefaults` `:417` |
+| guards exist per release, environment resolved, flags-only | `GuardedDeps`, `bridge/Bridge/Cabal/Flatten.hs:71`; `flattenComponent` `:156` |
 | flags-semantics rows this document leans on | O2 (exact algebra), O4 (slack direction), O6 soundness + cell-completion lemma: hold. §6 verdict oracle: **owed, and blocking here** (§9) |

@@ -5,12 +5,22 @@
 > API description.
 >
 > - **Live:** the three-component split and its hard dependency boundary; why we
->   dropped `cabal-install` and `hackage-security` and write our own index reader;
->   why one shared index must feed both solvers (it is what makes the benchmark
->   comparison apples-to-apples).
+>   dropped `cabal-install`; why one shared index must feed both solvers (it is what
+>   makes the benchmark comparison apples-to-apples).
 > - **Dead:** the `PInfo → SourcePackage` adapter of the section marked
 >   *"SKETCH — not compiled"*, and the "Core frontier (as of 2026-07-23)" section.
 >   Several type names here predate the reboot and no longer exist.
+> - **Reversed, and the reversal is not marked inline below:** dropping
+>   **`hackage-security`**. §"Dropping cabal-install and hackage-security" decided to
+>   read `01-index.tar` ourselves with the `tar` package. **We do not.** `Bridge.Hackage`
+>   talks to `hackage-security` directly — it bootstraps and refreshes the index and
+>   reads one release's `.cabal` on demand through its random-access index lookup — and
+>   there is no `tar` dependency in `pubgrub-hs.cabal`. Two consequences of the
+>   reversal, both good: `.cabal` **revisions need no work** (the index we are handed
+>   carries only the last revision of each release — verified 2026-08-12, 152,746
+>   entries, 152,746 distinct), and the index *is* verified rather than "read whatever
+>   tarball is on disk". `preferred-versions` is still unhandled. `../CLAUDE.md`'s
+>   dependency boundary note is the current statement; prefer it over anything below.
 >
 > See [STATUS.md](STATUS.md) for current state and `../CLAUDE.md` for the
 > architecture as built.
@@ -40,6 +50,8 @@ pubgrub-bridge (executable) ── deps: cabal-install-solver, Cabal, Cabal-synt
     ├─ cabal's Distribution.Solver.Modular.Solver.solve   (baseline)
     └─ PInfo→SourcePackage adapter → PubGrub.Package.Index (our solver)
   NO cabal-install, NO hackage-security
+                    ^^^^^^^^^^^^^^^^^ REVERSED — we use hackage-security, and
+                    there is no `tar` dep. See the banner at the top of this file.
         ▲
 harness — runs both, diffs verdicts, renders explanations side by side,
   measures wall-clock + peak residency
@@ -50,6 +62,12 @@ lightweight and portable; all the heavy cabal machinery is quarantined in the
 bridge.
 
 ## Dropping cabal-install and hackage-security
+
+> **Half of this section was carried out and half was reversed.** We dropped
+> `cabal-install` (still true, including for the baseline). We did **not** drop
+> `hackage-security` and there is no `tar` dependency — see the banner at the top.
+> The three-way import analysis below is still an accurate account of *why*
+> `cabal-install` is avoidable, which is what the section is worth keeping for.
 
 The `../cabal-solver-plan` reference depends on `cabal-install`, but tracing its
 imports shows it is used for only three things:

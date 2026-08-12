@@ -203,8 +203,8 @@ root, so `syntheticRoot` / `rootName` is the wrong shape. `solve` should take a
 list of seed incompatibilities instead, and "finished" becomes "satisfied by the
 level-0 assignments alone".
 
-**Status: not implemented.** `src/PubGrub/Solver.hs:397` still reads
-`solve provider rootPkg rootV` and seeds with `notRoot`. The payoff is real —
+**Status: not implemented** (re-checked 2026-08-12). `src/PubGrub/Solver.hs:428` still
+reads `solve provider rootPkg rootV` and seeds with `notRoot`. The payoff is real —
 `constraints: bar <2` is not a dependency, and as a root dependency it wrongly
 *forces* `bar` into the plan, whereas a seed incompatibility bans the range
 without requiring the package. See Open #3.
