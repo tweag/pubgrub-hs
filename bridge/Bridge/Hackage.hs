@@ -12,6 +12,8 @@ import           Data.Map.Strict                              (Map)
 import qualified Data.Map.Strict                              as Map
 import           Data.Maybe                                   (fromMaybe,
                                                                maybeToList)
+import           Data.Set                                     (Set)
+import qualified Data.Set                                     as Set
 import           Data.Text                                    (Text)
 import qualified Data.Text                                    as T
 import           Data.Time.Clock                              (NominalDiffTime,
@@ -58,7 +60,7 @@ import           Hackage.Security.Util.Some                   (Some (..))
 -- closes over the live 'IndexCallbacks', so an 'IndexHandle' is valid only
 -- /inside/ the 'withHackageIndex' callback.
 data IndexHandle = IndexHandle
-    { ihVersions  :: Map PackageName (NonEmpty Version)
+    { ihVersions  :: Map PackageName (Set Version)
     , ihLookupGPD :: PackageName -> Version -> IO (Either ParseError GenericPackageDescription)
     }
 
@@ -138,11 +140,11 @@ lookupGPD cbs pn v =
 -- the encoding written by 'updateCache' changes, so caches from older builds
 -- are rebuilt instead of being misread.
 cacheFormatVersion :: Int
-cacheFormatVersion = 2
+cacheFormatVersion = 3
 
 -- | Read the version cache, returning 'Nothing' if the file is corrupt or was
 -- written by a different 'cacheFormatVersion'.
-readVersionCache :: FilePath -> IO (Maybe (Map PackageName (NonEmpty Version)))
+readVersionCache :: FilePath -> IO (Maybe (Map PackageName (Set Version)))
 readVersionCache path = do
     result <- decodeFileOrFail path
     pure $ case result of
@@ -160,13 +162,20 @@ updateCache cacheFile Sec.IndexCallbacks{Sec.indexDirectory} = do
             [ (pkgName pkgId, pkgVersion pkgId)
             | (_entry, _, Just (Some (Sec.IndexPkgCabal pkgId))) <- Sec.directoryEntries indexDirectory
             ]
+        -- A 'Set' rather than a list: the versions come out of
+        -- 'Sec.directoryEntries' in the index's own order, which is neither sorted
+        -- nor guaranteed unique (14796 of 19393 packages were not ascending when
+        -- last measured). Every consumer wants them ordered, and the one that asks
+        -- "which release comes next" ('Bridge.Provider.withSlots') is wrong if they
+        -- are not — so make the order a property of the structure instead of an
+        -- obligation on each caller.
         index =
             Map.fromListWith
-                (<>)
+                Set.union
                 [ (pkgName, versions)
                 | g <- NE.groupWith fst pkgs
                 , let pkgName = fst (NE.head g)
-                , let versions = NE.map snd g
+                , let versions = Set.fromList (NE.toList (NE.map snd g))
                 ]
     liftIO $ encodeFile (toFilePath cacheFile) (cacheFormatVersion, index)
 

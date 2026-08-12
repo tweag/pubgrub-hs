@@ -413,6 +413,11 @@ package→versions map, not by the solve. Comparing this number against cabal wo
 compare index readers. Either measure the solve separately from index loading, or
 subtract a no-op baseline, before quoting peak memory at all.
 
+> **The attribution to that map is doubtful** (2026-08-12). Doubling its per-element
+> overhead — `NonEmpty Version` to `Set Version` — moved peak residency by 110 KB
+> (0.5%) on `vector`, where ~2.5 MB was expected. The constant is real; *what* it
+> consists of is unestablished. See "The version map is a `Set` now" below.
+
 (Also: the 27.2 s / 904 MB and 3.7 s / 83 MB figures recorded for the memoisation
 experiment are stale as absolutes — `pandoc` now runs at 1.1 s / 22 MB. The *ratio*
 lesson about retaining parse trees stands; the numbers no longer describe this tree.)
@@ -554,23 +559,81 @@ wall clock on this machine):
 | `aeson <2` | 22.998 GB | 23.905 GB | **+3.9%**, for identical search counts |
 | `lens <4` | 14.491 GB | 14.481 GB | −0.07%, its own cost cancelled by the win |
 
-**Why it is not free while slots are, which is the finding.** `expand'` already
-holds the version list of the package it is *deciding* — it enumerates candidates
-from it — so a slot costs nothing. `widen` is about a *different* package, the
-dependee, so it must look that list up and walk it again, once per emitted
-dependency. A deliberately cheaper formulation (clamp the outer bounds only, no
-per-interval work) measured **worse** — 23.919 GB — which is what locates the cost
-in fetching and traversing the list rather than in the interval arithmetic.
+**Where the cost is — first answer, since corrected.** The reading at the time was
+that `expand'` already holds the version list of the package it is *deciding*, so a
+slot costs nothing, while `widen` is about the *dependee* and must look that list up
+and walk it again per emitted dependency. A deliberately cheaper formulation (clamp
+the outer bounds only) measured **worse** — 23.919 GB — which seemed to place the
+cost in fetching and traversing the list.
 
-To land it, a package's lowest and highest release wants precomputing once —
-naturally beside the version map in `Bridge.Hackage` and its disk cache — reached
-through a `ReleaseSource` accessor. Narrowing then costs a lookup and one
-intersection. That is a bigger change than one conflict on one problem justifies
-today, so it waits.
+**That was wrong, and the container swap is what showed it.** With
+`Map PackageName (Set Version)` and `snapToVersions` reduced to two ordered lookups
+per interval — no traversal of the package's versions at all — narrowing cost
+**23.878 GB against 22.987 GB, the same 3.9%**. So the price was never in finding
+the bounds.
+
+What is now known about it:
+
+- it is not finding the bounds (O(log n) and O(n) formulations cost the same);
+- it is not building the second `InstanceSet` — measured separately at ~0.005%
+  (22.999 GB against a 22.998 GB baseline);
+- which leaves `snapToVersions`' own `VersionSet` round trip per emitted dependency,
+  or the solver doing its set algebra on differently-shaped ranges. **Those two have
+  not been told apart**, and the second would be inherent to narrowing rather than
+  fixable.
+
+So it stays out for the same reason as before, but not for the reason first
+recorded. Anyone picking this up should start by distinguishing those two, not by
+optimising the lookup.
 
 **Kept:** `PubGrub.VersionSet.snapToVersions` and its four properties (subset, same
 members of the universe, idempotent, empty universe empties everything), so the
 primitive and its contract are settled and unused rather than unwritten.
+
+### The version map is a `Set` now (2026-08-12)
+
+`ihVersions :: Map PackageName (Set Version)`, was `Map PackageName (NonEmpty
+Version)`. Prompted by the narrowing cost above; kept because of what it fixed
+regardless.
+
+The list came straight out of `Sec.directoryEntries`, in the index's own order —
+which is **neither sorted nor guaranteed unique**. Measured on the real cache:
+19,393 packages, 152,746 version entries, and **14,796 packages not in ascending
+order**, with local disorder rather than a clean reversal (`A-gent` runs
+`…0.11.0.17, 0.11.0.18…` and `…0.11.0.4, 0.11.0.5…` out of order inside an
+otherwise descending list). Every consumer wants them ordered, and `withSlots` —
+which asks *which release comes next* — is silently wrong if they are not. It was
+correct only because `expand'` happened to sort first. That is now a property of the
+structure rather than an obligation on each caller: `withSlots` takes the `Set` and
+uses `Set.lookupGT`, `expand'` drops its per-expansion `sortOn Down`.
+
+Duplicates turn out not to occur (152,746 entries, 152,746 distinct — the index
+hackage-security hands us keeps only the last revision of each release), but nothing
+guaranteed it, and a duplicate would have produced a zero-width slot `[v,v)`, which
+denotes nothing and would have dropped that release's dependencies in silence.
+
+Cost, which was the open question:
+
+| | allocation | max residency |
+|---|---|---|
+| `vector` (cleanest probe: 13 reads, minimal solver state) | 359.53 → 359.38 MB | 22,767,424 → 22,877,496 B, **+110 KB / +0.5%** |
+| `lens <4` | 14.491 → 14.476 GB | 37.77 → 38.50 MB |
+| `aeson <2` | 22.998 → 22.986 GB | 22.83 → 27.43 MB |
+
+Allocation went slightly *down* — the removed per-expansion sort covers the
+container's overhead. The cache file is the same size (1,954,523 bytes; `Binary`
+encodes a `Set` as a list), at `cacheFormatVersion` 3, so existing caches rebuild
+once.
+
+**A `Set` node is ~5 words against a cons cell's 3, so ~2.5 MB of growth across
+152,746 versions was the thing to watch, and it did not appear** — 110 KB on the
+clean probe. That is evidence against finding 2's attribution above ("dominated by
+the index's package→versions map"): doubling that map's per-element overhead moved
+peak residency by 0.5%. `aeson`'s +4.6 MB is a bigger jump than `vector`'s and
+`lens`'s, which points at GC sampling of transient solver state rather than at the
+map, since all three hold the same map. **What actually dominates the 22 MB has not
+been established** — worth settling before any memory number is quoted against
+cabal.
 
 **Reverted with it,** and needed again whenever narrowing returns: the split between
 the term the solver reasons with and the range the report quotes

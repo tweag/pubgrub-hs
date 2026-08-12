@@ -331,13 +331,16 @@ Known gaps, in the order worth fixing:
    term verbatim, so dead space (e.g. above a package's newest release) still
    survives.
 
-   Narrowing that against the version map was tried on 2026-08-12 and **reverted**:
-   it removed one conflict on one of five problems and cost 3.9% of total
-   allocation, because `widen` is about the *dependee* and so must fetch and walk
-   that package's version list per emitted dependency — unlike a slot, where
-   `expand'` already holds the list of the package it is deciding. It wants a
-   package's lowest/highest release precomputed first. Numbers, and the report-prose
-   split it also needs, are in `docs/STATUS.md` ("Narrowing declared ranges").
+   Narrowing that against the version map was tried twice on 2026-08-12 and
+   **reverted twice**: it removes one conflict on one of five problems and costs 3.9%
+   of total allocation. The second attempt was after `ihVersions` became a
+   `Set Version`, which made finding an interval's bounds two ordered lookups instead
+   of a traversal — and it cost **the same** 3.9%, so the first attempt's diagnosis
+   (that the price was fetching and walking the dependee's version list) was wrong.
+   What is left unexplained is `snapToVersions`' own `VersionSet` round trip per
+   emitted dependency versus the solver working on differently-shaped ranges; the
+   second would be inherent. Numbers, and the report-prose split narrowing also needs
+   (`fromNarrowedDependency`), are in `docs/STATUS.md` ("Narrowing declared ranges").
    `PubGrub.VersionSet.snapToVersions` is kept, tested, and unused.
 3. **Chain collapsing** — the spec fuses "depends on X *which depends on* Y" into
    one sentence; this is most of the remaining line-count gap.

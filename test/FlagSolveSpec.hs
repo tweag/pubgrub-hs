@@ -43,6 +43,7 @@ import           Data.IORef                     (IORef, modifyIORef', newIORef,
                                                  readIORef)
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
+import qualified Data.Set                       as Set
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Types.Condition   (Condition (..))
@@ -112,7 +113,8 @@ worldProvider world =
   where
     source =
         BP.ReleaseSource
-            { BP.rsVersionsOf = \p -> maybe [] (map relVersion . pkgReleases) (lookup p world)
+            { BP.rsVersionsOf = \p ->
+                maybe Set.empty (Set.fromList . map relVersion . pkgReleases) (lookup p world)
             , BP.rsReadRelease = \p v -> pure (readRelease p v)
             }
 

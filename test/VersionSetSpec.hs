@@ -4,6 +4,8 @@
 module VersionSetSpec (tests) where
 
 import           Data.List                         (nub, sort)
+import           Data.Set                          (Set)
+import qualified Data.Set                          as Set
 import           Distribution.Types.VersionInterval (Bound (..),
                                                     LowerBound (..),
                                                     UpperBound (..),
@@ -117,20 +119,20 @@ tests =
             -- wrote.
             "snapToVersions"
             [ testProperty "keeps exactly the universe members it had" $
-                forAll (listOf genVersion) $ \universe (vs :: VersionSet) ->
+                forAll genUniverse $ \universe (vs :: VersionSet) ->
                     foldr
                         ((.&&.) . (\v -> contains (snapToVersions universe vs) v === contains vs v))
                         (property True)
-                        universe
+                        (Set.toList universe)
             , testProperty "never grows the set" $
-                forAll (listOf genVersion) $ \universe (vs :: VersionSet) ->
+                forAll genUniverse $ \universe (vs :: VersionSet) ->
                     isSubsetOf (snapToVersions universe vs) vs
             , testProperty "idempotent" $
-                forAll (listOf genVersion) $ \universe (vs :: VersionSet) ->
+                forAll genUniverse $ \universe (vs :: VersionSet) ->
                     snapToVersions universe (snapToVersions universe vs)
                         === snapToVersions universe vs
             , testProperty "an empty universe snaps everything away" $ \(vs :: VersionSet) ->
-                snapToVersions [] vs === emptyVersionSet
+                snapToVersions Set.empty vs === emptyVersionSet
             ]
         , testGroup
             -- The operations work on the intervals directly. The reference is
@@ -232,3 +234,7 @@ threeAscending g = do
 
 ascendingList :: Gen Version -> Gen [Version]
 ascendingList g = nub . sort <$> listOf g
+
+-- | A package's version universe, in the shape 'snapToVersions' takes it.
+genUniverse :: Gen (Set Version)
+genUniverse = Set.fromList <$> listOf genVersion

@@ -30,6 +30,8 @@ module PubGrub.VersionSet (
 
 import           Data.Maybe                         (mapMaybe)
 import           Data.Ord                           (Down (..), comparing)
+import           Data.Set                           (Set)
+import qualified Data.Set                           as Set
 import           Distribution.Types.VersionInterval (Bound (..),
                                                      LowerBound (..),
                                                      UpperBound (..),
@@ -179,27 +181,32 @@ halfOpenVersionSet lo hi = fromCuts [(Cut lo Before, maybe Unbounded (`Cut` Befo
 -- a declared @<5@ back to its author as @<=4.21.0.0@. A subset cannot overstate
 -- what was declared.
 --
--- @universe@ need not be sorted and may hold versions outside the set; cost is one
--- pass over it per interval.
+-- Takes the universe as a 'Set' so each interval costs two ordered lookups rather
+-- than a pass over every version of the package.
 --
 -- Nothing calls this yet: applied to every emitted dependency it costs more
--- allocation than the conflicts it removes are worth, because it walks the
--- dependee's version list afresh each time.
-snapToVersions :: [Version] -> VersionSet -> VersionSet
+-- allocation than the conflicts it removes are worth, and finding the bounds is
+-- not where that cost lies.
+snapToVersions :: Set Version -> VersionSet -> VersionSet
 snapToVersions universe vs = fromCuts (mapMaybe tighten (cutsOf vs))
   where
-    tighten (lo, hi) = bounds (lo, hi) >>= \(a, b) -> Just (Cut a Before, Cut b After)
+    tighten (lo, hi) = do
+        a <- lowest lo
+        b <- highest hi
+        if a <= b then Just (Cut a Before, Cut b After) else Nothing
 
-    -- The lowest and highest members of the universe inside one interval, in one
-    -- fold. Nothing if the interval holds none.
-    bounds (lo, hi) = foldl' step Nothing universe
-      where
-        step acc v
-            | inside v = Just (maybe (v, v) (\(a, b) -> (min a v, max b v)) acc)
-            | otherwise = acc
-        -- @v@ is in the interval when the cut just below it is at or above the
-        -- lower bound and the cut just above it is at or below the upper.
-        inside v = lo <= Cut v Before && Cut v After <= hi
+    -- The lowest member of the universe at or above the interval's lower bound.
+    -- @Before v@ admits @v@ itself, @After v@ does not — the same distinction the
+    -- cut makes.
+    lowest (Cut v Before) = Set.lookupGE v universe
+    lowest (Cut v After)  = Set.lookupGT v universe
+    lowest Unbounded      = Nothing  -- a lower bound above every version: empty
+
+    -- And the highest at or below the upper bound, mirrored: an interval ending
+    -- @Before w@ excludes @w@, one ending @After w@ includes it.
+    highest (Cut w Before) = Set.lookupLT w universe
+    highest (Cut w After)  = Set.lookupLE w universe
+    highest Unbounded      = Set.lookupMax universe
 
 -- | Merge two sorted interval lists, joining any that overlap or touch.
 --

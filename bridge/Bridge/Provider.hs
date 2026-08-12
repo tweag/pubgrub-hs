@@ -51,6 +51,7 @@ import qualified Data.Map.Strict                              as Map
 import           Data.Maybe                                   (fromMaybe,
                                                                listToMaybe)
 import           Data.Ord                                     (Down (..))
+import           Data.Set                                     (Set)
 import qualified Data.Set                                     as Set
 import           Data.Text                                    (Text)
 import qualified Data.Text                                    as T
@@ -121,7 +122,7 @@ withProvider cache manager root act =
                         (mkInstalledDb installed)
                         ReleaseSource
                             { rsVersionsOf = \pn ->
-                                maybe [] NE.toList (Map.lookup pn (ihVersions handle))
+                                Map.findWithDefault Set.empty pn (ihVersions handle)
                             , rsReadRelease = \pn v -> liftIO (readRelease pn v)
                             }
                         root
@@ -215,8 +216,10 @@ releaseReader platform cInfo handle = do
 -- no @.cabal@ to read, they come from the compiler rather than an index, and
 -- 'mkExpand' takes them as a separate argument.
 data ReleaseSource m = ReleaseSource
-    { rsVersionsOf  :: PackageName -> [Version]
-    -- ^ every version of this package the source has, in any order.
+    { rsVersionsOf  :: PackageName -> Set Version
+    -- ^ every version of this package the source has. A 'Set', because
+    -- 'withSlots' asks which release comes /next/, and an unsorted list would
+    -- answer that wrongly and silently.
     , rsReadRelease :: PackageName -> Version -> m (Either ParseError Release)
     -- ^ the reduced form of one release: its declared flags and its guarded
     -- dependencies. Only ever called for versions 'rsVersionsOf' reported.
@@ -258,7 +261,7 @@ mkExpand installedDb source root = expand'
             Just chosen -> do
                 incs <- consequencesOfUsePreInstalled chosen
                 pure (Just (UsePreInstalled chosen, incs))
-            Nothing -> firstUsable (withSlots (sortOn Down (rsVersionsOf source pn)))
+            Nothing -> firstUsable (withSlots (rsVersionsOf source pn))
 
                 where
                     -- Releases newest first (@docs/flags-semantics.md@ §5,
@@ -387,8 +390,9 @@ mkExpand installedDb source root = expand'
             }
 
 -- | Pair each release with its __version slot__: the half-open range from it up
--- to the next release that exists, unbounded for the newest. Expects the list
--- newest first, the order candidates are tried in.
+-- to the next release that exists, unbounded for the newest. Newest first, the
+-- order candidates are tried in (@docs\/flags-semantics.md@ §5, between-releases
+-- half).
 --
 -- A slot contains exactly one existing release, so @p ∈ slot(v) × C@ denotes the
 -- same instances as @p ∈ {v} × C@ over anything that can be offered: the claim is
@@ -401,8 +405,8 @@ mkExpand installedDb source root = expand'
 -- release that is skipped (unparseable, or admitted by no offered assignment)
 -- still has its own dependencies, and widening across it would attribute this
 -- release's dependencies to it.
-withSlots :: [Version] -> [(Version, VersionSet)]
-withSlots newestFirst =
-    [ (v, VersionSet.halfOpenVersionSet v above)
-    | (v, above) <- zip newestFirst (Nothing : map Just newestFirst)
+withSlots :: Set Version -> [(Version, VersionSet)]
+withSlots releases =
+    [ (v, VersionSet.halfOpenVersionSet v (Set.lookupGT v releases))
+    | v <- Set.toDescList releases
     ]
