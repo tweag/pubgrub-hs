@@ -527,10 +527,57 @@ Every multi-interval set left in the traces holds real releases (survivors of
 banning, e.g. `bytestring >=0.10.9.0 && <0.10.10.0 || >=0.10.12.1 && <0.11.0.0 ||
 >=0.11.1.0 && <0.11.2`), not empty regions.
 
-Still to do on the same free resource: `Bridge.Provider.widen` emits a *declared*
-dependency range verbatim, so dead space above a package's newest release survives
-into terms. Snapping that to the version map is the other half, and is what remains
-of Reporting gap 2.
+### Narrowing declared ranges: tried and reverted (2026-08-12)
+
+The other half of the same idea — `Bridge.Provider.widen` emits a *declared*
+dependency range verbatim, so version space no release occupies survives into terms
+— was implemented, measured, and **taken back out**. The negative result is the
+useful part.
+
+What it bought, against the slot numbers above:
+
+| | decisions | conflicts | no-version | reads |
+|---|---|---|---|---|
+| `lens <4` | 1059 → **1038** | 63 → **62** | 1 → **0** | 557 → 557 |
+| `vector`, `pandoc`, `conduit <1.3`, `aeson <2` | unchanged on every counter |
+
+`lens`'s last no-version event was `integer-gmp in >=0.2 && <0.5.1.0`, and
+integer-gmp's oldest release *is* 0.5.1.0 — the whole range was dead space, so
+narrowing emptied it at emission instead of leaving the solver to refute it. Its
+deepest resolution also went 9 → 8.
+
+What it cost, measured by total allocation (`+RTS -s`, near-deterministic, unlike
+wall clock on this machine):
+
+| | narrowing off | narrowing on | |
+|---|---|---|---|
+| `aeson <2` | 22.998 GB | 23.905 GB | **+3.9%**, for identical search counts |
+| `lens <4` | 14.491 GB | 14.481 GB | −0.07%, its own cost cancelled by the win |
+
+**Why it is not free while slots are, which is the finding.** `expand'` already
+holds the version list of the package it is *deciding* — it enumerates candidates
+from it — so a slot costs nothing. `widen` is about a *different* package, the
+dependee, so it must look that list up and walk it again, once per emitted
+dependency. A deliberately cheaper formulation (clamp the outer bounds only, no
+per-interval work) measured **worse** — 23.919 GB — which is what locates the cost
+in fetching and traversing the list rather than in the interval arithmetic.
+
+To land it, a package's lowest and highest release wants precomputing once —
+naturally beside the version map in `Bridge.Hackage` and its disk cache — reached
+through a `ReleaseSource` accessor. Narrowing then costs a lookup and one
+intersection. That is a bigger change than one conflict on one problem justifies
+today, so it waits.
+
+**Kept:** `PubGrub.VersionSet.snapToVersions` and its four properties (subset, same
+members of the universe, idempotent, empty universe empties everything), so the
+primitive and its contract are settled and unused rather than unwritten.
+
+**Reverted with it,** and needed again whenever narrowing returns: the split between
+the term the solver reasons with and the range the report quotes
+(`fromNarrowedDependency`, plus rendering dependency leaves from their cause in
+`PubGrub.Report`). Without it a narrowed term reaches the proof, and
+`base >=4.7 && <5` gets quoted back to its author as `>=4.7.0.0 && <=4.21.0.0`.
+Narrowing a dependee term is not safe for reports on its own.
 
 ### One incidental oddity, unexplained
 

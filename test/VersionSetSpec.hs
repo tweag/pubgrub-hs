@@ -109,6 +109,30 @@ tests =
                         .&&. (halfOpenVersionSet lo (Just lo) === emptyVersionSet)
             ]
         , testGroup
+            -- 'snapToVersions' drops version space no member of the universe
+            -- occupies. Its whole contract is the pair "same versions of the
+            -- universe" and "never larger than what it was given" — the first is
+            -- what makes it sound to apply to a declared dependency range, the
+            -- second is what stops a report quoting a range wider than its author
+            -- wrote.
+            "snapToVersions"
+            [ testProperty "keeps exactly the universe members it had" $
+                forAll (listOf genVersion) $ \universe (vs :: VersionSet) ->
+                    foldr
+                        ((.&&.) . (\v -> contains (snapToVersions universe vs) v === contains vs v))
+                        (property True)
+                        universe
+            , testProperty "never grows the set" $
+                forAll (listOf genVersion) $ \universe (vs :: VersionSet) ->
+                    isSubsetOf (snapToVersions universe vs) vs
+            , testProperty "idempotent" $
+                forAll (listOf genVersion) $ \universe (vs :: VersionSet) ->
+                    snapToVersions universe (snapToVersions universe vs)
+                        === snapToVersions universe vs
+            , testProperty "an empty universe snaps everything away" $ \(vs :: VersionSet) ->
+                snapToVersions [] vs === emptyVersionSet
+            ]
+        , testGroup
             -- The operations work on the intervals directly. The reference is
             -- Cabal's combinators on 'VersionRange' syntax followed by Cabal's
             -- canonicaliser, and the operations must agree with it on the set and

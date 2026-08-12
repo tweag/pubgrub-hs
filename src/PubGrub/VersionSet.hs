@@ -18,6 +18,7 @@ module PubGrub.VersionSet (
     fullVersionSet,
     singletonVersionSet,
     halfOpenVersionSet,
+    snapToVersions,
     fromVersionRange,
     toVersionRange,
     complementVersionSet,
@@ -160,6 +161,45 @@ singletonVersionSet = fromVersionRange . thisVersion
 -- term such as @>=1.0 && <1.3@, and each hole in a range is refuted on its own.
 halfOpenVersionSet :: Version -> Maybe Version -> VersionSet
 halfOpenVersionSet lo hi = fromCuts [(Cut lo Before, maybe Unbounded (`Cut` Before) hi)]
+
+-- | Narrow every interval to the versions in @universe@ that it actually
+-- contains: each becomes the closed range from its lowest such version to its
+-- highest, and intervals holding none are dropped.
+--
+-- The result is a __subset__ of the input denoting the __same__ versions of
+-- @universe@ — it only ever removes version space nothing occupies. That is what
+-- makes it safe to apply to a declared dependency range once the index's version
+-- list is known: @>=0.2@ against a package whose oldest release is @0.5.1.0@
+-- becomes @>=0.5.1.0@, so banning that release empties the set instead of leaving
+-- a live-looking @>=0.2 && <0.5.1.0@ for the solver to refute separately.
+--
+-- Narrowing, never widening, is deliberate. The dual operation (widening each
+-- interval out to the next existing version, as 'halfOpenVersionSet' does for a
+-- release's slot) denotes the same versions just as soundly, but it would report
+-- a declared @<5@ back to its author as @<=4.21.0.0@. A subset cannot overstate
+-- what was declared.
+--
+-- @universe@ need not be sorted and may hold versions outside the set; cost is one
+-- pass over it per interval.
+--
+-- Nothing calls this yet: applied to every emitted dependency it costs more
+-- allocation than the conflicts it removes are worth, because it walks the
+-- dependee's version list afresh each time.
+snapToVersions :: [Version] -> VersionSet -> VersionSet
+snapToVersions universe vs = fromCuts (mapMaybe tighten (cutsOf vs))
+  where
+    tighten (lo, hi) = bounds (lo, hi) >>= \(a, b) -> Just (Cut a Before, Cut b After)
+
+    -- The lowest and highest members of the universe inside one interval, in one
+    -- fold. Nothing if the interval holds none.
+    bounds (lo, hi) = foldl' step Nothing universe
+      where
+        step acc v
+            | inside v = Just (maybe (v, v) (\(a, b) -> (min a v, max b v)) acc)
+            | otherwise = acc
+        -- @v@ is in the interval when the cut just below it is at or above the
+        -- lower bound and the cut just above it is at or below the upper.
+        inside v = lo <= Cut v Before && Cut v After <= hi
 
 -- | Merge two sorted interval lists, joining any that overlap or touch.
 --

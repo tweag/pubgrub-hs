@@ -329,8 +329,16 @@ Known gaps, in the order worth fixing:
    `aeson <2`'s no-version events went 6 → 0. What is left comes from the other
    direction — `Bridge.Provider.widen` puts a **declared** dependency range into a
    term verbatim, so dead space (e.g. above a package's newest release) still
-   survives. Snapping that to the same resident version map is the remaining work,
-   and it is again at generation time rather than in a report post-pass.
+   survives.
+
+   Narrowing that against the version map was tried on 2026-08-12 and **reverted**:
+   it removed one conflict on one of five problems and cost 3.9% of total
+   allocation, because `widen` is about the *dependee* and so must fetch and walk
+   that package's version list per emitted dependency — unlike a slot, where
+   `expand'` already holds the list of the package it is deciding. It wants a
+   package's lowest/highest release precomputed first. Numbers, and the report-prose
+   split it also needs, are in `docs/STATUS.md` ("Narrowing declared ranges").
+   `PubGrub.VersionSet.snapToVersions` is kept, tested, and unused.
 3. **Chain collapsing** — the spec fuses "depends on X *which depends on* Y" into
    one sentence; this is most of the remaining line-count gap.
 4. Cosmetic: `So,` on the final line; terminal periods on non-final lines; omit
