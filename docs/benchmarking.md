@@ -8,10 +8,9 @@ cabal test                    # 116 unit and property tests, ~0.3 s
 bench/compare.sh              # both solvers over bench/problems.txt
 ```
 
-> **Every figure currently in STATUS.md predates 2026-08-17**, when flags stopped
-> being a search dimension and buildability started being enforced. Re-running
-> `bench/compare.sh` is the first item on that file's open-questions list; until it
-> happens, the numbers there record what *was* true.
+> **The current figures are STATUS.md's "Re-measured after the scope cut"**
+> (2026-08-17). Every table above it there is dated and against the tree of its own
+> date — read them for how the project got here, not for what the solver does now.
 
 ---
 
@@ -106,6 +105,13 @@ Use it to decide whether a change costs anything.
 the second. **What the ~22 MB floor actually consists of is unestablished** — doubling
 the per-element overhead of the package→versions map, long assumed to dominate it,
 moved it by 0.5%. Do not quote a memory comparison against cabal until that is settled.
+
+**What sits *above* the floor is now partly known, and it is the memoised reduced
+forms.** `pandoc` reads 2871 `.cabal` files since generation-time collapsing landed,
+against 167 before, and its max residency went 22.9 → 81.0 MB — about 21 KB per extra
+retained release. Memory is therefore a function of *how many releases were parsed*,
+which makes it a metric the collapsing work moves, and one to record in every run
+rather than only when it looks interesting.
 
 **A timed run and a counted run are different runs.** With `-v` the trace renders to
 stdout — `aeson <2` prints thousands of lines — so `bench/compare.sh` deliberately runs

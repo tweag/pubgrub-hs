@@ -210,11 +210,11 @@ time; each rung leaves a runnable solver and we measure both deliverables at eac
 **Caveat on "measure both deliverables at each rung".** We did not do this for
 rungs 0–3, which were built unmeasured; measurement only started 2026-08-12, once the
 baseline existed, and it immediately found rung 3 incomplete (fixed above) — which is
-the argument for the discipline rather than against it. There is still no harness, and
-the figures that measurement produced (2026-08-12, five problems, `docs/STATUS.md`)
-were then invalidated by the 2026-08-17 scope cut: **re-run `bench/compare.sh` before
-acting on any figure in the docs.** The two workstreams below are what actually gate
-the deliverables, and they are not rungs:
+the argument for the discipline rather than against it. They are measured now:
+current figures are `docs/STATUS.md`, "Re-measured after the scope cut" (2026-08-17,
+five problems, both solvers). **Quote that section, not the dated ones above it** —
+each of those is against the tree of its own date. There is still no harness. The two
+workstreams below are what actually gate the deliverables, and they are not rungs:
 
 - **Explanations** — cause tracking is reinstated (`IncompatCause`) and
   `PubGrub.Report` renders a numbered proof. Next: `collapseNoInstances`, then
@@ -354,11 +354,12 @@ adjacent releases pairwise at derivation time, which is the collapsing
 cells (see 5 below) and then chain collapsing. See `docs/STATUS.md`, "The explanation
 deliverable is currently losing".
 
-**Two caveats on that evidence.** The line counts were taken before generation-time
-collapsing landed later the same day (`aeson <2` 2833 → 277), and before the
-2026-08-17 scope cut — which removes gap 5's symptom entirely for now, since a proof
-with no pinned cells cannot print one. The *ranking* of 1 and 3 is unaffected; gap 5
-drops out until the flag axis returns.
+**Two caveats on that evidence.** Those line counts were taken before generation-time
+collapsing landed later the same day; as re-measured on 2026-08-17 the proofs are
+`lens <4` 80, `conduit <1.3` 62 and `aeson <2` **241** lines, against cabal's 22, 16
+and 30. And the scope cut removes gap 5's symptom for now, since a proof with no
+pinned cells cannot print one. The *ranking* of 1 and 3 is unaffected; gap 5 drops out
+until the flag axis returns.
 
 1. **Depender-range collapsing** — the one gap that is a *spec divergence*, not a
    cosmetic choice, and the only one fixed outside the report layer. The spec
@@ -428,9 +429,11 @@ drops out until the flag axis returns.
    releases carrying the same occurrence, which cut `aeson <2` from 11.1s to 2.4s and its
    proof from 2833 lines to 277, but cost `pandoc` 6.6× in time and 17× in reads. That
    file has the five ways out, the settled term-equality question, and the one
-   measurement to take first — **and every number in it predates the 2026-08-17 scope
-   cut, which changes what "the same occurrence" compares equal to.** Re-measure
-   before choosing among the five.
+   measurement to take first. **Re-measured 2026-08-17 and the trade held, with a
+   column nobody had recorded: memory.** `pandoc`'s max residency went 22.9 → 81.0 MB
+   (cabal's is 80.1) and it allocates 17.31 GB against cabal's 1.80 GB — attributable,
+   because its verdict and decision count have never moved. Option 4 (merge on insert,
+   no extra reads) is the fix for that as well as for the time.
 
    On the **version** axis, the free half landed 2026-08-12: the depender's version
    component is a release's **slot** — `halfOpenVersionSet v next`, reaching up to

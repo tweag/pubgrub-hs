@@ -10,9 +10,12 @@
 >
 > **Last checked against the tree:** 2026-08-17, 116 tests passing.
 >
-> **Read [Release-1 scope](#release-1-scope-flags-are-fixed-at-their-defaults-2026-08-17)
-> first if you have been away.** Flags stopped being a search dimension on
-> 2026-08-17, and every measurement in this file was taken before that.
+> **If you have been away**, two sections carry everything that changed on
+> 2026-08-17: [Release-1 scope](#release-1-scope-flags-are-fixed-at-their-defaults-2026-08-17)
+> (flags are no longer searched) and
+> [Re-measured after the scope cut](#re-measured-after-the-scope-cut-2026-08-17)
+> (the current numbers, and the memory regression they turned up). Every other
+> measurement section is dated and historical.
 >
 > History lives in [decision-log.md](decision-log.md) (how we got here);
 > abandoned ideas live in [attic/](attic/) (what we tried and dropped).
@@ -31,20 +34,22 @@ correctly is table stakes. It exists to answer two questions:
 ranges, Cabal flags, buildability, and installed/boot-package pinning. 116 tests
 pass, including all six worked examples from the PubGrub spec.
 
-**Neither deliverable has been delivered, but the comparison has started.** As of
-2026-08-12 cabal's own solver runs over our index (`pubgrub --cabal`, no
-`cabal-install` dependency), and the first five-problem comparison is in
-[First baseline comparison](#first-baseline-comparison-2026-08-12): **verdicts agree
-everywhere, cabal is 2.7–4.3× faster where there is real search, we use 2–3× less
-memory.** What is missing is the harness — one run doing both, diffing plans,
-repeating for timing — and the explanation side-by-side.
+**Neither deliverable has been delivered, but the comparison has started.** cabal's
+own solver runs over our index (`pubgrub --cabal`, no `cabal-install` dependency),
+and the current five-problem numbers are in
+[Re-measured after the scope cut](#re-measured-after-the-scope-cut-2026-08-17):
+**all five verdicts agree; we are level or faster on four and 3–4× slower on
+`pandoc`; we hold a 2.2–2.6× memory advantage on four and have lost it entirely on
+`pandoc`.** That last one is generation-time depender collapsing being paid for, and
+it is the largest open cost in the project. What is missing is the harness — one run
+doing both, diffing plans, repeating for timing — and the explanation side-by-side.
 
 **And the problem got smaller on 2026-08-17.** Flags are no longer a search
 dimension: every flag is fixed at its declared default, on *both* sides of the
 comparison. That is a deliberate scope cut for a first release, not a discovery —
 see [Release-1 scope](#release-1-scope-flags-are-fixed-at-their-defaults-2026-08-17).
-Its immediate consequence for everything below: **no number in this file has been
-re-measured since**, and several of them were about costs the cut removes.
+Measured afterwards, it **barely moved this problem set at all**, which is worth
+knowing before anyone credits it with a performance result.
 
 ---
 
@@ -382,16 +387,15 @@ search, so the search and the policy have to land together.
 
 Full arguments in the linked sections; this is the index.
 
-0. **Re-measure, before deciding anything below.** Every number in this file was
-   taken before the 2026-08-17 scope cut, and the cut touches exactly what they
-   measured: no flag search means no 2^k re-offer, no pinned cells in the terms the
-   solver carries or prints, and one candidate assignment per release; buildability
-   means some releases are no longer offered at all. `bench/compare.sh` over
-   `bench/problems.txt` is one command ([benchmarking.md](benchmarking.md)) and it
-   decides whether the collapsing trade, the `noversion` rise, and item 4's measured
-   depth still exist. **Nothing in `collapsing.md` should be built until this is
-   re-run** — its §5 measurement is itself a comparison against numbers that are now
-   stale on both sides.
+0. ~~**Re-measure, before deciding anything below.**~~ **Done 2026-08-17** — see
+   [Re-measured after the scope cut](#re-measured-after-the-scope-cut-2026-08-17).
+   Three answers, and the middle one changes a priority: the cut barely moved this
+   problem set (so flags were hardly searched on it); depender collapsing costs
+   **memory** as well as time and reads, which nobody had measured — `pandoc`'s max
+   residency went 22.9 → 81.0 MB and its allocation is 9.6× cabal's; and the
+   `noversion` rise is not a flag artifact, because it survived. **The successor is
+   item 2**: `collapsing.md` option 4 now fixes a memory regression as well as a time
+   one, and the store-shape measurement its §5 asks for is the next thing to run.
 1. **Should the provider's `expand` split back into "pick" then "consequences"?**
    ([`flags-semantics.md`](flags-semantics.md) §8.) Design item, not a decision.
    **Note the interaction:** [`decision-semantics.md`](decision-semantics.md) §10 says
@@ -528,14 +532,11 @@ collapsing would otherwise have to preserve.
 
 ## Measurement — first results
 
-> **Everything from here down predates 2026-08-17**, when flags stopped being
-> searched and buildability started being enforced. Treat the numbers as a record of
-> what was true, not as the current state — see
-> [Release-1 scope](#release-1-scope-flags-are-fixed-at-their-defaults-2026-08-17)
-> and Open question 0. The *findings* mostly survive (which problems have search in
-> them, what dominates `pandoc`, what the explanation gap is made of); the
-> **figures** do not, and the ones about flag-driven retries and pinned cells are the
-> least likely to.
+> **The current numbers are in
+> [Re-measured after the scope cut](#re-measured-after-the-scope-cut-2026-08-17)**
+> (2026-08-17). Everything between here and there is the record of how the project
+> got to them, in order, and each table is against the tree at its own date — useful
+> for *why* a change was made, not for what the solver does today.
 >
 > **To reproduce anything below, see [benchmarking.md](benchmarking.md).** It documents
 > `bench/compare.sh` and `bench/summarise.awk`, the problem set and why it is those
@@ -1084,17 +1085,95 @@ Before any of it: `noversion` events rose on all three unsat problems (`conduit`
 `lens` 1 → 8, `aeson` 0 → 9), which is unexplained and might be a hole the collapsing
 opened.
 
-**And before *that*, re-measure the whole table.** It was taken with flags searched
-and buildability ignored; both changed on 2026-08-17, and the mechanism this table
-measures is directly affected. `spanningOccurrence` extends a span while neighbouring
-releases carry the *same* guard and the same `Dependency`. Every guard is now a
-literal, so two releases that declare the same dependency under differently-*written*
-conditions — `if flag(x)` in one, unconditional in the next — compare equal once both
-fold to `Lit True`, where before they broke the span. Expect **longer spans**, which
-pushes the existing trade further in *both* directions: shorter proofs, more releases
-walked. Two smaller effects go the other way: dead groups fold to `Lit False` and
-disappear before the walk sees them, and unbuildable releases are skipped. Which
-dominates is exactly the sort of thing this project has guessed wrong before.
+**Re-measured on 2026-08-17** (next section). The prediction was longer spans, because
+`spanningOccurrence` extends while neighbours carry the same guard and every guard is
+now a literal — so two releases declaring the same dependency under differently-written
+conditions compare equal where they used to break the span. That is what happened, and
+it is a few per cent: proofs 13–15% shorter on two problems, reads slightly *up*. **The
+table above still describes the tree.** What the re-measurement did add is the column
+this one lacks — `pandoc`'s residency tripled — which makes option 4 more urgent, not
+less.
+
+### Re-measured after the scope cut (2026-08-17)
+
+Open question 0, discharged. `bench/compare.sh` over the whole set, one machine, warm
+index, `-v` on for our solver (so our elapsed figures are upper bounds); quiet
+two-run timings for ours in the second column.
+
+| problem | verdict | ours, `-v` / quiet ×2 | cabal | ours res | cabal res | ours alloc | cabal alloc |
+|---|---|---|---|---|---|---|---|
+| `vector` | both sat | 1.00 / 0.90, 1.06 | 1.24 | **22.6** | 49.9 MB | **0.84** | 0.86 GB |
+| `pandoc` | both sat | 8.62 / 6.51, 6.84 | **1.95** | 81.0 | 80.1 MB | 17.31 | **1.80** GB |
+| `conduit <1.3` | both UNSAT | 1.23 / 1.10, 1.15 | 1.24 | **22.6** | 49.9 MB | **1.23** | 1.32 GB |
+| `lens <4` | both UNSAT | 2.28 / 1.79, 1.80 | 1.79 | **34.1** | 76.2 MB | 3.25 | **1.88** GB |
+| `aeson <2` | both UNSAT | 2.63 / 2.05, 2.26 | 3.51 | **30.7** | 80.4 MB | **4.24** | 5.43 GB |
+
+Our search counts, against the same run of 2026-08-12 (counts are deterministic, so
+these differences are real):
+
+| problem | decisions | conflicts | no-version | reads | proof |
+|---|---|---|---|---|---|
+| `vector` | 39 → 39 | 0 → 0 | 0 → 0 | 108 → **116** | — |
+| `pandoc` | 266 → 266 | 1 → 1 | 0 → 0 | 2834 → **2871** | — |
+| `conduit <1.3` | 60 → **51** | — → 22 | 6 → **5** | 287 → 289 | 74 → **62** |
+| `lens <4` | 93 → **90** | — → 49 | 8 → **7** | 317 → 317 | 80 → 80 |
+| `aeson <2` | 438 → **392** | — → 78 | 9 → **7** | 423 → 423 | 277 → **241** |
+
+(A `—` is a figure the 2026-08-12 table did not record, so the cell is today's value
+alone. `vector` and `pandoc`'s conflict counts come from the pre-collapsing table,
+where they were also 0 and 1.)
+
+**Finding 1: the scope cut barely moved this problem set, and that is informative.**
+Proofs are 13–16% shorter on `conduit` and `aeson`, decisions a few per cent down,
+reads up very slightly, `lens <4` identical to the line. The predicted direction was
+right — longer spans, so shorter proofs and marginally more reads — but the magnitude
+says something the prediction did not: **flags were hardly a search dimension on these
+five problems in the first place.** The 2^k cost was real in
+`test/FlagSolveSpec.hs` and theoretical here. Anyone tempted to argue that removing
+flag search is what makes the solver competitive should read this table first: it did
+not, and it was not why the cut was made.
+
+**Finding 2: depender collapsing is a worse trade than recorded, and the missing
+column was memory.** `pandoc` at the pre-collapsing commit was 167 reads, 1.59 s and
+**22.9 MB** max residency. It is now 2871 reads, 6.5–8.6 s and **81.0 MB** — our
+memory advantage on that problem is gone, and it is the metric the deliverable leans
+on hardest. The arithmetic is consistent with the obvious cause: ~2700 extra retained
+reduced forms over ~58 MB is ~21 KB each, and `vector`'s 103 extra reads at that rate
+would be ~2 MB, which is inside its floor and indeed invisible. Allocation says it
+loudest: **17.31 GB against cabal's 1.80 GB, 9.6×**, on the one problem in the set
+that has no search to win.
+
+**The attribution is clean on `pandoc` and only there.** Its verdict, decisions and
+conflicts are identical across every tree in this file; the sole thing that moved is
+reads, 167 → 2834 measured against the immediately preceding commit. Nothing else can
+be responsible.
+
+The other direction cannot be quantified from what is recorded. The last allocation
+figures for `aeson <2` and `lens <4` are 22.998 GB and 14.491 GB from the narrowing
+experiment above, and they now allocate **4.24 GB** and **3.25 GB** — but that
+interval contains the non-reinstallable-boot rule *as well as* collapsing, and those
+two problems answered **sat** then and **UNSAT** now. Different question, different
+search: a ~5× drop that cannot be handed to either change. Recording allocation on
+both sides of a commit, which nobody did for collapsing, is what would have settled
+it.
+
+So `collapsing.md`'s recommendation stands and gets more urgent. Option 4 (merge on
+insert, zero extra reads) is the only one of the five that removes `pandoc`'s cost
+without giving back whatever collapsing is worth on the search problems, because it
+does not walk.
+
+**Finding 3: the `noversion` rise survives the cut**, and is therefore not a flag
+artifact: `conduit` 1 → 6 → 5, `lens` 1 → 8 → 7, `aeson` 0 → 9 → 7 across
+pre-collapsing, post-collapsing, today. Still unexplained, still the thing to
+understand before optimising the mechanism that produced it.
+
+**One thing to watch, not yet a finding.** cabal's `aeson <2` went 1.90 s → 3.51 s and
+its allocation is 5.43 GB against our 4.24 GB — the first problem where we allocate
+less than cabal. Single unrepeated runs at ±25% do not stretch to 1.8×, so this is
+probably real, and the likely cause is ours: a manual flag is not *weak*, so
+`deferWeakFlagChoices` no longer defers the flags that influence dependencies and
+cabal's goal ordering changed. If so, we made the baseline slower by constraining it,
+which is fair but has to be said out loud in any published comparison.
 
 ### The explanation target, now concrete
 
@@ -1203,7 +1282,7 @@ moves; treat a cited line number as a hint, and grep for the identifier.
 | deliverable | state |
 |---|---|
 | **Explanation showcase** — real failing problems, pubgrub-hs vs cabal side by side | solver produces numbered proofs, and cabal's failure text is now reachable (`--cabal` returns its `Fail` message); no side-by-side rendering, no *unsat* problem set, wording gaps open |
-| **Benchmark report** — time + peak residency on real sat/unsat problems | **first comparison exists** ([First baseline comparison](#first-baseline-comparison-2026-08-12)), on five sat problems, single runs. Not a report: no repetition, index build not separated from solve, no unsat cases, and what peak residency consists of is unestablished. **All of it predates the 2026-08-17 scope cut and needs re-running** |
+| **Benchmark report** — time + peak residency on real sat/unsat problems | **current numbers exist** for five problems, two sat and three unsat, both solvers ([Re-measured](#re-measured-after-the-scope-cut-2026-08-17)). Not a report: index build still not separated from solve, timings are one or two runs against ±25% noise, and what the memory floor consists of is unestablished. It also now has a result that has to be *fixed* before it is published — `pandoc` allocating 9.6× cabal |
 
 The baseline and the shared index are done — `cabal-install-solver` drives cabal's
 resolver from the same `withWorld`, which is what makes the comparison

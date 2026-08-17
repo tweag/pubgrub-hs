@@ -8,22 +8,26 @@ adjacent releases, instead of one per release, as `references/pubgrub.md:456` re
 Authority on the emission *shape* remains [`flags-semantics.md`](flags-semantics.md)
 §4.2; this file is about the mechanism and its cost.
 
-> **Stale in one specific way, since 2026-08-17.** Flags stopped being a search
-> dimension ([STATUS.md](STATUS.md), "Release-1 scope"), which touches this file in
-> three places, none of which invalidate the *argument*:
+> **Re-measured 2026-08-17, after flags stopped being a search dimension**
+> ([STATUS.md](STATUS.md), "Release-1 scope"). Three things to carry into everything
+> below:
 >
-> 1. **every number below was taken with flags searched.** Re-run `bench/compare.sh`
->    before choosing among the five options — §5's measurement is a comparison, and
->    both sides of it have moved;
-> 2. **one of the two motivations is gone for now.** §1's performance case was partly
+> 1. **the cut changed almost nothing here.** Spans did get longer, as predicted —
+>    every guard is now a literal, so releases declaring the same dependency under
+>    differently-written conditions no longer break a span — and the effect is a few
+>    per cent: proofs 13–16% shorter on `conduit` and `aeson`, reads *up* by 8 on
+>    `vector` and 37 on `pandoc`, `lens <4` unchanged to the line. **§1's table below
+>    still describes the situation.**
+> 2. **the trade is worse than §1 records, in a column §1 does not have.** `pandoc`'s
+>    max residency went **22.9 MB before collapsing to 81.0 MB**, which is cabal's
+>    80.1 MB — the memory advantage the benchmark deliverable leans on, gone on that
+>    problem. Its allocation is **17.31 GB against cabal's 1.80 GB**. Option 4 is now
+>    the fix for a memory regression as well as a time one.
+> 3. **one of the two motivations is gone for now.** §1's performance case was partly
 >    the 2^k re-offer; with one assignment per release that is zero. The spec
->    divergence and the proof length remain, and they carry it on their own;
-> 3. **"the same occurrence" now compares more things equal.** The walk requires an
->    identical guard, and every guard is now a literal, so releases that declare the
->    same dependency under differently-written conditions no longer break the span.
->    Expect **longer spans**: shorter proofs, more releases walked — the same trade,
->    further in both directions. Against that, `Lit False` groups vanish before the
->    walk sees them, and unbuildable releases are skipped entirely.
+>    divergence and the proof length carry this on their own, and §6's `noversion`
+>    rise survived the cut (`conduit` 6 → 5, `lens` 8 → 7, `aeson` 9 → 7 — still far
+>    above the 1, 1, 0 from before collapsing), so it is not a flag artifact.
 >
 > §4's term-equality analysis is unaffected and gets *easier*: a dependee term minted
 > by `widen` was already one cell with an empty pin map, and now every cell is.
@@ -53,10 +57,29 @@ Measured against the commit before it:
 | `lens <4` | 1.84 → 2.25 | 557 → **317** | 9 → **80** | — → 93 |
 | `aeson <2` | 11.12 → **2.37** | 250 → 423 | 2833 → **277** | 1376 → 438 |
 
+Re-run on 2026-08-17 (see the banner): `vector` 116 reads, `pandoc` 2871, `conduit`
+289 reads / 62 proof lines, `lens` 317 / 80, `aeson` 423 / 241. The right-hand column
+moved by a few per cent and nothing here changed sign.
+
 **A trade, not a win.** `aeson <2` is 4.7× faster with a proof 10× shorter;
 `conduit <1.3`'s proof is 14× shorter. But `pandoc` — one conflict, reads dominate — is
 6.6× slower with 17× the reads, and `lens <4`'s proof got *longer* because its search
 takes a different path.
+
+**And the column this table is missing is memory**, which turned out to be where it
+hurts most: `pandoc`'s max residency went **22.9 MB → 81.0 MB**, level with cabal's
+80.1 MB, because ~2700 extra retained reduced forms at ~21 KB each is ~58 MB. On
+`vector` the same rate predicts ~2 MB, which is inside its floor and duly invisible.
+Measured 2026-08-17; the mechanism is unchanged since 2026-08-12.
+
+**In allocation — the metric to trust — only the cost side is attributable.**
+`pandoc` now allocates **17.31 GB against cabal's 1.80 GB**, and since its verdict,
+decisions and conflicts have never moved, the walk is the only candidate. On the
+benefit side the last recorded figures (`aeson <2` 22.998 GB, `lens <4` 14.491 GB)
+predate *both* collapsing and the non-reinstallable-boot rule, and both problems
+answered sat then and UNSAT now; they are 4.24 GB and 3.25 GB today, which is a real
+improvement of unclear parentage. Take allocation on both sides of the next commit
+here — that omission is why this file cannot state its own benefit in its best metric.
 
 ## 2. Why the cost exists at all
 
@@ -234,9 +257,21 @@ know before building anything and (b) comes into play.
 Everything else about option 4 is settled — term equality, the key, the bucket size, the
 cause shape. This measurement is the only open question.
 
+**The baseline to price against is now 2026-08-17's** (the banner, and STATUS.md's
+"Re-measured after the scope cut"), not §1's right-hand column. Take `pandoc`'s
+allocation — 17.31 GB — as the headline figure rather than its elapsed time: it is the
+stable metric, it is 9.6× cabal's, and it is what option 4 is supposed to remove. And
+record allocation for **all five** problems before and after, which is the thing §1
+cannot do retrospectively.
+
 ## 6. And before any of it
 
 `noversion` events rose on all three unsat problems when collapsing landed:
 `conduit <1.3` 1 → 6, `lens <4` 1 → 8, `aeson <2` 0 → 9. **Unexplained.** It may be a
 hole the wider clauses opened, in which case some of the numbers in §1 move again.
 Understand that before optimising the mechanism that produced it.
+
+**Re-measured 2026-08-17: it survived the flags-at-defaults cut** — 5, 7 and 7
+respectively, against 1, 1 and 0 before collapsing. So it is a property of the wider
+clauses, not of flag search, which removes the cheapest available explanation and
+leaves the work to do.
