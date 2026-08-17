@@ -357,6 +357,74 @@ be declared.
 
 ---
 
+## Era 8 — The baseline, and the first-release scope (Aug 12 – Aug 17)
+
+### cabal's own solver, over our index — STUCK
+
+*Aug 12.* `Bridge.Cabal.Baseline` drives `Distribution.Solver.Modular.modularResolver`
+over the same index our solver reads, with **no `cabal-install` dependency**;
+`pubgrub --cabal <target>` runs it. One `withWorld` opens the index, the installed db
+and (from Aug 17) the `pkg-config` db, so both solvers are fed from one read — which
+is what makes the comparison structural rather than arranged. First five-problem
+results and the two plan divergences are in [STATUS.md](STATUS.md).
+
+Its first act was to find a bug in *us*: cabal constrains boot packages as
+non-reinstallable, we only *preferred* installed units, and `aeson <2` was resolving
+by planning to build `base 4.15.1.0` from Hackage. Three of five verdicts disagreed
+until our provider carried the same rule. **A baseline earns its cost by disagreeing.**
+
+### Depender collapsing at generation time — OPEN, landed and unfinished
+
+*Aug 12.* `spanningOccurrence` emits one incompatibility per guarded occurrence over
+adjacent releases, which is what `references/pubgrub.md:456` asks for. It is a
+**trade, not a win**: `aeson <2` 4.7× faster with a 10× shorter proof, `pandoc` 6.6×
+slower with 17× the reads, because knowing whether the neighbour carries the same
+dependency means parsing its `.cabal`. Five ways out, one measurement to take first,
+all in [collapsing.md](collapsing.md).
+
+### Flags fixed at their declared defaults — the first-release scope cut
+
+*Aug 17.* **Flags stop being a search dimension.** They are still parsed and applied —
+dependencies are the ones the defaults select — but no flag is a variable the solver
+may set. Ours resolves flag conditions at flatten time (`componentDepsAtDefaults`);
+cabal's is told at the shared index read (`lookupGPD` marks every flag manual, so
+`enforceManualFlags` pins it to the same value). One instance per release, both sides.
+
+Three things worth having on the record, because each is easy to misread later:
+
+- **It is a scope cut, not a retraction.** [flags-semantics.md](flags-semantics.md) is
+  unchanged as a specification and its property suite still exercises the full
+  three-state algebra; only the degenerate case runs. The machinery stays, and the
+  `flags` jj bookmark marks where the axis stands.
+- **It silently disarmed the project's worst trap.** Buildability landed the same week
+  — the thing Open #2 says must not land alone — and the completeness bug did not
+  appear, because with one completion per release the bad case has no instances. The
+  trap re-arms when flag search returns, and by then `buildable:` will look finished.
+- **It invalidates every measurement taken before it**, including the whole of Era 8's
+  first two entries. Re-running `bench/compare.sh` is the precondition for acting on
+  any of them.
+
+It also restricts the *problem*: an automatic flag is exactly what cabal would flip to
+escape an unsatisfiable dependency, so some problems that resolved will now fail. Both
+solvers fail together, which is fair — but any published benchmark or showcase has to
+say so.
+
+### Buildability, and the pkg-config db — STUCK
+
+*Aug 17.* A release whose library cannot be built here is no longer offered:
+`buildable: False`, plus `pkgconfig-depends` checked against the machine's real
+`PkgConfigDb` with cabal's own predicate. `buildableCondition` returns a *condition*
+over flags rather than a boolean, so the flag axis can come back and satisfy it
+instead of redoing the analysis.
+
+The baseline had been passing `Nothing` for that db with the comment "we do not model
+pkgconfig-depends", which is not the neutral value it looks like: cabal reads it as
+*no `pkg-config` executable exists* and rejects every `pkgconfig-depends`, then
+escapes by flipping `zlib`'s automatic flag — 9 of 29 popular targets taking a flag
+flip they did not need. **A stub that looks like an omission can be an assertion.**
+
+---
+
 ## Open right now
 
 Four things are genuinely undecided or unbuilt. In roughly the order the existing
@@ -405,7 +473,13 @@ description, and the consequences step reads it again. That's already paid for b
 
 The most important trap in the project.
 
-`buildable:` is ignored entirely today. It looks like an isolated gap. It isn't:
+**Still open, and the trigger moved.** `buildable:` landed on 2026-08-17 without the
+completeness search and nothing broke — see Era 8: fixing every flag at its default
+leaves one completion per release, so the bad case has no instances. The item below
+now belongs to whoever restores flag search, who will find buildability looking like
+finished work. Read it as written and then read that caveat again.
+
+The argument as it stood, when `buildable:` was ignored entirely:
 
 - Nothing in the tree is currently un-buildable *depending on flag values*. So the
   provider's "try one completion per cell" shortcut cannot currently miss a valid
@@ -430,9 +504,16 @@ case that collapsing would otherwise have to preserve.
 
 The one outright **divergence from the PubGrub spec** rather than a choice.
 
+**Largely closed since this was written** — flag axis Aug 5, version axis Aug 12 (Era
+8) — and still open in the sense that matters: what landed is a trade, and choosing
+how to finish it needs a fresh measurement. [collapsing.md](collapsing.md) is the live
+document. The 2^k argument below is also *currently* moot, since flags are fixed.
+
+The case as it stood, when we emitted the per-version form:
+
 The spec requires identical dependencies of adjacent versions to collapse into one
 incompatibility — `foo >=1.0 && <1.3 depends on bar >=1.0 && <2`, not one per
-version of `foo` (`references/pubgrub.md:456`). We emit the per-version form.
+version of `foo` (`references/pubgrub.md:456`).
 
 It costs **both** deliverables:
 
@@ -465,9 +546,13 @@ answer.
 
 ### Smaller, also open
 
-- **Manual flags** — the intended rule ("a manual flag takes its default unless the
-  user set it") is asserted **from memory** and unverified against
-  `cabal-install-solver`. Not settled normative content.
+- ~~**Manual flags**~~ — **settled, and now implemented in its degenerate case.** The
+  rule was verified against `cabal-install-solver` on 2026-08-05
+  (`Preference.enforceManualFlags`, reading `flagManual` off each `PackageFlag`) and
+  owned by input translation, not admissibility (`flags-semantics.md` §1.6). Since
+  2026-08-17 *every* flag is marked manual at the index read, so the rule is what both
+  solvers run on. What is still unbuilt is the general case: some flags manual, some
+  values user-supplied.
 - **Give the set algebra access to flag declarations?** Would make emptiness exact
   and delete the one-sided slack, at the cost of the core/bridge boundary. A
   cost/benefit call, not a correctness one.
@@ -491,7 +576,9 @@ Things decided with reasons recorded, where revisiting has already cost time:
   wrongly gives wrong answers. Test `isEmpty ⟹ empty`, never `⟺`.
 - **Flags live in the value, not as solver variables.** A flag variable would need
   conditional existence, which PubGrub has no notion of. The price is the 2^k
-  re-offer, and the answer to that price is Open #4, not a change of model.
+  re-offer, and the answer to that price is Open #4, not a change of model. (Since
+  2026-08-17 the price is not being paid, because the search is not being done —
+  Era 8. That is a scope cut, not a third answer.)
 - **The property suite's universe must be non-uniform** — versions must differ in
   which flags they declare, including one declaring none. A uniform universe cannot
   tell the three flag readings apart, which is exactly how a wrong `difference`

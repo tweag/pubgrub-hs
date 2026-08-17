@@ -81,7 +81,7 @@ is a summary and not authoritative; the documents below decide. Project history 
 
 ```sh
 cabal build
-cabal test                      # 103 tests, ~0.3 s
+cabal test                      # 116 tests, ~0.3 s
 cabal run pubgrub -- aeson      # the driver; add -v for the search trace
 cabal run pubgrub -- --cabal aeson   # cabal's solver, same index (the baseline)
 bench/compare.sh                # both solvers over bench/problems.txt
@@ -129,8 +129,11 @@ Current layout (4 cabal components):
   `Bridge/Hackage/{HttpClient,Unlifted}.hs`, and
   `Bridge/Cabal/{Baseline,Flatten,InstalledPkg}.hs`: index reader, installed-db
   reader, the cabal-solver baseline, flag-parametric `GenericPackageDescription`
-  flattening, and the real `Provider`. `Provider.releaseReader` memoises, per release, only the *reduced*
-  form the provider needs (declared flags + flag-guarded deps) — never the parsed
+  flattening, and the real `Provider`. `Flatten` reads two things off the same walk of
+  a conditional tree (`flattenWith`): the `build-depends`, and the `BuildInfo` that
+  decides buildability (`buildable:` plus `pkgconfig-depends` against the machine's
+  `PkgConfigDb`, library only). `Provider.releaseReader` memoises, per release, only the *reduced*
+  form the provider needs (declared flags + guarded deps + a buildable flag) — never the parsed
   description. Retaining those instead cost 27.2s / 904MB on `pandoc` against
   3.7s / 83MB uncached: ~170 parse trees pinning their slices of the index is
   enough live data to make every major GC copy it.
@@ -165,28 +168,34 @@ time; each rung leaves a runnable solver and we measure both deliverables at eac
 
 - **Rung 0** — ✅ plumbing: index reading running on real Hackage data.
 - **Rung 1** — ✅ version ranges. Solver resolves real Hackage packages end to end.
-- **Rung 2** — ✅ flags + conditional deps, as a search dimension. A decision is an
-  *instance* (version × total flag assignment); `Bridge.Cabal.Flatten` flattens the
-  conditional tree to flag-guarded groups and evaluates them at exactly the decided
-  assignment; the provider tries the all-default assignment of a release first and
-  considers deviations only once the accumulated constraint excludes it, fewest
-  deviations first. Semantics: `docs/flags-semantics.md`, with a worked trace in
-  its §9. **The cost that trace describes has been paid** (flag axis of §4.2,
-  2026-08-05): a version rejected for a flag-irrelevant reason is no longer re-offered
-  per irrelevant assignment, because the depender term carries the guard rather than
-  the assignment. What survives is smaller and differently shaped — Reporting gap 1
-  below, and `docs/decision-semantics.md` §0.
-- **Rung 3** — ⚠️ `base`/GHC pinning (installed db → `PreInstalled` instances, strict
-  prefer-installed). **Incomplete, found 2026-08-12 by the baseline.** Strict
-  prefer-installed says what to do when an installed unit is admissible; it says
-  nothing about the case where a constraint *excludes* it, and there we fall through to
-  a source release — so `aeson <2` resolves by planning to build `base 4.15.1.0` from
-  Hackage. cabal forbids that (its non-reinstallable list: `base`, `ghc-bignum`,
-  `ghc-internal`, `ghc-prim`, `ghc`, `integer-gmp`, `integer-simple`,
-  `template-haskell`, mirrored in `Bridge.Cabal.Baseline.nonReinstallablePackages`) and
-  reports no plan. Three of the five benchmark problems disagree for exactly this
-  reason, and they are not comparable until the provider carries the same rule: a
-  non-reinstallable package must offer installed units only, never a source release.
+- **Rung 2** — ✅ flags + conditional deps, **applied but not searched since
+  2026-08-17.** `Bridge.Cabal.Flatten.componentDepsAtDefaults` resolves flag
+  conditions at flatten time against the release's declared defaults, so every guard
+  folds to a literal and no flag reaches the solver; `Bridge.Hackage.lookupGPD` marks
+  every flag manual so cabal's `enforceManualFlags` pins it to the same value. One
+  instance per release, on both sides. Read
+  [`docs/STATUS.md`](docs/STATUS.md)'s "Release-1 scope" before touching this — the
+  search machinery (three-state pins, `expandGuard`, `preferDefaults`, the symbolic
+  `componentDeps`) is intact and unfed, and `docs/flags-semantics.md` is unchanged as
+  a specification. Consequence to know: the 2^k re-offer that motivates half of
+  Reporting gap 1 below **is currently zero**, and returns with the flag axis.
+- **Rung 3** — ✅ `base`/GHC pinning (installed db → `PreInstalled` instances), and
+  **only**-installed rather than merely *prefer*-installed for boot packages. The
+  distinction was found on 2026-08-12 by the baseline: strict prefer-installed says
+  what to do when an installed unit is admissible and nothing about the case where a
+  constraint *excludes* it, and we fell through to a source release — `aeson <2`
+  resolved by planning to build `base 4.15.1.0` from Hackage. cabal forbids that, and
+  `Bridge.Installed.nonReinstallablePackages` is now the single list both solvers read
+  (`base`, `ghc-bignum`, `ghc-internal`, `ghc-prim`, `ghc`, `integer-gmp`,
+  `integer-simple`, `template-haskell`): the baseline as constraints, our provider as
+  a rule in `expand'`. All five benchmark verdicts agree.
+- **Buildability** (not a rung; landed 2026-08-17) — a release whose library cannot be
+  built here is not offered: `buildable: False`, and `pkgconfig-depends` against the
+  machine's real `pkg-config` db, which `withWorld` reads once and hands to *both*
+  solvers. `buildableCondition` returns a `Condition FlagName` and
+  `buildableAtDefaults` evaluates it, so the flag axis can come back and *satisfy* the
+  condition rather than redo the analysis. Not yet stated as an incompatibility
+  (`references/pubgrub.md:476`), so a skipped release reads as "no versions in range".
 - **Rung 4** — setup / build-tool deps (see reference's `SetupDeps.hs`). Note what
   cabal does here that we have no model for at all: it solves **qualified goals**, so
   each executable and setup dependency gets its **own domain**. `Setup.hs` is an
@@ -200,9 +209,12 @@ time; each rung leaves a runnable solver and we measure both deliverables at eac
 
 **Caveat on "measure both deliverables at each rung".** We did not do this for
 rungs 0–3, which were built unmeasured; measurement only started 2026-08-12, once the
-baseline existed, and it immediately found rung 3 incomplete (above) — which is the
-argument for the discipline rather than against it. There is still no harness. The two
-workstreams below are what actually gate the deliverables, and they are not rungs:
+baseline existed, and it immediately found rung 3 incomplete (fixed above) — which is
+the argument for the discipline rather than against it. There is still no harness, and
+the figures that measurement produced (2026-08-12, five problems, `docs/STATUS.md`)
+were then invalidated by the 2026-08-17 scope cut: **re-run `bench/compare.sh` before
+acting on any figure in the docs.** The two workstreams below are what actually gate
+the deliverables, and they are not rungs:
 
 - **Explanations** — cause tracking is reinstated (`IncompatCause`) and
   `PubGrub.Report` renders a numbered proof. Next: `collapseNoInstances`, then
@@ -230,6 +242,15 @@ data InstanceSet = InstanceSet
 data SourceCell = SourceCell VersionSet (Map FlagName FlagPin)  -- range × pinned flags
 data FlagPin    = PinnedTo Bool | NotDeclared
 ```
+
+**Only the degenerate case runs today.** Since 2026-08-17 no pin is ever created —
+guards fold to literals, so every cell has an empty pin map and the DNF is a list of
+plain ranges. The flag machinery below is therefore *unexercised by the real bridge
+and still fully exercised by the tests*: `test/InstanceSetSpec.hs` for the algebra,
+and `test/FlagSolveSpec.hs` for the provider rule, which feeds `mkExpand` hand-built
+releases whose guards are real `Condition`s. That is the only reason it is safe to
+leave in. Do not simplify it away on the evidence of a trace; read "Release-1 scope"
+in `docs/STATUS.md` first.
 
 **DNF** is *disjunctive normal form* — an OR of ANDs. Here: within one `SourceCell`
 the conditions are ANDed (version in this range **and** `simd` pinned on), and the
@@ -324,7 +345,7 @@ incompatibility and emits a numbered proof with backward references. The two
 unsatisfiable `PaperSpec` examples are the reference cases; the spec publishes
 their exact expected English (`references/pubgrub.md:1005` and `:1150`).
 
-Known gaps, in the order worth fixing. **The order is now evidence-backed** (2026-08-12,
+Known gaps, in the order worth fixing. **The order is evidence-backed** (2026-08-12,
 first side-by-side against cabal): our proof for `lens <4` is 9 lines against cabal's
 22, but `conduit <1.3` is **1061** against 16 and `aeson <2` is **2833** against 30.
 Gap 1's version axis is most of that — whole runs of proof lines do nothing but merge
@@ -332,6 +353,12 @@ adjacent releases pairwise at derivation time, which is the collapsing
 `references/pubgrub.md:456` asks for at generation time — followed by unsimplified flag
 cells (see 5 below) and then chain collapsing. See `docs/STATUS.md`, "The explanation
 deliverable is currently losing".
+
+**Two caveats on that evidence.** The line counts were taken before generation-time
+collapsing landed later the same day (`aeson <2` 2833 → 277), and before the
+2026-08-17 scope cut — which removes gap 5's symptom entirely for now, since a proof
+with no pinned cells cannot print one. The *ranking* of 1 and 3 is unaffected; gap 5
+drops out until the flag axis returns.
 
 1. **Depender-range collapsing** — the one gap that is a *spec divergence*, not a
    cosmetic choice, and the only one fixed outside the report layer. The spec
@@ -365,7 +392,9 @@ deliverable is currently losing".
    in the version × assignment space, so a refutation failed to generalise to the
    sibling assignments. `test/FlagSolveSpec.hs` records the k=1 case and
    `docs/flags-semantics.md` §9 traces it; the flag axis fixed it (measured: 2
-   expansions where it was 3 with one irrelevant flag, 5 with two).
+   expansions where it was 3 with one irrelevant flag, 5 with two). **Since
+   2026-08-17 it cannot arise at all**: with one assignment per release, k is 0 and
+   there is nothing to re-offer.
 
    **What survives, and it is no longer 2^k in the declared flags.** Three costs
    remain, all because a decision is still a *point instance* — see
@@ -374,7 +403,9 @@ deliverable is currently losing".
    guard-shaped terms would narrow inside it; and decisions still name inert flags in
    every trace. The residue is bounded by the number of **guard regions** (cells over
    the flags guards actually mention), not by 2^k over every declared flag. Do not
-   call it "the 2^k blow-up" — that name now overstates it.
+   call it "the 2^k blow-up" — that name now overstates it. While flags are fixed at
+   their defaults there are no guard regions and the residue is zero; it returns with
+   the flag axis.
 
    *The shape that was built*, fixed by `docs/flags-semantics.md` §4.2, which
    overrules this file: the unit is **one guarded dependency occurrence**
@@ -397,7 +428,9 @@ deliverable is currently losing".
    releases carrying the same occurrence, which cut `aeson <2` from 11.1s to 2.4s and its
    proof from 2833 lines to 277, but cost `pandoc` 6.6× in time and 17× in reads. That
    file has the five ways out, the settled term-equality question, and the one
-   measurement to take first.
+   measurement to take first — **and every number in it predates the 2026-08-17 scope
+   cut, which changes what "the same occurrence" compares equal to.** Re-measure
+   before choosing among the five.
 
    On the **version** axis, the free half landed 2026-08-12: the depender's version
    component is a release's **slot** — `halfOpenVersionSet v next`, reaching up to
@@ -417,7 +450,10 @@ deliverable is currently losing".
    third pin state turned out **not** to be needed on this path: requiring the guard to
    be *identical* means every release in the span declares the flags the guard mentions,
    since one that did not could not have produced that guard
-   (`docs/collapsing.md` §1). See also `docs/decision-semantics.md`, which builds on
+   (`docs/collapsing.md` §1). While flags are fixed at their defaults it does not arise
+   from the other direction either — guards are literals, so there is no flag to be
+   inapplicable and only dependency-identity is compared; the question comes back with
+   the flag axis. See also `docs/decision-semantics.md`, which builds on
    this emission shape and treated it as its prerequisite — now paid.
 2. **`collapseNoInstances`** — intensional ranges mean the solver must separately
    learn that a range's *holes* are empty, so `no version for bar in >2.0.0 && <3`
@@ -448,7 +484,10 @@ deliverable is currently losing".
    one sentence; this is most of the remaining line-count gap.
 4. Cosmetic: `So,` on the final line; terminal periods on non-final lines; omit
    the synthetic root's version; number only lines actually referenced.
-5. **Collapse cells that exhaust a flag's states.** Real proof lines read
+5. **Collapse cells that exhaust a flag's states.** *Dormant since 2026-08-17: no
+   cell is ever pinned, so no proof line can show this. Keep it on the list — it
+   returns with the flag axis, and the fix is independent of everything else.* Real
+   proof lines read
    `aeson >=1.2.2.0 && <1.4.2.0 -bytestring-builder or … +bytestring-builder or …
    (no bytestring-builder flag)` — three cells over one version range covering all
    three pin states, which denotes "any instance in that range" with the flag

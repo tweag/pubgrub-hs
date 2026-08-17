@@ -4,9 +4,14 @@ How to reproduce every number in [STATUS.md](STATUS.md), and what each one is wo
 The short version:
 
 ```sh
-cabal test                    # 103 unit and property tests, ~0.3 s
+cabal test                    # 116 unit and property tests, ~0.3 s
 bench/compare.sh              # both solvers over bench/problems.txt
 ```
+
+> **Every figure currently in STATUS.md predates 2026-08-17**, when flags stopped
+> being a search dimension and buildability started being enforced. Re-running
+> `bench/compare.sh` is the first item on that file's open-questions list; until it
+> happens, the numbers there record what *was* true.
 
 ---
 

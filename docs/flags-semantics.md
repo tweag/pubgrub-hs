@@ -890,9 +890,25 @@ observable today.
 ## 10. What holds today
 
 A specification nobody has checked against the code is how the last round of
-confusion started, so: this is the state as of **2026-08-12** (re-checked against the
-tree that day; 103 tests passing), and it is expected to be edited whenever the tree
-moves.
+confusion started, so: this is the state as of **2026-08-17**, and it is expected to
+be edited whenever the tree moves.
+
+> **Read this first, or the table below will mislead you.** Since 2026-08-17 the
+> implementation runs in this specification's **degenerate case**: every flag is
+> treated as manual and fixed at its declared default, on our side by resolving flag
+> conditions at flatten time (`componentDepsAtDefaults`) and on cabal's by marking
+> every flag manual at the shared index read. So there is exactly **one instance per
+> release**, no pin is ever created, and every set the algebra sees is flag-free.
+>
+> **Nothing in §§1–9 changes.** The semantics are what they are whether or not the
+> search explores them, and the tests still exercise them: `InstanceSetSpec` for the
+> three-state algebra over a non-uniform universe (§6), and `FlagSolveSpec` for the
+> provider rule, which drives the real `mkExpand` over hand-built releases whose
+> guards are genuine conditions — including §9's worked trace. That coverage is the
+> only reason it is safe to leave the machinery in place. What changes is which rows below are *exercised*
+> rather than merely *held*, and the table now says so. This is a scope cut for a
+> first release, recorded in [STATUS.md](STATUS.md)'s "Release-1 scope"; the flag axis
+> is expected back, and §10's couplings are written for whoever brings it back.
 
 | obligation | status |
 |---|---|
@@ -905,13 +921,14 @@ moves.
 | O6 soundness | holds |
 | O6 completeness | **latent — see below** |
 | O7 enumeration boundary | holds: the algebra never enumerates, the provider enumerates releases only |
-| §1.5 buildability | not implemented (`buildable:` is ignored) |
-| §1.5 manual flags | not implemented; the rule is now settled and lives in §1.6's translation, not in admissibility |
-| §1.6 lenient user constraints | not implemented (no user flag constraints yet) |
-| §4.1 dependencies at the decided assignment | holds |
-| §4.2 per-fact collapsing | **implemented.** Flag axis 2026-08-05, version axis 2026-08-12: `Bridge.Provider.dependencyInc` emits one guarded occurrence, the depender term pinning only the guard's flags (`sourceInstances`) and spanning adjacent releases that carry the identical occurrence (`spanningOccurrence`). Its cost is not settled — see [collapsing.md](collapsing.md) |
+| §1.5 buildability | **implemented for one assignment** (2026-08-17): `buildableCondition` computes the condition (`buildable:` plus `pkgconfig-depends` against the machine's `PkgConfigDb`, library only), `buildableAtDefaults` evaluates it, and the provider does not offer the release. *Satisfying* the condition rather than evaluating it is the flag-axis half, still owed |
+| §1.5 unbuildable as a stated fact (`pubgrub.md:476`) | not implemented — the release is silently absent, so the report says "no versions in range" rather than why |
+| §1.5 manual flags | **implemented in the degenerate case** (2026-08-17): every flag is manual and no user values exist, so the translation is "take the default" and it is applied at input rather than as a solver constraint. The general rule — some flags manual, some values user-supplied — is untouched |
+| §1.6 lenient user constraints | not implemented (no user flag constraints yet), and while every flag is manual they are the only thing that could move one |
+| §4.1 dependencies at the decided assignment | holds; currently trivial, since there is one assignment per release |
+| §4.2 per-fact collapsing | **implemented, both axes.** Flag axis 2026-08-05 (the guard is the depender's flag component); version axis 2026-08-12 (`spanningOccurrence` over adjacent releases carrying the same occurrence) — a measured trade, see [collapsing.md](collapsing.md) |
 | §4.3 report wording | partial: constraints render, the not-applicable wording is not aligned |
-| §5 choice policy | implemented as release-major then fewest deviations, but over a **one-completion-per-cell** search — correct only while admissibility is assignment-independent (below) |
+| §5 choice policy | implemented as release-major then fewest deviations, but over a **one-completion-per-cell** search — correct only while admissibility is assignment-independent (below). Currently vacuous: one completion exists, so "fewest deviations" ranks a single candidate |
 | §6 non-uniform universe, one-sided properties | in place |
 | §6 verdict oracle | owed, **and blocking for condition decisions** |
 | D1 determination before success | specified ([decision-semantics.md](decision-semantics.md) §3), not implemented |
@@ -921,13 +938,20 @@ moves.
 
 Three couplings worth knowing before picking up any of it.
 
-**O6's completeness half is satisfied only by accident.** Nothing in the tree is
-*assignment-dependently* inadmissible yet: buildability is ignored, manual flags
-are undistinguished, user flag constraints do not exist. So the provider's
-one-completion-per-cell search cannot currently miss an admissible instance — the
-cell-completion lemma is enough on its own. The gap opens the moment §1.5 is
-implemented. Implement the two together, or the first correct-looking buildability
-patch introduces a wrong "no solution".
+**O6's completeness half is satisfied, and no longer by accident — by scope.** The
+original wording of this paragraph said the accident would end the moment §1.5 was
+implemented. §1.5 *was* implemented, on 2026-08-17, and completeness did not break,
+because the same cut made every flag manual: a release has exactly one completion, so
+"the default completion is inadmissible while another completion of the same cell is
+admissible" has no instances. Admissibility is assignment-dependent in the `.cabal`
+file and assignment-independent in the problem being solved.
+
+This is a **weaker** guarantee than it looks, and the weakness is the point:
+completeness now rests on there being one completion, not on the search finding all
+of them. The provider's one-completion-per-cell shortcut is untouched and still
+unsound in general. **Whoever restores flag search restores the gap**, and must land
+the O6-complete search with it — buildability will by then look like finished, tested
+code rather than half of a pair.
 
 Note this is not only a property of the code: **§5's own selection recipe was
 written against that accident** and said so, until the 2026-08-05 review caught it.
@@ -955,6 +979,21 @@ inadmissible", where it answers `None` and the per-instance reasons are dropped 
 favour of the solver's set-level "no instances in `X`". That costs explanation
 quality only, and the fix belongs in the *cause* attached to that incompatibility,
 not in the return type.
+
+**This stopped being hypothetical on 2026-08-17.** The provider now skips releases
+whose library is unbuildable here, and says nothing about them. Two paths follow
+directly from the paragraph above, and the second is the smaller job:
+
+- where the scan eventually settles on a release, the skipped ones' facts —
+  `{ foo 1.2 }`, "never select this", `pubgrub.md:476`, collapsed over adjacent
+  releases like a dependency — can ride along with the `Some`, **no interface change
+  required**;
+- where every release was skipped, the reasons are lost and the report reads "no
+  versions in range", which is the cause-side gap above rather than a new one.
+
+A code comment in `Bridge.Provider` briefly claimed this was blocked on `expand`
+being able to answer "no decision, but learn this". It is not; only the second case
+would want that, and even there the cause is the right place.
 
 The tree already leans on the same reasoning for uninterpretable descriptions:
 they are skipped with a warning and no incompatibility, which §1.5 makes correct —

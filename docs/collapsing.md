@@ -8,6 +8,26 @@ adjacent releases, instead of one per release, as `references/pubgrub.md:456` re
 Authority on the emission *shape* remains [`flags-semantics.md`](flags-semantics.md)
 §4.2; this file is about the mechanism and its cost.
 
+> **Stale in one specific way, since 2026-08-17.** Flags stopped being a search
+> dimension ([STATUS.md](STATUS.md), "Release-1 scope"), which touches this file in
+> three places, none of which invalidate the *argument*:
+>
+> 1. **every number below was taken with flags searched.** Re-run `bench/compare.sh`
+>    before choosing among the five options — §5's measurement is a comparison, and
+>    both sides of it have moved;
+> 2. **one of the two motivations is gone for now.** §1's performance case was partly
+>    the 2^k re-offer; with one assignment per release that is zero. The spec
+>    divergence and the proof length remain, and they carry it on their own;
+> 3. **"the same occurrence" now compares more things equal.** The walk requires an
+>    identical guard, and every guard is now a literal, so releases that declare the
+>    same dependency under differently-written conditions no longer break the span.
+>    Expect **longer spans**: shorter proofs, more releases walked — the same trade,
+>    further in both directions. Against that, `Lit False` groups vanish before the
+>    walk sees them, and unbuildable releases are skipped entirely.
+>
+> §4's term-equality analysis is unaffected and gets *easier*: a dependee term minted
+> by `widen` was already one cell with an empty pin map, and now every cell is.
+
 ---
 
 ## 1. Where it stands

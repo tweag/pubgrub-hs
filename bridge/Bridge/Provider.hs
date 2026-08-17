@@ -375,10 +375,14 @@ mkExpand installedDb source root = expand'
                             -- The spec states such a release as an incompatibility of
                             -- its own, collapsed over adjacent releases
                             -- (@references\/pubgrub.md:476@), so that a report can say
-                            -- why it is out. @expand@ cannot answer "no decision, but
-                            -- learn this" (@PubGrub.Provider@), so the release is not
-                            -- offered, and an exhausted list reads as "no versions in
-                            -- range".
+                            -- why it is out. That needs no new interface: where the scan
+                            -- settles on a release, the skipped releases' facts can ride
+                            -- along with that @Just@, since incompatibilities need not be
+                            -- about the instance just decided (@docs\/flags-semantics.md@
+                            -- §10). Only an /exhausted/ list loses them, and there the
+                            -- fix belongs in the cause attached to "no instances in
+                            -- range". Neither is done, so the release is simply not
+                            -- offered.
                             Right release | not (relBuildable release) -> firstUsable rest
                             Right release ->
                                 -- Each guarded dependency becomes one incompatibility

@@ -4,6 +4,15 @@
 > §12 records the code this document was checked against at drafting time and
 > is expected to be edited whenever the tree moves.
 >
+> **Dormant since 2026-08-17, and deliberately not withdrawn.** Flags stopped being
+> a search dimension ([STATUS.md](STATUS.md), "Release-1 scope"): every flag is fixed
+> at its declared default, so a release has exactly one instance and the costs this
+> document exists to remove — re-offering a version per irrelevant flag assignment,
+> searching assignments outside the constraint store, naming uninvolved flags in every
+> trace — are all currently **zero**. Nothing here is wrong; there is simply nothing
+> for it to fix until the flag axis returns, at which point it becomes live again
+> unchanged. Do not schedule it, and do not delete the machinery it depends on.
+>
 > **Prerequisite:** per-fact guarded emission,
 > [flags-semantics.md §4.2](flags-semantics.md). It is restated nowhere here —
 > this document assumes dependency facts arrive shaped

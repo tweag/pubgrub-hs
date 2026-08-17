@@ -8,7 +8,11 @@
 > table below decide. If this file contradicts one of them, that one is right and
 > this file is stale — fix it.
 >
-> **Last checked against the tree:** 2026-08-12, 103 tests passing.
+> **Last checked against the tree:** 2026-08-17, 116 tests passing.
+>
+> **Read [Release-1 scope](#release-1-scope-flags-are-fixed-at-their-defaults-2026-08-17)
+> first if you have been away.** Flags stopped being a search dimension on
+> 2026-08-17, and every measurement in this file was taken before that.
 >
 > History lives in [decision-log.md](decision-log.md) (how we got here);
 > abandoned ideas live in [attic/](attic/) (what we tried and dropped).
@@ -24,8 +28,8 @@ correctly is table stakes. It exists to answer two questions:
 2. Can it **match cabal-install on time and peak memory** on real problems?
 
 **The solver works.** It resolves real Hackage packages end to end, with version
-ranges, Cabal flags, and installed/boot-package pinning. 103 tests pass, including
-all six worked examples from the PubGrub spec.
+ranges, Cabal flags, buildability, and installed/boot-package pinning. 116 tests
+pass, including all six worked examples from the PubGrub spec.
 
 **Neither deliverable has been delivered, but the comparison has started.** As of
 2026-08-12 cabal's own solver runs over our index (`pubgrub --cabal`, no
@@ -34,6 +38,13 @@ all six worked examples from the PubGrub spec.
 everywhere, cabal is 2.7–4.3× faster where there is real search, we use 2–3× less
 memory.** What is missing is the harness — one run doing both, diffing plans,
 repeating for timing — and the explanation side-by-side.
+
+**And the problem got smaller on 2026-08-17.** Flags are no longer a search
+dimension: every flag is fixed at its declared default, on *both* sides of the
+comparison. That is a deliberate scope cut for a first release, not a discovery —
+see [Release-1 scope](#release-1-scope-flags-are-fixed-at-their-defaults-2026-08-17).
+Its immediate consequence for everything below: **no number in this file has been
+re-measured since**, and several of them were about costs the cut removes.
 
 ---
 
@@ -47,8 +58,8 @@ the "authoritative on" column says who owns the question.
 | file | authoritative on | status |
 |---|---|---|
 | [`references/pubgrub.md`](../references/pubgrub.md) | **the algorithm.** Vendored copy of pub's spec | present and now tracked (1233 lines); all cited line numbers verified 2026-08-12. Reference — never edit |
-| [`flags-semantics.md`](flags-semantics.md) | **flags**, and the value/set language | spec, 2026-08-03, largely implemented |
-| [`decision-semantics.md`](decision-semantics.md) | what a **decision** is (condition decisions) | spec, drafted 2026-08-04, **nothing implemented** |
+| [`flags-semantics.md`](flags-semantics.md) | **flags**, and the value/set language | spec, 2026-08-03; unchanged by the release-1 scope cut, but only its degenerate case is exercised — see its §10 |
+| [`decision-semantics.md`](decision-semantics.md) | what a **decision** is (condition decisions) | spec, drafted 2026-08-04, **nothing implemented**; its motivating cost is *suspended*, not gone — see below |
 | [`../specification/`](../specification/) | **nothing — it is not authoritative.** Our own draft attempt at formalising the kernel, in Lean | executable and machine-checked; **a draft.** Where it disagrees with `references/pubgrub.md` or `flags-semantics.md`, it is wrong. Lean code is normative only over its own prose |
 | [`../CLAUDE.md`](../CLAUDE.md) | architecture, the rung ladder, conventions | current |
 | [`specification.md`](specification.md) | Cabal's **build model** (components, scopes, Backpack) | reference for rungs 4–5, nothing implemented |
@@ -56,7 +67,7 @@ the "authoritative on" column says who owns the question.
 | [`pubgrub-intro.md`](pubgrub-intro.md) | tutorial introduction to PubGrub | useful, three stale sections (flagged in it) |
 | [`flags-semantics-review.md`](flags-semantics-review.md) | an independent review of the flag spec | 2026-08-05; findings folded in, kept as the record |
 | [`benchmarking.md`](benchmarking.md) | **how to run the tests and benchmarks**, and which numbers to trust | current, 2026-08-12 |
-| [`collapsing.md`](collapsing.md) | **depender collapsing**: what landed, its cost, and the five ways to finish it | design note, 2026-08-12 — the next thing to work on |
+| [`collapsing.md`](collapsing.md) | **depender collapsing**: what landed, its cost, and the five ways to finish it | design note, 2026-08-12 — the next thing to work on, but **its numbers predate the release-1 scope cut** and one of its two motivations was the 2^k re-offer that cut removes |
 | [`decision-log.md`](decision-log.md) | project history | narrative, not authoritative |
 | [`related-work.md`](related-work.md) | external literature → our problems | reading map, not authoritative |
 | this file | current state | summary, not authoritative |
@@ -133,9 +144,11 @@ Three consequences:
    it. It deviates from `references/pubgrub.md` only where its §1 registers.
 2. **It has a hard prerequisite** — per-fact guarded emission,
    `flags-semantics.md` §4.2 — and says of itself that it *"is inert without"* it.
-   §4.2's **flag axis is implemented** (2026-08-05); its **version axis is not**, and
-   that is the half `references/pubgrub.md:456` actually asks for. So the prerequisite
-   is half paid.
+   §4.2's **flag axis is implemented** (2026-08-05) and its **version axis** landed on
+   2026-08-12 — the half `references/pubgrub.md:456` actually asks for — as a
+   measured trade rather than a clean win ([collapsing.md](collapsing.md)). So the
+   prerequisite is paid, and the thing it was a prerequisite *for* is now dormant
+   instead (see below).
 3. **It is the revisit `flags-semantics.md` reserved.** §1.4 there recorded that
    putting the flag in the value costs 2^k re-offers and said "if the retry cost ever
    dominates, this is the decision to revisit." `decision-semantics.md` §0 is that
@@ -145,6 +158,12 @@ The division of labour on that 2^k cost is the cleanest way to see the split:
 **§4.2 keeps irrelevant flags out of the learned clauses; condition decisions keep
 them out of the decisions too.** Three costs survive §4.2, all because a decision is
 still a single point instance.
+
+**Both of those are about a cost that is currently zero.** With flags fixed at their
+defaults there is one assignment per release, so no flag is ever a search dimension
+and 2^k is 2^0. That does not retire `decision-semantics.md` — it makes it *dormant*.
+It becomes live again the moment the flag axis returns, and it is the reason not to
+delete the machinery in the meantime.
 
 They also split the flag algebra by role, which sounds like a contradiction and is not:
 
@@ -212,12 +231,21 @@ are **O6** (the provider must never report "nothing available" when something is
 - **Rung 0** — our own Hackage index reader, on real cached `01-index.tar`, handling
   `.cabal` revisions (last wins) and `preferred-versions`.
 - **Rung 1** — version ranges. Resolves real packages end to end.
-- **Rung 2** — flags and conditional dependencies as a search dimension. A decision
-  is a version plus a total flag assignment; the provider tries the all-defaults
-  assignment first and deviates only when forced, fewest deviations first.
+- **Rung 2** — flags and conditional dependencies, **applied but not searched**. A
+  release's dependencies are the ones its declared flag defaults select, evaluated
+  off the flattened conditional tree; every flag is treated as manual and no flag is
+  a variable the solver may set. A decision is still a version plus a total flag
+  assignment, but there is exactly one of those per release. The search machinery
+  (three-state pins, `preferDefaults`, the symbolic flatten) is intact and unfed —
+  see [Release-1 scope](#release-1-scope-flags-are-fixed-at-their-defaults-2026-08-17).
 - **Rung 3** — `base`/GHC pinning: the installed database becomes pre-installed
   instances, with strict prefer-installed, and an installed unit pins its whole
-  closure.
+  closure. Boot packages are **only**-installed: a non-reinstallable package offers
+  installed units or nothing, never a source release.
+- **Buildability** — a release whose library cannot be built here is not offered:
+  `buildable: False`, and `pkgconfig-depends` resolved against the machine's real
+  `pkg-config` db (cabal's own `PkgConfigDb` and predicate, read once in `withWorld`
+  and handed to both solvers).
 - **Explanations, partly** — cause tracking exists and `PubGrub.Report` prints a
   numbered proof. Both unsatisfiable examples from the PubGrub spec are tests.
 - **Output** — the solution renders as a dependency tree.
@@ -239,6 +267,56 @@ collection then copies the lot.
 
 ---
 
+## Release-1 scope: flags are fixed at their defaults (2026-08-17)
+
+**What changed.** Flags stopped being a search dimension. They are still parsed and
+still applied — a release's dependencies are the ones its defaults select, not the
+ones an unflagged read would give — but no flag is a variable the solver may set.
+
+Both solvers had to be told, and each takes it differently:
+
+- **ours, at flatten time.** `Bridge.Cabal.Flatten.componentDepsAtDefaults` resolves
+  flag conditions against the release's own defaults instead of leaving them
+  symbolic, so every guard folds to a literal. Nothing downstream changed shape:
+  `expandGuard` already maps `Lit True` to one candidate assignment with **no pins**
+  (so a dependency is emitted with its flag component unconstrained) and `Lit False`
+  to none (and the provider drops a group whose expansion is empty). No pinned cell
+  is ever built, `InstanceSet` degenerates to one flag-free cell per operand, and a
+  release offers exactly one instance: itself under its defaults;
+- **cabal's, at the index read.** `Bridge.Hackage.lookupGPD` marks every flag
+  manual, so cabal's `enforceManualFlags` prunes every branch whose value is neither
+  the default nor named by a user flag constraint — and we pass none. Doing it at the
+  single shared read is what keeps the comparison structural: neither solver can be
+  handed a different universe by accident.
+
+**Two things to remember when reading numbers taken after this.** A manual flag is
+not *weak* (`weak m = not (strfl || m)`), so `deferWeakFlagChoices` stops deferring
+the flags that influence dependencies — that perturbs cabal's **goal ordering**, not
+just its flag values. And an automatic flag is exactly what cabal would have flipped
+to escape an unsatisfiable dependency, so some problems that resolved before will
+not. Both solvers fail together, which is what makes the comparison fair, but it is a
+**restriction of the problem** and any published explanation has to say so.
+
+**What it does to the open work**, and this is the part worth checking before picking
+anything up:
+
+- the **2^k re-offer is gone by construction**, not by fix. That was one of the two
+  motivations for depender collapsing (`collapsing.md`) and the whole motivation for
+  condition decisions (`decision-semantics.md`). Both remain correct about a cost
+  that is currently zero;
+- the [trap below](#the-one-trap-worth-knowing-before-you-touch-anything) did **not**
+  spring when buildability landed the same week, and the reason is this cut;
+- **every measurement in this file predates it.** The collapsing trade in particular
+  (`aeson <2` 4.7× faster, `pandoc` 6.6× slower) was measured with flags searched.
+
+**What is deliberately kept.** `componentDeps` (the symbolic flatten), `expandGuard`,
+`preferDefaults`, the three-state pin and its property suite are all still here and
+still tested. The `flags` jj bookmark marks where that work stands. This is a scope
+cut for a first release, not a retraction of the model — `flags-semantics.md` is
+unchanged as a specification, and only its degenerate case is exercised.
+
+---
+
 ## Written down but not built
 
 Everything here has a specification and no implementation. **Do not assume any of
@@ -247,11 +325,12 @@ it exists in the code.**
 | thing | spec | note |
 |---|---|---|
 | **Condition decisions** (its rules D1, D2, D3) | [`decision-semantics.md`](decision-semantics.md) §2–§9 | kernel-level change to what a decision is |
-| **§4.2's version axis** — widening a depender across adjacent releases | [`flags-semantics.md`](flags-semantics.md) §4.2 | the flag axis landed 2026-08-05; this half needs `NotDeclared` and is what `pubgrub.md:456` asks for |
+| ~~**§4.2's version axis**~~ — widening a depender across adjacent releases | [`flags-semantics.md`](flags-semantics.md) §4.2 | **built 2026-08-12** and unfinished: a trade, not a win. [collapsing.md](collapsing.md) has the five ways out and the measurement to take first |
 | **Seed incompatibilities** instead of a synthetic root | [decision-log](decision-log.md#5-open-decisions) | decided 2026-07-30; `solve` still takes `rootPkg`/`rootV` |
-| **`buildable:`** | [`flags-semantics.md`](flags-semantics.md) §1.5 | ignored entirely today — see the trap below |
-| **Manual flags** | [`flags-semantics.md`](flags-semantics.md) §1.6 | rule now settled and locally checkable against cabal's `enforceManualFlags`; it is *input translation*, not admissibility |
-| **User flag constraints** (`--flag`) | [`flags-semantics.md`](flags-semantics.md) §1.6 | do not exist yet |
+| **`buildable:` as a *condition*** | [`flags-semantics.md`](flags-semantics.md) §1.5 | **half built, 2026-08-17.** `buildableCondition` returns the condition; `buildableAtDefaults` evaluates it, and the provider skips the release. Satisfying it rather than evaluating it is the flag-axis half |
+| **Unbuildable stated as an incompatibility** | `references/pubgrub.md:476` | not built. A skipped release is silently absent, so a report says "no versions in range" rather than why. **No interface change needed** for the common case — the facts can ride along with the decision the scan does settle on ([`flags-semantics.md`](flags-semantics.md) §10); only "every release was skipped" loses them, and that is a cause-side gap |
+| **Manual flags** | [`flags-semantics.md`](flags-semantics.md) §1.6 | **built in its degenerate case, 2026-08-17**: *every* flag is manual and no user values exist, so the translation is "take the default" and it is applied at the index read rather than as a solver constraint |
+| **User flag constraints** (`--flag`) | [`flags-semantics.md`](flags-semantics.md) §1.6 | do not exist yet — and while every flag is manual, they are the only thing that could move one |
 | **Rung 4** — setup / build-tool deps | — | not started |
 | **Rung 5** — public sublibraries | — | not started |
 | **The benchmark harness** | — | nothing exists; the larger of the two deliverables |
@@ -261,26 +340,41 @@ it exists in the code.**
 
 ## The one trap worth knowing before you touch anything
 
-**`buildable:`, the completeness search, and a missing test are one work item.**
+**`buildable:`, the completeness search, and a missing test are one work item** —
+and the item is now *armed but not firing*, which is a worse state to misread than
+either extreme.
 
-It looks like three separate gaps. It is not:
+The trap as it stood: the provider's shortcut is to try **one flag completion per
+candidate region**, so if a region's default completion is unusable while another
+completion of the same region is fine, the shortcut misses a valid instance. The
+symptom is a confident, wrong **"no solution"** — the false `None` O6 forbids.
+Nothing in the tree was unusable depending on flag values, so the shortcut was
+**correct by accident**, and implementing `buildable:` was going to end the accident.
 
-- Nothing in the tree is currently unusable *depending on flag values*. So the
-  provider's shortcut — try one flag completion per candidate region — cannot
-  currently miss a valid instance. It is **correct by accident**.
-- The moment `buildable:` is implemented, that accident ends, and the shortcut can
-  miss a valid instance. The symptom is a confident, wrong **"no solution"**.
-- The test that would catch it needs a world where the *default* flag completion is
-  unusable but another completion of the same region is fine — and that world cannot
-  be built until `buildable:` exists.
-- And it is **written into the spec, not only the code**: `flags-semantics.md` §5's
-  selection recipe was itself phrased against the accident until the 2026-08-05
-  review caught it. §5 is now stated as policy over an O6-complete search, so the
-  search and the policy have to land together.
+**Buildability landed on 2026-08-17 and the trap did not spring.** Not because the
+analysis was wrong — because the same week removed the other half of its
+precondition. With every flag fixed at its default there is exactly **one**
+completion per release, so "the default completion is unusable but another is fine"
+has no instances: the other completion is not in the universe at all, for us or for
+cabal. Admissibility is assignment-dependent in the `.cabal` file and
+assignment-independent in the problem we are solving.
 
-So: implement buildability, the search, and the oracle together. Doing the first
-alone introduces the bug. `flags-semantics.md` §10 states this; it is repeated here
-because it is the easiest expensive mistake available.
+Two things follow, and they pull in opposite directions:
+
+- **you may implement and measure buildability today** without the completeness
+  search, which is what happened;
+- **the trap re-arms the instant the flag axis comes back**, and it will do so
+  quietly, because by then `buildable:` will look like settled, tested, working code
+  rather than the second half of an unfinished pair.
+
+So the work item is unchanged in content and changed in trigger: **whoever restores
+flag search owns the O6-complete search and §6's oracle**, and cannot treat
+buildability as already done. The test that would catch it still cannot be built
+until then — it needs a world where completions of one region disagree about
+usability. And it is **written into the spec, not only the code**:
+`flags-semantics.md` §5's selection recipe was itself phrased against the accident
+until the 2026-08-05 review caught it; §5 is now stated as policy over an O6-complete
+search, so the search and the policy have to land together.
 
 ---
 
@@ -288,6 +382,16 @@ because it is the easiest expensive mistake available.
 
 Full arguments in the linked sections; this is the index.
 
+0. **Re-measure, before deciding anything below.** Every number in this file was
+   taken before the 2026-08-17 scope cut, and the cut touches exactly what they
+   measured: no flag search means no 2^k re-offer, no pinned cells in the terms the
+   solver carries or prints, and one candidate assignment per release; buildability
+   means some releases are no longer offered at all. `bench/compare.sh` over
+   `bench/problems.txt` is one command ([benchmarking.md](benchmarking.md)) and it
+   decides whether the collapsing trade, the `noversion` rise, and item 4's measured
+   depth still exist. **Nothing in `collapsing.md` should be built until this is
+   re-run** — its §5 measurement is itself a comparison against numbers that are now
+   stale on both sides.
 1. **Should the provider's `expand` split back into "pick" then "consequences"?**
    ([`flags-semantics.md`](flags-semantics.md) §8.) Design item, not a decision.
    **Note the interaction:** [`decision-semantics.md`](decision-semantics.md) §10 says
@@ -297,7 +401,10 @@ Full arguments in the linked sections; this is the index.
    cost.** The divergence from `references/pubgrub.md:456` is closed. The flag axis
    landed 2026-08-05 (the 2^k re-offer is gone — measured: 2 expansions where it was
    3 with one irrelevant flag and 5 with two; depender terms carry the guard, not the
-   whole assignment). The version axis landed 2026-08-12 in
+   whole assignment), and **that half of the motivation is moot since 2026-08-17**:
+   with flags fixed at their defaults there is one assignment per release and nothing
+   to re-offer, so what the collapsing is still for is the spec divergence and the
+   proof length. The version axis landed 2026-08-12 in
    `Bridge.Provider.spanningOccurrence`. **It is a trade, not a win** — `aeson <2`
    11.1s → 2.4s with its proof 2833 → 277 lines, but `pandoc` 6.6× slower on 17× the
    reads. [`collapsing.md`](collapsing.md) is authoritative on where it stands and
@@ -406,11 +513,13 @@ the most recent thinking on this:
 
 1. ~~Per-fact guarded emission (§4.2), flag axis.~~ **Done 2026-08-05.** It removed
    the 2^k re-offer on its own, as predicted.
-2. **Measure it on real problems.** This is the step now due, and nothing above it in
-   the list should start before it: the sequencing note's whole point is that the
-   kernel change is justified by measurement, not by argument.
+2. ~~**Measure it on real problems.**~~ **Done 2026-08-12** — the five-problem
+   comparison below, and the collapsing trade. **And invalidated on 2026-08-17** by
+   the scope cut; re-running it is Open question 0.
 3. Only then decide whether the kernel generalisation (condition decisions) pays for
    itself. If it does, the verdict oracle lands before or with it — not after.
+   **Dormant while flags are fixed**: the cost it exists to remove is currently zero,
+   so this cannot be justified by measurement until flag search returns.
 
 Seeds before collapsing, incidentally: smaller change, and it removes a special case
 collapsing would otherwise have to preserve.
@@ -419,6 +528,15 @@ collapsing would otherwise have to preserve.
 
 ## Measurement — first results
 
+> **Everything from here down predates 2026-08-17**, when flags stopped being
+> searched and buildability started being enforced. Treat the numbers as a record of
+> what was true, not as the current state — see
+> [Release-1 scope](#release-1-scope-flags-are-fixed-at-their-defaults-2026-08-17)
+> and Open question 0. The *findings* mostly survive (which problems have search in
+> them, what dominates `pandoc`, what the explanation gap is made of); the
+> **figures** do not, and the ones about flag-driven retries and pinned cells are the
+> least likely to.
+>
 > **To reproduce anything below, see [benchmarking.md](benchmarking.md).** It documents
 > `bench/compare.sh` and `bench/summarise.awk`, the problem set and why it is those
 > problems, and which of these numbers are deterministic (counts) rather than noisy
@@ -710,7 +828,16 @@ would have supplied — CLI constraint syntax, a preference intermediate languag
 ours already.
 
 Both solvers are fed from one `Bridge.Provider.withWorld`: one index bracket, one
-installed-db read.
+installed-db read — and, since 2026-08-17, one `pkg-config` db. That last one was
+not a detail: passing `Nothing` reads to cabal as *no `pkg-config` executable
+exists*, so it rejected every `pkgconfig-depends` and escaped by flipping `zlib`'s
+automatic `pkg-config` flag, on 9 of 29 popular targets. A baseline has to agree
+about the environment before agreeing about a plan is worth anything.
+
+That symptom is no longer available to cabal — with every flag manual it cannot flip
+one to escape — which makes the db *more* load-bearing, not less: on a machine
+without the system library, cabal now rejects the release outright, and so do we.
+Same rule, same db, same verdict.
 
 | problem | verdict | time | peak RSS | max residency |
 |---|---|---|---|---|
@@ -871,7 +998,10 @@ already-known gaps, now with evidence behind them:
    the first place. This is now the top item for both deliverables: it is also most of
    why `aeson <2` takes 11 s.
 
-2. **Flag cells that cover every state, unsimplified.** Terms like
+2. **Flag cells that cover every state, unsimplified.** *(Gone for now: with flags
+   fixed at their defaults no cell is ever pinned, so no proof line can print one.
+   Kept because it returns with the flag axis, and because the fix — a `mergeCells`
+   sibling — is cheap and independent of when that happens.)* Terms like
 
    ```
    aeson >=1.2.2.0 && <1.4.2.0 -bytestring-builder
@@ -953,6 +1083,18 @@ with no merging in it, and see what the indirection costs on `pandoc` against `a
 Before any of it: `noversion` events rose on all three unsat problems (`conduit` 1 → 6,
 `lens` 1 → 8, `aeson` 0 → 9), which is unexplained and might be a hole the collapsing
 opened.
+
+**And before *that*, re-measure the whole table.** It was taken with flags searched
+and buildability ignored; both changed on 2026-08-17, and the mechanism this table
+measures is directly affected. `spanningOccurrence` extends a span while neighbouring
+releases carry the *same* guard and the same `Dependency`. Every guard is now a
+literal, so two releases that declare the same dependency under differently-*written*
+conditions — `if flag(x)` in one, unconditional in the next — compare equal once both
+fold to `Lit True`, where before they broke the span. Expect **longer spans**, which
+pushes the existing trade further in *both* directions: shorter proofs, more releases
+walked. Two smaller effects go the other way: dead groups fold to `Lit False` and
+disappear before the walk sees them, and unbuildable releases are skipped. Which
+dominates is exactly the sort of thing this project has guessed wrong before.
 
 ### The explanation target, now concrete
 
@@ -1061,7 +1203,7 @@ moves; treat a cited line number as a hint, and grep for the identifier.
 | deliverable | state |
 |---|---|
 | **Explanation showcase** — real failing problems, pubgrub-hs vs cabal side by side | solver produces numbered proofs, and cabal's failure text is now reachable (`--cabal` returns its `Fail` message); no side-by-side rendering, no *unsat* problem set, wording gaps open |
-| **Benchmark report** — time + peak residency on real sat/unsat problems | **first comparison exists** ([First baseline comparison](#first-baseline-comparison-2026-08-12)), on five sat problems, single runs. Not a report: no repetition, index build not separated from solve, no unsat cases, and what peak residency consists of is unestablished |
+| **Benchmark report** — time + peak residency on real sat/unsat problems | **first comparison exists** ([First baseline comparison](#first-baseline-comparison-2026-08-12)), on five sat problems, single runs. Not a report: no repetition, index build not separated from solve, no unsat cases, and what peak residency consists of is unestablished. **All of it predates the 2026-08-17 scope cut and needs re-running** |
 
 The baseline and the shared index are done — `cabal-install-solver` drives cabal's
 resolver from the same `withWorld`, which is what makes the comparison
@@ -1070,3 +1212,10 @@ apples-to-apples rather than arranged. What remains for both deliverables is the
 eyeballing them, separating index build from solve, repeating runs, and rendering the
 two failure explanations side by side. Plus an unsat problem set, which neither
 deliverable can be evidenced without and which does not exist yet.
+
+**One thing the deliverables now have to state outright.** Both solvers run with
+every flag pinned to its declared default, which is a restriction of the problem, not
+a property of either solver. It makes the comparison fair — neither side may flip a
+flag to escape — and it makes some real-world failures unreachable, because cabal's
+automatic flags are exactly what it would have flipped. A benchmark or showcase that
+does not say so is misleading, however honest its numbers are.
