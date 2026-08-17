@@ -52,8 +52,9 @@ reportConflict root = case incompCause root of
     -- rather than the bare terms so each explains itself: an empty range is the
     -- range simply being unsatisfiable, not a conflict with anything else.
     leaf c = case incompCause c of
-        CauseNoInstances p s -> "no version for " <> pretty p <> " in " <> pretty s
-        _                    -> summary c
+        CauseNoInstances p s   -> "no version for " <> pretty p <> " in " <> pretty s
+        CauseOnlyInstalled p   -> pretty p <> " cannot be built from source"
+        _                      -> summary c
 
     -- The final line of the proof. A lone positive term here is the root being
     -- ruled out at its synthetic version, which reads better as plain failure.

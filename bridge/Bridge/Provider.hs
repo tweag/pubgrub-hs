@@ -83,7 +83,8 @@ import qualified Distribution.Verbosity                       as Verbosity
 import           Hackage.Security.Client.Repository.Cache     (Cache)
 import           Network.HTTP.Client                          (Manager)
 import           PubGrub.Incompatibility                      (Incompatibility,
-                                                               fromDependency)
+                                                               fromDependency,
+                                                               onlyInstalled)
 import           PubGrub.Index.PreInstalled                   (PreInstalledPackage (..))
 import           PubGrub.InstanceSet                          (HasVersion (..),
                                                                Instance (..),
@@ -327,7 +328,7 @@ mkExpand installedDb source root = expand'
         case listToMaybe admissible of
             Just chosen -> do
                 incs <- consequencesOfUsePreInstalled chosen
-                pure (Just (UsePreInstalled chosen, incs))
+                pure (Just (UsePreInstalled chosen, onlyInstalledFact pn ++ incs))
             -- No admissible installed unit. For most packages that means falling
             -- through to source releases; for a non-reinstallable one it means
             -- nothing at all, because its Hackage releases cannot be built against
@@ -443,6 +444,45 @@ mkExpand installedDb source root = expand'
         key fa = ((deviations fa, unFlagAssignment fa), fa)
         deviations fa =
             length [() | (f, b) <- unFlagAssignment fa, lookup f declared /= Just b]
+
+    -- | For a non-reinstallable package, the standing fact that it can __only__ be an
+    -- installed unit: no source release of it may be selected, whatever the range.
+    -- It is emitted alongside the decision that first commits to one of its
+    -- installed units.
+    --
+    -- 'expand'' never offers a source release of such a package, so without the
+    -- fact the solver rediscovers the rule one range at a time: every range of
+    -- @base@ holding only source releases costs a decision, a provider call
+    -- answering 'Nothing', and a @noInstances@ clause for that range.
+    -- @aeson \'<2\'@ paid that over five ranges; with the fact it pays once, and its
+    -- proof halves. cabal takes the same rule as a constraint
+    -- (@Bridge.Cabal.Baseline.nonReinstallableConstraints@), so this closes an
+    -- asymmetry rather than adding a rule of our own.
+    --
+    -- __Why here and not at the root__, where cabal\'s equivalent goes and where it
+    -- would cover the first query too: stating all eight facts up front shortens
+    -- @lens \'<4\'@\'s proof to two lines, but costs @aeson \'<2\'@ 41% more
+    -- allocation and 466 more decisions, because eight extra level-0 derivations
+    -- change which satisfier conflict resolution picks. That is search-path luck
+    -- rather than a principle, and worth revisiting if the @aeson@ path is ever
+    -- understood.
+    --
+    -- Riding along with a decision needs no new interface: incompatibilities are
+    -- context-independent, so the solver never requires them to be about the
+    -- instance just decided (@docs\/flags-semantics.md@ §10). A package whose
+    -- /first/ query is already source-only still pays once: @conduit \'<1.3\'@ and
+    -- @lens \'<4\'@ each keep one such event.
+    onlyInstalledFact pn
+        | isNonReinstallable pn = [onlyInstalled pn anySourceRelease]
+        | otherwise = []
+
+    -- | Every source instance of a package: any version, no flags pinned. The
+    -- complement of \"is an installed unit\", on the source side.
+    anySourceRelease =
+        InstanceSet
+            { isInstalled = Set.empty
+            , isSource = [SourceCell VersionSet.fullVersionSet Map.empty]
+            }
 
     -- Committing to an installed unit fixes its whole transitive closure, so
     -- hand the solver every edge of that closure at once. Each edge names its

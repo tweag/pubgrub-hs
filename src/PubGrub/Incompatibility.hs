@@ -7,6 +7,7 @@ module PubGrub.Incompatibility
     , incompGet
     , notRoot
     , noInstances
+    , onlyInstalled
     , fromDependency
     , IncompatRelation (..)
     , incompRelation
@@ -84,6 +85,7 @@ data Incompatibility = Incompatibility
 data IncompatCause
     = CauseRoot PackageName Instance                              -- notRoot
     | CauseNoInstances PackageName InstanceSet                    -- noInstances
+    | CauseOnlyInstalled PackageName                              -- onlyInstalled
     | CauseDependency PackageName InstanceSet (PackageName, InstanceSet)  -- fromDependency
     | CauseDerivedFrom Incompatibility Incompatibility            -- priorCause
 
@@ -102,6 +104,22 @@ notRoot p i = Incompatibility (Map.singleton p (Negative (singletonInstance i)))
 -- none of it can be selected.
 noInstances :: PackageName -> InstanceSet -> Incompatibility
 noInstances p s = Incompatibility (Map.singleton p (Positive s)) (CauseNoInstances p s)
+
+-- | A package that may not be built from source at all: only an already-installed
+-- unit of it can be selected. The term is /every source instance/ — any version,
+-- no flags pinned — so the clause forbids the whole source side of the package at
+-- once.
+--
+-- This is a fact about the world rather than about a range, which is why it has its
+-- own cause. Rendered as 'CauseNoInstances' it would read \"no version for base in
+-- >=0\", which is both false-sounding and unhelpful: there are plenty of versions of
+-- @base@, and the reason none may be used is that the compiler provides it.
+--
+-- Which packages it applies to is the provider's decision (for cabal, the
+-- non-reinstallable boot packages). The core only needs to know the shape.
+onlyInstalled :: PackageName -> InstanceSet -> Incompatibility
+onlyInstalled p anySource =
+    Incompatibility (Map.singleton p (Positive anySource)) (CauseOnlyInstalled p)
 
 -- | Dependency incompatibility: @package@ in @instances@ requires @dep@ in
 -- @depSet@ — encoded @{ package: Positive instances, dep: Negative depSet }@.

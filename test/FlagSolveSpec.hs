@@ -30,6 +30,7 @@
 -- search dimension rather than a constant.
 module FlagSolveSpec (tests) where
 
+import           Bridge.Cabal.InstalledPkg      (InstalledPkg (..))
 import           Bridge.Hackage                 (ParseError (..))
 import           Bridge.Installed               (mkInstalledDb)
 import qualified Bridge.Provider                as BP
@@ -52,15 +53,23 @@ import           Distribution.Types.Dependency  (Dependency, mainLibSet,
 import           Distribution.Types.Flag        (FlagName, mkFlagAssignment,
                                                  mkFlagName)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
+import           Distribution.Types.UnitId      (mkUnitId)
 import           Distribution.Types.Version     (Version, mkVersion)
 import           Distribution.Version           (anyVersion)
-import           PubGrub.InstanceSet            (Instance (BuildSource))
+import           PubGrub.Incompatibility        (IncompatCause (..),
+                                                 Incompatibility (..))
+import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
+import           PubGrub.InstanceSet            (Instance (..),
+                                                 InstanceSet (..))
+import           PubGrub.InstanceSet.SourceCell (SourceCell (..))
 import           PubGrub.Provider               (Provider (Provider, expand))
 import           PubGrub.Report                 (reportConflict)
 import           PubGrub.Solver                 (SolveError (..), SolverMsg,
                                                  solve)
+import qualified PubGrub.VersionSet             as VersionSet
 import           Test.Tasty                     (TestTree, testGroup)
-import           Test.Tasty.HUnit               (assertBool, testCase, (@?=))
+import           Test.Tasty.HUnit               (assertBool, assertFailure,
+                                                 testCase, (@?=))
 
 -- --------------------------------------------------------------------------
 -- A toy world with flags
@@ -271,7 +280,70 @@ tests =
         , unusedFlag
         , irrelevantFlagRetried
         , irrelevantFlagsDoNotCompound
+        , bootPackageStatesItself
         ]
+
+-- | 8. Not about flags, but about the same provider rule and needing the same
+-- harness: committing to an installed unit of a __non-reinstallable__ package also
+-- states, once, that the package cannot be built from source.
+--
+-- Without that standing fact the solver rediscovers it one range at a time — every
+-- range of @base@ containing no installed unit costs a decision, a provider call
+-- answering 'Nothing' and a fresh @noInstances@ clause naming that range. On
+-- @aeson \'<2\'@ that happened five times over five ranges (@docs\/STATUS.md@,
+-- "Where the no-version events came from").
+--
+-- The fixture is called @base@ because the rule keys on
+-- 'Bridge.Installed.nonReinstallablePackages', a fixed list of the compiler's own
+-- packages; @ordinary@ is the control.
+bootPackageStatesItself :: TestTree
+bootPackageStatesItself =
+    testGroup
+        "non-reinstallable packages"
+        [ testCase "deciding one also states that it cannot be built from source" $ do
+            incs <- runTestM (expandInstalled "base")
+            case [p | CauseOnlyInstalled p <- map incompCause incs] of
+                [p] -> p @?= mkPackageName "base"
+                ps -> assertFailure ("expected one such fact, got " ++ show (length ps))
+        , testCase "an ordinary installed package states no such thing" $ do
+            incs <- runTestM (expandInstalled "ordinary")
+            [() | CauseOnlyInstalled _ <- map incompCause incs] @?= []
+        ]
+  where
+    -- The real provider rule over a world with one installed unit and no releases,
+    -- asked about that package with everything on offer.
+    expandInstalled name = do
+        let db =
+                mkInstalledDb
+                    [ InstalledPkg
+                        { ipUnitId = mkUnitId name
+                        , ipName = mkPackageName name
+                        , ipVersion = mkVersion [1, 0]
+                        , ipDepends = []
+                        }
+                    ]
+            source =
+                BP.ReleaseSource
+                    (const Set.empty)
+                    (\_ _ -> error "this world has no releases to read")
+        result <- BP.mkExpand db source [] (mkPackageName name) (everything name)
+        case result of
+            Just (UsePreInstalled _, incs) -> pure incs
+            _ -> liftIO (assertFailure "expected the installed unit to be chosen")
+
+    -- What the solver offers before it knows anything: the installed unit, or any
+    -- source release.
+    everything name =
+        InstanceSet
+            { isInstalled =
+                Set.singleton
+                    PreInstalledPackage
+                        { pipUnitId = mkUnitId name
+                        , pipVersion = mkVersion [1, 0]
+                        , pipDependencies = []
+                        }
+            , isSource = [SourceCell VersionSet.fullVersionSet Map.empty]
+            }
 
 -- | 1. When the declared defaults already solve, they are what gets decided —
 -- for both polarities of default, so this cannot pass by accident with a
