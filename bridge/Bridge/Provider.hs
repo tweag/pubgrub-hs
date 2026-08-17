@@ -31,6 +31,7 @@ module Bridge.Provider
     ) where
 
 import           Bridge.Cabal.Flatten                         (GuardedDeps,
+                                                               buildableAtDefaults,
                                                                componentDeps,
                                                                expandGuard)
 import           Bridge.Cabal.InstalledPkg                    (getInstalledPackageIndex,
@@ -121,7 +122,8 @@ withProvider cache manager root act =
             platform = wPlatform world
             cInfo = wCompiler world
             installed = reduceIndex (wInstalled world)
-        (readRelease, lookupStats) <- liftIO (releaseReader platform cInfo handle)
+        (readRelease, lookupStats) <-
+            liftIO (releaseReader platform cInfo (wPkgConfig world) handle)
         let provider =
                 Provider
                     ( mkExpand
@@ -163,17 +165,17 @@ data World = World
     -- own solver uses
     , wPkgConfig :: Maybe PkgConfigDb
     -- ^ what @pkg-config@ on this machine reports, for the @pkgconfig-depends@
-    -- cabal's solver validates and ours does not model.
+    -- both solvers validate: cabal in its own validation phase, ours through
+    -- 'Bridge.Cabal.Flatten.buildableCondition'.
     --
     -- 'Nothing' would not mean "ignore them": cabal reads it as /no pkg-config
     -- executable was found/ and rejects every @pkgconfig-depends@. That made cabal
     -- reject @zlib +pkg-config@ and flip @zlib@\'s automatic @pkg-config@ flag
     -- instead, on 9 of 29 popular targets.
     --
-    -- The asymmetry that remains is ours: we ignore @pkgconfig-depends@. On a
-    -- machine that has the system libraries this is invisible. On one that does
-    -- not, cabal rejects where we do not, which is a real fidelity gap and the
-    -- reason this is read rather than stubbed to something permissive.
+    -- What each solver does with an unsatisfiable @pkgconfig-depends@ still
+    -- differs: cabal rules out that branch of the flag tree, while we drop the
+    -- release from the candidate list without stating why (see 'relBuildable').
     }
 
 -- | Open the index and resolve the compiler world, then run @act@. The index
@@ -218,8 +220,14 @@ sourceInstance v = BuildSource v (mkFlagAssignment [])
 -- environment already resolved. So they are derived once per release and reused
 -- for every assignment tried against it.
 data Release = Release
-    { relFlags   :: [(FlagName, Bool)]
-    , relGuarded :: GuardedDeps
+    { relFlags     :: [(FlagName, Bool)]
+    , relGuarded   :: GuardedDeps
+    , relBuildable :: Bool
+    -- ^ whether this release's library can be built here at all: @buildable@ and
+    -- @pkgconfig-depends@ resolved against the machine, at the declared flag
+    -- defaults (@Bridge.Cabal.Flatten.buildableAtDefaults@). A 'Bool' because
+    -- flags are fixed at their defaults; searching flags will need the condition
+    -- itself, which 'Bridge.Cabal.Flatten.buildableCondition' returns.
     }
 
 -- | A memoising reader for 'Release', with a @(parsed, reused)@ count.
@@ -242,9 +250,10 @@ data Release = Release
 releaseReader
     :: Platform
     -> CompilerInfo
+    -> Maybe PkgConfigDb
     -> IndexHandle
     -> IO (PackageName -> Version -> IO (Either ParseError Release), IO (Int, Int))
-releaseReader platform cInfo handle = do
+releaseReader platform cInfo pkgConfig handle = do
     ref <- newIORef (Map.empty, 0 :: Int, 0 :: Int)
     let readRelease pn v = do
             (entries, _, _) <- readIORef ref
@@ -261,6 +270,7 @@ releaseReader platform cInfo handle = do
             Release
                 { relFlags = [(flagName f, flagDefault f) | f <- genPackageFlags gpd]
                 , relGuarded = componentDeps platform cInfo gpd
+                , relBuildable = buildableAtDefaults pkgConfig platform cInfo gpd
                 }
     pure (readRelease, (\(_, p, reused) -> (p, reused)) <$> readIORef ref)
 
@@ -355,6 +365,21 @@ mkExpand installedDb source root = expand'
                                         )
                                     )
                                 firstUsable rest
+                            -- A release whose library cannot be built here is not a
+                            -- candidate: its @pkgconfig-depends@ are unsatisfiable on
+                            -- this machine, or it declares @buildable: False@. It is
+                            -- skipped without a warning because, unlike an unparseable
+                            -- @.cabal@, this is an ordinary fact about the release, and
+                            -- cabal applies the same rule from the same pkg-config db.
+                            --
+                            -- The spec states such a release as an incompatibility of
+                            -- its own, collapsed over adjacent releases
+                            -- (@references\/pubgrub.md:476@), so that a report can say
+                            -- why it is out. @expand@ cannot answer "no decision, but
+                            -- learn this" (@PubGrub.Provider@), so the release is not
+                            -- offered, and an exhausted list reads as "no versions in
+                            -- range".
+                            Right release | not (relBuildable release) -> firstUsable rest
                             Right release ->
                                 -- Each guarded dependency becomes one incompatibility
                                 -- @{pn: D, dep: not T}@. The depender @D@ is every

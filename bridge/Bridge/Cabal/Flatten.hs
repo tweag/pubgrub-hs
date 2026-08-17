@@ -70,6 +70,8 @@
 module Bridge.Cabal.Flatten (
     GuardedDeps,
     componentDeps,
+    buildableCondition,
+    buildableAtDefaults,
     depsAt,
     flattenDeps,
     defaultFlags,
@@ -103,6 +105,9 @@ import           Distribution.System                          (Platform (..))
 import           Distribution.Types.Condition                 (Condition (..),
                                                                cAnd, cNot,
                                                                simplifyCondition)
+import           Distribution.Solver.Types.PkgConfigDb        (PkgConfigDb,
+                                                               pkgConfigPkgIsPresent)
+import           Distribution.Types.BuildInfo                 (BuildInfo (..))
 import           Distribution.Types.CondTree                  (CondBranch (..),
                                                                CondTree (..))
 import           Distribution.Types.ConfVar                   (ConfVar (..))
@@ -113,8 +118,11 @@ import           Distribution.Types.Flag                      (FlagAssignment,
                                                                FlagName,
                                                                PackageFlag (..),
                                                                lookupFlagAssignment,
+                                                               mkFlagAssignment,
                                                                mkFlagName,
                                                                unFlagName)
+import           Distribution.Types.Library                   (Library (..))
+import           Distribution.Types.PkgconfigDependency        (PkgconfigDependency (..))
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
 import           Distribution.Types.PackageName               (PackageName)
 import           Distribution.Version                         (withinRange)
@@ -151,21 +159,36 @@ evalCond flags = go
     go (COr a b)  = go a || go b
     go (CAnd a b) = go a && go b
 
--- | Flatten one component's conditional tree, pushing each branch condition
--- (with the environment resolved) down as an accumulated flag guard.
-flattenComponent
+-- | Walk one component's conditional tree, pushing each branch condition (with
+-- the environment resolved) down as an accumulated flag guard, and taking @at@
+-- from every node along the way.
+--
+-- What is taken is a parameter because two different things are read off the same
+-- tree in the same shape: the @build-depends@ ('flattenComponent') and the
+-- @BuildInfo@ that decides whether the node can be built here at all
+-- ('buildableCondition'). One walk, described once.
+flattenWith
     :: (ConfVar -> Either FlagName Bool)
+    -> (CondTree ConfVar [Dependency] a -> b)
     -> CondTree ConfVar [Dependency] a
-    -> GuardedDeps
-flattenComponent env = go (Lit True)
+    -> [(Guard, b)]
+flattenWith env at = go (Lit True)
   where
-    go guard (CondNode _data deps branches) =
-        (guard, deps) : concatMap (goBranch guard) branches
+    go guard node@(CondNode _data _deps branches) =
+        (guard, at node) : concatMap (goBranch guard) branches
     goBranch guard (CondBranch cond ifTrue mIfFalse) =
         let (cond', _free) = simplifyCondition cond env
             whenTrue = go (guard `cAnd` cond') ifTrue
             whenFalse = maybe [] (go (guard `cAnd` cNot cond')) mIfFalse
          in whenTrue ++ whenFalse
+
+-- | Flatten one component's conditional tree to its flag-guarded dependency
+-- groups.
+flattenComponent
+    :: (ConfVar -> Either FlagName Bool)
+    -> CondTree ConfVar [Dependency] a
+    -> GuardedDeps
+flattenComponent env = flattenWith env condTreeConstraints
 
 -- | Flatten the library, sub-library and executable conditional dependency
 -- trees to flag-guarded groups, resolving OS\/arch\/compiler conditions against
@@ -195,6 +218,79 @@ depsAt flags guarded =
 -- | Each declared flag mapped to its default value.
 defaultFlags :: GenericPackageDescription -> Map FlagName Bool
 defaultFlags gpd = Map.fromList [(flagName f, flagDefault f) | f <- genPackageFlags gpd]
+
+-- | Under what condition on its flags this release's __library__ can be built on
+-- this machine.
+--
+-- Two things make a node unusable, and both are read off its @BuildInfo@:
+-- @buildable: False@, and a @pkgconfig-depends@ this machine cannot satisfy. A
+-- node under guard @C@ that is unusable means the release requires @not C@, so the
+-- answer is the conjunction of @not C@ over every unusable node — @Lit True@ when
+-- there are none.
+--
+-- == Why this is a condition and not a boolean
+--
+-- @pkg-config@ is a /constant/ of the machine, like OS and arch: the solver does
+-- not choose it, so it can be resolved once rather than searched. But what it
+-- resolves to is not "buildable" or "not buildable" — it is a statement about
+-- which /flag assignments/ remain, because @pkgconfig-depends@ lives inside
+-- flag-guarded blocks:
+--
+-- > if flag(pkg-config)
+-- >   pkgconfig-depends: zlib-any
+--
+-- With flags fixed at their defaults there is one assignment and
+-- 'buildableAtDefaults' collapses this to a boolean. Keeping the condition lets
+-- flag search come back without redoing the analysis: a search over flags has to
+-- /satisfy/ this condition rather than evaluate it (@docs\/flags-semantics.md@
+-- O6).
+--
+-- == Why the library only
+--
+-- A dependency needs the library; an unbuildable executable does not make the
+-- package unusable as a dependency. Note this is deliberately narrower than
+-- 'componentDeps', which does collect executables' dependencies — that
+-- over-approximates, and over-approximating /buildability/ would exclude releases
+-- rather than merely constrain them.
+--
+-- == 'Nothing' means no @pkg-config@ executable
+--
+-- Not "assume satisfied". That is cabal's reading of the same value
+-- (@Distribution.Solver.Modular.Validate@ rejects every @pkgconfig-depends@ when
+-- the db is absent), and taking the db and the predicate from cabal rather than
+-- restating them is what keeps the two solvers on one environment — the same
+-- argument that makes the shared index reader load-bearing.
+buildableCondition
+    :: Maybe PkgConfigDb
+    -> Platform
+    -> CompilerInfo
+    -> GenericPackageDescription
+    -> Condition FlagName
+buildableCondition db platform compiler gpd =
+    foldr cAnd (Lit True) $
+        [ cNot guard
+        | tree <- maybeToList (condLibrary gpd)
+        , (guard, bi) <- flattenWith env (libBuildInfo . condTreeData) tree
+        , not (usable bi)
+        ]
+  where
+    env = envConfVar platform compiler
+    usable bi = buildable bi && all present (pkgconfigDepends bi)
+    present (PkgconfigDependency n range) =
+        maybe False (\d -> pkgConfigPkgIsPresent d n range) db
+
+-- | 'buildableCondition' evaluated at the release's declared defaults — the
+-- question to ask while flags are treated as manual.
+buildableAtDefaults
+    :: Maybe PkgConfigDb
+    -> Platform
+    -> CompilerInfo
+    -> GenericPackageDescription
+    -> Bool
+buildableAtDefaults db platform compiler gpd =
+    evalCond
+        (mkFlagAssignment (Map.toList (defaultFlags gpd)))
+        (buildableCondition db platform compiler gpd)
 
 -- | Dependencies of a package version at its /default/ flag values, as a
 -- version-set map. (Convenience: 'depsAt' the defaults over 'componentDeps'.)

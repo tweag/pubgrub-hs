@@ -116,6 +116,7 @@ test-suite pubgrub-hs-test
         , pubgrub-hs:bridge
         , base
         , bytestring
+        , cabal-install-solver
         , Cabal-syntax
         , co-log
         , containers

@@ -120,10 +120,13 @@ worldProvider world =
 
     -- Every release of every package, in the reduced shape the bridge expects:
     -- the package's declared flags, and this release's guarded dependency groups.
+    -- Everything here is buildable — this world has no @pkgconfig-depends@ and
+    -- nothing marked @buildable: False@, both of which are read off a real
+    -- @BuildInfo@ these fixtures do not have.
     releases :: Map (PackageName, Version) BP.Release
     releases =
         Map.fromList
-            [ ((p, relVersion r), BP.Release (pkgFlags pk) (relGuarded r))
+            [ ((p, relVersion r), BP.Release (pkgFlags pk) (relGuarded r) True)
             | (p, pk) <- world
             , r <- pkgReleases pk
             ]
