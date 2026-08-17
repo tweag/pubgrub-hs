@@ -38,6 +38,7 @@ import           Distribution.Types.CondTree                  (CondTree,
                                                                mapTreeData)
 import           Distribution.Types.ConfVar                   (ConfVar)
 import           Distribution.Types.Dependency                (Dependency)
+import           Distribution.Types.Flag                      (PackageFlag (..))
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
 import           Distribution.Types.LibraryName               (LibraryName (..))
 import           Distribution.Types.PackageId                 (PackageIdentifier (..))
@@ -127,6 +128,35 @@ withHackageIndex cache manager act =
 -- random-access lookup ('indexLookupCabal'). Valid only while the 'withIndex'
 -- bracket that gave the 'IndexCallbacks' is open, that is, inside
 -- 'withHackageIndex'.
+--
+-- Every flag is marked __manual__ on the way out, so that flags are applied but
+-- fixed at their declared defaults rather than searched. This is the half of
+-- that rule which reaches /cabal's/ solver; our own goes through
+-- 'Bridge.Cabal.Flatten.componentDepsAtDefaults'.
+--
+-- It works because @Distribution.Solver.Modular.IndexConversion.flagInfo@ reads
+-- 'flagManual' off each 'PackageFlag', and
+-- @Distribution.Solver.Modular.Preference.enforceManualFlags@ (wired in at
+-- cabal's @Solver.hs@\'s validation phase) then prunes every branch of a manual
+-- flag whose value is neither the default nor named by a user flag constraint. We
+-- pass no flag constraints, so each flag is pinned to 'flagDefault', the same
+-- value 'Bridge.Cabal.Flatten.defaultFlags' gives our provider.
+--
+-- Doing it here, at the single shared read, keeps the comparison structural:
+-- both solvers are fed one index, so neither can be handed a different universe
+-- by accident.
+--
+-- Two consequences to keep in mind when reading benchmark numbers:
+--
+-- * cabal's @weak m = not (strfl || m)@ makes a manual flag /non-weak/, so
+--   @deferWeakFlagChoices@ stops deferring the flags that influence dependencies
+--   (ones that influence none stay weak via @Builder@\'s @trivial@). That perturbs
+--   cabal's goal ordering, not just its flag values.
+-- * an automatic flag is exactly what cabal would flip to escape an
+--   unsatisfiable dependency, so some problems that resolve with flags searched
+--   do not resolve here. Both solvers fail together, which keeps the comparison
+--   fair, but it is a restriction of the problem, and any published explanation
+--   has to say so.
 lookupGPD
     :: Sec.IndexCallbacks
     -> PackageName
@@ -134,7 +164,11 @@ lookupGPD
     -> IO (Either ParseError GenericPackageDescription)
 lookupGPD cbs pn v =
     Sec.uncheckClientErrors $
-        parseGPD . Sec.trusted <$> Sec.indexLookupCabal cbs (PackageIdentifier pn v)
+        fmap allFlagsManual . parseGPD . Sec.trusted
+            <$> Sec.indexLookupCabal cbs (PackageIdentifier pn v)
+  where
+    allFlagsManual gpd =
+        gpd{genPackageFlags = [f{flagManual = True} | f <- genPackageFlags gpd]}
 
 -- | On-disk schema version for the package-version cache. Bump this whenever
 -- the encoding written by 'updateCache' changes, so caches from older builds

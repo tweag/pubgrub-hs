@@ -55,6 +55,14 @@
 -- Note @Lit True@ is a real guard, not the absence of one: every component has an
 -- unconditional block and its guard is exactly @Lit True@.
 --
+-- == Flags are resolved here, not by the solver
+--
+-- Everything above describes 'componentDeps', which a search over flags needs.
+-- The solver is fed 'componentDepsAtDefaults' instead ('Bridge.Provider' makes
+-- the call): every flag is treated as /manual/ and fixed at its declared
+-- default, so no guard reaches the solver. See that function for why the
+-- downstream machinery needs no other change.
+--
 -- Terminology, since the specifications distinguish these and
 -- @docs\/flags-semantics.md@ §4.2 turns on the difference:
 --
@@ -70,6 +78,7 @@
 module Bridge.Cabal.Flatten (
     GuardedDeps,
     componentDeps,
+    componentDepsAtDefaults,
     buildableCondition,
     buildableAtDefaults,
     depsAt,
@@ -137,15 +146,24 @@ type Guard = Condition FlagName
 type GuardedDeps = [(Guard, [Dependency])]
 
 -- | Resolve the fixed environment: OS, arch and compiler conditions become
--- concrete @Right@ booleans; flag conditions stay symbolic as @Left flag@.
-envConfVar :: Platform -> CompilerInfo -> ConfVar -> Either FlagName Bool
-envConfVar (Platform arch os) compiler = \case
+-- concrete @Right@ booleans.
+--
+-- What becomes of a /flag/ condition is the caller's choice, and it is the only
+-- difference between 'componentDeps' (@Left@, symbolic) and
+-- 'componentDepsAtDefaults' (@Right@, resolved).
+envConfVar
+    :: (FlagName -> Either FlagName Bool)
+    -> Platform
+    -> CompilerInfo
+    -> ConfVar
+    -> Either FlagName Bool
+envConfVar flagEnv (Platform arch os) compiler = \case
     OS o -> Right (o == os)
     Arch a -> Right (a == arch)
     Impl flavor range ->
         let CompilerId f v = compilerInfoId compiler
          in Right (f == flavor && withinRange v range)
-    PackageFlag f -> Left f
+    PackageFlag f -> flagEnv f
 
 -- | Evaluate a flag-only condition. A flag not present in the assignment
 -- defaults to 'False' (guards only mention declared flags, so a total
@@ -195,13 +213,54 @@ flattenComponent env = flattenWith env condTreeConstraints
 -- the given platform and compiler. Test-suites, benchmarks and foreign
 -- libraries are intentionally excluded.
 componentDeps :: Platform -> CompilerInfo -> GenericPackageDescription -> GuardedDeps
-componentDeps platform compiler gpd =
+componentDeps = componentDepsWith Left
+
+-- | 'componentDeps' with every flag resolved at its __declared default__, which is
+-- how the solver is fed: flags are parsed and applied, but treated as manual, so
+-- none of them is a search dimension.
+--
+-- The result is still a 'GuardedDeps', and deliberately so — nothing downstream
+-- changes shape. Every guard folds to a literal (@simplifyCondition@ has no free
+-- variables left, and @cAnd@\/@cNot@ collapse literals), and 'expandGuard' already
+-- maps those two literals to exactly what is wanted:
+--
+-- * @Lit True@ becomes @[Map.empty]@ — one candidate assignment with /no/ pins, so
+--   'Bridge.Provider' emits a dependency over a version range with the flag
+--   component unconstrained;
+-- * @Lit False@ becomes @[]@, and the provider drops a group whose expansion is
+--   empty, so the dead branch is discarded rather than carried.
+--
+-- So no pinned cell is ever built, 'PubGrub.InstanceSet' degenerates to one
+-- flag-free cell per operand, and each release offers exactly one instance: itself
+-- under its defaults.
+--
+-- An /undeclared/ flag named by a condition resolves to 'False', matching the
+-- convention 'evalCond' already documents and @test\/FlattenSpec.hs@ pins down. It
+-- should not arise — a guard mentions only flags its own release declares.
+--
+-- The counterpart on the baseline's side is 'Bridge.Hackage.lookupGPD', which marks
+-- every flag manual so cabal's own @enforceManualFlags@ pins it to the same
+-- 'flagDefault'. Two mechanisms, one rule: both solvers see the same index.
+componentDepsAtDefaults :: Platform -> CompilerInfo -> GenericPackageDescription -> GuardedDeps
+componentDepsAtDefaults platform compiler gpd =
+    componentDepsWith atDefault platform compiler gpd
+  where
+    defaults = defaultFlags gpd
+    atDefault f = Right (Map.findWithDefault False f defaults)
+
+componentDepsWith
+    :: (FlagName -> Either FlagName Bool)
+    -> Platform
+    -> CompilerInfo
+    -> GenericPackageDescription
+    -> GuardedDeps
+componentDepsWith flagEnv platform compiler gpd =
     concat $
         [flattenComponent env t | t <- maybeToList (condLibrary gpd)]
             ++ [flattenComponent env t | (_, t) <- condSubLibraries gpd]
             ++ [flattenComponent env t | (_, t) <- condExecutables gpd]
   where
-    env = envConfVar platform compiler
+    env = envConfVar flagEnv platform compiler
 
 -- | Evaluate the guards at a concrete flag assignment and merge the resulting
 -- dependency ranges (intersecting duplicate constraints on the same package).
@@ -274,7 +333,7 @@ buildableCondition db platform compiler gpd =
         , not (usable bi)
         ]
   where
-    env = envConfVar platform compiler
+    env = envConfVar Left platform compiler
     usable bi = buildable bi && all present (pkgconfigDepends bi)
     present (PkgconfigDependency n range) =
         maybe False (\d -> pkgConfigPkgIsPresent d n range) db

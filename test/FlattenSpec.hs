@@ -15,11 +15,14 @@ module FlattenSpec (tests) where
 import           Bridge.Cabal.Flatten                         (buildableAtDefaults,
                                                                buildableCondition,
                                                                componentDeps,
+                                                               componentDepsAtDefaults,
                                                                defaultFlags,
                                                                depsAt,
+                                                               expandGuard,
                                                                flattenDeps)
 import           Distribution.Solver.Types.PkgConfigDb        (pkgConfigDbFromList)
 import           Data.ByteString.Char8                        (pack)
+import           Data.List                                    (isInfixOf)
 import qualified Data.Map.Strict                              as Map
 import           Distribution.Compiler                        (AbiTag (NoAbiTag),
                                                                CompilerFlavor (GHC),
@@ -45,7 +48,8 @@ import           PubGrub.VersionSet                           (VersionSet,
                                                                fromVersionRange)
 import           Test.Tasty                                   (TestTree,
                                                                testGroup)
-import           Test.Tasty.HUnit                             (assertFailure,
+import           Test.Tasty.HUnit                             (assertBool,
+                                                               assertFailure,
                                                                testCase, (@?=))
 
 -- --------------------------------------------------------------------------
@@ -117,6 +121,7 @@ tests =
         [ testGroup "components" componentTests
         , testGroup "environment (resolved at flatten time)" envTests
         , testGroup "flags (resolved at depsAt time)" flagTests
+        , testGroup "flags (resolved at flatten time, at their defaults)" defaultedTests
         , testGroup "buildability (pkg-config, buildable: False)" buildableTests
         , testGroup "merging" mergeTests
         ]
@@ -314,6 +319,101 @@ envTests =
                     ]
         map fst (componentDeps testPlatform testCompiler gpd)
             @?= [Lit True, Lit False, Lit True]
+    ]
+
+-- | 'componentDepsAtDefaults', the entry point the solver is fed, with every
+-- flag treated as manual and fixed at its declared default.
+--
+-- These tests pin down that /nothing symbolic survives the flatten/: the guards
+-- come out as literals, so no flag can reach the solver however the result is
+-- used afterwards. Fixing the flags rests on that property, and it is cheaper
+-- to assert here than to infer from a solve.
+defaultedTests :: [TestTree]
+defaultedTests =
+    [ testCase "every guard folds to a literal" $ do
+        gpd <-
+            gpdOf . pkg $
+                flag "fast" False
+                    ++ unlines
+                        [ "library"
+                        , "  build-depends: base"
+                        , "  if flag(fast)"
+                        , "    build-depends: speedy"
+                        , "  else"
+                        , "    build-depends: slow"
+                        ]
+        map fst (componentDepsAtDefaults testPlatform testCompiler gpd)
+            @?= [Lit True, Lit False, Lit True]
+    , -- The flatten has already committed, so a later 'depsAt' cannot reopen the
+      -- choice — which is exactly the difference from 'componentDeps', where the
+      -- same assignment does switch the branch (see the group above).
+      testCase "the default branch is chosen, and depsAt cannot unpick it" $ do
+        gpd <-
+            gpdOf . pkg $
+                flag "fast" False
+                    ++ unlines
+                        [ "library"
+                        , "  if flag(fast)"
+                        , "    build-depends: speedy"
+                        , "  else"
+                        , "    build-depends: slow"
+                        ]
+        let guarded = componentDepsAtDefaults testPlatform testCompiler gpd
+            at fs = map (unPackageName . fst) (Map.toList (depsAt (assign fs) guarded))
+        at [] @?= ["slow"]
+        at [("fast", True)] @?= ["slow"]
+    , testCase "a flag defaulting True selects its own branch" $ do
+        gpd <-
+            gpdOf . pkg $
+                flag "fast" True
+                    ++ unlines
+                        [ "library"
+                        , "  if flag(fast)"
+                        , "    build-depends: speedy"
+                        , "  else"
+                        , "    build-depends: slow"
+                        ]
+        let guarded = componentDepsAtDefaults testPlatform testCompiler gpd
+        map (unPackageName . fst) (Map.toList (depsAt (assign []) guarded))
+            @?= ["speedy"]
+    , -- What 'Bridge.Provider' does with those literals, and why no other part of
+      -- the pipeline has to handle them: the live group yields one candidate
+      -- assignment with /no/ pins, so the dependency is emitted with its flag
+      -- component unconstrained; the dead group yields none, and the provider
+      -- drops a group whose expansion is empty.
+      testCase "expandGuard turns the literals into an unpinned emission" $ do
+        gpd <-
+            gpdOf . pkg $
+                flag "fast" False
+                    ++ unlines
+                        [ "library"
+                        , "  build-depends: base"
+                        , "  if flag(fast)"
+                        , "    build-depends: speedy"
+                        , "  else"
+                        , "    build-depends: slow"
+                        ]
+        map (expandGuard . fst) (componentDepsAtDefaults testPlatform testCompiler gpd)
+            @?= [[Map.empty], [], [Map.empty]]
+    , -- 'componentDepsAtDefaults' has to resolve every flag, so it needs an answer
+      -- for one the release does not declare. It reads False, matching the
+      -- convention 'evalCond' already documents — but the fallback is unreachable
+      -- from a real index, because Cabal-syntax refuses the file outright. Pinned
+      -- here so that stays a fact about the parser rather than an assumption.
+      testCase "an undeclared flag cannot reach us: the parser rejects it" $ do
+        let src =
+                pkg $
+                    unlines
+                        [ "library"
+                        , "  if flag(ghost)"
+                        , "    build-depends: spooky"
+                        ]
+        case snd (runParseResult (parseGenericPackageDescription (pack src))) of
+            Left (_, errs) ->
+                assertBool
+                    ("expected an undefined-flag error, got: " ++ show errs)
+                    (any (("used without having been defined" `isInfixOf`) . show) errs)
+            Right _ -> assertFailure "expected the parse to fail on an undefined flag"
     ]
 
 flagTests :: [TestTree]

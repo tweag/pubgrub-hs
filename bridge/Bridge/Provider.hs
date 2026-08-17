@@ -32,7 +32,7 @@ module Bridge.Provider
 
 import           Bridge.Cabal.Flatten                         (GuardedDeps,
                                                                buildableAtDefaults,
-                                                               componentDeps,
+                                                               componentDepsAtDefaults,
                                                                expandGuard)
 import           Bridge.Cabal.InstalledPkg                    (getInstalledPackageIndex,
                                                                reduceIndex)
@@ -269,7 +269,7 @@ releaseReader platform cInfo pkgConfig handle = do
         reduce gpd =
             Release
                 { relFlags = [(flagName f, flagDefault f) | f <- genPackageFlags gpd]
-                , relGuarded = componentDeps platform cInfo gpd
+                , relGuarded = componentDepsAtDefaults platform cInfo gpd
                 , relBuildable = buildableAtDefaults pkgConfig platform cInfo gpd
                 }
     pure (readRelease, (\(_, p, reused) -> (p, reused)) <$> readIORef ref)
