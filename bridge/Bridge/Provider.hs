@@ -64,6 +64,8 @@ import           Distribution.Pretty                          (prettyShow)
 import           Distribution.Simple.Compiler                 (compilerInfo)
 import           Distribution.Simple.GHC                      (configure)
 import           Distribution.Simple.PackageIndex             (InstalledPackageIndex)
+import           Distribution.Solver.Types.PkgConfigDb        (PkgConfigDb,
+                                                               readPkgConfigDb)
 import           Distribution.Simple.Program.Db               (defaultProgramDb)
 import           Distribution.System                          (Platform,
                                                                buildPlatform)
@@ -159,6 +161,19 @@ data World = World
     , wInstalled :: InstalledPackageIndex
     -- ^ the global db as Cabal models it; 'reduceIndex' cuts it down to what our
     -- own solver uses
+    , wPkgConfig :: Maybe PkgConfigDb
+    -- ^ what @pkg-config@ on this machine reports, for the @pkgconfig-depends@
+    -- cabal's solver validates and ours does not model.
+    --
+    -- 'Nothing' would not mean "ignore them": cabal reads it as /no pkg-config
+    -- executable was found/ and rejects every @pkgconfig-depends@. That made cabal
+    -- reject @zlib +pkg-config@ and flip @zlib@\'s automatic @pkg-config@ flag
+    -- instead, on 9 of 29 popular targets.
+    --
+    -- The asymmetry that remains is ours: we ignore @pkgconfig-depends@. On a
+    -- machine that has the system libraries this is invisible. On one that does
+    -- not, cabal rejects where we do not, which is a real fidelity gap and the
+    -- reason this is read rather than stubbed to something permissive.
     }
 
 -- | Open the index and resolve the compiler world, then run @act@. The index
@@ -172,12 +187,14 @@ withWorld cache manager act =
         (compiler, mPlatform, programDb) <-
             liftIO $ configure Verbosity.normal Nothing Nothing defaultProgramDb
         installedIndex <- liftIO $ getInstalledPackageIndex Verbosity.normal compiler programDb
+        pkgConfig <- liftIO $ readPkgConfigDb Verbosity.normal programDb
         act
             World
                 { wIndex = handle
                 , wPlatform = fromMaybe buildPlatform mPlatform
                 , wCompiler = compilerInfo compiler
                 , wInstalled = installedIndex
+                , wPkgConfig = pkgConfig
                 }
 
 -- | The synthetic root package name, chosen so it cannot collide with a real

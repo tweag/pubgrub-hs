@@ -58,6 +58,7 @@ import           Distribution.Solver.Types.PackageConstraint (ConstraintScope (.
                                                               PackageProperty (..),
                                                               scopeToplevel)
 import           Distribution.Solver.Types.PackageIndex (PackageIndex)
+import           Distribution.Solver.Types.PkgConfigDb (PkgConfigDb)
 import qualified Distribution.Solver.Types.PackageIndex as SolverIndex
 import           Distribution.Solver.Types.PackagePreferences (PackagePreferences (..))
 import           Distribution.Solver.Types.Progress (Progress, foldProgress)
@@ -92,18 +93,24 @@ solveWithCabal
     -> Platform
     -> CompilerInfo
     -> InstalledPackageIndex
+    -> Maybe PkgConfigDb
+    -- ^ what @pkg-config@ reports on this machine, from
+    -- 'Bridge.Provider.wPkgConfig'. 'Nothing' is /not/ neutral: cabal takes it to
+    -- mean that no @pkg-config@ executable exists and rejects every
+    -- @pkgconfig-depends@, which pushes cabal into automatic flag flips our solver
+    -- never makes.
     -> PackageIndex (SourcePackage ())
     -> [(PackageName, VersionRange)]
     -- ^ the targets, with the range each is constrained to
     -> Progress String String [ResolverPackage ()]
-solveWithCabal config platform cinfo installed source targets =
+solveWithCabal config platform cinfo installed pkgConfig source targets =
     modularResolver
         config
         platform
         cinfo
         installed
         source
-        Nothing -- no pkg-config db: we do not model pkgconfig-depends
+        pkgConfig
         (preferences targetNames)
         (targetConstraints targets ++ nonReinstallableConstraints)
         targetNames

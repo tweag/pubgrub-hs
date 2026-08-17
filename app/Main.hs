@@ -237,6 +237,7 @@ runBaseline world targets = do
                 (wPlatform world)
                 (wCompiler world)
                 (wInstalled world)
+                (wPkgConfig world)
                 sourceIdx
                 targets
         (steps, result) = outcome progress
