@@ -4,7 +4,7 @@ How to reproduce every number in [STATUS.md](STATUS.md), and what each one is wo
 The short version:
 
 ```sh
-cabal test                    # 126 unit and property tests, ~0.3 s
+cabal test                    # 128 unit and property tests, ~0.3 s
 bench/compare.sh              # both solvers over bench/problems.txt
 ```
 

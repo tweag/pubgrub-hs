@@ -436,6 +436,34 @@ Three lessons worth the entry:
   loop, which is the hot path. Keeping the clauses a plain list in scan order and
   paying `O(position)` only on an actual merge costs nothing where it matters.
 
+### The no-version rise, explained — STUCK
+
+*Aug 17.* An unexplained counter had been sitting in the collapsing notes since the
+walk landed: `noversion` events up from 1, 1, 0 to 6, 8, 9 on the three unsat
+problems. The standing guess was that wide clauses were opening holes in ranges.
+
+Reading the traces instead of theorising: **eleven of the fourteen events were
+`base`**, and none was a hole. A non-reinstallable package offers installed units and
+nothing else, so any range holding no installed unit makes the provider answer
+`Nothing` and the solver learn `noInstances base <that range>` — once per range, five
+times on `aeson <2`, all the same fact. Stating it once (`CauseOnlyInstalled`, "base
+cannot be built from source") cut `conduit <1.3`'s proof 43 → 12 lines, `aeson <2`'s
+178 → 83, and conflict-resolution steps 189 → 18 and 170 → 13 on `conduit` and `lens`.
+Two of the three unsat proofs are now shorter than cabal's message.
+
+Three lessons, and the first is the reason this entry exists:
+
+- **A counter is not a diagnosis.** "Unexplained rise in X" survived three sessions
+  and two changes that each could have explained it away. Fifteen minutes of reading
+  the actual events answered it, and the answer was in a different subsystem than the
+  one the counter was filed under.
+- **The fix was to state a rule we were already enforcing.** The provider had refused
+  source releases of boot packages since 2026-08-12; what was missing was *saying* so.
+  Our own baseline had it right all along, as an input constraint.
+- **A cause type is part of the fix, not a decoration.** Rendered through the existing
+  `CauseNoInstances`, the new fact reads "no version for base in >=0" — false-sounding
+  to anyone who knows Hackage has hundreds of them.
+
 ### Buildability, and the pkg-config db — STUCK
 
 *Aug 17.* A release whose library cannot be built here is no longer offered:

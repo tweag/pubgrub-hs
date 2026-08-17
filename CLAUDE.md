@@ -81,7 +81,7 @@ is a summary and not authoritative; the documents below decide. Project history 
 
 ```sh
 cabal build
-cabal test                      # 126 tests, ~0.3 s
+cabal test                      # 128 tests, ~0.3 s
 cabal run pubgrub -- aeson      # the driver; add -v for the search trace
 cabal run pubgrub -- --cabal aeson   # cabal's solver, same index (the baseline)
 bench/compare.sh                # both solvers over bench/problems.txt
@@ -357,10 +357,11 @@ adjacent releases pairwise at derivation time, which is the collapsing
 cells (see 5 below) and then chain collapsing. See `docs/STATUS.md`, "The explanation
 deliverable is currently losing".
 
-**Those line counts are historical.** As of 2026-08-17, with gap 1 done, the proofs
-are `lens <4` **9** lines against cabal's 22, `conduit <1.3` **43** against 16, and
-`aeson <2` **178** against 30 — one win, two still long, and what is left of the two
-is chain collapsing (gap 3), which is now the top item. Gap 5's symptom is also gone
+**Those line counts are historical.** As of 2026-08-17, with gap 1 done and the
+boot-package rule stated once rather than per range, the proofs are `lens <4` **6**
+lines against cabal's 22, `conduit <1.3` **12** against 16, and `aeson <2` **83**
+against 30 — two wins and one outlier, and what is left of `aeson` is chain
+collapsing (gap 3), which is now the top item. Gap 5's symptom is also gone
 for now: a proof with no pinned cells cannot print one, and no cell is pinned while
 flags are fixed at their defaults.
 
@@ -482,11 +483,14 @@ flags are fixed at their defaults.
    `:132`, which is a blank line). Absorb the range into the sibling cause's term
    by union and drop the node.
 
-   Mostly overtaken by slots (gap 1): holes *between* releases no longer form, and
-   `aeson <2`'s no-version events went 6 → 0. What is left comes from the other
-   direction — `Bridge.Provider.widen` puts a **declared** dependency range into a
-   term verbatim, so dead space (e.g. above a package's newest release) still
-   survives.
+   Mostly overtaken by slots (gap 1): holes *between* releases no longer form. What
+   is left comes from the other direction — `Bridge.Provider.widen` puts a
+   **declared** dependency range into a term verbatim, so dead space still survives.
+   **There is now exactly one known instance**, and it is worth keeping as the test
+   case: `transformers >=0.2.2 && <0.2.2.0` in `conduit <1.3`, a window whose only
+   candidate version does not exist (the oldest matching release is `0.2.2.0`). It is
+   also, identified at last, the single conflict that narrowing removed when it was
+   tried and reverted twice below.
 
    Narrowing that against the version map was tried twice on 2026-08-12 and
    **reverted twice**: it removes one conflict on one of five problems and costs 3.9%

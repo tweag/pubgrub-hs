@@ -8,7 +8,7 @@
 > table below decide. If this file contradicts one of them, that one is right and
 > this file is stale — fix it.
 >
-> **Last checked against the tree:** 2026-08-17, 126 tests passing.
+> **Last checked against the tree:** 2026-08-17, 128 tests passing.
 >
 > **If you have been away**, three sections carry everything that changed on
 > 2026-08-17: [Release-1 scope](#release-1-scope-flags-are-fixed-at-their-defaults-2026-08-17)
@@ -33,7 +33,7 @@ correctly is table stakes. It exists to answer two questions:
 2. Can it **match cabal-install on time and peak memory** on real problems?
 
 **The solver works.** It resolves real Hackage packages end to end, with version
-ranges, Cabal flags, buildability, and installed/boot-package pinning. 126 tests
+ranges, Cabal flags, buildability, and installed/boot-package pinning. 128 tests
 pass, including all six worked examples from the PubGrub spec.
 
 **Neither deliverable has been delivered, but the comparison has started.** cabal's
@@ -41,10 +41,10 @@ own solver runs over our index (`pubgrub --cabal`, no `cabal-install` dependency
 and the current five-problem numbers are in
 [Merge on insert](#merge-on-insert-the-collapsing-trade-is-gone-2026-08-17): **all
 five verdicts agree, we are faster than cabal on all five, leaner in memory on all
-five (2.2–3.5×), and allocate less on four of five.** On `lens <4` our proof is **9
-lines against cabal's 22**, which is the first specimen that looks like the
-explanation thesis; `conduit <1.3` (43 vs 16) and `aeson <2` (178 vs 30) are not
-there yet. What is missing is the harness — one run doing both, diffing plans,
+five (2.2–3.5×), and allocate less on four of five.** Our proofs are **shorter than
+cabal's message on two of the three unsat problems** — `lens <4` 6 lines against 22,
+`conduit <1.3` 12 against 16 — which is the explanation thesis with evidence under
+it; `aeson <2` (83 against 30) is the outlier. What is missing is the harness — one run doing both, diffing plans,
 repeating for timing — and the explanation side-by-side.
 
 **And the problem got smaller on 2026-08-17.** Flags are no longer a search
@@ -1233,6 +1233,64 @@ collapsing (Reporting gap 3), which nothing here touches.
   identical, allocation within 0.002%. That is because the shape used avoids the
   per-clause indirection all three candidate shapes in `collapsing.md` §4 would have
   added — the clauses stay a plain list in scan order and only a merge pays anything.
+
+### Where the no-version events came from (2026-08-17)
+
+`collapsing.md` §6 had carried an unexplained rise in `noversion` events since
+generation-time collapsing landed, with a standing guess that wide clauses were
+opening holes in ranges. Read off the traces, that is wrong. Of the fourteen events
+across the three unsat problems, **eleven were `base`** — one was a dead-space range
+in `transformers`, two were the solver reaching the bottom of a version list.
+
+The eleven are one fact, discovered repeatedly. `base` is non-reinstallable, so the
+provider offers installed units and nothing else; any range holding no installed unit
+makes `expand` answer `Nothing`, and the solver learns `noInstances base <range>` —
+once per distinct range, five times on `aeson <2`. Nothing about that is a hole:
+the ranges are fine, the only-installed rule is what empties them.
+
+So the provider now states it once, when it first commits to an installed unit of
+such a package: **`base` cannot be built from source**, the whole source side banned
+in one clause. As a unit clause it propagates at level 0, so a dependency on a
+source-only range of `base` contradicts immediately rather than after a decision and
+a provider call. It is what the baseline has always had — cabal takes the same rule
+as an input constraint (`PackagePropertyInstalled`) — so this closes an asymmetry
+rather than adding a rule of ours.
+
+| problem | no-version | proof | resolving steps | allocation |
+|---|---|---|---|---|
+| `conduit <1.3` | 5 → **3** | 43 → **12** | 189 → **18** | 1.20 → **1.00** GB |
+| `lens <4` | 3 → **2** | 9 → **6** | 170 → **13** | 2.55 → **2.45** GB |
+| `aeson <2` | 6 → **1** | 178 → **83** | 283 → 173 | 3.15 → 3.16 GB |
+
+**Two of the three unsat proofs are now shorter than cabal's message** — `conduit`
+12 against 16, `lens` 6 against 22 — where before only `lens` was. `aeson <2` is 83
+against 30 and remains the outlier.
+
+It needed a cause of its own. Rendered as `CauseNoInstances` the new fact reads *"no
+version for base in >=0"*, which is false-sounding and unhelpful — there are plenty of
+versions of `base`, and the reason none may be used is that the compiler provides it.
+`CauseOnlyInstalled` renders as *"base cannot be built from source"*, which is what
+`PubGrub.Report`'s own comment had claimed we did since it was written. `lens <4`'s
+whole proof is now:
+
+```
+1. Because lens ==1.7 is required and lens >=1.7 && <3.10 depends on array >=0.3.0.2 && <0.5, array >=0.3.0.2 && <0.5 is required
+2. Because (1) and array >=0.4.0.1 && <0.5.0.0 depends on base >=4.2 && <4.7, array not >=0.3.0.2 && <0.4.0.1 and base not >=4.2 && <4.7 are incompatible
+3. Because (2) and array >=0.4.0.0 && <0.4.0.1 depends on base >=4.2 && <4.6, array not >=0.3.0.2 && <0.4.0.0 and base not >=4.2 && <4.7 are incompatible
+4. Because (3) and array >=0.3.0.3 && <0.4.0.0 depends on base >=4.2 && <4.5, array not >=0.3.0.2 && <0.3.0.3 and base not >=4.2 && <4.7 are incompatible
+5. Because (4) and array >=0.3.0.2 && <0.3.0.3 depends on base >=4.2 && <4.4, base >=4.2 && <4.7 is required
+6. Because (5) and base cannot be built from source, version solving failed.
+```
+
+**What is left, and each residue is now named rather than counted.** The *first*
+query for a boot package still pays, because the fact rides along with a decision and
+there has not been one yet — stating all eight at the root fixes that and takes
+`lens` to a two-line proof, but costs `aeson` 41% more allocation and 466 more
+decisions, so it was measured and rejected (see `Bridge.Provider.onlyInstalled`). The
+`transformers >=0.2.2 && <0.2.2.0` event is Reporting gap 2's other half — a declared
+bound put into a term verbatim by `widen`, leaving a window no release occupies — and
+it is, at last identified, the one conflict that narrowing removed when it was tried
+and reverted twice. Reaching the bottom of a version list is not a defect.
 
 ### The explanation target, now concrete
 

@@ -34,9 +34,10 @@ and its cost.
 > expanded. Those have no clause either way, so propagation cannot tell, and a
 > proof can only cite what was derived.
 >
-> **§§1–3 are kept as the record of what was tried.** §4 is what was built. §5's
-> measurement was taken and is answered there. §6 is still open and is now the only
-> open item in this file.
+> **§§1–3 are kept as the record of what was tried.** §4 is what was built, §5
+> answers its own measurement, and §6 — the no-version rise, unexplained since
+> 2026-08-12 — is answered too, by something that turned out to have nothing to do
+> with collapsing. **Nothing in this file is open.**
 
 ---
 
@@ -289,22 +290,53 @@ are cheap (no walk, no reads beyond the ones the solver wanted anyway), and ever
 other metric improved, but a future change that makes re-expansion expensive again
 should look here first.
 
-## 6. The one thing still open
+## 6. The no-version rise: answered
 
-`noversion` events rose on all three unsat problems when collapsing landed:
-`conduit <1.3` 1 → 6, `lens <4` 1 → 8, `aeson <2` 0 → 9. **Unexplained**, and it has
-now outlived two changes that could each have explained it away:
+`noversion` events rose on all three unsat problems when collapsing landed
+(`conduit <1.3` 1 → 6, `lens <4` 1 → 8, `aeson <2` 0 → 9) and this section spent
+three sessions calling it unexplained, with a standing guess that wide clauses were
+opening holes in ranges the solver then had to refute one at a time.
 
-| | before collapsing | walk | flags at defaults | store merging |
+**The guess was wrong.** Read off the traces on 2026-08-17, the fourteen events then
+outstanding were:
+
+| | `base` | dead-space range | bottom of the version list |
+|---|---|---|---|
+| `conduit <1.3` | 3 | 1 (`transformers >=0.2.2 && <0.2.2.0`) | 1 |
+| `lens <4` | 3 | — | — |
+| `aeson <2` | 5 | — | 1 |
+
+Eleven of fourteen are `base`, and they are not holes at all. `base` is
+non-reinstallable, so the provider offers its installed units and nothing else; any
+range holding no installed unit — because it excludes 4.21.0.0 outright, or because a
+learned clause has banned it — makes `expand` answer `Nothing`, and the solver learns
+`noInstances base <that range>`. One clause per range, all of them the same fact.
+Wider clauses did not create the fact; they made the solver meet it in more places.
+
+The fix is to say it once, which is what
+[`PubGrub.Incompatibility.onlyInstalled`](../src/PubGrub/Incompatibility.hs) and the
+provider now do — and it is what cabal has always done, as an input constraint
+(`PackagePropertyInstalled`). Measured:
+
+| | no-version | proof | resolving steps | allocation |
 |---|---|---|---|---|
-| `conduit <1.3` | 1 | 6 | 5 | 5 |
-| `lens <4` | 1 | 8 | 7 | **3** |
-| `aeson <2` | 0 | 9 | 7 | 6 |
+| `conduit <1.3` | 5 → **3** | 43 → **12** | 189 → **18** | 1.20 → **1.00** GB |
+| `lens <4` | 3 → **2** | 9 → **6** | 170 → **13** | 2.55 → **2.45** GB |
+| `aeson <2` | 6 → **1** | 178 → **83** | 283 → 173 | 3.15 → 3.16 GB |
 
-So it is a property of **wider depender clauses as such**, not of the walk that first
-produced them and not of flag search. The remaining hypothesis is the one this file
-started with: a wide clause lets the solver conclude a positive term over a range
-whose interior holds no release it can use, and it then has to learn that hole
-separately. If that is right, `collapseNoInstances` (CLAUDE.md, Reporting gap 2) is
-where it gets absorbed rather than prevented. Worth an afternoon with
-`bench/summarise.awk` and one trace before believing it.
+What is left is exactly the residue the diagnosis predicts, and it is worth keeping
+straight:
+
+- **the first query for a boot package**, when it is already source-only. The fact
+  rides along with a decision, and there has been no decision yet. Stating all eight
+  facts at the root closes this — `lens` goes to a **two-line** proof and zero
+  no-version events — but costs `aeson` 41% more allocation and 466 more decisions,
+  because eight extra level-0 derivations change which satisfier conflict resolution
+  picks. Measured and rejected; see the haddock on `Bridge.Provider.onlyInstalled`.
+- **the dead-space range**, which is Reporting gap 2's other half: `widen` puts a
+  declared bound into a term verbatim, so `>=0.2.2` against an index whose oldest
+  matching release is `0.2.2.0` leaves a window with nothing in it. This is the one
+  conflict that narrowing removed when it was tried and reverted twice
+  (STATUS.md, "Narrowing declared ranges") — now identified, rather than counted.
+- **the bottom of a version list**, which is not a defect: a downward search ends by
+  establishing that nothing below the oldest release exists.
