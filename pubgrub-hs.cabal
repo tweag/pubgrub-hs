@@ -26,6 +26,7 @@ library
         PubGrub.Report
         PubGrub.SetOps
         PubGrub.Solver
+        PubGrub.Store
         PubGrub.Term
         PubGrub.VersionSet
     build-depends:
@@ -110,6 +111,7 @@ test-suite pubgrub-hs-test
         PaperSpec
         PartialSolutionSpec
         SolverSpec
+        StoreSpec
         VersionSetSpec
     build-depends:
         , pubgrub-hs

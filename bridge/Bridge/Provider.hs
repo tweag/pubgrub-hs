@@ -395,9 +395,8 @@ mkExpand installedDb source root = expand'
                                     Nothing -> firstUsable rest
                                     Just flags -> do
                                         let inst = BuildSource v flags
-                                        incs <-
-                                            sequence
-                                                [ dependencyInc pn v guard assignment dep
+                                            incs =
+                                                [ dependencyInc pn slot assignment dep
                                                 | -- for each guarded dependency of the chosen release
                                                   (guard, deps) <- relGuarded release
                                                 , Just assignment <- [NE.nonEmpty (expandGuard guard)]
@@ -461,67 +460,29 @@ mkExpand installedDb source root = expand'
                     closureEdges installedDb (pipUnitId pip)
                 ]
 
-    -- | One guarded dependency occurrence as an incompatibility, with the depender
-    -- covering __every adjacent release that carries the same occurrence__, not
-    -- just the one being decided.
+    -- | One guarded dependency occurrence of the decided release, as an
+    -- incompatibility over that release\'s __slot__: the half-open range up to the
+    -- next release in the index ('withSlots').
     --
-    -- @references\/pubgrub.md:456@ asks for this: identical dependencies of
-    -- adjacent versions collapse into one incompatibility, from the first version
-    -- that has the dependency to the first that does not. One per release is not
-    -- wrong, but the solver then re-derives the range a release at a time, which
-    -- fills proofs with lines that only merge two neighbours (@conduit \'<1.3\'@
-    -- took 1061 lines against cabal\'s 16) and leaves N clauses to propagate where
-    -- one would do.
-    dependencyInc pn v guard assignment dep = do
-        dependers <- spanningOccurrence pn v guard dep
-        pure
-            ( fromDependency
-                pn
-                (sourceInstances dependers assignment)
-                (depPkgName dep)
-                (widen (depPkgName dep) (VersionSet.fromVersionRange (depVerRange dep)))
-            )
-
-    -- | The range to name a release\'s neighbours by: walk out from @v@ in both
-    -- directions while each neighbour carries this same occurrence, then take the
-    -- half-open range from the lowest such release up to the first release above the
-    -- highest.
+    -- @references\/pubgrub.md:456@ asks for identical dependencies of adjacent
+    -- versions of the depender to be /one/ incompatibility. A slot names one
+    -- release, so that happens in 'PubGrub.Store' instead, which unions the
+    -- depender terms of two facts that agree about the dependee as they arrive.
+    -- Adjacent slots /touch/, so the union is one interval with no hole, and no
+    -- neighbour\'s @.cabal@ is read. Establishing the range here would mean
+    -- parsing the neighbours: on @pandoc@, a problem with one conflict, that cost
+    -- 167 to 2834 reads and 22.9 MB to 81.0 MB of residency
+    -- (@docs\/collapsing.md@).
     --
-    -- \"The same occurrence\" is compared per /dependency/, not per group: a neighbour
-    -- qualifies when any of its guarded groups has this guard and contains this exact
-    -- \'Dependency\', whatever else it declares (@docs\/flags-semantics.md@ §4.2).
-    -- Comparing whole groups would refuse to merge two releases that differ in
-    -- something unrelated.
-    --
-    -- Requiring the guard to be __identical__ keeps this sound on the flag axis:
-    -- every release in the span declares the flags the guard mentions, since one that
-    -- did not could not have produced that guard. So the third pin state is not needed
-    -- here, and flags the guard never mentions stay free in the cell.
-    --
-    -- The walk costs a @.cabal@ read per neighbour tried, memoised per release. Many
-    -- are releases the solver would never have read: on @pandoc@ the reads rose from
-    -- 167 to 2834.
-    spanningOccurrence pn v guard dep = do
-        lo <- walk Set.lookupLT v
-        hi <- walk Set.lookupGT v
-        pure (VersionSet.halfOpenVersionSet lo (Set.lookupGT hi releases))
-      where
-        releases = rsVersionsOf source pn
-
-        -- The furthest release in one direction still carrying the occurrence.
-        walk step from = case step from releases of
-            Nothing -> pure from
-            Just w -> do
-                result <- rsReadRelease source pn w
-                case result of
-                    -- An unparseable neighbour stops the walk rather than being stepped
-                    -- over: we cannot claim a fact about a release we cannot read, and
-                    -- widening across it would do exactly that.
-                    Right neighbour | carries neighbour -> walk step w
-                    _ -> pure from
-
-        carries neighbour =
-            any (\(g, ds) -> g == guard && dep `elem` ds) (relGuarded neighbour)
+    -- What is given up is the releases the solver never expanded. Those had no
+    -- clause either way, so propagation cannot tell the difference, and a proof
+    -- can cite only what was derived.
+    dependencyInc pn slot assignment dep =
+        fromDependency
+            pn
+            (sourceInstances slot assignment)
+            (depPkgName dep)
+            (widen (depPkgName dep) (VersionSet.fromVersionRange (depVerRange dep)))
 
     -- Widen a dependency's version range into an instance set. The installed
     -- half is extensional: the compiler's database is small and fully known.

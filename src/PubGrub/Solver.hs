@@ -61,6 +61,9 @@ import           PubGrub.InstanceSet            (Instance, InstanceSet,
                                                  singletonInstance)
 import           PubGrub.Provider               (Provider (..))
 import           PubGrub.SetOps                 (SetOps (..))
+import           PubGrub.Store                  (Store, emptyStore,
+                                                 insertClause, insertClauses,
+                                                 storeClauses)
 import           PubGrub.Term                   (Term (..), intersectTerm,
                                                  negateTerm)
 
@@ -315,17 +318,22 @@ satisfierSearch ps i = do
 -- 'psRelation'; on @IAlmostSatisfied p@ derive (¬ its term for @p@) via
 -- 'addDerivation'; on @ISatisfied@ hand off to 'conflictResolution'. Returns
 -- the terminal incompatibility on unsolvable input, or the (possibly grown)
--- incompatibility list and updated solution.
+-- store and updated solution.
+--
+-- The worklist is 'storeClauses' — the store's own scan order, newest first —
+-- and a learned clause goes back through 'insertClause' rather than being consed
+-- on, which is what gives dependency facts about one pair of packages the chance
+-- to merge ('PubGrub.Store').
 unitPropagation
     :: (Monad m, WithLog env SolverMsg m)
     => PackageName
     -> Instance
-    -> [Incompatibility]
+    -> Store
     -> PartialSolution
-    -> m (Either SolveError ([Incompatibility], PartialSolution))
+    -> m (Either SolveError (Store, PartialSolution))
 unitPropagation rootPkg rootI = scan
   where
-    scan incompats ps = step incompats ps incompats
+    scan store ps = step store ps (storeClauses store)
 
     -- Walk the worklist of incompatibilities once; on any action, restart scan.
     step incompats ps [] = pure (Right (incompats, ps))
@@ -343,7 +351,7 @@ unitPropagation rootPkg rootI = scan
                     Right (almostPkg, rootCause, ps') -> do
                         logMsg (Learned rootCause)
                         logMsg (Backtracked (psLevel ps'))
-                        scan (rootCause : incompats) (addDerivation almostPkg rootCause ps')
+                        scan (insertClause rootCause incompats) (addDerivation almostPkg rootCause ps')
             IAlmostSatisfied q ->
                 scan incompats (addDerivation q i ps)
             _ -> step incompats ps rest
@@ -423,7 +431,7 @@ solve
     -> Instance
     -> m (Either SolveError (Map PackageName Instance))
 solve provider rootPkg rootV =
-    go [notRoot rootPkg rootV] emptyPS
+    go (insertClause (notRoot rootPkg rootV) emptyStore) emptyPS
     where
         go incompats ps =
             unitPropagation rootPkg rootV incompats ps >>= \case
@@ -436,7 +444,7 @@ solve provider rootPkg rootV =
                             expand provider p range >>= \case
                                 Nothing -> do
                                     logMsg (NoVersionFor p range)
-                                    go (noInstances p range : incompats') ps'
+                                    go (insertClause (noInstances p range) incompats') ps'
                                 Just (i, depIncs) -> do
                                     logMsg (Chose p i)
-                                    go (depIncs ++ incompats') (addDecision p i ps')
+                                    go (insertClauses depIncs incompats') (addDecision p i ps')
