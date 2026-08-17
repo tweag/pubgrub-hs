@@ -81,7 +81,7 @@ is a summary and not authoritative; the documents below decide. Project history 
 
 ```sh
 cabal build
-cabal test                      # 116 tests, ~0.3 s
+cabal test                      # 126 tests, ~0.3 s
 cabal run pubgrub -- aeson      # the driver; add -v for the search trace
 cabal run pubgrub -- --cabal aeson   # cabal's solver, same index (the baseline)
 bench/compare.sh                # both solvers over bench/problems.txt
@@ -122,9 +122,12 @@ harness — NOT BUILT. One run doing both, diffing plans, repeating for timing
 Current layout (4 cabal components):
 
 - `src/` — library. `PubGrub.hs` (umbrella) plus
-  `PubGrub/{Term,VersionSet,SetOps,Relation,Incompatibility,Solver,Provider,Report,Pretty}.hs`,
+  `PubGrub/{Term,VersionSet,SetOps,Relation,Incompatibility,Solver,Store,Provider,Report,Pretty}.hs`,
   `Index/PreInstalled.hs` (the installed-unit model) and
-  `InstanceSet{,/SourceCell}.hs` (the solver's set type).
+  `InstanceSet{,/SourceCell}.hs` (the solver's set type). `Store` is the
+  incompatibility store: clauses in scan order, with dependency facts about one
+  (depender, dependee) pair and an identical dependee term **merged as they arrive**,
+  which is where `references/pubgrub.md:456`'s collapsing happens (see Reporting gap 1).
 - `bridge/` — private library `bridge`. `Bridge/{Hackage,Installed,Provider}.hs`,
   `Bridge/Hackage/{HttpClient,Unlifted}.hs`, and
   `Bridge/Cabal/{Baseline,Flatten,InstalledPkg}.hs`: index reader, installed-db
@@ -138,7 +141,7 @@ Current layout (4 cabal components):
   3.7s / 83MB uncached: ~170 parse trees pinning their slices of the index is
   enough live data to make every major GC copy it.
 - `app/Main.hs` — executable `pubgrub`: the CLI driver.
-- `test/` — `{VersionSet,InstanceSet,Solver,PartialSolution,Paper,Flatten,FlagSolve,Installed}Spec.hs`.
+- `test/` — `{VersionSet,InstanceSet,PartialSolution,Solver,Store,Paper,Flatten,FlagSolve,Installed}Spec.hs`.
 
 The cabal baseline landed 2026-08-12: `bridge` depends on `cabal-install-solver`
 (and **not** `cabal-install`), `Bridge.Cabal.Baseline` drives
@@ -354,12 +357,12 @@ adjacent releases pairwise at derivation time, which is the collapsing
 cells (see 5 below) and then chain collapsing. See `docs/STATUS.md`, "The explanation
 deliverable is currently losing".
 
-**Two caveats on that evidence.** Those line counts were taken before generation-time
-collapsing landed later the same day; as re-measured on 2026-08-17 the proofs are
-`lens <4` 80, `conduit <1.3` 62 and `aeson <2` **241** lines, against cabal's 22, 16
-and 30. And the scope cut removes gap 5's symptom for now, since a proof with no
-pinned cells cannot print one. The *ranking* of 1 and 3 is unaffected; gap 5 drops out
-until the flag axis returns.
+**Those line counts are historical.** As of 2026-08-17, with gap 1 done, the proofs
+are `lens <4` **9** lines against cabal's 22, `conduit <1.3` **43** against 16, and
+`aeson <2` **178** against 30 — one win, two still long, and what is left of the two
+is chain collapsing (gap 3), which is now the top item. Gap 5's symptom is also gone
+for now: a proof with no pinned cells cannot print one, and no cell is pinned while
+flags are fixed at their defaults.
 
 1. **Depender-range collapsing** — the one gap that is a *spec divergence*, not a
    cosmetic choice, and the only one fixed outside the report layer. The spec
@@ -424,16 +427,28 @@ until the flag axis returns.
    depender term still names the irrelevant flag and the 2^k cost survives intact.
    (This file prescribed the rejected form until 2026-08-05.)
 
-   **Landed 2026-08-12, and unfinished — see [`docs/collapsing.md`](docs/collapsing.md)
-   before touching it.** `Bridge.Provider.spanningOccurrence` now emits over adjacent
-   releases carrying the same occurrence, which cut `aeson <2` from 11.1s to 2.4s and its
-   proof from 2833 lines to 277, but cost `pandoc` 6.6× in time and 17× in reads. That
-   file has the five ways out, the settled term-equality question, and the one
-   measurement to take first. **Re-measured 2026-08-17 and the trade held, with a
-   column nobody had recorded: memory.** `pandoc`'s max residency went 22.9 → 81.0 MB
-   (cabal's is 80.1) and it allocates 17.31 GB against cabal's 1.80 GB — attributable,
-   because its verdict and decision count have never moved. Option 4 (merge on insert,
-   no extra reads) is the fix for that as well as for the time.
+   **Done, 2026-08-17 — and not where this section spent two days assuming it would
+   be.** Doing it at generation time means the provider walking out from the decided
+   release and parsing its neighbours' `.cabal` files to learn what they declare;
+   that was built on 2026-08-12 (`spanningOccurrence`), measured, and **removed**. It
+   cost `pandoc` — one conflict, reads dominate — 167 reads → 2834, 22.9 → 81.0 MB of
+   residency and 17.31 GB of allocation, to widen clauses no search ever contested.
+
+   What replaced it: the provider emits one fact per release **slot**, and
+   `PubGrub.Store` unions the depender terms of two facts that agree about the
+   dependee **as they arrive**. Slots touch, so the union is one contiguous interval
+   and nothing is read to discover it. Reads, allocation and residency returned to
+   their pre-collapsing values and the proofs came out *shorter* than the walk made
+   them (`lens <4` 80 → 9 lines, against cabal's 22). Numbers in `docs/STATUS.md`,
+   "Merge on insert"; the full account, including the two rejected store shapes and
+   what each of the five options was worth, in [`docs/collapsing.md`](docs/collapsing.md).
+
+   Two things to carry forward. The rule is **weaker than the spec's** — it collapses
+   the releases the solver expanded, not every release carrying the dependency, which
+   nothing observable depends on but is not what `:456` says. And **decisions went up**
+   (`aeson <2` 392 → 758), because merging widens a clause after the second release
+   has been expanded rather than before; that is cheap today and is the first thing to
+   look at if re-expansion ever gets expensive again.
 
    On the **version** axis, the free half landed 2026-08-12: the depender's version
    component is a release's **slot** — `halfOpenVersionSet v next`, reaching up to
@@ -446,18 +461,19 @@ until the flag axis returns.
    `aeson <2`: reads 350 → 250, no-version events 6 → 0, and the gappy eleven-way
    conflict term became one contiguous interval (`docs/STATUS.md`, "Second pass").
 
-   Widening across *distinct* releases — the part that requires reads — then landed on
-   top of slots later the same day, as `spanningOccurrence` above. Slots made it
-   cheaper, not harder: two adjacent slots already union into a contiguous range, so
-   only dependency-identity was left to establish, and that is the read. Note the
-   third pin state turned out **not** to be needed on this path: requiring the guard to
-   be *identical* means every release in the span declares the flags the guard mentions,
-   since one that did not could not have produced that guard
-   (`docs/collapsing.md` §1). While flags are fixed at their defaults it does not arise
-   from the other direction either — guards are literals, so there is no flag to be
-   inapplicable and only dependency-identity is compared; the question comes back with
-   the flag axis. See also `docs/decision-semantics.md`, which builds on
-   this emission shape and treated it as its prerequisite — now paid.
+   Widening across *distinct* releases — the part that required reads — landed on top
+   of slots later the same day, as the `spanningOccurrence` walk described above, and
+   went away with it. Slots made it cheaper, not harder: two adjacent slots already
+   union into a contiguous range, so only dependency-identity was left to establish,
+   and that was the read. Note the third pin state turned out **not** to be needed on
+   that path: requiring the guard to be *identical* means every release in the span
+   declares the flags the guard mentions, since one that did not could not have
+   produced that guard (`docs/collapsing.md` §1). While flags are fixed at their
+   defaults it does not arise from the other direction either — guards are literals,
+   so there is no flag to be inapplicable and only dependency-identity is compared;
+   the question comes back with the flag axis. See also
+   `docs/decision-semantics.md`, which builds on this emission shape and treated it
+   as its prerequisite — now paid.
 2. **`collapseNoInstances`** — intensional ranges mean the solver must separately
    learn that a range's *holes* are empty, so `no version for bar in >2.0.0 && <3`
    leaves clutter the proof. pubgrub-rs has a dedicated post-pass for exactly
@@ -484,7 +500,8 @@ until the flag axis returns.
    (`fromNarrowedDependency`), are in `docs/STATUS.md` ("Narrowing declared ranges").
    `PubGrub.VersionSet.snapToVersions` is kept, tested, and unused.
 3. **Chain collapsing** — the spec fuses "depends on X *which depends on* Y" into
-   one sentence; this is most of the remaining line-count gap.
+   one sentence. **Now the top item**: with gap 1 done, this is most of what is left
+   between `conduit <1.3`'s 43 lines and cabal's 16.
 4. Cosmetic: `So,` on the final line; terminal periods on non-final lines; omit
    the synthetic root's version; number only lines actually referenced.
 5. **Collapse cells that exhaust a flag's states.** *Dormant since 2026-08-17: no

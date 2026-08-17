@@ -1,36 +1,42 @@
-# Depender collapsing: where it stands and how to finish it
+# Depender collapsing: how it was done, and what it cost
 
-Written 2026-08-12, at the end of the session that landed it. Self-contained on
-purpose — nothing here needs the conversation it came from.
+Started 2026-08-12 as a plan for finishing generation-time collapsing; **finished
+2026-08-17 by option 4, and by deleting the generation-time walk it was written
+about.** Self-contained on purpose — nothing here needs the conversation it came
+from.
 
-Subject: emitting **one** dependency incompatibility per guarded occurrence spanning
-adjacent releases, instead of one per release, as `references/pubgrub.md:456` requires.
-Authority on the emission *shape* remains [`flags-semantics.md`](flags-semantics.md)
-§4.2; this file is about the mechanism and its cost.
+Subject: stating **one** dependency incompatibility per guarded occurrence over a
+range of adjacent releases, instead of one per release, as
+`references/pubgrub.md:456` requires. Authority on the emission *shape* remains
+[`flags-semantics.md`](flags-semantics.md) §4.2; this file is about the mechanism
+and its cost.
 
-> **Re-measured 2026-08-17, after flags stopped being a search dimension**
-> ([STATUS.md](STATUS.md), "Release-1 scope"). Three things to carry into everything
-> below:
+> **Outcome, so nobody re-derives it.** The walk
+> (`Bridge.Provider.spanningOccurrence`, §1) is gone. The provider emits one fact
+> per release **slot**, and [`PubGrub.Store`](../src/PubGrub/Store.hs) unions the
+> depender terms of two facts that agree about the dependee as they arrive (§4).
+> Against the walk it measured:
 >
-> 1. **the cut changed almost nothing here.** Spans did get longer, as predicted —
->    every guard is now a literal, so releases declaring the same dependency under
->    differently-written conditions no longer break a span — and the effect is a few
->    per cent: proofs 13–16% shorter on `conduit` and `aeson`, reads *up* by 8 on
->    `vector` and 37 on `pandoc`, `lens <4` unchanged to the line. **§1's table below
->    still describes the situation.**
-> 2. **the trade is worse than §1 records, in a column §1 does not have.** `pandoc`'s
->    max residency went **22.9 MB before collapsing to 81.0 MB**, which is cabal's
->    80.1 MB — the memory advantage the benchmark deliverable leans on, gone on that
->    problem. Its allocation is **17.31 GB against cabal's 1.80 GB**. Option 4 is now
->    the fix for a memory regression as well as a time one.
-> 3. **one of the two motivations is gone for now.** §1's performance case was partly
->    the 2^k re-offer; with one assignment per release that is zero. The spec
->    divergence and the proof length carry this on their own, and §6's `noversion`
->    rise survived the cut (`conduit` 6 → 5, `lens` 8 → 7, `aeson` 9 → 7 — still far
->    above the 1, 1, 0 from before collapsing), so it is not a flag artifact.
+> | | reads | allocation | max residency | proof |
+> |---|---|---|---|---|
+> | `vector` | 116 → **13** | 0.84 → **0.38** GB | 22.6 MB | — |
+> | `pandoc` | 2871 → **167** | 17.31 → **1.53** GB | 81.0 → **22.6** MB | — |
+> | `conduit <1.3` | 289 → **174** | 1.23 → **1.20** GB | 22.6 MB | 62 → **43** |
+> | `lens <4` | 317 → **178** | 3.25 → **2.55** GB | 34.1 → **26.1** MB | 80 → **9** |
+> | `aeson <2` | 423 → **261** | 4.24 → **3.15** GB | 30.7 → **22.6** MB | 241 → **178** |
 >
-> §4's term-equality analysis is unaffected and gets *easier*: a dependee term minted
-> by `widen` was already one cell with an empty pin map, and now every cell is.
+> Both sides of the trade §1 describes went the right way at once, which the walk
+> could never do: reads and memory came back to where they were before collapsing
+> existed, and the proofs got *shorter* than the walk made them. Full table, and
+> the comparison against cabal, in [STATUS.md](STATUS.md).
+>
+> What is given up against the spec's rule is the releases the solver never
+> expanded. Those have no clause either way, so propagation cannot tell, and a
+> proof can only cite what was derived.
+>
+> **§§1–3 are kept as the record of what was tried.** §4 is what was built. §5's
+> measurement was taken and is answered there. §6 is still open and is now the only
+> open item in this file.
 
 ---
 
@@ -245,33 +251,60 @@ depender range, which is exactly the fact the spec wants stated. Merging via
 `priorCause` instead makes a *derived* node — and those derived nodes **are**
 `conduit`'s 1061 proof lines. Option 4 does not shorten them, it stops them existing.
 
-## 5. Do this first
+## 5. The measurement it asked for, and its answer
 
-**Price the store change in isolation.** Change the store to shape (a) with **no
-merging at all**, then run `bench/compare.sh` (see [benchmarking.md](benchmarking.md)).
-That separates the indirection cost from the merge benefit. `pandoc` (scan- and
-read-dominated) and `aeson <2` (search-dominated) will disagree and both numbers matter.
-If the indirection is free, the merge is a small addition on top; if it costs 20%, we
-know before building anything and (b) comes into play.
+This section used to say: price the store change in isolation before building
+anything, because the three candidate shapes all add an indirection to the hot loop
+and clause position dominates propagation cost here. That was done, in three steps,
+each a full `bench/compare.sh`:
 
-Everything else about option 4 is settled — term equality, the key, the bucket size, the
-cause shape. This measurement is the only open question.
+| step | what changed | result |
+|---|---|---|
+| A | store type in, **merging off**, walk still on | counts identical, allocation within 0.002% — the store change is **free** |
+| B | merging on, walk still on | `aeson <2` 4.24 → 2.66 GB, `lens <4` proof 80 → 37, `conduit` decisions 51 → 28; `pandoc` unchanged, since the walk still owns its reads |
+| C | walk removed, per-slot emission | the table in the banner |
 
-**The baseline to price against is now 2026-08-17's** (the banner, and STATUS.md's
-"Re-measured after the scope cut"), not §1's right-hand column. Take `pandoc`'s
-allocation — 17.31 GB — as the headline figure rather than its elapsed time: it is the
-stable metric, it is 9.6× cabal's, and it is what option 4 is supposed to remove. And
-record allocation for **all five** problems before and after, which is the thing §1
-cannot do retrospectively.
+**The indirection turned out to be avoidable**, which is why A cost nothing. None of
+the three shapes in §4 was used. A fourth one is what the code does:
 
-## 6. And before any of it
+- **(d) values in scan order, plus a `Set` of merge keys.** `stClauses` stays a
+  plain `[Incompatibility]`, so propagation walks it exactly as it walked the list
+  it replaced — no lookup per clause, which is the whole cost the other shapes were
+  trying to buy their way out of. Finding a merge target is an `O(position)` rebuild
+  of the list's prefix, paid only on an actual merge, and the key set is what stops
+  that walk from ever happening when it would find nothing (the common case: most
+  dependency facts are the first of their kind). The merged clause is written back
+  in place, so §4's "keeps its predecessor's position" property holds without ids.
+
+Step B is worth keeping in mind separately from C: **merging is doing the work, not
+the removal of the walk.** With the walk still in place it already bought a third of
+`aeson`'s allocation and half of `lens`'s proof. Removing the walk is what returned
+`pandoc` and the memory.
+
+One thing the tables do not show, and it is the honest cost of the weaker rule:
+**decisions went up** — `conduit <1.3` 51 → 137, `aeson <2` 392 → 758. Merging
+cannot prevent a re-expansion the way a pre-emptively wide clause could; it widens
+the clause after the solver has expanded the second release. Those extra decisions
+are cheap (no walk, no reads beyond the ones the solver wanted anyway), and every
+other metric improved, but a future change that makes re-expansion expensive again
+should look here first.
+
+## 6. The one thing still open
 
 `noversion` events rose on all three unsat problems when collapsing landed:
-`conduit <1.3` 1 → 6, `lens <4` 1 → 8, `aeson <2` 0 → 9. **Unexplained.** It may be a
-hole the wider clauses opened, in which case some of the numbers in §1 move again.
-Understand that before optimising the mechanism that produced it.
+`conduit <1.3` 1 → 6, `lens <4` 1 → 8, `aeson <2` 0 → 9. **Unexplained**, and it has
+now outlived two changes that could each have explained it away:
 
-**Re-measured 2026-08-17: it survived the flags-at-defaults cut** — 5, 7 and 7
-respectively, against 1, 1 and 0 before collapsing. So it is a property of the wider
-clauses, not of flag search, which removes the cheapest available explanation and
-leaves the work to do.
+| | before collapsing | walk | flags at defaults | store merging |
+|---|---|---|---|---|
+| `conduit <1.3` | 1 | 6 | 5 | 5 |
+| `lens <4` | 1 | 8 | 7 | **3** |
+| `aeson <2` | 0 | 9 | 7 | 6 |
+
+So it is a property of **wider depender clauses as such**, not of the walk that first
+produced them and not of flag search. The remaining hypothesis is the one this file
+started with: a wide clause lets the solver conclude a positive term over a range
+whose interior holds no release it can use, and it then has to learn that hole
+separately. If that is right, `collapseNoInstances` (CLAUDE.md, Reporting gap 2) is
+where it gets absorbed rather than prevented. Worth an afternoon with
+`bench/summarise.awk` and one trace before believing it.

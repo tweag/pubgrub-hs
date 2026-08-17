@@ -4,13 +4,14 @@ How to reproduce every number in [STATUS.md](STATUS.md), and what each one is wo
 The short version:
 
 ```sh
-cabal test                    # 116 unit and property tests, ~0.3 s
+cabal test                    # 126 unit and property tests, ~0.3 s
 bench/compare.sh              # both solvers over bench/problems.txt
 ```
 
-> **The current figures are STATUS.md's "Re-measured after the scope cut"**
-> (2026-08-17). Every table above it there is dated and against the tree of its own
-> date — read them for how the project got here, not for what the solver does now.
+> **The current figures are STATUS.md's "Merge on insert"** (2026-08-17, the last
+> measurement section in that file). Every table above it there is dated and against
+> the tree of its own date — read those for how the project got here, not for what
+> the solver does now.
 
 ---
 
@@ -104,14 +105,18 @@ Use it to decide whether a change costs anything.
 `maximum residency` from `+RTS -s` is the live heap as the GC saw it. STATUS.md quotes
 the second. **What the ~22 MB floor actually consists of is unestablished** — doubling
 the per-element overhead of the package→versions map, long assumed to dominate it,
-moved it by 0.5%. Do not quote a memory comparison against cabal until that is settled.
+moved it by 0.5%. STATUS.md now does quote a memory comparison against cabal (2.2–3.5×
+on the five problems), so settling this has gone from housekeeping to the weakest link
+in the strongest claim the project has: a ratio whose numerator is a number nobody can
+account for is not evidence, however reproducible it is.
 
-**What sits *above* the floor is now partly known, and it is the memoised reduced
-forms.** `pandoc` reads 2871 `.cabal` files since generation-time collapsing landed,
-against 167 before, and its max residency went 22.9 → 81.0 MB — about 21 KB per extra
-retained release. Memory is therefore a function of *how many releases were parsed*,
-which makes it a metric the collapsing work moves, and one to record in every run
-rather than only when it looks interesting.
+**What sits *above* the floor is known, and it is the memoised reduced forms** —
+about 21 KB per parsed release. The evidence is a regression and its removal:
+generation-time collapsing took `pandoc` from 167 reads to 2871 and its residency
+from 22.9 MB to 81.0, and dropping that walk took both back (167 reads, 22.6 MB).
+Residency therefore tracks **how many releases were parsed**, which is a number the
+solver's own strategy moves — so record it on every run, not only when it looks
+interesting.
 
 **A timed run and a counted run are different runs.** With `-v` the trace renders to
 stdout — `aeson <2` prints thousands of lines — so `bench/compare.sh` deliberately runs

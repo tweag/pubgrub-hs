@@ -8,14 +8,16 @@
 > table below decide. If this file contradicts one of them, that one is right and
 > this file is stale — fix it.
 >
-> **Last checked against the tree:** 2026-08-17, 116 tests passing.
+> **Last checked against the tree:** 2026-08-17, 126 tests passing.
 >
-> **If you have been away**, two sections carry everything that changed on
+> **If you have been away**, three sections carry everything that changed on
 > 2026-08-17: [Release-1 scope](#release-1-scope-flags-are-fixed-at-their-defaults-2026-08-17)
-> (flags are no longer searched) and
+> (flags are no longer searched),
 > [Re-measured after the scope cut](#re-measured-after-the-scope-cut-2026-08-17)
-> (the current numbers, and the memory regression they turned up). Every other
-> measurement section is dated and historical.
+> (which found a memory regression), and
+> [Merge on insert](#merge-on-insert-the-collapsing-trade-is-gone-2026-08-17)
+> (which removed it, and holds the current numbers). Every other measurement
+> section is dated and historical.
 >
 > History lives in [decision-log.md](decision-log.md) (how we got here);
 > abandoned ideas live in [attic/](attic/) (what we tried and dropped).
@@ -31,18 +33,19 @@ correctly is table stakes. It exists to answer two questions:
 2. Can it **match cabal-install on time and peak memory** on real problems?
 
 **The solver works.** It resolves real Hackage packages end to end, with version
-ranges, Cabal flags, buildability, and installed/boot-package pinning. 116 tests
+ranges, Cabal flags, buildability, and installed/boot-package pinning. 126 tests
 pass, including all six worked examples from the PubGrub spec.
 
 **Neither deliverable has been delivered, but the comparison has started.** cabal's
 own solver runs over our index (`pubgrub --cabal`, no `cabal-install` dependency),
 and the current five-problem numbers are in
-[Re-measured after the scope cut](#re-measured-after-the-scope-cut-2026-08-17):
-**all five verdicts agree; we are level or faster on four and 3–4× slower on
-`pandoc`; we hold a 2.2–2.6× memory advantage on four and have lost it entirely on
-`pandoc`.** That last one is generation-time depender collapsing being paid for, and
-it is the largest open cost in the project. What is missing is the harness — one run
-doing both, diffing plans, repeating for timing — and the explanation side-by-side.
+[Merge on insert](#merge-on-insert-the-collapsing-trade-is-gone-2026-08-17): **all
+five verdicts agree, we are faster than cabal on all five, leaner in memory on all
+five (2.2–3.5×), and allocate less on four of five.** On `lens <4` our proof is **9
+lines against cabal's 22**, which is the first specimen that looks like the
+explanation thesis; `conduit <1.3` (43 vs 16) and `aeson <2` (178 vs 30) are not
+there yet. What is missing is the harness — one run doing both, diffing plans,
+repeating for timing — and the explanation side-by-side.
 
 **And the problem got smaller on 2026-08-17.** Flags are no longer a search
 dimension: every flag is fixed at its declared default, on *both* sides of the
@@ -393,29 +396,22 @@ Full arguments in the linked sections; this is the index.
    problem set (so flags were hardly searched on it); depender collapsing costs
    **memory** as well as time and reads, which nobody had measured — `pandoc`'s max
    residency went 22.9 → 81.0 MB and its allocation is 9.6× cabal's; and the
-   `noversion` rise is not a flag artifact, because it survived. **The successor is
-   item 2**: `collapsing.md` option 4 now fixes a memory regression as well as a time
-   one, and the store-shape measurement its §5 asks for is the next thing to run.
+   `noversion` rise is not a flag artifact, because it survived. **Item 2 was then
+   built** — `collapsing.md` option 4, see
+   [Merge on insert](#merge-on-insert-the-collapsing-trade-is-gone-2026-08-17) — and
+   the memory regression is gone. The `noversion` rise is the survivor: it has now
+   outlived both the flag cut and the walk, so it belongs to wide clauses as such.
 1. **Should the provider's `expand` split back into "pick" then "consequences"?**
    ([`flags-semantics.md`](flags-semantics.md) §8.) Design item, not a decision.
    **Note the interaction:** [`decision-semantics.md`](decision-semantics.md) §10 says
    the condition-decision model *inherits all three benefits* of the split, and that
    the two should be scheduled as one item.
-2. **Depender collapsing — both axes have landed; the open question is now its
-   cost.** The divergence from `references/pubgrub.md:456` is closed. The flag axis
-   landed 2026-08-05 (the 2^k re-offer is gone — measured: 2 expansions where it was
-   3 with one irrelevant flag and 5 with two; depender terms carry the guard, not the
-   whole assignment), and **that half of the motivation is moot since 2026-08-17**:
-   with flags fixed at their defaults there is one assignment per release and nothing
-   to re-offer, so what the collapsing is still for is the spec divergence and the
-   proof length. The version axis landed 2026-08-12 in
-   `Bridge.Provider.spanningOccurrence`. **It is a trade, not a win** — `aeson <2`
-   11.1s → 2.4s with its proof 2833 → 277 lines, but `pandoc` 6.6× slower on 17× the
-   reads. [`collapsing.md`](collapsing.md) is authoritative on where it stands and
-   holds the five ways to finish it, the recommendation (options 2 + 4), and the one
-   measurement to take first. **Also unexplained and to be understood before
-   optimising: `noversion` events rose on all three unsat problems.** The notes below
-   are kept as background on what the version axis had to do.
+2. ~~**Depender-range collapsing, version axis**~~ — **closed 2026-08-17**, by
+   merging in the store rather than walking the index ([collapsing.md](collapsing.md)).
+   What remains is a deliberate weakening of `references/pubgrub.md:456`, recorded
+   there and in the results section: we collapse the releases the solver expanded, not
+   every release carrying the dependency. Nothing observable depends on the
+   difference, and closing it would cost exactly the reads this change removed.
 3. **Should the set algebra be allowed to read flag declarations?** Would make
    emptiness exact and remove the one-sided slack, at the cost of the core/bridge
    boundary. Cost/benefit, not correctness.
@@ -1162,6 +1158,10 @@ insert, zero extra reads) is the only one of the five that removes `pandoc`'s co
 without giving back whatever collapsing is worth on the search problems, because it
 does not walk.
 
+**It was built the same day** — see the next section. The regression is gone, and the
+search problems kept their win, so the "unclear parentage" above stops mattering: the
+current tree is better than either tree being compared.
+
 **Finding 3: the `noversion` rise survives the cut**, and is therefore not a flag
 artifact: `conduit` 1 → 6 → 5, `lens` 1 → 8 → 7, `aeson` 0 → 9 → 7 across
 pre-collapsing, post-collapsing, today. Still unexplained, still the thing to
@@ -1174,6 +1174,65 @@ probably real, and the likely cause is ours: a manual flag is not *weak*, so
 `deferWeakFlagChoices` no longer defers the flags that influence dependencies and
 cabal's goal ordering changed. If so, we made the baseline slower by constraining it,
 which is fair but has to be said out loud in any published comparison.
+
+### Merge on insert: the collapsing trade is gone (2026-08-17)
+
+[`collapsing.md`](collapsing.md)'s option 4, built. The provider no longer walks
+neighbouring releases to find out what they declare; it emits one dependency fact per
+release **slot**, and the new [`PubGrub.Store`](../src/PubGrub/Store.hs) unions the
+depender terms of two facts that agree about the dependee as they arrive. Slots are
+what makes that free: adjacent slots touch, so their union is one contiguous interval
+and no `.cabal` is read to discover it.
+
+Against the walk, on the same machine and index:
+
+| problem | reads | allocation | max residency | proof | decisions |
+|---|---|---|---|---|---|
+| `vector` | 116 → **13** | 0.84 → **0.38** GB | 22.6 MB | — | 39 |
+| `pandoc` | 2871 → **167** | 17.31 → **1.53** GB | 81.0 → **22.6** MB | — | 266 → 270 |
+| `conduit <1.3` | 289 → **174** | 1.23 → **1.20** GB | 22.6 MB | 62 → **43** | 51 → **137** |
+| `lens <4` | 317 → **178** | 3.25 → **2.55** GB | 34.1 → **26.1** MB | 80 → **9** | 90 → **106** |
+| `aeson <2` | 423 → **261** | 4.24 → **3.15** GB | 30.7 → **22.6** MB | 241 → **178** | 392 → **758** |
+
+**Both halves of the trade moved the right way at once**, which the walk by
+construction could not do. `pandoc`'s regression is not reduced, it is gone: reads,
+allocation and residency are back to their pre-collapsing values, and the proofs are
+*shorter* than the walk made them rather than longer.
+
+And against cabal, which is the comparison that matters:
+
+| problem | ours, `-v` / quiet ×2 | cabal | ours res | cabal res | ours alloc | cabal alloc | our proof | cabal's message |
+|---|---|---|---|---|---|---|---|---|
+| `vector` | 0.77 / 0.78, 0.86 | 1.00 | **22.6** | 49.9 MB | **0.38** | 0.86 GB | — | 55 |
+| `pandoc` | 1.18 / 1.32, 1.38 | 1.99 | **22.6** | 80.1 MB | **1.53** | 1.80 GB | — | 385 |
+| `conduit <1.3` | 1.24 / 1.06, 1.16 | 1.60 | **22.6** | 49.9 MB | **1.20** | 1.32 GB | 43 | **16** |
+| `lens <4` | 1.49 / 1.52, 1.57 | 1.53 | **26.1** | 76.2 MB | 2.55 | **1.88** GB | **9** | 22 |
+| `aeson <2` | 1.66 / 1.66, 1.75 | 2.60 | **22.6** | 80.4 MB | **3.15** | 5.43 GB | 178 | **30** |
+
+**We are now faster than cabal on all five, leaner in memory on all five (2.2–3.5×),
+and allocate less on four of five.** `lens <4` is the exception on allocation, and it
+is also the problem where our proof is **9 lines against cabal's 22** — the first
+side-by-side that looks like the thing the project set out to demonstrate. `conduit`
+and `aeson` are still 2.7× and 5.9× longer than cabal's message; that is chain
+collapsing (Reporting gap 3), which nothing here touches.
+
+**Three things to know before building on this.**
+
+- **The rule is weaker than the spec's.** `references/pubgrub.md:456` wants the range
+  to run from the first release that has the dependency to the first that does not;
+  we merge only the releases the solver actually expanded. Those are the only ones
+  whose clauses ever existed, so propagation and the proof cannot tell — but a
+  statement about an unvisited release is not being made, and if something ever needs
+  one, this is not where it comes from.
+- **Decisions went up, sharply on two problems** (`conduit` 51 → 137, `aeson`
+  392 → 758). Merging cannot prevent a re-expansion the way a pre-emptively wide
+  clause could; it widens the clause after the second release has been expanded. The
+  extra decisions are cheap here — every other metric improved — but a change that
+  makes re-expansion expensive again should look at this first.
+- **The store change itself was free**, measured with merging disabled: counts
+  identical, allocation within 0.002%. That is because the shape used avoids the
+  per-clause indirection all three candidate shapes in `collapsing.md` §4 would have
+  added — the clauses stay a plain list in scan order and only a merge pays anything.
 
 ### The explanation target, now concrete
 
@@ -1282,7 +1341,7 @@ moves; treat a cited line number as a hint, and grep for the identifier.
 | deliverable | state |
 |---|---|
 | **Explanation showcase** — real failing problems, pubgrub-hs vs cabal side by side | solver produces numbered proofs, and cabal's failure text is now reachable (`--cabal` returns its `Fail` message); no side-by-side rendering, no *unsat* problem set, wording gaps open |
-| **Benchmark report** — time + peak residency on real sat/unsat problems | **current numbers exist** for five problems, two sat and three unsat, both solvers ([Re-measured](#re-measured-after-the-scope-cut-2026-08-17)). Not a report: index build still not separated from solve, timings are one or two runs against ±25% noise, and what the memory floor consists of is unestablished. It also now has a result that has to be *fixed* before it is published — `pandoc` allocating 9.6× cabal |
+| **Benchmark report** — time + peak residency on real sat/unsat problems | **current numbers exist** for five problems, two sat and three unsat, both solvers ([Merge on insert](#merge-on-insert-the-collapsing-trade-is-gone-2026-08-17)), and they are now favourable on every problem. Not a report: index build still not separated from solve, timings are one or two runs against ±25% noise, and what the ~22 MB memory floor consists of is unestablished — which is the next thing to settle, since a memory claim is now the strongest one we have |
 
 The baseline and the shared index are done — `cabal-install-solver` drives cabal's
 resolver from the same `withWorld`, which is what makes the comparison

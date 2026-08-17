@@ -409,6 +409,33 @@ escape an unsatisfiable dependency, so some problems that resolved will now fail
 solvers fail together, which is fair — but any published benchmark or showcase has to
 say so.
 
+### Merge on insert, and the walk deleted — STUCK
+
+*Aug 17.* The collapsing trade above was resolved by moving the collapsing from
+generation time to insert time. `PubGrub.Store` — new, and the first structure the
+core has kept beyond a list of clauses — unions the depender terms of two dependency
+facts that agree about the dependee, as they arrive; the provider emits per release
+**slot**, so adjacent facts touch and their union is contiguous without reading
+anything. `spanningOccurrence` and its `.cabal` walk are gone.
+
+Every metric improved at once, which the walk could not do: `pandoc` 2871 reads → 167,
+17.31 → 1.53 GB allocated, 81.0 → 22.6 MB resident; `lens <4`'s proof 80 → 9 lines
+against cabal's 22. We are now faster than cabal on all five problems and leaner in
+memory on all five.
+
+Three lessons worth the entry:
+
+- **A cheaper place can beat a more faithful one.** The spec puts collapsing at
+  generation time and we followed it there first. Insert time gives a weaker rule —
+  only the releases the solver expanded — and every observable is better for it.
+- **Measure the container change separately from the change it enables.** The store
+  went in with merging disabled first: counts identical, allocation within 0.002%. Had
+  that cost 20%, the merge would have been evaluated against a moving floor.
+- **The obvious shape was not the right one.** All three shapes considered
+  (`IntMap` + id order, `IORef` cells, prepend-and-leave) add work to the propagation
+  loop, which is the hot path. Keeping the clauses a plain list in scan order and
+  paying `O(position)` only on an actual merge costs nothing where it matters.
+
 ### Buildability, and the pkg-config db — STUCK
 
 *Aug 17.* A release whose library cannot be built here is no longer offered:
