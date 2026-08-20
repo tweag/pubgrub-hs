@@ -92,10 +92,10 @@ import           PubGrub.InstanceSet                          (HasVersion (..),
                                                                InstanceSet (..),
                                                                memberInstance,
                                                                singletonInstance,
-                                                               singletonUsePreInstalled,
-                                                               sourceInstances)
+                                                               singletonUsePreInstalled)
 import           PubGrub.InstanceSet.SourceCell               (SourceCell (..),
-                                                               assignmentFrom)
+                                                               assignmentFrom,
+                                                               pinnedCell)
 
 import           Distribution.Types.Dependency                (depPkgName,
                                                                depVerRange)
@@ -416,7 +416,7 @@ mkExpand installedDb source root = expand'
                                                 , Just assignment <- [NE.nonEmpty (expandGuard guard)]
                                                 , -- only if the guard admits the chosen instance, which is what
                                                   -- makes the fact true of it
-                                                  inst `memberInstance` sourceInstances slot assignment
+                                                  inst `memberInstance` slotInstances slot assignment
                                                 , dep <- deps
                                                 ]
                                         pure (Just inst, reverse stated ++ incs)
@@ -501,7 +501,7 @@ mkExpand installedDb source root = expand'
     -- The slot, rather than the single version, lets 'PubGrub.Store' union a run of
     -- unbuildable releases into one clause: adjacent slots touch, so the union has
     -- no hole between the releases and reads as the range the spec asks for.
-    unbuildableFact pn slot = unbuildable pn (sourceInstances slot (NE.singleton Map.empty))
+    unbuildableFact pn slot = unbuildable pn (slotInstances slot (NE.singleton Map.empty))
 
     -- | Every source instance of a package: any version, no flags pinned. The
     -- complement of \"is an installed unit\", on the source side.
@@ -547,7 +547,7 @@ mkExpand installedDb source root = expand'
     dependencyInc pn slot assignment dep =
         fromDependency
             pn
-            (sourceInstances slot assignment)
+            (slotInstances slot assignment)
             (depPkgName dep)
             (widen (depPkgName dep) (VersionSet.fromVersionRange (depVerRange dep)))
 
@@ -590,8 +590,34 @@ mkExpand installedDb source root = expand'
 -- release that is skipped (unparseable, or admitted by no offered assignment)
 -- still has its own dependencies, and widening across it would attribute this
 -- release's dependencies to it.
-withSlots :: Set Version -> [(Version, VersionSet)]
+withSlots :: Set Version -> [(Version, Slot)]
 withSlots releases =
-    [ (v, VersionSet.halfOpenVersionSet v (Set.lookupGT v releases))
+    [ (v, Slot (VersionSet.halfOpenVersionSet v (Set.lookupGT v releases)))
     | v <- Set.toDescList releases
     ]
+
+-- | One release's slot, as a type of its own.
+--
+-- A depender term over a __slot__ is the collapsed term
+-- @references\/pubgrub.md:456@ asks for; one over the __single version__ just
+-- decided is the per-version emission it replaces. Both are intervals, so only a
+-- type keeps one from being passed where the other belongs.
+--
+-- The constructor is not exported and 'withSlots' is the only thing that applies it,
+-- so a slot can only mean \"this release, up to the next one the index actually
+-- has\". 'slotInstances' is the only way back out.
+newtype Slot = Slot VersionSet
+
+-- | Every instance of a slot that satisfies one of the given pin sets — the depender
+-- term of a dependency fact, and the term an unbuildable fact bans.
+--
+-- The pin sets are __not assignments__: they need not mention every declared flag,
+-- and how much the result denotes follows from how much they pin (see 'pinnedCell').
+-- 'NonEmpty' because an empty union is the empty set, and a guard that no assignment
+-- satisfies is dropped before it gets here.
+slotInstances :: Slot -> NE.NonEmpty (Map.Map FlagName Bool) -> InstanceSet
+slotInstances (Slot vs) pinSets =
+    InstanceSet
+        { isInstalled = Set.empty
+        , isSource = [pinnedCell vs pins | pins <- NE.toList pinSets]
+        }
