@@ -28,21 +28,21 @@ import qualified Data.Text                      as T
 import qualified Data.Text.Encoding             as T
 import           Distribution.Types.Flag        (mkFlagAssignment)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
-import           Distribution.Version           (earlierVersion,
+import           Distribution.Version           (Version, earlierVersion,
                                                  intersectVersionRanges,
                                                  mkVersion, orLaterVersion)
 import           PubGrub.Incompatibility        (fromDependency)
 import           PubGrub.InstanceSet            (HasVersion (version),
                                                  Instance (BuildSource),
                                                  InstanceSet (..),
-                                                 memberInstance,
-                                                 singletonInstance)
+                                                 memberInstance)
 import           PubGrub.InstanceSet.SourceCell (SourceCell (..))
 import           PubGrub.Provider               (Provider (Provider))
 import           PubGrub.Report                 (reportConflict)
 import           PubGrub.Solver                 (SolveError (..), SolverMsg,
                                                  solve)
-import           PubGrub.VersionSet             (VersionSet, fromVersionRange)
+import           PubGrub.VersionSet             (VersionSet, fromVersionRange,
+                                                 halfOpenVersionSet)
 import           Test.Tasty                     (TestName, TestTree, testGroup)
 import           Test.Tasty.Golden              (goldenVsString)
 import           Test.Tasty.HUnit               (testCase, (@?=))
@@ -122,13 +122,34 @@ mkProvider world = Provider expand'
             , mkVersion (relVersion r) == version chosen
             ]
 
+    -- The releases of @p@ this world publishes, which is what a version /slot/ is
+    -- defined against.
+    published :: PackageName -> Set.Set Version
+    published p = Set.fromList [mkVersion (relVersion r) | (q, rs) <- world, q == p, r <- rs]
+
+    -- A release's __slot__: from it up to the next release that exists, unbounded
+    -- for the newest. This is the depender term @references\/pubgrub.md:465@ asks
+    -- for — \"an inclusive lower bound of the first version that has the dependency,
+    -- and an exclusive upper bound of the first that /doesn't/\" — and what
+    -- 'Bridge.Provider.withSlots' mints for the real thing.
+    --
+    -- It matters here for the same reason it matters there, and the spec's own
+    -- worked examples are the evidence. With the single version as the depender, a
+    -- range wider than one release leaves the solver to discover separately that the
+    -- rest of it is empty, and that \"no version for …\" fact is an extra line in a
+    -- proof the spec writes without one. A slot covers the gap by construction, so
+    -- the derivation graph comes out the shape @:1005@ draws.
+    slotOf :: PackageName -> Version -> InstanceSet
+    slotOf p ver =
+        InstanceSet Set.empty [SourceCell (halfOpenVersionSet ver (Set.lookupGT ver (published p))) Map.empty]
+
     expand' p range =
         case filter (`memberInstance` range) (universe p) of
             [] -> pure (Nothing, [])
             candidates ->
                 let chosen = maximumBy (comparing version) candidates
                     incs =
-                        [ fromDependency p (singletonInstance chosen) d (widen d vs)
+                        [ fromDependency p (slotOf p (version chosen)) d (widen d vs)
                         | (d, vs) <- depsOf p chosen
                         ]
                  in pure (Just chosen, incs)
@@ -256,19 +277,11 @@ tests =
           -- > So, because root depends on both baz ^1.0.0 and foo ^1.0.0, version
           -- > solving failed.
           --
-          -- The last line is ours up to cosmetics, in Cabal's range syntax. The
-          -- first is __two__ lines here, because our ranges are intensional: the
-          -- solver separately learns that a range's /holes/ are empty, and each
-          -- dependency fact is paired with a \"no version for …\" sibling instead
-          -- of with the next dependency fact. That is CLAUDE.md's reporting gap 2
-          -- (@collapseNoInstances@), and it is also what keeps the chain fusion
-          -- from firing: absorb those siblings and the two dependency facts become
-          -- each other's neighbours, which is exactly the \"which depends on\"
-          -- line the spec writes.
-          --
-          -- The cosmetics are reporting gap 4: no terminal periods, a range where
-          -- the spec says \"every version of\", and the root's synthetic version
-          -- shown.
+          -- Ours has the same two lines, because the provider states each
+          -- dependency over the depender's slot ('slotOf'). What is left is
+          -- CLAUDE.md's reporting gap 4, wording: a range where the spec says
+          -- \"every version of\", the root's synthetic version, no terminal
+          -- periods, and Cabal's range syntax for the spec's @^1.0.0@.
           proofGolden "Linear Error Reporting (unsat)" "linear-error-reporting.txt"
             [ (pkg "root", [Release [1, 0, 0] [(pkg "foo", caret [1, 0, 0]), (pkg "baz", caret [1, 0, 0])]])
             , (pkg "foo", [Release [1, 0, 0] [(pkg "bar", caret [2, 0, 0])]])
@@ -277,13 +290,10 @@ tests =
             ]
         , -- @:1150@. Here the derivation branches, and the shape the spec asks for
           -- is reproduced: one line per step, a line number minted only for the
-          -- conclusion that gets referred to later (1), the back-reference in the
-          -- line that joins the two branches, and \"depends on both\" where one
-          -- release's two dependencies are named together.
-          --
-          -- Same two residues as above: the \"no version for …\" siblings (gap 2)
-          -- and the cosmetics (gap 4, which includes the blank line the spec puts
-          -- between the branches).
+          -- conclusion that gets referred to later (1), and the back-reference in
+          -- the line that joins the two branches. Ours differs in which facts each
+          -- line fuses, and in the cosmetics above (gap 4, which includes the blank
+          -- line the spec puts between the branches).
           proofGolden "Branching Error Reporting (unsat)" "branching-error-reporting.txt"
             [ (pkg "root", [Release [1, 0, 0] [(pkg "foo", caret [1, 0, 0])]])
             ,
