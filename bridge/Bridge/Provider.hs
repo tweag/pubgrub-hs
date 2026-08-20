@@ -104,8 +104,7 @@ import           PubGrub.Provider                             (Provider (..))
 import           PubGrub.VersionSet                           (VersionSet,
                                                                contains)
 import qualified PubGrub.VersionSet                           as VersionSet
-import           UnliftIO                                     (MonadIO,
-                                                               MonadUnliftIO,
+import           UnliftIO                                     (MonadUnliftIO,
                                                                liftIO)
 
 -- | Open the Hackage index and the compiler's installed world, build a
@@ -296,9 +295,13 @@ data ReleaseSource m = ReleaseSource
 
 -- | The provider's @expand@: the whole candidate-selection and emission rule, over
 -- an installed world, a source world, and the root's targets.
+--
+-- It needs a text log channel and __not__ 'MonadIO': reading a release runs in
+-- whatever @m@ the 'ReleaseSource' was built in, so an in-memory world can drive
+-- it purely, as @test\/PaperSpec.hs@ does.
 mkExpand
     :: forall m env
-     . (MonadIO m, WithLog env Text m)
+     . (WithLog env Text m)
     => InstalledDb
     -> ReleaseSource m
     -> [(PackageName, VersionSet)]

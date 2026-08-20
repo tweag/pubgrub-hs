@@ -1,11 +1,22 @@
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
 -- | The worked examples from the PubGrub paper (references/pubgrub.md,
 -- "Examples" section), as end-to-end solver tests.
 --
--- Unlike 'SolverSpec', which lists allowed instances explicitly, this harness
--- models a package universe the way the paper does: each release declares its
--- dependencies as version /ranges/, and the 'Provider' widens those ranges
--- into instance sets against the world. So these tests also exercise
--- 'VersionSet' and the range-to-instance widening the real bridge will do.
+-- These tests run the __real__ provider: 'Bridge.Provider.mkExpand' takes its world
+-- as arguments, so 'mkProvider' feeds it the paper's universe out of memory instead
+-- of Hackage, as @test\/FlagSolveSpec.hs@ does. Nothing about the rule —
+-- candidate enumeration, version slots, the newest-first preference, range widening,
+-- incompatibility emission — is restated here. A copy of the rule would test only
+-- the copy, and a golden file would not notice it drifting, because a golden
+-- absorbs whatever proof comes out.
+--
+-- What the worlds supply is the /data/, the way the paper writes it: each
+-- release declares its dependencies as version /ranges/, and the provider widens
+-- them into instance sets. So these tests also exercise 'PubGrub.VersionSet' and
+-- the bridge's own range-to-instance widening.
 --
 -- The four satisfiable examples assert the exact solution the paper reports; the two
 -- error-reporting examples are unsatisfiable and assert the __rendered proof__ against
@@ -15,34 +26,34 @@
 -- for the differences that remain and which known gap each belongs to.
 module PaperSpec (tests) where
 
-import           Colog                          (LoggerT, usingLoggerT)
+import           Bridge.Hackage                 (ParseError (..))
+import           Bridge.Installed               (mkInstalledDb)
+import qualified Bridge.Provider                as BP
+import           Colog                          (HasLog (..), LogAction)
 import qualified Data.ByteString.Lazy          as BL
+import           Control.Exception              (toException)
+import           Control.Monad.Reader           (MonadReader, ReaderT,
+                                                 runReaderT)
 import           Data.Functor.Identity          (Identity, runIdentity)
-import           Data.List                      (maximumBy)
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
-import           Data.Ord                       (comparing)
 import qualified Data.Set                       as Set
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import qualified Data.Text.Encoding             as T
+import           Distribution.Types.Condition   (Condition (Lit))
+import           Distribution.Types.Dependency  (mainLibSet, mkDependency)
 import           Distribution.Types.Flag        (mkFlagAssignment)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
-import           Distribution.Version           (Version, earlierVersion,
+import           Distribution.Version           (Version, VersionRange,
+                                                 earlierVersion,
                                                  intersectVersionRanges,
                                                  mkVersion, orLaterVersion)
-import           PubGrub.Incompatibility        (fromDependency)
-import           PubGrub.InstanceSet            (HasVersion (version),
-                                                 Instance (BuildSource),
-                                                 InstanceSet (..),
-                                                 memberInstance)
-import           PubGrub.InstanceSet.SourceCell (SourceCell (..))
+import           PubGrub.InstanceSet            (Instance (BuildSource))
 import           PubGrub.Provider               (Provider (Provider))
 import           PubGrub.Report                 (reportConflict)
 import           PubGrub.Solver                 (SolveError (..), SolverMsg,
                                                  solve)
-import           PubGrub.VersionSet             (VersionSet, fromVersionRange,
-                                                 halfOpenVersionSet)
 import           Test.Tasty                     (TestName, TestTree, testGroup)
 import           Test.Tasty.Golden              (goldenVsString)
 import           Test.Tasty.HUnit               (testCase, (@?=))
@@ -54,7 +65,7 @@ import           Test.Tasty.HUnit               (testCase, (@?=))
 -- | One source release: a version and its dependencies as (name, range) pairs.
 data Release = Release
     { relVersion :: [Int]
-    , relDeps    :: [(PackageName, VersionSet)]
+    , relDeps    :: [(PackageName, VersionRange)]
     }
 
 -- | The whole universe: each package's available releases.
@@ -63,17 +74,21 @@ type World = [(PackageName, [Release])]
 -- Range helpers mirroring the paper's (semver) notation. Note this is NOT
 -- Cabal's PVP caret: the paper's @^1.0.0@ is @>=1.0.0 && <2.0.0@ (major = the
 -- first component), whereas Cabal's 'majorBoundVersion' would stop at @<1.1@.
-caret :: [Int] -> VersionSet -- ^1.2.3  =  >=1.2.3 && <2.0.0
+--
+-- These are 'VersionRange's, not 'PubGrub.VersionSet.VersionSet's, because that is
+-- what a @.cabal@ dependency carries and therefore what 'BP.mkExpand' is handed.
+-- Turning one into a set is the provider's job, and doing it here would be taking
+-- over a step of the rule under test.
+caret :: [Int] -> VersionRange -- ^1.2.3  =  >=1.2.3 && <2.0.0
 caret [] = error "caret: empty version"
 caret v@(major : _) =
-    fromVersionRange
-        (intersectVersionRanges (orLaterVersion (mkVersion v)) (earlierVersion (mkVersion [major + 1])))
+    intersectVersionRanges (orLaterVersion (mkVersion v)) (earlierVersion (mkVersion [major + 1]))
 
-gte :: [Int] -> VersionSet -- >=1.2.3
-gte v = fromVersionRange (orLaterVersion (mkVersion v))
+gte :: [Int] -> VersionRange -- >=1.2.3
+gte v = orLaterVersion (mkVersion v)
 
-lt :: [Int] -> VersionSet -- <1.2.3
-lt v = fromVersionRange (earlierVersion (mkVersion v))
+lt :: [Int] -> VersionRange -- <1.2.3
+lt v = earlierVersion (mkVersion v)
 
 -- | A release as a solver 'Instance': its version under the default (empty)
 -- flag assignment. An 'Instance' only identifies a release, so the dependencies
@@ -90,77 +105,97 @@ instanceOf world p v =
         (i : _) -> i
         []      -> error ("instanceOf: no " ++ show p ++ " " ++ show v)
 
--- | The provider for a world: pick the newest instance in the range the
--- solver offers, and widen the chosen release's dependency ranges into
--- instance sets against the world's universe.
-mkProvider :: Applicative m => World -> Provider m
-mkProvider world = Provider expand'
+-- | The provider for a world: the /real/ 'BP.mkExpand', driven from an in-memory
+-- release source built out of the world.
+--
+-- Three departures from a Hackage-backed run, none of them touching the rule:
+--
+--  * the 'BP.ReleaseSource' answers from the world rather than from an index, and
+--    no @.cabal@ is ever parsed. Its two questions are exactly what a paper world
+--    can answer: which versions exist, and what one release declares.
+--  * the world\'s root is an ordinary release rather than 'BP.rootName', so the
+--    synthetic-root shortcut never fires and the root resolves through the same
+--    path as every other package. Hence the empty target list.
+--  * the installed db is empty: these worlds have no pre-installed units, so the
+--    installed half of every 'PubGrub.InstanceSet.InstanceSet' is empty and the
+--    prefer-installed and non-reinstallable branches never run.
+--
+-- The paper\'s releases have no flags, so every guard is @'Lit' True@ — a real
+-- guard, not the absence of one, which 'Bridge.Cabal.Flatten.expandGuard' resolves
+-- to the single empty pin set. That is the shape every guard folds to while flags
+-- are fixed at their declared defaults.
+mkProvider :: World -> Provider PureM
+mkProvider world = Provider (BP.mkExpand (mkInstalledDb []) source [])
   where
-    universe :: PackageName -> [Instance]
-    universe p = [releaseInstance r | (q, rs) <- world, q == p, r <- rs]
+    source =
+        BP.ReleaseSource
+            { BP.rsVersionsOf = \p ->
+                Set.fromList [mkVersion (relVersion r) | (q, rs) <- world, q == p, r <- rs]
+            , BP.rsReadRelease = \p v -> pure (readRelease p v)
+            }
 
-    -- Widen a range into the instances of @d@ it admits: one cell carrying the
-    -- declared range, exactly as 'Bridge.Provider' does. The range therefore
-    -- survives into the incompatibility, so a conflict report can name it
-    -- instead of enumerating the versions that happen to be in this world.
-    -- These worlds have no pre-installed packages, so the installed half is
-    -- empty.
-    widen :: PackageName -> VersionSet -> InstanceSet
-    widen _d vs = InstanceSet Set.empty [SourceCell vs Map.empty]
-
-    -- The dependencies the world records for the chosen release.
-    --
-    -- An 'InstanceSet' is symbolic and cannot be enumerated, so expand' picks
-    -- the candidates out of the world and keeps those the offered set admits.
-    depsOf :: PackageName -> Instance -> [(PackageName, VersionSet)]
-    depsOf p chosen =
-        concat
-            [ relDeps r
-            | (q, rs) <- world
-            , q == p
+    -- Every release of every package, in the reduced shape the bridge expects: no
+    -- declared flags, one unconditional dependency group, buildable.
+    releases :: Map (PackageName, Version) BP.Release
+    releases =
+        Map.fromList
+            [ ( (p, mkVersion (relVersion r))
+              , BP.Release
+                    { BP.relFlags = []
+                    , BP.relGuarded =
+                        [(Lit True, [mkDependency d vr mainLibSet | (d, vr) <- relDeps r])]
+                    , BP.relBuildable = True
+                    }
+              )
+            | (p, rs) <- world
             , r <- rs
-            , mkVersion (relVersion r) == version chosen
             ]
 
-    -- The releases of @p@ this world publishes, which is what a version /slot/ is
-    -- defined against.
-    published :: PackageName -> Set.Set Version
-    published p = Set.fromList [mkVersion (relVersion r) | (q, rs) <- world, q == p, r <- rs]
+    -- 'BP.mkExpand' only ever asks about versions @rsVersionsOf@ reported, so the
+    -- miss branch is unreachable; it answers with a parse failure rather than an
+    -- 'error' so a future wiring bug degrades into a skipped release instead of a
+    -- crash.
+    readRelease p v =
+        maybe (Left (missing p v)) Right (Map.lookup (p, v) releases)
 
-    -- A release's __slot__: from it up to the next release that exists, unbounded
-    -- for the newest. This is the depender term @references\/pubgrub.md:465@ asks
-    -- for — \"an inclusive lower bound of the first version that has the dependency,
-    -- and an exclusive upper bound of the first that /doesn't/\" — and what
-    -- 'Bridge.Provider.withSlots' mints for the real thing.
-    --
-    -- It matters here for the same reason it matters there, and the spec's own
-    -- worked examples are the evidence. With the single version as the depender, a
-    -- range wider than one release leaves the solver to discover separately that the
-    -- rest of it is empty, and that \"no version for …\" fact is an extra line in a
-    -- proof the spec writes without one. A slot covers the gap by construction, so
-    -- the derivation graph comes out the shape @:1005@ draws.
-    slotOf :: PackageName -> Version -> InstanceSet
-    slotOf p ver =
-        InstanceSet Set.empty [SourceCell (halfOpenVersionSet ver (Set.lookupGT ver (published p))) Map.empty]
+    missing p v =
+        ParseException (toException (userError ("not in world: " <> show (p, v))))
 
-    expand' p range =
-        case filter (`memberInstance` range) (universe p) of
-            [] -> pure (Nothing, [])
-            candidates ->
-                let chosen = maximumBy (comparing version) candidates
-                    incs =
-                        [ fromDependency p (slotOf p (version chosen)) d (widen d vs)
-                        | (d, vs) <- depsOf p chosen
-                        ]
-                 in pure (Just chosen, incs)
+-- --------------------------------------------------------------------------
+-- The monad the worlds are solved in
+-- --------------------------------------------------------------------------
 
--- | Run the solver purely, discarding the solver's log trace.
+-- | Two log channels, because the pieces being composed want different message
+-- types: 'solve' emits 'SolverMsg' and 'BP.mkExpand' emits 'Text'. A single
+-- 'Colog.LoggerT' carries one message type and so cannot serve both.
+--
+-- Over 'Identity' rather than 'IO', which the provider rule permits: 'BP.mkExpand'
+-- asks only for 'Monad' and a text channel, so these tests stay pure and their
+-- assertions stay a plain '@?='.
+data LogEnv = LogEnv
+    { leText   :: LogAction PureM Text
+    , leSolver :: LogAction PureM SolverMsg
+    }
+
+newtype PureM a = PureM {unPureM :: ReaderT LogEnv Identity a}
+    deriving newtype (Functor, Applicative, Monad, MonadReader LogEnv)
+
+instance HasLog LogEnv Text PureM where
+    getLogAction = leText
+    setLogAction a e = e{leText = a}
+
+instance HasLog LogEnv SolverMsg PureM where
+    getLogAction = leSolver
+    setLogAction a e = e{leSolver = a}
+
+-- | Run the solver purely, discarding both log channels.
 runSolve
-    :: Provider (LoggerT SolverMsg Identity)
+    :: Provider PureM
     -> PackageName
     -> Instance
     -> Either SolveError (Map PackageName Instance)
-runSolve provider p i = runIdentity (usingLoggerT mempty (solve provider p i))
+runSolve provider p i =
+    runIdentity (runReaderT (unPureM (solve provider p i)) (LogEnv mempty mempty))
 
 -- | Run the solver against a world, rooted at @root 1.0.0@. A failure is kept
 -- as its rendered report rather than 'show'n, because the derived 'Show' would
