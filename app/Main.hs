@@ -14,53 +14,68 @@
 -- renders to stdout; the trace only under @--verbose@ (see 'Verbosity').
 module Main (main) where
 
-import           Bridge.Cabal.Baseline           (defaultSolverConfig, outcome,
-                                                  solveWithCabal,
-                                                  sourcePackageIndex)
-import           Bridge.Hackage                  (mkCache)
-import           Bridge.Provider                 (World (..), rootInstance,
-                                                  rootName, withProvider,
-                                                  withWorld)
-import           Colog                           (HasLog (..), LogAction (..),
-                                                  cmap, logMsg)
-import           Control.Monad.Reader            (MonadReader, ReaderT,
-                                                  runReaderT)
-import           Data.List                       (sortOn)
-import           Data.Map.Strict                 (Map)
-import qualified Data.Map.Strict                 as Map
-import           Data.Set                        (Set)
-import qualified Data.Set                        as Set
-import           Data.Text                       (Text)
-import qualified Data.Text                       as T
-import qualified Data.Text.IO                    as TIO
-import           Distribution.Parsec             (eitherParsec)
-import           Distribution.Pretty             (prettyShow)
-import           Distribution.Types.Flag         (showFlagAssignment)
-import qualified Distribution.Solver.Types.ComponentDeps as CD
+import           Bridge.Cabal.Baseline                     (defaultSolverConfig,
+                                                            outcome,
+                                                            solveWithCabal,
+                                                            sourcePackageIndex)
+import           Bridge.Hackage                            (mkCache)
+import           Bridge.Provider                           (World (..),
+                                                            rootInstance,
+                                                            rootName,
+                                                            withProvider,
+                                                            withWorld)
+import           Colog                                     (HasLog (..),
+                                                            LogAction (..),
+                                                            cmap, logMsg)
+import           Control.Monad.Reader                      (MonadReader,
+                                                            ReaderT, runReaderT)
+import           Data.List                                 (sortOn)
+import           Data.Map.Strict                           (Map)
+import qualified Data.Map.Strict                           as Map
+import           Data.Set                                  (Set)
+import qualified Data.Set                                  as Set
+import           Data.Text                                 (Text)
+import qualified Data.Text                                 as T
+import qualified Data.Text.IO                              as TIO
+import           Distribution.Package                      (packageId)
+import           Distribution.Parsec                       (eitherParsec)
+import           Distribution.Pretty                       (prettyShow)
+import qualified Distribution.Solver.Types.ComponentDeps   as CD
 import           Distribution.Solver.Types.ResolverPackage (ResolverPackage (..))
-import           Distribution.Solver.Types.SolverPackage (SolverPackage (..))
-import           Distribution.Package            (packageId)
-import           Distribution.Types.PackageId    (pkgName)
-import           Distribution.Types.PackageName  (PackageName)
-import           Distribution.Types.VersionRange (VersionRange, anyVersion)
-import           Hackage.Security.Util.Path      (fromFilePath, makeAbsolute)
-import           Network.HTTP.Client             (defaultManagerSettings,
-                                                  newManager)
-import           PubGrub.Incompatibility         (IncompatCause (..),
-                                                  Incompatibility,
-                                                  incompCause, incompTerms)
-import           PubGrub.InstanceSet             (HasVersion (version),
-                                                  Instance (..),
-                                                  singletonInstance)
-import           PubGrub.Provider                (Provider (..))
-import           PubGrub.Pretty                  (Pretty (pretty))
-import           PubGrub.Report                  (reportConflict)
-import           PubGrub.Solver                  (SolveError (..),
-                                                  SolverMsg (..), solve)
-import           PubGrub.VersionSet              (VersionSet, fromVersionRange)
-import           System.Environment              (getArgs)
-import           UnliftIO                        (MonadIO (liftIO),
-                                                  MonadUnliftIO)
+import           Distribution.Solver.Types.SolverPackage   (SolverPackage (..))
+import           Distribution.Types.Flag                   (showFlagAssignment)
+import           Distribution.Types.PackageId              (pkgName)
+import           Distribution.Types.PackageName            (PackageName)
+import           Distribution.Types.VersionRange           (VersionRange,
+                                                            anyVersion)
+import           Hackage.Security.Util.Path                (fromFilePath,
+                                                            makeAbsolute)
+import           Network.HTTP.Client                       (defaultManagerSettings,
+                                                            newManager)
+import           Options.Applicative                       (Parser, argument,
+                                                            eitherReader,
+                                                            execParser, flag,
+                                                            fullDesc, header,
+                                                            help, helper, info,
+                                                            long, metavar,
+                                                            progDesc, short,
+                                                            value)
+import           PubGrub.Incompatibility                   (IncompatCause (..),
+                                                            Incompatibility,
+                                                            incompCause,
+                                                            incompTerms)
+import           PubGrub.InstanceSet                       (HasVersion (version),
+                                                            Instance (..),
+                                                            singletonInstance)
+import           PubGrub.Pretty                            (Pretty (pretty))
+import           PubGrub.Provider                          (Provider (..))
+import           PubGrub.Report                            (reportConflict)
+import           PubGrub.Solver                            (SolveError (..),
+                                                            SolverMsg (..),
+                                                            solve)
+import           PubGrub.VersionSet                        (fromVersionRange)
+import           UnliftIO                                  (MonadIO (liftIO),
+                                                            MonadUnliftIO)
 
 -- --------------------------------------------------------------------------
 -- The application monad: two log channels rendered to stdout
@@ -109,7 +124,7 @@ runApp verbosity app = runReaderT (unApp app) env
                 -- with unforced fields) but nothing renders it, so the cost
                 -- that matters for a timed run — pretty-printing an
                 -- 'Incompatibility' and writing a line — is gone.
-                Normal -> mempty
+                Normal  -> mempty
             }
 
 renderSolverMsg :: SolverMsg -> Text
@@ -149,47 +164,24 @@ data Options = Options
     { optVerbosity :: Verbosity
     , optWhich     :: Which
     , optTarget    :: PackageName
-    , optRange     :: VersionSet
-    , optRawRange  :: VersionRange
+    , optRange     :: VersionRange
     -- ^ the same constraint unconverted: cabal's solver takes a 'VersionRange',
     -- ours a 'VersionSet', and both must come from the one argument
     }
 
-usage :: String
-usage = "usage: pubgrub [-v|--verbose] [--cabal] <package> [version-range]"
+parseTarget :: String -> Either String PackageName
+parseTarget = eitherParsec
 
-parseArgs :: [String] -> Either String Options
-parseArgs args = do
-    (verbosity, which, positional) <- takeFlags Normal Ours [] args
-    case positional of
-        [name] -> options verbosity which name Nothing
-        [name, range] -> options verbosity which name (Just range)
-        _ -> Left usage
-  where
-    takeFlags v w acc [] = Right (v, w, reverse acc)
-    takeFlags v w acc (a : as)
-        | a == "-v" || a == "--verbose" = takeFlags Verbose w acc as
-        | a == "--cabal" = takeFlags v Cabal acc as
-        -- Only long options are rejected as unknown. A leading @-@ alone does
-        -- not make an argument a flag — this is the position a version range
-        -- appears in, and range syntax has historically included @-any@ — so
-        -- anything else is handed to the range parser to accept or reject.
-        | take 2 a == "--" = Left ("unknown flag: " ++ a ++ "\n" ++ usage)
-        | otherwise = takeFlags v w (a : acc) as
+parseRange :: String -> Either String VersionRange
+parseRange = eitherParsec
 
-    options v w name mRange = do
-        p <- eitherParsec name
-        range <- case mRange of
-            Nothing -> pure anyVersion
-            Just r -> eitherParsec r :: Either String VersionRange
-        pure
-            Options
-                { optVerbosity = v
-                , optWhich = w
-                , optTarget = p
-                , optRange = fromVersionRange range
-                , optRawRange = range
-                }
+optionsParser :: Parser Options
+optionsParser =
+    Options
+        <$> flag Normal Verbose (short 'v' <> long "verbose" <> help "Print the solver trace")
+        <*> flag Ours Cabal (long "cabal" <> help "Run cabal's solver instead of the native solver")
+        <*> argument (eitherReader parseTarget) (metavar "PACKAGE")
+        <*> argument (eitherReader parseRange) (value anyVersion <> metavar "VERSION-RANGE")
 
 -- --------------------------------------------------------------------------
 -- Driver
@@ -197,10 +189,12 @@ parseArgs args = do
 
 main :: IO ()
 main = do
-    args <- getArgs
-    case parseArgs args of
-        Left err -> putStrLn ("error: " ++ err)
-        Right opts -> do
+    work =<< execParser (info (helper <*> optionsParser) infoMod)
+    where
+        infoMod = fullDesc <>
+                  progDesc "Resolve a Hackage package's dependency closure" <>
+                  header "pubgrub - a Hackage dependency resolver"
+        work opts = do
             let target = optTarget opts
             cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
             manager <- newManager defaultManagerSettings
@@ -209,14 +203,14 @@ main = do
                 -- expand the root like any other package, but has no index entry
                 -- to look its dependencies up in.
                 Ours ->
-                    withProvider cache manager [(target, optRange opts)] $ \provider -> do
+                    withProvider cache manager [(target, fromVersionRange (optRange opts))] $ \provider -> do
                         logMsg (T.pack ("Solving for " ++ prettyShow target))
                         result <- solve provider rootName rootInstance
                         report provider result
                 Cabal ->
                     withWorld cache manager $ \world -> do
                         logMsg (T.pack ("Solving for " ++ prettyShow target ++ " (cabal's solver)"))
-                        runBaseline world [(target, optRawRange opts)]
+                        runBaseline world [(target, optRange opts)]
 
 
 -- | Run cabal's solver over the same world and render its answer in the same

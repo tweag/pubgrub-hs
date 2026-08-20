@@ -96,6 +96,7 @@ executable pubgrub
         , hackage-security
         , http-client
         , mtl
+        , optparse-applicative
         , pubgrub-hs
         , pubgrub-hs:bridge
         , text
