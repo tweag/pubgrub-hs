@@ -4,7 +4,7 @@ How to reproduce every number in [STATUS.md](STATUS.md), and what each one is wo
 The short version:
 
 ```sh
-cabal test                    # 128 unit and property tests, ~0.3 s
+cabal test                    # 136 unit, property and golden tests, ~0.3 s
 bench/compare.sh              # both solvers over bench/problems.txt
 ```
 
@@ -37,13 +37,31 @@ Two groups repay knowing about:
   time it ran, and a fourth when its universe was fixed. If you touch the set algebra,
   this is the guard. Its "size control" case is the one that pins cell-count growth
   (28293 cells unpruned against 41 pruned, for a denotation of 56 instances).
-- **`PubGrub paper examples`** — the two worked examples from
-  [`references/pubgrub.md`](../references/pubgrub.md), including the exact English of
-  the two unsatisfiable ones. A change to report wording will show up here first, and
-  should.
+- **`PubGrub paper examples`** — the six worked examples from
+  [`references/pubgrub.md`](../references/pubgrub.md). The four satisfiable ones assert
+  the solution the spec reports; the two unsatisfiable ones assert the **rendered
+  proof**, against the wording the spec publishes at `:1005` and `:1150`. A change to
+  report wording shows up here first, and should.
 
-There is no golden-file test for the *real* solver's output; the numbers below are
-measured by hand and recorded in STATUS.md.
+### Golden tests, and how to update them
+
+The two proofs are [tasty-golden] tests: the expected output is a file under
+[`test/golden/`](../test/golden), one per case, so it reads as the proof a user would
+see rather than as a list of string literals. A failure prints the actual proof in
+full.
+
+```sh
+cabal test --test-options=--accept       # rewrite the golden files from the run
+```
+
+Use `--accept` when the wording changed **on purpose**, and read the resulting `jj
+diff` as the review of that change — it is the only place the report's output is
+pinned. Do not reach for it to make a red suite green: these two files are the
+closest thing the reporter has to a conformance test against the spec.
+
+There is no golden test for the *real* solver's output on Hackage problems — that
+would pin an index that moves. Those numbers are measured by hand and recorded in
+STATUS.md.
 
 ## Benchmarks
 
@@ -151,10 +169,17 @@ Three things to keep in mind when reading a comparison:
    identities on the way out, so a flat package list will mislead you — the `setup:`
    lines are the other domain.
 
-For the explanation deliverable, the comparable quantity is **length**: our numbered
-proof against cabal's message. `bench/compare.sh` prints both (`proof=` and
+For the explanation deliverable, the comparable quantity is **length**: our proof
+against cabal's message. `bench/compare.sh` prints both (`proof=` and
 `cabal-log-lines=`). cabal's stays at 16–30 lines whatever the problem, because it
 reports the search rather than a derivation; ours has no bound on length yet.
+
+**`proof=` counts by connective, not by line number.** The reporter numbers only the
+conclusions it refers back to (`references/pubgrub.md:596`), which in a linear
+derivation is none of them, so `summarise.awk` matches the opening words instead
+(`Because`, `And because`, `So, because`, `Thus,`). The older pattern
+`^[0-9]+\. ` scored a 57-line `aeson <2` proof as 9 lines. If the reporter's wording
+changes, that pattern is what has to change with it.
 
 ## The one thing that is missing
 
@@ -164,3 +189,4 @@ counters and printed one summary line would fix it, and would let `bench/compare
 stop running with `-v`. It does not exist.
 
 [tasty]: https://hackage.haskell.org/package/tasty
+[tasty-golden]: https://hackage.haskell.org/package/tasty-golden

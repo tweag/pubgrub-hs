@@ -478,6 +478,47 @@ pkgconfig-depends", which is not the neutral value it looks like: cabal reads it
 escapes by flipping `zlib`'s automatic flag — 9 of 29 popular targets taking a flag
 flip they did not need. **A stub that looks like an omission can be an assertion.**
 
+## Era 9 — Conformance in the reporter (Aug 20)
+
+### The report follows the spec's algorithm, and one gap turns out to gate another
+
+*Aug 20.* Two changes, both spec conformance, both landing in the explanation
+deliverable.
+
+`PubGrub.Report` stopped replaying the derivation tree one node per line and started
+following `references/pubgrub.md:504` — fusing a chain of two external facts into one
+sentence, and **skipping every other derived step**, which the spec offers in as many
+words ("you can skip every other derived incompatibility without losing clarity",
+`:528`). Proofs: `lens <4` 6 → 4 lines, `conduit <1.3` 12 → 7, `aeson <2` 83 → 57,
+against cabal's 22, 16 and 30. Line numbers are now minted only where the derivation
+branches, as `:596` asks.
+
+The transferable part is what pinning the spec's two published examples as tests then
+revealed. **The `no version for …` clutter is not clutter — it is load-bearing in the
+wrong direction.** Because our ranges are intensional the solver separately learns that
+a range's holes are empty, so every dependency fact is paired with a hole-is-empty
+sibling, and a fact so paired is never adjacent to the next dependency fact. The chain
+fusion therefore cannot fire, and on the spec's own linear example that single effect
+is the entire difference between its two published lines and our three.
+`collapseNoInstances` had been filed as report polish and scheduled *after* chain
+collapsing; it is now the top item, on two independent arguments. **A gap can be
+someone else's blocker, and the way we found out was writing down what the spec says
+the output should be.**
+
+Alongside it, `references/pubgrub.md:476`: an unbuildable release is now *stated* as an
+incompatibility rather than silently skipped, so a proof says `foo >=2.0.0 cannot be
+built here` instead of reporting the range as empty. It rides out with the release the
+scan settles on (no interface change — incompatibilities are context-independent), and
+`PubGrub.Store` merges adjacent slots into one contiguous run, which is `:476`'s
+"as well as any adjacent versions" for free.
+
+And a caveat worth more than the change: instrumenting the scan found **zero**
+unbuildable releases across all five benchmark problems, so both the new clause and the
+skip it replaces are dead code on the current problem set. The buildability rung has
+never been exercised by a measurement — only by tests. **A problem set that never walks
+a path cannot report anything about it**, which is a requirement on the unsat problem
+set the deliverables still need, not on the code.
+
 ---
 
 ## Open right now

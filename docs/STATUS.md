@@ -33,8 +33,10 @@ correctly is table stakes. It exists to answer two questions:
 2. Can it **match cabal-install on time and peak memory** on real problems?
 
 **The solver works.** It resolves real Hackage packages end to end, with version
-ranges, Cabal flags, buildability, and installed/boot-package pinning. 128 tests
-pass, including all six worked examples from the PubGrub spec.
+ranges, Cabal flags, buildability, and installed/boot-package pinning. 136 tests
+pass, including all six worked examples from the PubGrub spec — the two
+error-reporting ones now assert the __rendered proof__ against a golden file
+(`test/golden/`), checked against the wording the spec publishes.
 
 **Neither deliverable has been delivered, but the comparison has started.** cabal's
 own solver runs over our index (`pubgrub --cabal`, no `cabal-install` dependency),
@@ -75,7 +77,7 @@ the "authoritative on" column says who owns the question.
 | [`pubgrub-intro.md`](pubgrub-intro.md) | tutorial introduction to PubGrub | useful, three stale sections (flagged in it) |
 | [`flags-semantics-review.md`](flags-semantics-review.md) | an independent review of the flag spec | 2026-08-05; findings folded in, kept as the record |
 | [`benchmarking.md`](benchmarking.md) | **how to run the tests and benchmarks**, and which numbers to trust | current, 2026-08-12 |
-| [`collapsing.md`](collapsing.md) | **depender collapsing**: what landed, its cost, and the five ways to finish it | design note, 2026-08-12 — the next thing to work on, but **its numbers predate the release-1 scope cut** and one of its two motivations was the 2^k re-offer that cut removes |
+| [`collapsing.md`](collapsing.md) | **depender collapsing**: what landed, its cost, and the five ways to finish it | design note, 2026-08-12, **closed 2026-08-17** by merging in the store (its option 4). Kept as the record of what each option was worth; its numbers predate the release-1 scope cut and one of its two motivations was the 2^k re-offer that cut removes |
 | [`decision-log.md`](decision-log.md) | project history | narrative, not authoritative |
 | [`related-work.md`](related-work.md) | external literature → our problems | reading map, not authoritative |
 | this file | current state | summary, not authoritative |
@@ -336,7 +338,7 @@ it exists in the code.**
 | ~~**§4.2's version axis**~~ — widening a depender across adjacent releases | [`flags-semantics.md`](flags-semantics.md) §4.2 | **built 2026-08-12** and unfinished: a trade, not a win. [collapsing.md](collapsing.md) has the five ways out and the measurement to take first |
 | **Seed incompatibilities** instead of a synthetic root | [decision-log](decision-log.md#5-open-decisions) | decided 2026-07-30; `solve` still takes `rootPkg`/`rootV` |
 | **`buildable:` as a *condition*** | [`flags-semantics.md`](flags-semantics.md) §1.5 | **half built, 2026-08-17.** `buildableCondition` returns the condition; `buildableAtDefaults` evaluates it, and the provider skips the release. Satisfying it rather than evaluating it is the flag-axis half |
-| **Unbuildable stated as an incompatibility** | `references/pubgrub.md:476` | not built. A skipped release is silently absent, so a report says "no versions in range" rather than why. **No interface change needed** for the common case — the facts can ride along with the decision the scan does settle on ([`flags-semantics.md`](flags-semantics.md) §10); only "every release was skipped" loses them, and that is a cause-side gap |
+| ~~**Unbuildable stated as an incompatibility**~~ | `references/pubgrub.md:476` | **built 2026-08-20.** The scan emits `unbuildable p slot` for each release it passes over and hands them out with the release it settles on; [`PubGrub.Store`](../src/PubGrub/Store.hs) unions adjacent slots into one contiguous run. As predicted, no interface change was needed and the *exhausted* case (every release in range unbuildable) still loses the facts — see [Unbuildable, stated](#unbuildable-stated-and-a-path-the-benchmarks-never-walk-2026-08-20) |
 | **Manual flags** | [`flags-semantics.md`](flags-semantics.md) §1.6 | **built in its degenerate case, 2026-08-17**: *every* flag is manual and no user values exist, so the translation is "take the default" and it is applied at the index read rather than as a solver constraint |
 | **User flag constraints** (`--flag`) | [`flags-semantics.md`](flags-semantics.md) §1.6 | do not exist yet — and while every flag is manual, they are the only thing that could move one |
 | **Rung 4** — setup / build-tool deps | — | not started |
@@ -415,13 +417,17 @@ Full arguments in the linked sections; this is the index.
 3. **Should the set algebra be allowed to read flag declarations?** Would make
    emptiness exact and remove the one-sided slack, at the cost of the core/bridge
    boundary. Cost/benefit, not correctness.
-4. **`collapseNoInstances`, and it may not be cosmetic.** Filed under report polish
-   in `CLAUDE.md` (Reporting gap 2), but the measurement below found it is where all
-   the deep conflict resolution goes: the three deepest resolutions in `aeson <2`
-   (9, 10 and 18 iterations) are each a gappy range being learned one hole at a time.
-   That is an argument for weighing it against the version axis rather than after the
-   cosmetics — both are about ranges, and this one has measured depth behind it. Then
-   chain collapsing, then wording.
+4. **`collapseNoInstances` — now the top item, on two independent arguments.** Filed
+   under report polish in `CLAUDE.md` (Reporting gap 2), and it is not that. The first
+   argument is the measurement below: it is where all the deep conflict resolution
+   goes, since the three deepest resolutions in `aeson <2` (9, 10 and 18 iterations)
+   are each a gappy range being learned one hole at a time. The second arrived with
+   chain collapsing on 2026-08-20 — the `no version for …` siblings are what stop the
+   chain fusion from firing, so on the spec's own worked example they are the entire
+   difference between its published two lines and our three
+   ([Chain collapsing](#chain-collapsing-the-proofs-are-half-as-long-2026-08-20)).
+   Both arguments point the same way, and chain collapsing — which used to be
+   scheduled after this — is done.
 
 ### Notes on the version axis, before anyone starts it
 
@@ -1292,6 +1298,107 @@ bound put into a term verbatim by `widen`, leaving a window no release occupies 
 it is, at last identified, the one conflict that narrowing removed when it was tried
 and reverted twice. Reaching the bottom of a version list is not a defect.
 
+### Chain collapsing: the proofs are half as long (2026-08-20)
+
+Reporting gap 3, and it turned out to be __two__ rules rather than one — both from the
+spec's own reporting algorithm (`references/pubgrub.md:504`), which
+[`PubGrub.Report`](../src/PubGrub/Report.hs) now follows instead of replaying the
+derivation tree one node per line:
+
+- **a chain of two external facts is one sentence.** "foo depends on bar ^2.0.0 *which
+  depends on* baz ^3.0.0" (`:1018`), and its sibling form "depends on *both* X and Y"
+  where two facts share a depender. Each is guarded by a subset test, so a fused
+  sentence cannot say more than the two facts do; `isEmpty` is one-sided on an
+  `InstanceSet`, and it fails in the safe direction — the guard can only decline to
+  fuse where it could have;
+- **every other derived step is skipped.** "This tends to end up a little verbose. You
+  can skip every other derived incompatibility without losing clarity" (`:528`; the
+  algorithm's case 2.ii at `:643`). Where a step's derived cause has a single derived
+  cause of its own, that intermediate *conclusion* goes unsaid and both external facts
+  are named in one line. This is the half that does the work, because these derivation
+  graphs are mostly linear chains.
+
+Line numbers went with it: the spec numbers only the conclusions it refers back to
+(`:596`), which in a linear chain is none of them, so a number is now minted in exactly
+one place — where the derivation branches.
+
+| problem | proof before | proof after | cabal's message |
+|---|---|---|---|
+| `conduit <1.3` | 12 | **7** | 16 |
+| `lens <4` | 6 | **4** | 22 |
+| `aeson <2` | 83 | **57** | 30 |
+
+**Nothing else moved, by construction**: the change is confined to rendering, and
+reads, allocation, max residency and every trace count are identical either side of it
+(`aeson <2`: 261 reads, 3.22 GB, 22.9 MB, 871 decisions, 173 resolving steps, both
+before and after). Two of the three unsat proofs are now shorter than cabal's message
+and `aeson` remains the outlier at 57 against 30.
+
+One tooling change came with it. `bench/summarise.awk` counted proof lines by matching
+a leading number, which after this counts 9 of `aeson`'s 57 lines; it matches the
+opening connective now (`docs/benchmarking.md`).
+
+#### What the spec's own examples then showed, which was not the plan
+
+The two error-reporting examples in `test/PaperSpec.hs` now assert the rendered proof
+against a golden file (`test/golden/`, via `tasty-golden` — `cabal test
+--test-options=--accept` to update one deliberately), and the spec publishes the exact
+wording it expects for both (`:1005`, `:1150`). Our output has the same *shape* as both — one line per step,
+"depends on both", a number minted only for the conclusion referred to later, the
+back-reference on the joining line, "So," on the conclusion.
+
+Where it differs, on the linear example, the spec writes two lines and we write three.
+**The whole difference is Reporting gap 2**, and it is not the cosmetic difference it
+was filed as: because our ranges are intensional, the solver separately learns that a
+range's *holes* are empty, so each dependency fact is paired with a
+`no version for …` sibling — and a dependency fact whose sibling is a hole-is-empty
+fact is never adjacent to the next dependency fact. **The clutter is what stops the
+chain fusion from firing.** Absorb the siblings (pubgrub-rs's
+`collapse_no_versions`) and the two dependency facts become each other's neighbours,
+which is precisely the "which depends on" line the spec writes.
+
+That is now the top reporting item, and it is the one to do before any more effort goes
+into `aeson`'s 57 lines.
+
+### Unbuildable, stated — and a path the benchmarks never walk (2026-08-20)
+
+`references/pubgrub.md:476` — "if a package version can't be selected […] we just add
+an incompatibility indicating that it (as well as any adjacent versions that are also
+incompatible) should never be selected". Until now a release whose library cannot be
+built here was simply not offered, so the solver learned only that the range it had
+narrowed to was empty and said so: *no version for foo in >=2*. The versions exist;
+what is missing is a C library on this machine, or the release says
+`buildable: False`.
+
+What landed:
+
+- `PubGrub.Incompatibility.unbuildable` — a unit clause banning the instances, with its
+  own cause so the proof line can be the reason. It bans the release's whole **slot**,
+  unpinned, which is every instance of it while flags are fixed at their defaults; when
+  the flag axis returns the term becomes the region where `buildableCondition` is
+  false and nothing else changes;
+- the provider's candidate scan accumulates one per release it passes over and hands
+  them out with whichever release it settles on. No interface change: incompatibilities
+  are context-independent, so the solver never requires them to be about the instance
+  just decided ([flags-semantics.md](flags-semantics.md) §10);
+- `PubGrub.Store` merges them on the same rule it already used for dependency facts.
+  Adjacent slots touch, so a run of unbuildable releases is one contiguous clause —
+  which is the "as well as any adjacent versions" half of `:476`, for free;
+- a proof line now reads `foo >=2.0.0 cannot be built here`.
+
+**Two honest caveats.** The *exhausted* case still loses the facts: if every release in
+range is unbuildable the provider answers `Nothing`, and with no instance to return
+there is nowhere to put them short of changing what `expand` returns. And — the finding
+worth carrying — **none of the five benchmark problems meets an unbuildable release at
+all**. Instrumenting the scan counted zero on all five, so both the pre-existing skip
+and this clause are dead code on the current problem set: the measured cost of the
+change is nil and so is its measured benefit. It is exercised only by
+`test/FlagSolveSpec.hs` (end to end: the same world solves when the release is
+buildable, and explains itself when it is not) and `test/StoreSpec.hs` (the adjacency
+merge). Any problem set meant to evidence the explanation deliverable should include a
+package with `pkgconfig-depends` this machine lacks, or the buildability rung goes
+unmeasured.
+
 ### The explanation target, now concrete
 
 cabal's `aeson <2` failure is 25 lines of search trace ending in a list of suspects:
@@ -1398,7 +1505,7 @@ moves; treat a cited line number as a hint, and grep for the identifier.
 
 | deliverable | state |
 |---|---|
-| **Explanation showcase** — real failing problems, pubgrub-hs vs cabal side by side | solver produces numbered proofs, and cabal's failure text is now reachable (`--cabal` returns its `Fail` message); no side-by-side rendering, no *unsat* problem set, wording gaps open |
+| **Explanation showcase** — real failing problems, pubgrub-hs vs cabal side by side | proofs now follow the spec's own reporting algorithm and are **shorter than cabal's message on two of the three unsat problems** (`lens <4` 4 lines against 22, `conduit <1.3` 7 against 16, `aeson <2` 57 against 30), with both of the spec's published examples pinned as tests. Still missing: side-by-side rendering, an *unsat* problem set, and gap 2 — which is now the top item because it is also what blocks the last fusion |
 | **Benchmark report** — time + peak residency on real sat/unsat problems | **current numbers exist** for five problems, two sat and three unsat, both solvers ([Merge on insert](#merge-on-insert-the-collapsing-trade-is-gone-2026-08-17)), and they are now favourable on every problem. Not a report: index build still not separated from solve, timings are one or two runs against ±25% noise, and what the ~22 MB memory floor consists of is unestablished — which is the next thing to settle, since a memory claim is now the strongest one we have |
 
 The baseline and the shared index are done — `cabal-install-solver` drives cabal's

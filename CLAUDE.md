@@ -81,7 +81,7 @@ is a summary and not authoritative; the documents below decide. Project history 
 
 ```sh
 cabal build
-cabal test                      # 128 tests, ~0.3 s
+cabal test                      # 136 tests, ~0.3 s
 cabal run pubgrub -- aeson      # the driver; add -v for the search trace
 cabal run pubgrub -- --cabal aeson   # cabal's solver, same index (the baseline)
 bench/compare.sh                # both solvers over bench/problems.txt
@@ -128,6 +128,7 @@ Current layout (4 cabal components):
   incompatibility store: clauses in scan order, with dependency facts about one
   (depender, dependee) pair and an identical dependee term **merged as they arrive**,
   which is where `references/pubgrub.md:456`'s collapsing happens (see Reporting gap 1).
+  Unbuildable facts about one package merge the same way, which is `:476`'s half of it.
 - `bridge/` — private library `bridge`. `Bridge/{Hackage,Installed,Provider}.hs`,
   `Bridge/Hackage/{HttpClient,Unlifted}.hs`, and
   `Bridge/Cabal/{Baseline,Flatten,InstalledPkg}.hs`: index reader, installed-db
@@ -141,7 +142,8 @@ Current layout (4 cabal components):
   3.7s / 83MB uncached: ~170 parse trees pinning their slices of the index is
   enough live data to make every major GC copy it.
 - `app/Main.hs` — executable `pubgrub`: the CLI driver.
-- `test/` — `{VersionSet,InstanceSet,PartialSolution,Solver,Store,Paper,Flatten,FlagSolve,Installed}Spec.hs`.
+- `test/` — `{VersionSet,InstanceSet,PartialSolution,Solver,Store,Paper,Flatten,FlagSolve,Installed}Spec.hs`,
+  plus `test/golden/` — the expected proofs for `PaperSpec`'s two error-reporting cases.
 
 The cabal baseline landed 2026-08-12: `bridge` depends on `cabal-install-solver`
 (and **not** `cabal-install`), `Bridge.Cabal.Baseline` drives
@@ -197,8 +199,17 @@ time; each rung leaves a runnable solver and we measure both deliverables at eac
   machine's real `pkg-config` db, which `withWorld` reads once and hands to *both*
   solvers. `buildableCondition` returns a `Condition FlagName` and
   `buildableAtDefaults` evaluates it, so the flag axis can come back and *satisfy* the
-  condition rather than redo the analysis. Not yet stated as an incompatibility
-  (`references/pubgrub.md:476`), so a skipped release reads as "no versions in range".
+  condition rather than redo the analysis. **Stated as an incompatibility since
+  2026-08-20** (`references/pubgrub.md:476`): the provider's scan emits
+  `unbuildable p slot` for each release it passes over and hands those out with
+  whichever release it settles on, `PubGrub.Store` unions adjacent slots into the
+  contiguous run the spec asks for, and a proof line reads `foo >=2.0.0 cannot be
+  built here` instead of leaving the solver to report the range as empty. Two things
+  to know: the *exhausted* case — every release in range unbuildable — still loses the
+  facts, because with no instance to return there is nowhere to put them without
+  changing what `expand` returns; and **none of the five benchmark problems meets an
+  unbuildable release at all**, so the whole path is exercised only by
+  `test/FlagSolveSpec.hs` and `test/StoreSpec.hs`, never by a measurement.
 - **Rung 4** — setup / build-tool deps (see reference's `SetupDeps.hs`). Note what
   cabal does here that we have no model for at all: it solves **qualified goals**, so
   each executable and setup dependency gets its **own domain**. `Setup.hs` is an
@@ -357,13 +368,24 @@ adjacent releases pairwise at derivation time, which is the collapsing
 cells (see 5 below) and then chain collapsing. See `docs/STATUS.md`, "The explanation
 deliverable is currently losing".
 
-**Those line counts are historical.** As of 2026-08-17, with gap 1 done and the
-boot-package rule stated once rather than per range, the proofs are `lens <4` **6**
-lines against cabal's 22, `conduit <1.3` **12** against 16, and `aeson <2` **83**
-against 30 — two wins and one outlier, and what is left of `aeson` is chain
-collapsing (gap 3), which is now the top item. Gap 5's symptom is also gone
-for now: a proof with no pinned cells cannot print one, and no cell is pinned while
-flags are fixed at their defaults.
+**Those line counts are historical, twice over.** With gap 1 done and the
+boot-package rule stated once rather than per range (2026-08-17) they became `lens
+<4` 6 lines, `conduit <1.3` 12 and `aeson <2` 83. **Gap 3 then landed on 2026-08-20**
+and they are now `lens <4` **4** lines against cabal's 22, `conduit <1.3` **7**
+against 16, and `aeson <2` **57** against 30 — two clear wins and one outlier that
+halved. Nothing else moved: the change is pure rendering, so reads, allocation,
+residency and decision counts are identical either side of it.
+
+**Gap 2 is now the top item, and it is no longer only about clutter.** Pinning the
+spec's own two worked examples as tests (`test/PaperSpec.hs`) showed that the
+`no version for …` siblings are what *prevent* gap 3's chain fusion from firing: each
+dependency fact is paired with a hole-is-empty fact instead of with the next
+dependency fact, so "depends on X which depends on Y" never gets the chance to form.
+On the spec's linear example that is the whole difference between our three lines and
+its published two. Absorbing the siblings does two things at once.
+
+Gap 5's symptom is also gone for now: a proof with no pinned cells cannot print one,
+and no cell is pinned while flags are fixed at their defaults.
 
 1. **Depender-range collapsing** — the one gap that is a *spec divergence*, not a
    cosmetic choice, and the only one fixed outside the report layer. The spec
@@ -475,13 +497,23 @@ flags are fixed at their defaults.
    the question comes back with the flag axis. See also
    `docs/decision-semantics.md`, which builds on this emission shape and treated it
    as its prerequisite — now paid.
-2. **`collapseNoInstances`** — intensional ranges mean the solver must separately
-   learn that a range's *holes* are empty, so `no version for bar in >2.0.0 && <3`
-   leaves clutter the proof. pubgrub-rs has a dedicated post-pass for exactly
-   this: `DerivationTree::collapse_no_versions` (`references/pubgrub/src/report.rs:102`
+2. **`collapseNoInstances`** — **the top item since 2026-08-20.** Intensional ranges
+   mean the solver must separately learn that a range's *holes* are empty, so
+   `no version for bar in >2.0.0 && <3` leaves clutter the proof. pubgrub-rs has a
+   dedicated post-pass for exactly this:
+   `DerivationTree::collapse_no_versions` (`references/pubgrub/src/report.rs:102`
    at rev `4dbe916`), with the merge rule in `merge_no_versions` (`:133` — this said
    `:132`, which is a blank line). Absorb the range into the sibling cause's term
    by union and drop the node.
+
+   **It is not only clutter, and that is new information.** Gap 3 landed with the
+   spec's two worked examples pinned as tests, and they show these siblings *blocking*
+   the chain fusion: a dependency fact whose sibling cause is a hole-is-empty fact is
+   never adjacent to the next dependency fact, so "depends on X which depends on Y"
+   cannot form. On `references/pubgrub.md:1005`'s own example the spec writes two
+   lines and we write three for exactly this reason — absorb the sibling and the
+   remaining two facts become each other's neighbours. The fix therefore pays twice,
+   which is why it now outranks the cosmetics it used to sit beside.
 
    Mostly overtaken by slots (gap 1): holes *between* releases no longer form. What
    is left comes from the other direction — `Bridge.Provider.widen` puts a
@@ -503,11 +535,39 @@ flags are fixed at their defaults.
    second would be inherent. Numbers, and the report-prose split narrowing also needs
    (`fromNarrowedDependency`), are in `docs/STATUS.md` ("Narrowing declared ranges").
    `PubGrub.VersionSet.snapToVersions` is kept, tested, and unused.
-3. **Chain collapsing** — the spec fuses "depends on X *which depends on* Y" into
-   one sentence. **Now the top item**: with gap 1 done, this is most of what is left
-   between `conduit <1.3`'s 43 lines and cabal's 16.
-4. Cosmetic: `So,` on the final line; terminal periods on non-final lines; omit
-   the synthetic root's version; number only lines actually referenced.
+3. **Chain collapsing — done, 2026-08-20**, and it was two rules rather than one.
+   `PubGrub.Report` now follows the spec's own reporting algorithm
+   (`references/pubgrub.md:504`) instead of replaying the derivation tree one node per
+   line:
+
+   - **a chain of two external facts is one sentence** — "foo depends on bar ^2.0.0
+     *which depends on* baz ^3.0.0" (`:1018`), plus its sibling form "depends on
+     *both* X and Y" where two facts share a depender. Both are in `pair`, and both
+     are guarded by a subset test so a fused sentence cannot claim more than the two
+     facts do. `isEmpty` being one-sided means the guard can only fail to fuse, never
+     fuse wrongly;
+   - **every other derived step is skipped** — "you can skip every other derived
+     incompatibility without losing clarity" (`:528`, the algorithm's case 2.ii at
+     `:643`). Where a step's derived cause has a single derived cause of its own, the
+     intermediate *conclusion* goes unsaid and both external facts are named in one
+     line. Most derivation graphs here are linear chains, so this is the half that
+     halves them.
+
+   Measured: `lens <4` 6 → **4** lines, `conduit <1.3` 12 → **7**, `aeson <2`
+   83 → **57**. Two of three are now shorter than cabal's message (22 and 16); `aeson`
+   against 30 is still the outlier. `test/PaperSpec.hs` pins the rendered proof of
+   both of the spec's published examples as **golden files** under `test/golden/`
+   (`cabal test --test-options=--accept` rewrites them; the diff is the review) — the
+   closest thing to a conformance test the reporter has, and what turned gap 2 from a
+   cosmetic item into the top one.
+4. Cosmetic, and *two of these came for free with gap 3*: `So,` on the final line
+   ✅ and numbering only the lines actually referenced ✅ (a linear proof now carries
+   no numbers at all, per `:596`). Still open: terminal periods on non-final lines;
+   omit the synthetic root's version — which also prints the NUL in
+   `Bridge.Provider.rootName` as a stray space; "every version of foo" where the spec
+   says that rather than `foo >=0`; and the blank line the spec puts between branches.
+   Note `bench/summarise.awk` counts proof lines by their opening connective now,
+   *because* numbering went sparse — see `docs/benchmarking.md`.
 5. **Collapse cells that exhaust a flag's states.** *Dormant since 2026-08-17: no
    cell is ever pinned, so no proof line can show this. Keep it on the list — it
    returns with the flag axis, and the fix is independent of everything else.* Real
