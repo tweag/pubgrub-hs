@@ -340,8 +340,28 @@ mkExpand installedDb source root = expand'
             -- the difference between preferring installed units and allowing only
             -- installed ones. Without it @aeson '<2'@ resolves by planning to build
             -- @base 4.15.1.0@ from Hackage, which cabal rejects.
+            --
+            -- __Say why, rather than answering with nothing.__ The fact rides out
+            -- with the 'Nothing', as the scan's facts do below. Without it the
+            -- solver learns only that the range is empty, and the proof reads /no
+            -- version for base in >=4.5 && <4.7/ when the reason is that the
+            -- compiler provides @base@. 'onlyInstalledFact' also rides with the
+            -- first installed decision, but a boot package whose early queries are
+            -- all source-only has no decision to ride with: on @lens \'<4\'@ that was
+            -- three of the four no-version events, and all three reached the proof.
+            --
+            -- It replaces a clause rather than adding one: @banRest@ subtracts what
+            -- the provider stated, and the fact covers every instance in a
+            -- source-only range, so the @noInstances@ clause is dropped as empty.
+            -- ('isEmpty' is one-sided, so at worst the store carries a redundant
+            -- clause; @banRest@ says why that is the safe direction.)
+            --
+            -- This broadens a learned clause, and broadening is what made stating
+            -- all eight boot facts at the root expensive (see 'onlyInstalledFact').
+            -- Emitting one fact where it is needed is expected not to be, but that
+            -- is to be measured on the search, not assumed.
             Nothing
-                | isNonReinstallable pn -> pure (Nothing, [])
+                | isNonReinstallable pn -> pure (Nothing, onlyInstalledFact pn)
                 | otherwise -> firstUsable (withSlots (rsVersionsOf source pn))
 
                 where

@@ -330,28 +330,57 @@ bootPackageStatesItself =
         , testCase "an ordinary installed package states no such thing" $ do
             incs <- runTestM (expandInstalled "ordinary")
             [() | CauseOnlyInstalled _ <- map incompCause incs] @?= []
+        , -- The case with no decision to hang the fact on. The offered range holds
+          -- The case with no decision to hang the fact on. The offered range holds
+          -- no installed unit, so the rule has nothing to return; without a
+          -- /reason/ the solver would state that the range is empty. On
+          -- @lens \'<4\'@ three of the four no-version events were this, every one
+          -- of them before @base@ was first decided, and each reached the proof as
+          -- \"no version for base in …\" about a range full of real releases.
+          testCase "a source-only range of one still says why" $ do
+            (chosen, incs) <- runTestM (expandIn "base" sourceOnly)
+            chosen @?= Nothing
+            [p | CauseOnlyInstalled p <- map incompCause incs] @?= [mkPackageName "base"]
+        , testCase "an ordinary package in the same position says nothing" $ do
+            (chosen, incs) <- runTestM (expandIn "ordinary" sourceOnly)
+            chosen @?= Nothing
+            assertBool "expected no facts" (null incs)
         ]
   where
-    -- The real provider rule over a world with one installed unit and no releases,
-    -- asked about that package with everything on offer.
     expandInstalled name = do
-        let db =
-                mkInstalledDb
-                    [ InstalledPkg
-                        { ipUnitId = mkUnitId name
-                        , ipName = mkPackageName name
-                        , ipVersion = mkVersion [1, 0]
-                        , ipDepends = []
-                        }
-                    ]
-            source =
-                BP.ReleaseSource
-                    (const Set.empty)
-                    (\_ _ -> error "this world has no releases to read")
-        result <- BP.mkExpand db source [] (mkPackageName name) (everything name)
+        result <- expandIn name (everything name)
         case result of
             (Just (UsePreInstalled _), incs) -> pure incs
             _ -> liftIO (assertFailure "expected the installed unit to be chosen")
+
+    -- The real provider rule over a world with one installed unit of @name@ and no
+    -- releases at all, asked about that package with @offered@ on the table. The
+    -- reader errors because nothing here should reach it: a non-reinstallable
+    -- package never consults the source side, and @ordinary@ has no versions.
+    expandIn name offered =
+        BP.mkExpand db source [] (mkPackageName name) offered
+      where
+        db =
+            mkInstalledDb
+                [ InstalledPkg
+                    { ipUnitId = mkUnitId name
+                    , ipName = mkPackageName name
+                    , ipVersion = mkVersion [1, 0]
+                    , ipDepends = []
+                    }
+                ]
+        source =
+            BP.ReleaseSource
+                (const Set.empty)
+                (\_ _ -> error "this world has no releases to read")
+
+    -- Any source release, and no installed unit: the shape a range takes once a
+    -- constraint has excluded the compiler's own copy.
+    sourceOnly =
+        InstanceSet
+            { isInstalled = Set.empty
+            , isSource = [SourceCell VersionSet.fullVersionSet Map.empty]
+            }
 
     -- What the solver offers before it knows anything: the installed unit, or any
     -- source release.
