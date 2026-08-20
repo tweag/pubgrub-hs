@@ -117,7 +117,19 @@ type World = [(PackageName, Pkg)]
 -- The installed db is empty: these worlds have no pre-installed units, so every
 -- 'PubGrub.InstanceSet.InstanceSet' has an empty installed side.
 worldProvider :: World -> Provider TestM
-worldProvider world =
+worldProvider = worldProviderWith []
+
+-- | The same, with some releases marked as impossible to build /here/.
+--
+-- Buildability is named beside the world rather than inside 'Release' because in
+-- the bridge it is not part of a release's dependency data either:
+-- @Bridge.Provider.relBuildable@ is as much a verdict about this machine
+-- (@pkgconfig-depends@ against the real @pkg-config@ db) as about the @.cabal@
+-- (@buildable: False@). It is also the one thing these fixtures cannot express by
+-- writing guarded groups, since both inputs are read off a @BuildInfo@ they do not
+-- have.
+worldProviderWith :: [(PackageName, Version)] -> World -> Provider TestM
+worldProviderWith unbuildableHere world =
     Provider (BP.mkExpand (mkInstalledDb []) source [])
   where
     source =
@@ -128,14 +140,17 @@ worldProvider world =
             }
 
     -- Every release of every package, in the reduced shape the bridge expects:
-    -- the package's declared flags, and this release's guarded dependency groups.
-    -- Everything here is buildable — this world has no @pkgconfig-depends@ and
-    -- nothing marked @buildable: False@, both of which are read off a real
-    -- @BuildInfo@ these fixtures do not have.
+    -- the package's declared flags, this release's guarded dependency groups, and
+    -- whether its library can be built here at all.
     releases :: Map (PackageName, Version) BP.Release
     releases =
         Map.fromList
-            [ ((p, relVersion r), BP.Release (pkgFlags pk) (relGuarded r) True)
+            [ ( (p, relVersion r)
+              , BP.Release
+                    (pkgFlags pk)
+                    (relGuarded r)
+                    ((p, relVersion r) `notElem` unbuildableHere)
+              )
             | (p, pk) <- world
             , r <- pkgReleases pk
             ]
@@ -203,6 +218,11 @@ renderFailure (NoSatisfier p _) =
 
 solveWorld :: World -> IO (Either Text (Map PackageName Instance))
 solveWorld = runSolve . worldProvider
+
+-- | Solve a world in which the named releases cannot be built here.
+solveWorldWith
+    :: [(PackageName, Version)] -> World -> IO (Either Text (Map PackageName Instance))
+solveWorldWith unbuildableHere = runSolve . worldProviderWith unbuildableHere
 
 -- | Wrap a provider so that every @expand@ records the package it was asked
 -- about. The solver asks exactly once per decision, so the tally counts
@@ -281,6 +301,7 @@ tests =
         , irrelevantFlagRetried
         , irrelevantFlagsDoNotCompound
         , bootPackageStatesItself
+        , unbuildableStatesItself
         ]
 
 -- | 8. Not about flags, but about the same provider rule and needing the same
@@ -342,6 +363,87 @@ bootPackageStatesItself =
                         , pipVersion = mkVersion [1, 0]
                         , pipDependencies = []
                         }
+            , isSource = [SourceCell VersionSet.fullVersionSet Map.empty]
+            }
+
+-- | 9. Also not about flags: a release whose library cannot be built in this
+-- environment is __stated__ rather than silently passed over
+-- (@references\/pubgrub.md:477@ — "we just add an incompatibility indicating that
+-- it […] should never be selected").
+--
+-- The difference is entirely in the explanation, which is why it is asserted on the
+-- rendered proof. Skipping the release quietly leaves the solver to find out that
+-- the range above @1.0.0@ is empty, and it reports what it found: /no version for
+-- foo in >=2/. That is false-sounding — the version exists, and the reason it may
+-- not be used is local to this machine. With the fact stated, the same range is
+-- contradicted by a clause that says so, and the proof line is the reason.
+--
+-- The world is unsatisfiable either way: @foo 2.0.0@ cannot be built and @foo
+-- 1.0.0@ needs a package that has no versions. The verdicts agree; only the proof
+-- changes.
+unbuildableStatesItself :: TestTree
+unbuildableStatesItself =
+    testGroup
+        "unbuildable releases"
+        [ testCase "the proof says a release cannot be built, not that it is absent" $ do
+            result <- solveWorldWith [(pkg "foo", v2)] world
+            case result of
+                Right sol -> assertFailure ("expected no solution, got " ++ show (Map.keys sol))
+                Left proof -> do
+                    assertBool
+                        ("the proof should say foo cannot be built here:\n" <> T.unpack proof)
+                        (T.pack "cannot be built here" `T.isInfixOf` proof)
+                    -- "No version for foo in <1.0.0" may still be there, and is
+                    -- /true/ — nothing is published below the oldest release — but
+                    -- the range holding 2.0.0 must not be reported as if it were
+                    -- empty.
+                    assertBool
+                        ("and should not report foo >=2.0.0 as empty:\n" <> T.unpack proof)
+                        (not (T.pack "no version for foo in >=2" `T.isInfixOf` proof))
+        , -- The control, and the reason the verdict is not merely a coincidence of
+          -- the fixture: with every release buildable the same world /solves/, on
+          -- the very release the other case rules out.
+          testCase "the same world solves when that release can be built" $ do
+            result <- solveWorld world
+            result
+                @?= Right
+                    ( solutionOf
+                        [ (pkg "root", v1, [])
+                        , (pkg "foo", v2, [])
+                        ]
+                    )
+        , -- And the fact itself, at the point it is minted: the scan passes 2.0.0,
+          -- settles on 1.0.0, and hands both out together — an incompatibility need
+          -- not be about the instance just decided.
+          testCase "the fact rides out with the release the scan settles on" $ do
+            let provider = worldProviderWith [(pkg "foo", v2)] world
+            result <- runTestM (expand provider (pkg "foo") anyInstance)
+            case result of
+                Just (BuildSource v _, incs) -> do
+                    v @?= v1
+                    [p | CauseUnbuildable p _ <- map incompCause incs] @?= [pkg "foo"]
+                _ -> assertFailure "expected 1.0.0 to be chosen"
+        ]
+  where
+    -- foo 2.0.0 has no dependencies at all, so nothing but buildability can rule it
+    -- out; foo 1.0.0 depends on a package with no versions.
+    world =
+        [ (pkg "root", plain [pkg "foo"])
+        ,
+            ( pkg "foo"
+            , Pkg
+                []
+                [ Release v2 []
+                , Release v1 [always [pkg "gone"]]
+                ]
+            )
+        ]
+
+    -- Everything on offer, as the solver offers it before it knows anything. No
+    -- installed side: these worlds have no pre-installed units.
+    anyInstance =
+        InstanceSet
+            { isInstalled = Set.empty
             , isSource = [SourceCell VersionSet.fullVersionSet Map.empty]
             }
 

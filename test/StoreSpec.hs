@@ -20,7 +20,8 @@ import           Distribution.Types.VersionRange (earlierVersion,
                                                   orLaterVersion)
 import           PubGrub.Incompatibility        (IncompatCause (..),
                                                  Incompatibility (..),
-                                                 fromDependency, noInstances)
+                                                 fromDependency, noInstances,
+                                                 unbuildable)
 import           PubGrub.InstanceSet            (InstanceSet (..))
 import           PubGrub.InstanceSet.SourceCell (FlagPin (..), SourceCell (..))
 import           PubGrub.SetOps                 (equivalent)
@@ -73,6 +74,7 @@ tests =
     testGroup
         "PubGrub.Store"
         [ testGroup "merging dependency facts" mergeTests
+        , testGroup "merging unbuildable facts" unbuildableTests
         , testGroup "what must not merge" separateTests
         ]
 
@@ -167,9 +169,13 @@ separateTests =
                     ]
                     emptyStore
         length (storeClauses store) @?= 2
-    , -- Only dependency facts merge. A ban is not about a pair of packages, and a
-      -- derived clause's terms have been through the algebra, where the DNF stops
-      -- being canonical and structural equality stops meaning set equality.
+    , -- A @noInstances@ ban is not a merge candidate. Unlike the unbuildable facts
+      -- below it is minted by the /solver/, for the one range it happened to query,
+      -- and no part of the spec asks for those to be collapsed; merging them would
+      -- be sound and simply is not done. Derived clauses are
+      -- excluded for a stronger reason: their terms have been through the algebra,
+      -- where the DNF stops being canonical and structural equality stops meaning
+      -- set equality.
       testCase "bans are never merged, even for the same package" $ do
         let store =
                 insertClauses
@@ -199,8 +205,70 @@ separateTests =
     ]
 
 -- --------------------------------------------------------------------------
+-- Unbuildable facts
+-- --------------------------------------------------------------------------
+
+-- | @references\/pubgrub.md:477@ asks for the same adjacency collapsing that
+-- @:456@ asks for on dependencies: an unselectable version, "as well as any
+-- adjacent versions that are also incompatible", is /one/ incompatibility. The
+-- provider states one per release slot and these are where the run becomes
+-- contiguous.
+unbuildableTests :: [TestTree]
+unbuildableTests =
+    [ testCase "two adjacent unbuildable slots become one fact" $ do
+        let store =
+                insertClauses
+                    [unbuildable pkgA (slot 1 2), unbuildable pkgA (slot 2 3)]
+                    emptyStore
+        case storeClauses store of
+            [only] -> bannedBy only `shouldDenote` sourceOnly (halfOpen 1 3)
+            cs     -> assertFailure ("expected one clause, got " ++ show (length cs))
+    , -- The point of the slot, again: a run of unbuildable releases must read as one
+      -- range in the proof, not as one line per release with holes between them.
+      testCase "the run is contiguous, and covers between the releases" $ do
+        let store =
+                insertClauses
+                    [unbuildable pkgA (slot 1 2), unbuildable pkgA (slot 2 3)]
+                    emptyStore
+        case storeClauses store of
+            [only] ->
+                assertBool
+                    "1.5 should be inside the merged run"
+                    (bannedBy only `denotesVersion` mkVersion [1, 5])
+            cs -> assertFailure ("expected one clause, got " ++ show (length cs))
+    , testCase "the merged fact stays an unbuildable leaf" $ do
+        let store =
+                insertClauses
+                    [unbuildable pkgA (slot 1 2), unbuildable pkgA (slot 2 3)]
+                    emptyStore
+        case map incompCause (storeClauses store) of
+            [CauseUnbuildable p _] -> p @?= pkgA
+            _ -> assertFailure "expected a single CauseUnbuildable leaf"
+    , testCase "different packages stay separate" $ do
+        let store =
+                insertClauses
+                    [unbuildable pkgA (slot 1 2), unbuildable pkgB (slot 2 3)]
+                    emptyStore
+        length (storeClauses store) @?= 2
+    , -- Two different facts about the same instances: "cannot be built here" and
+      -- "has this dependency". Merging them would state one as the other.
+      testCase "an unbuildable fact does not merge with a dependency fact" $ do
+        let store =
+                insertClauses
+                    [unbuildable pkgA (slot 1 2), dependsOnQ (slot 2 3)]
+                    emptyStore
+        length (storeClauses store) @?= 2
+    ]
+
+-- --------------------------------------------------------------------------
 -- Helpers
 -- --------------------------------------------------------------------------
+
+-- | The instance set an unbuildable fact bans, read off its cause.
+bannedBy :: Incompatibility -> InstanceSet
+bannedBy i = case incompCause i of
+    CauseUnbuildable _ s -> s
+    _                    -> error "not an unbuildable clause"
 
 halfOpen :: Int -> Int -> VersionSet.VersionSet
 halfOpen lo hi = VersionSet.halfOpenVersionSet (v lo) (Just (v hi))

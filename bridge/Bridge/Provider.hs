@@ -84,7 +84,8 @@ import           Hackage.Security.Client.Repository.Cache     (Cache)
 import           Network.HTTP.Client                          (Manager)
 import           PubGrub.Incompatibility                      (Incompatibility,
                                                                fromDependency,
-                                                               onlyInstalled)
+                                                               onlyInstalled,
+                                                               unbuildable)
 import           PubGrub.Index.PreInstalled                   (PreInstalledPackage (..))
 import           PubGrub.InstanceSet                          (HasVersion (..),
                                                                Instance (..),
@@ -344,8 +345,23 @@ mkExpand installedDb source root = expand'
                     -- Releases newest first (@docs/flags-semantics.md@ §5,
                     -- between-releases half). One @.cabal@ read per release, not
                     -- per candidate assignment.
-                    firstUsable [] = pure Nothing
-                    firstUsable ((v, slot):rest) = do
+                    --
+                    -- @stated@ accumulates the facts learned about releases the scan
+                    -- rejects on the way past, newest first. They ride out with
+                    -- whichever release it settles on: incompatibilities are
+                    -- context-independent, so the solver never requires them to be
+                    -- about the instance just decided
+                    -- (@docs\/flags-semantics.md@ §10).
+                    firstUsable = scan []
+
+                    -- An exhausted list is the solver's business: it turns @Nothing@
+                    -- into "no instances in range". The facts in @stated@ are lost
+                    -- here, since there is no instance to return them with, and
+                    -- keeping them would mean changing what @expand@ returns. So a
+                    -- range whose every release is unbuildable still reports as "no
+                    -- version for p in range".
+                    scan _stated [] = pure Nothing
+                    scan stated ((v, slot):rest) = do
                         result <- rsReadRelease source pn v
                         case result of
                             -- A .cabal that fails to parse: warn and skip. The
@@ -365,26 +381,22 @@ mkExpand installedDb source root = expand'
                                             ++ ")"
                                         )
                                     )
-                                firstUsable rest
+                                scan stated rest
                             -- A release whose library cannot be built here is not a
                             -- candidate: its @pkgconfig-depends@ are unsatisfiable on
-                            -- this machine, or it declares @buildable: False@. It is
-                            -- skipped without a warning because, unlike an unparseable
-                            -- @.cabal@, this is an ordinary fact about the release, and
-                            -- cabal applies the same rule from the same pkg-config db.
+                            -- this machine, or it declares @buildable: False@. Unlike an
+                            -- unparseable @.cabal@ this is an ordinary fact about the
+                            -- release, so it gets no warning, and cabal applies the same
+                            -- rule from the same pkg-config db.
                             --
-                            -- The spec states such a release as an incompatibility of
-                            -- its own, collapsed over adjacent releases
-                            -- (@references\/pubgrub.md:476@), so that a report can say
-                            -- why it is out. That needs no new interface: where the scan
-                            -- settles on a release, the skipped releases' facts can ride
-                            -- along with that @Just@, since incompatibilities need not be
-                            -- about the instance just decided (@docs\/flags-semantics.md@
-                            -- §10). Only an /exhausted/ list loses them, and there the
-                            -- fix belongs in the cause attached to "no instances in
-                            -- range". Neither is done, so the release is simply not
-                            -- offered.
-                            Right release | not (relBuildable release) -> firstUsable rest
+                            -- It is /stated/ as a clause (@references\/pubgrub.md:476@).
+                            -- Without one the solver learns only that the range it
+                            -- narrowed to is empty, and the report reads "no version for
+                            -- p in range" when the versions exist and cannot be built
+                            -- here. With it, the proof line gives the reason. The clause
+                            -- covers the release's whole slot: see 'unbuildableFact'.
+                            Right release | not (relBuildable release) ->
+                                scan (unbuildableFact pn slot : stated) rest
                             Right release ->
                                 -- Each guarded dependency becomes one incompatibility
                                 -- @{pn: D, dep: not T}@. The depender @D@ is every
@@ -393,7 +405,7 @@ mkExpand installedDb source root = expand'
                                 -- assignment that shares the dependency at once. Only
                                 -- guards that @inst@ satisfies are emitted.
                                 case listToMaybe (usableAssignments v release) of
-                                    Nothing -> firstUsable rest
+                                    Nothing -> scan stated rest
                                     Just flags -> do
                                         let inst = BuildSource v flags
                                             incs =
@@ -406,7 +418,7 @@ mkExpand installedDb source root = expand'
                                                   inst `memberInstance` sourceInstances slot assignment
                                                 , dep <- deps
                                                 ]
-                                        pure (Just (inst, incs))
+                                        pure (Just (inst, reverse stated ++ incs))
 
                     -- The assignments this release could be built under, in
                     -- preference order, keeping only those the offered set
@@ -475,6 +487,20 @@ mkExpand installedDb source root = expand'
     onlyInstalledFact pn
         | isNonReinstallable pn = [onlyInstalled pn anySourceRelease]
         | otherwise = []
+
+    -- | The fact that a release cannot be built in this environment: a unit clause
+    -- banning every instance of its version __slot__ (@references\/pubgrub.md:476@).
+    --
+    -- Unpinned, because with flags fixed at their declared defaults a release has
+    -- exactly one instance and buildability is a property of the release. Under a
+    -- searched flag axis a release can be unbuildable at one assignment and fine
+    -- at another, and the term would have to be the region where
+    -- 'Bridge.Cabal.Flatten.buildableCondition' is false.
+    --
+    -- The slot, rather than the single version, lets 'PubGrub.Store' union a run of
+    -- unbuildable releases into one clause: adjacent slots touch, so the union has
+    -- no hole between the releases and reads as the range the spec asks for.
+    unbuildableFact pn slot = unbuildable pn (sourceInstances slot (NE.singleton Map.empty))
 
     -- | Every source instance of a package: any version, no flags pinned. The
     -- complement of \"is an installed unit\", on the source side.

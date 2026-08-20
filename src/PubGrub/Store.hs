@@ -1,6 +1,7 @@
 -- | The incompatibility store: what the solver has learned, in the order
--- propagation scans it, with dependency facts about the same pair of packages
--- __merged as they arrive__.
+-- propagation scans it, with facts that say the same thing __merged as they
+-- arrive__ — dependency facts about the same pair of packages, and unbuildable
+-- facts about the same package.
 --
 -- == Why this is not just a list
 --
@@ -39,8 +40,9 @@
 --
 -- == The merged clause is a leaf, and that is the point for reports
 --
--- It is rebuilt with 'fromDependency', so its cause stays 'CauseDependency' with
--- the unioned depender set. The alternative — letting conflict resolution reach
+-- It is rebuilt with its own constructor — 'fromDependency', or
+-- 'PubGrub.Incompatibility.unbuildable' — so its cause stays a leaf cause with the
+-- unioned term. The alternative — letting conflict resolution reach
 -- the same range by resolving the narrow facts against each other — produces
 -- 'CauseDerivedFrom' nodes, and those derived nodes /are/ the proof lines this
 -- exists to remove. Merging at insert does not shorten those lines; it stops
@@ -65,7 +67,7 @@ import qualified Data.Set                       as Set
 import           Distribution.Types.PackageName (PackageName)
 import           PubGrub.Incompatibility        (IncompatCause (..),
                                                  Incompatibility (..),
-                                                 fromDependency)
+                                                 fromDependency, unbuildable)
 import           PubGrub.Index.PreInstalled     (PreInstalledPackage)
 import           PubGrub.InstanceSet            (InstanceSet (..))
 import           PubGrub.InstanceSet.SourceCell (SourceCell)
@@ -85,12 +87,18 @@ data Store = Store
     , stMergeable :: !(Set MergeKey)
     }
 
--- | What has to match for two dependency facts to be merged: the depender
--- package, the dependee package, and the __dependee instance set__, which must be
--- identical rather than merely overlapping.
+-- | What has to match for two clauses to be merged.
 --
--- The set is compared /structurally/, via 'setKey'. 'InstanceSet' deliberately
--- has no 'Eq' — its source side is a non-canonical DNF, so structural equality is
+-- Two shapes qualify. A dependency fact ('MergeDep') matches on the depender
+-- package, the dependee package, and the __dependee instance set__, which must be
+-- identical rather than merely overlapping. An unbuildable fact
+-- ('MergeUnbuildable') matches on the package alone: it is a unit clause, so
+-- there is no second term to agree about, and two of them are the same fact about
+-- two runs of releases. PubGrub asks for adjacent versions that cannot be
+-- selected to be stated as one incompatibility.
+--
+-- On the dependency side, the set is compared /structurally/, via 'setKey'.
+-- 'InstanceSet' deliberately has no 'Eq' — its source side is a non-canonical DNF, so structural equality is
 -- not semantic equality and a lawful instance is impossible. That general problem
 -- does not arise here, because the sets being compared are not general: a
 -- dependee set is minted by the provider from a declared range and never
@@ -99,7 +107,14 @@ data Store = Store
 -- structural equality /is/ semantic equality. Sets that have been through the
 -- algebra are non-canonical, and they only appear in 'CauseDerivedFrom'
 -- clauses, which are not merge candidates.
-type MergeKey = (PackageName, PackageName, SetKey)
+--
+-- The accumulated term of a merged clause is /not/ compared against anything: it
+-- has been through 'union' and is therefore non-canonical, and neither key looks
+-- at it.
+data MergeKey
+    = MergeDep PackageName PackageName SetKey
+    | MergeUnbuildable PackageName
+    deriving (Eq, Ord)
 
 -- | A structural key for an 'InstanceSet'. Cells are sorted so that two DNFs
 -- differing only in cell order compare equal; nothing else is normalised, and
@@ -109,7 +124,8 @@ type SetKey = (Set PreInstalledPackage, [SourceCell])
 setKey :: InstanceSet -> SetKey
 setKey s = (isInstalled s, Set.toAscList (Set.fromList (isSource s)))
 
--- | The key of a clause that may take part in a merge: dependency facts only.
+-- | The key of a clause that may take part in a merge: a dependency fact or an
+-- unbuildable one.
 --
 -- A clause is judged by its /cause/ rather than by its term map, because the term
 -- map has already lost what is needed: 'fromDependency' drops the dependee entry
@@ -118,7 +134,8 @@ setKey s = (isInstalled s, Set.toAscList (Set.fromList (isSource s)))
 -- with each other rather than being excluded.
 mergeKey :: Incompatibility -> Maybe MergeKey
 mergeKey i = case incompCause i of
-    CauseDependency p _ (q, depSet) -> Just (p, q, setKey depSet)
+    CauseDependency p _ (q, depSet) -> Just (MergeDep p q (setKey depSet))
+    CauseUnbuildable p _            -> Just (MergeUnbuildable p)
     _                               -> Nothing
 
 emptyStore :: Store
@@ -165,7 +182,13 @@ mergeInto k new = go
     merged c = case (incompCause c, incompCause new) of
         (CauseDependency p aSet (q, depSet), CauseDependency _ bSet _) ->
             fromDependency p (aSet `union` bSet) q depSet
-        -- Unreachable: both clauses answered 'mergeKey' with @Just k@, which only
-        -- a 'CauseDependency' does. Were it reached, the newer fact would be
-        -- lost, not kept as 'mergeInto' promises for a missing match.
+        -- Two unit clauses banning instances of the same package: ¬(p ∈ A) and
+        -- ¬(p ∈ B) is ¬(p ∈ A∪B), so the union claims nothing new. Slots touch, so
+        -- for runs of adjacent unbuildable releases the union is one contiguous
+        -- range — which is what @references\/pubgrub.md:476@ asks to be stated.
+        (CauseUnbuildable p aSet, CauseUnbuildable _ bSet) ->
+            unbuildable p (aSet `union` bSet)
+        -- Unreachable: the two clauses answered 'mergeKey' with the same @Just k@,
+        -- and each key shape pins the cause. Were it reached, the newer fact would
+        -- be lost, not kept as 'mergeInto' promises for a missing match.
         _ -> c
