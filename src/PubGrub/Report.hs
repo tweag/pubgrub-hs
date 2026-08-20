@@ -157,7 +157,29 @@ reportConflict root = case incompCause root of
     -- 'PubGrub.SetOps.isEmpty' on an 'InstanceSet' is one-sided — it may fail to
     -- notice that a set is empty — so both guards can only fail to fuse where they
     -- could have. Neither can fuse where it should not.
-    pair c1 c2 = case (asDependency c1, asDependency c2) of
+    pair c1 c2 = case (emptyRangeFor c1 c2, emptyRangeFor c2 c1) of
+        -- A dependency whose dependee range the solver has already found empty.
+        -- Naming both facts would print that range /twice/ in one sentence, and
+        -- on a real proof it is not short: haddock 2.29.1's bound on base is
+        -- seven windows.
+        --
+        -- Saying it once is sound only when the dependency's whole range is inside
+        -- the empty one, which is what the 'isSubsetOf' checks. Where it is only
+        -- partly inside, the two facts stay separate — absorbing that case means
+        -- widening the term rather than dropping a clause, so it is not a
+        -- rendering change.
+        (Just one, _) -> one
+        (_, Just one) -> one
+        _ -> pairDeps c1 c2
+
+    -- @dep@'s dependee range known empty by @hole@?
+    emptyRangeFor dep' hole = case (asDependency dep', incompCause hole) of
+        (Just (p, s, q, r), CauseNoInstances q' empty)
+            | q == q', r `isSubsetOf` empty ->
+                Just (dep p s q r <> ", which has no versions")
+        _ -> Nothing
+
+    pairDeps c1 c2 = case (asDependency c1, asDependency c2) of
         (Just (p1, s1, q1, r1), Just (p2, s2, q2, r2))
             | q1 == p2, r1 `isSubsetOf` s2 -> chain p1 s1 q1 r1 q2 r2
             | q2 == p1, r2 `isSubsetOf` s1 -> chain p2 s2 q2 r2 q1 r1
