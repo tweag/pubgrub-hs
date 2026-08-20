@@ -7,13 +7,16 @@
 -- into instance sets against the world. So these tests also exercise
 -- 'VersionSet' and the range-to-instance widening the real bridge will do.
 --
--- The four satisfiable examples assert the exact solution the paper reports.
--- The two error-reporting examples are unsatisfiable, and assert only that
--- solving fails: their rendered reports do not yet match the paper's.
+-- The four satisfiable examples assert the exact solution the paper reports; the two
+-- error-reporting examples are unsatisfiable and assert the __rendered proof__ against
+-- a golden file in @test\/golden@. The spec publishes its own expected wording for
+-- both (@references\/pubgrub.md:1005@ and @:1150@), so these two cases are the closest
+-- thing there is to a conformance test for 'PubGrub.Report' — see the note above each
+-- for the differences that remain and which known gap each belongs to.
 module PaperSpec (tests) where
 
 import           Colog                          (LoggerT, usingLoggerT)
-import           Data.Either                    (isLeft)
+import qualified Data.ByteString.Lazy          as BL
 import           Data.Functor.Identity          (Identity, runIdentity)
 import           Data.List                      (maximumBy)
 import           Data.Map.Strict                (Map)
@@ -22,6 +25,7 @@ import           Data.Ord                       (comparing)
 import qualified Data.Set                       as Set
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
+import qualified Data.Text.Encoding             as T
 import           Distribution.Types.Flag        (mkFlagAssignment)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Version           (earlierVersion,
@@ -39,8 +43,9 @@ import           PubGrub.Report                 (reportConflict)
 import           PubGrub.Solver                 (SolveError (..), SolverMsg,
                                                  solve)
 import           PubGrub.VersionSet             (VersionSet, fromVersionRange)
-import           Test.Tasty                     (TestTree, testGroup)
-import           Test.Tasty.HUnit               (assertBool, testCase, (@?=))
+import           Test.Tasty                     (TestName, TestTree, testGroup)
+import           Test.Tasty.Golden              (goldenVsString)
+import           Test.Tasty.HUnit               (testCase, (@?=))
 
 -- --------------------------------------------------------------------------
 -- A range-based package universe
@@ -150,6 +155,25 @@ renderFailure (NoSolution i) = reportConflict i
 renderFailure (NoSatisfier p _) =
     T.pack ("internal error: no satisfier for " <> show p)
 
+-- | Assert the rendered proof of an unsatisfiable world against a golden file.
+--
+-- Golden rather than an expected list in the source, because what is under test is a
+-- block of English: in a file of its own it can be read as the proof a user would
+-- see, and when the wording changes on purpose
+-- @cabal test --test-options=--accept@ rewrites it instead of anyone hand-editing
+-- string literals.
+--
+-- A world that /solves/ writes its solution into the same file, so a golden diff
+-- says what happened rather than \"expected Left\".
+proofGolden :: TestName -> FilePath -> World -> TestTree
+proofGolden name file world =
+    goldenVsString name ("test/golden/" <> file) (pure (utf8 (rendered (solveWorld world))))
+  where
+    rendered (Left proof) = proof <> T.pack "\n"
+    rendered (Right sol) =
+        T.pack ("expected no solution, got " <> show (Map.keys sol) <> "\n")
+    utf8 = BL.fromStrict . T.encodeUtf8
+
 -- | The expected solution as a map, from (name, version) pairs.
 expected :: World -> [(String, [Int])] -> Map PackageName Instance
 expected world entries =
@@ -225,28 +249,53 @@ tests =
                     ]
              in solveWorld world
                     @?= Right (expected world [("root", [1, 0, 0]), ("foo", [1, 0, 0]), ("target", [2, 0, 0])])
-        , testCase "Linear Error Reporting (unsat)" $
-            let world =
-                    [ (pkg "root", [Release [1, 0, 0] [(pkg "foo", caret [1, 0, 0]), (pkg "baz", caret [1, 0, 0])]])
-                    , (pkg "foo", [Release [1, 0, 0] [(pkg "bar", caret [2, 0, 0])]])
-                    , (pkg "bar", [Release [2, 0, 0] [(pkg "baz", caret [3, 0, 0])]])
-                    , (pkg "baz", [Release [1, 0, 0] [], Release [3, 0, 0] []])
+        , -- @:1005@. The spec's own two lines are
+          --
+          -- > Because every version of foo depends on bar ^2.0.0 which depends on
+          -- > baz ^3.0.0, every version of foo requires baz ^3.0.0.
+          -- > So, because root depends on both baz ^1.0.0 and foo ^1.0.0, version
+          -- > solving failed.
+          --
+          -- The last line is ours up to cosmetics, in Cabal's range syntax. The
+          -- first is __two__ lines here, because our ranges are intensional: the
+          -- solver separately learns that a range's /holes/ are empty, and each
+          -- dependency fact is paired with a \"no version for …\" sibling instead
+          -- of with the next dependency fact. That is CLAUDE.md's reporting gap 2
+          -- (@collapseNoInstances@), and it is also what keeps the chain fusion
+          -- from firing: absorb those siblings and the two dependency facts become
+          -- each other's neighbours, which is exactly the \"which depends on\"
+          -- line the spec writes.
+          --
+          -- The cosmetics are reporting gap 4: no terminal periods, a range where
+          -- the spec says \"every version of\", and the root's synthetic version
+          -- shown.
+          proofGolden "Linear Error Reporting (unsat)" "linear-error-reporting.txt"
+            [ (pkg "root", [Release [1, 0, 0] [(pkg "foo", caret [1, 0, 0]), (pkg "baz", caret [1, 0, 0])]])
+            , (pkg "foo", [Release [1, 0, 0] [(pkg "bar", caret [2, 0, 0])]])
+            , (pkg "bar", [Release [2, 0, 0] [(pkg "baz", caret [3, 0, 0])]])
+            , (pkg "baz", [Release [1, 0, 0] [], Release [3, 0, 0] []])
+            ]
+        , -- @:1150@. Here the derivation branches, and the shape the spec asks for
+          -- is reproduced: one line per step, a line number minted only for the
+          -- conclusion that gets referred to later (1), the back-reference in the
+          -- line that joins the two branches, and \"depends on both\" where one
+          -- release's two dependencies are named together.
+          --
+          -- Same two residues as above: the \"no version for …\" siblings (gap 2)
+          -- and the cosmetics (gap 4, which includes the blank line the spec puts
+          -- between the branches).
+          proofGolden "Branching Error Reporting (unsat)" "branching-error-reporting.txt"
+            [ (pkg "root", [Release [1, 0, 0] [(pkg "foo", caret [1, 0, 0])]])
+            ,
+                ( pkg "foo"
+                ,
+                    [ Release [1, 0, 0] [(pkg "a", caret [1, 0, 0]), (pkg "b", caret [1, 0, 0])]
+                    , Release [1, 1, 0] [(pkg "x", caret [1, 0, 0]), (pkg "y", caret [1, 0, 0])]
                     ]
-             in assertBool "expected no solution" (isLeft (solveWorld world))
-        , testCase "Branching Error Reporting (unsat)" $
-            let world =
-                    [ (pkg "root", [Release [1, 0, 0] [(pkg "foo", caret [1, 0, 0])]])
-                    ,
-                        ( pkg "foo"
-                        ,
-                            [ Release [1, 0, 0] [(pkg "a", caret [1, 0, 0]), (pkg "b", caret [1, 0, 0])]
-                            , Release [1, 1, 0] [(pkg "x", caret [1, 0, 0]), (pkg "y", caret [1, 0, 0])]
-                            ]
-                        )
-                    , (pkg "a", [Release [1, 0, 0] [(pkg "b", caret [2, 0, 0])]])
-                    , (pkg "b", [Release [1, 0, 0] [], Release [2, 0, 0] []])
-                    , (pkg "x", [Release [1, 0, 0] [(pkg "y", caret [2, 0, 0])]])
-                    , (pkg "y", [Release [1, 0, 0] [], Release [2, 0, 0] []])
-                    ]
-             in assertBool "expected no solution" (isLeft (solveWorld world))
+                )
+            , (pkg "a", [Release [1, 0, 0] [(pkg "b", caret [2, 0, 0])]])
+            , (pkg "b", [Release [1, 0, 0] [], Release [2, 0, 0] []])
+            , (pkg "x", [Release [1, 0, 0] [(pkg "y", caret [2, 0, 0])]])
+            , (pkg "y", [Release [1, 0, 0] [], Release [2, 0, 0] []])
+            ]
         ]

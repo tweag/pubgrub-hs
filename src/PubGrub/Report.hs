@@ -1,13 +1,37 @@
-{-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeFamilies        #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 -- | Rendering a failed resolution as a human-readable proof.
 --
 -- A terminal 'Incompatibility' carries the 'IncompatCause' tree that produced
 -- it, which is all this module needs: 'reportConflict' replays that tree as a
--- numbered argument. Ranges print in Cabal syntax (@>=1.0.0 && <2@).
+-- written argument. Ranges print in Cabal syntax (@>=1.0.0 && <2@).
+--
+-- == Two rules keep the proof short
+--
+-- Replayed naively, one line per derived incompatibility and each naming one
+-- external fact, a proof is too long to read to the end.
+--
+--  * __A chain of two external facts is one sentence.__ Where a dependency's
+--    dependee is the depender of the next, the proof says \"@foo@ depends on
+--    @bar@ /which depends on/ @baz@\" rather than naming @bar@ twice, and where
+--    two facts share a depender it says \"depends on /both/ X and Y\". Both
+--    live in @pair@.
+--
+--  * __Every other derived step is skipped.__ Where a step's derived cause has a
+--    single derived cause of its own, that intermediate /conclusion/ is left out
+--    and both external facts are named in one line. Since most derivation graphs
+--    are linear chains, this halves them.
+--
+-- == Line numbers are for joins only
+--
+-- Only an incompatibility that a later line refers back to is numbered, and in
+-- a linear chain that is none of them. A number is minted in exactly one place
+-- — @numberLast@, at a step with two derived causes — so a proof that never
+-- branches carries no numbers at all.
+--
+-- A sub-derivation shared by two steps is not detected: 'Incompatibility' has no
+-- identity to detect it with, so a shared node is explained twice instead of
+-- being referred to.
 module PubGrub.Report
     ( reportConflict
     ) where
@@ -18,61 +42,192 @@ import qualified Data.Text               as T
 import           PubGrub.Incompatibility (IncompatCause (..),
                                           Incompatibility (..))
 import           PubGrub.Pretty          (Pretty (..))
+import           PubGrub.SetOps          (equivalent, isSubsetOf)
 import           PubGrub.Term            (Term (..))
 
+-- | The proof under construction: its lines __newest first__, and the next free
+-- line number.
+data Out = Out
+    { outLines :: [(Maybe Int, Text)]
+    , outNext  :: !Int
+    }
+
 -- | Render an incompatibility and its derivation as a human-readable proof.
---
--- Each derived ('DerivedFrom') step becomes a numbered line; a step references
--- the earlier lines it was derived from as @(n)@, while external leaf facts are
--- inlined. Post-order numbering guarantees every reference points backwards.
--- A sub-derivation that two steps share is rendered once for each.
-reportConflict
-    :: Incompatibility -> Text
+reportConflict :: Incompatibility -> Text
 reportConflict root = case incompCause root of
-    CauseDerivedFrom c1 c2 ->
-        let (r1, acc1, n1) = visit c1 [] (1 :: Int)
-            (r2, acc2, n2) = visit c2 acc1 n1
-            final = "Because " <> r1 <> " and " <> r2 <> ", " <> conclusion root <> "."
-            steps = reverse ((n2, final) : acc2)
-         in T.intercalate "\n" [T.pack (show n) <> ". " <> t | (n, t) <- steps]
+    CauseDerivedFrom _ _ ->
+        render (reverse (outLines (derived True root (Out [] 1))))
+    -- The terminal incompatibility is itself an external fact: nothing was
+    -- derived, so the fact is the whole explanation.
     _ -> leaf root
   where
-    -- Emit a line per derived step, threading the next free number and the
-    -- lines accumulated so far (newest first). Returns how to refer to this
-    -- node: @(n)@ for a derived step, or the inlined phrase for a leaf.
-    visit inc acc n = case incompCause inc of
-        CauseDerivedFrom c1 c2 ->
-            let (r1, acc1, n1) = visit c1 acc n
-                (r2, acc2, n2) = visit c2 acc1 n1
-                line = "Because " <> r1 <> " and " <> r2 <> ", " <> summary inc
-             in ("(" <> T.pack (show n2) <> ")", (n2, line) : acc2, n2 + 1)
-        _ -> (leaf inc, acc, n)
+    render ls = T.intercalate "\n" [prefix n <> t | (n, t) <- ls]
+    prefix Nothing  = ""
+    prefix (Just n) = T.pack (show n) <> ". "
 
-    -- External facts at the leaves of the proof. We render these from the cause
-    -- rather than the bare terms so each explains itself: an empty range is the
-    -- range simply being unsatisfiable, not a conflict with anything else.
+    -- Explain one derived incompatibility, ending with the line that concludes it.
+    -- @final@ marks the last line of the whole proof, which reads "So, …".
+    derived final inc out = case incompCause inc of
+        CauseDerivedFrom c1 c2 -> case (isDerived c1, isDerived c2) of
+            -- Case 3 (references/pubgrub.md:668): both causes are external. One
+            -- line, and the only case that opens a line of derivation rather than
+            -- continuing one.
+            (False, False) ->
+                emit (opening final "Because " <> pair c1 c2 <> ", " <> says final inc) out
+            -- Case 2 (references/pubgrub.md:641): one derived cause, one external
+            -- fact.
+            (True, False) -> oneDerived final c1 c2 inc out
+            (False, True) -> oneDerived final c2 c1 inc out
+            -- Case 1 (references/pubgrub.md:595): both causes derived — the
+            -- derivation branches, and this is the only place a line number is
+            -- wanted. Explain the first branch, number the line it ends on, then
+            -- explain the second and close by referring back.
+            (True, True) ->
+                let (n, out') = numberLast (derived False c1 out)
+                 in emit
+                        ( opening final "And because "
+                            <> summary c1
+                            <> " ("
+                            <> T.pack (show n)
+                            <> "), "
+                            <> says final inc
+                        )
+                        (derived False c2 out')
+        -- Not reached: 'derived' is only ever called on a derived node.
+        _ -> emit (leaf inc) out
+
+    -- Case 2, with @d@ the derived cause and @e@ the external fact.
+    oneDerived final d e inc out = case chainStep d of
+        -- Case 2.ii — the every-other-step skip. @d@'s own conclusion is left
+        -- unsaid and the two external facts are named together here, which is
+        -- where a long linear chain loses half its lines.
+        Just (pd, pe) ->
+            emit
+                (opening final "And because " <> pair pe e <> ", " <> says final inc)
+                (derived False pd out)
+        -- Case 2.iii: @d@ branches or bottoms out, so it gets its own lines and
+        -- this one closes with the external fact alone.
+        Nothing ->
+            emit
+                (opening final "And because " <> leaf e <> ", " <> says final inc)
+                (derived False d out)
+
+    -- A derived node that can be folded into its parent's line: exactly one
+    -- derived cause and one external fact. Answers with the pair, the derived
+    -- cause first.
+    chainStep inc = case incompCause inc of
+        CauseDerivedFrom a b -> case (isDerived a, isDerived b) of
+            (True, False) -> Just (a, b)
+            (False, True) -> Just (b, a)
+            _             -> Nothing
+        _ -> Nothing
+
+    -- "So," instead of "And" marks the conclusion rather than another step
+    -- (references/pubgrub.md:1027).
+    opening final base = if final then "So, because " else base
+
+    emit t out = out{outLines = (Nothing, t) : outLines out}
+
+    -- Give the line just emitted a number, so a later line can cite it. Numbers
+    -- are minted here and nowhere else.
+    numberLast out = case outLines out of
+        ((Just n, t) : rest) -> (n, out{outLines = (Just n, t) : rest})
+        ((Nothing, t) : rest) ->
+            ( outNext out
+            , out{outLines = (Just (outNext out), t) : rest, outNext = outNext out + 1}
+            )
+        -- Unreachable: every branch emits at least one line before this is called.
+        -- Answering with the unused number keeps the proof well-formed if it ever is.
+        [] -> (outNext out, out)
+
+    isDerived c = case incompCause c of
+        CauseDerivedFrom _ _ -> True
+        _                    -> False
+
+    -- Two external facts, as one clause. Two fusions, each guarded so that it
+    -- cannot say more than the facts do:
+    --
+    --  * a __chain__ — the first fact's dependee is the second's depender — reads
+    --    "a depends on b which depends on c". That is only true if every instance
+    --    the first fact leaves open for the middle package is one the second fact
+    --    speaks about, hence the 'isSubsetOf';
+    --  * __one depender, two dependees__ reads "a depends on both b and c", for
+    --    which the two facts must be about the same instances of @a@.
+    --
+    -- 'PubGrub.SetOps.isEmpty' on an 'InstanceSet' is one-sided — it may fail to
+    -- notice that a set is empty — so both guards can only fail to fuse where they
+    -- could have. Neither can fuse where it should not.
+    pair c1 c2 = case (asDependency c1, asDependency c2) of
+        (Just (p1, s1, q1, r1), Just (p2, s2, q2, r2))
+            | q1 == p2, r1 `isSubsetOf` s2 -> chain p1 s1 q1 r1 q2 r2
+            | q2 == p1, r2 `isSubsetOf` s1 -> chain p2 s2 q2 r2 q1 r1
+            | p1 == p2, s1 `equivalent` s2 ->
+                pretty p1
+                    <> " "
+                    <> pretty s1
+                    <> " depends on both "
+                    <> pretty q1
+                    <> " "
+                    <> pretty r1
+                    <> " and "
+                    <> pretty q2
+                    <> " "
+                    <> pretty r2
+        _ -> leaf c1 <> " and " <> leaf c2
+
+    chain p s q r q' r' =
+        dep p s q r <> " which depends on " <> pretty q' <> " " <> pretty r'
+
+    -- A dependency fact whose dependee term survived. 'fromDependency' drops that
+    -- term when the dependency is unsatisfiable, and then there is no "depends on"
+    -- left to render: the clause is a bare ban on the depender and reads as one.
+    asDependency c = case incompCause c of
+        CauseDependency p s (q, r)
+            | q /= p, Map.member q (incompTerms c) -> Just (p, s, q, r)
+        _ -> Nothing
+
+    -- External facts at the leaves of the proof. Rendered from the cause rather
+    -- than from the bare terms so that each explains itself: an empty range is the
+    -- range being unsatisfiable rather than a conflict with anything else, a
+    -- package that is only installed says it cannot be built from source, and a
+    -- release that cannot be built here says /that/ rather than looking absent
+    -- (references/pubgrub.md:475).
     leaf c = case incompCause c of
-        CauseNoInstances p s   -> "no version for " <> pretty p <> " in " <> pretty s
-        CauseOnlyInstalled p   -> pretty p <> " cannot be built from source"
-        _                      -> summary c
+        CauseNoInstances p s -> "no version for " <> pretty p <> " in " <> pretty s
+        CauseOnlyInstalled p -> pretty p <> " cannot be built from source"
+        CauseUnbuildable p s -> pretty p <> " " <> pretty s <> " cannot be built here"
+        _ -> case asDependency c of
+            Just (p, s, q, r) -> dep p s q r
+            Nothing           -> summary c
 
-    -- The final line of the proof. A lone positive term here is the root being
-    -- ruled out at its synthetic version, which reads better as plain failure.
-    conclusion c = case Map.toList (incompTerms c) of
-        [(_, Positive _)] -> "version solving failed"
-        _                 -> summary c
+    -- What a line concludes. On the proof's last line a lone positive term is the
+    -- root being ruled out at its synthetic version, which reads better as plain
+    -- failure.
+    says final c
+        | final = case Map.toList (incompTerms c) of
+            [(_, Positive _)] -> "version solving failed"
+            _                 -> summary c
+        | otherwise = summary c
 
     summary c = case Map.toList (incompTerms c) of
         [] -> "version solving failed"
         [(p, Positive r)] -> pretty p <> " " <> pretty r <> " is forbidden"
         [(p, Negative r)] -> pretty p <> " " <> pretty r <> " is required"
-        [(p1, Positive r1), (p2, Negative r2)] -> dep p1 r1 p2 r2
-        [(p2, Negative r2), (p1, Positive r1)] -> dep p1 r1 p2 r2
+        [(p1, Positive r1), (p2, Negative r2)] -> requires p1 r1 p2 r2
+        [(p2, Negative r2), (p1, Positive r1)] -> requires p1 r1 p2 r2
         terms -> T.intercalate " and " [showTerm p t | (p, t) <- terms] <> " are incompatible"
 
     -- Keep the depender's range so distinct derivation steps stay distinct
     -- ("assoc ==1.0.2 depends on …" vs "assoc >=1.0.2 && <1.1 depends on …").
     dep p1 r1 p2 r2 =
         pretty p1 <> " " <> pretty r1 <> " depends on " <> pretty p2 <> " " <> pretty r2
+
+    -- A /derived/ two-term incompatibility. The spec says "requires" here and
+    -- keeps "depends on" for the external fact (references/pubgrub.md:1005,
+    -- both in one line): a dependency is declared in a @.cabal@ file, a
+    -- requirement is what the solver worked out from one.
+    requires p1 r1 p2 r2 =
+        pretty p1 <> " " <> pretty r1 <> " requires " <> pretty p2 <> " " <> pretty r2
+
     showTerm p (Positive r) = pretty p <> " " <> pretty r
     showTerm p (Negative r) = pretty p <> " not " <> pretty r

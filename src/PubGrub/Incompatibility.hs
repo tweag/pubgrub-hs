@@ -8,6 +8,7 @@ module PubGrub.Incompatibility
     , notRoot
     , noInstances
     , onlyInstalled
+    , unbuildable
     , fromDependency
     , IncompatRelation (..)
     , incompRelation
@@ -86,6 +87,7 @@ data IncompatCause
     = CauseRoot PackageName Instance                              -- notRoot
     | CauseNoInstances PackageName InstanceSet                    -- noInstances
     | CauseOnlyInstalled PackageName                              -- onlyInstalled
+    | CauseUnbuildable PackageName InstanceSet                    -- unbuildable
     | CauseDependency PackageName InstanceSet (PackageName, InstanceSet)  -- fromDependency
     | CauseDerivedFrom Incompatibility Incompatibility            -- priorCause
 
@@ -120,6 +122,30 @@ noInstances p s = Incompatibility (Map.singleton p (Positive s)) (CauseNoInstanc
 onlyInstalled :: PackageName -> InstanceSet -> Incompatibility
 onlyInstalled p anySource =
     Incompatibility (Map.singleton p (Positive anySource)) (CauseOnlyInstalled p)
+
+-- | Instances that cannot be built in this environment at all, and so must never
+-- be selected. The provider states this /instead of/ a release's dependencies:
+-- an unselectable version's dependencies are not added at all.
+--
+-- Like 'onlyInstalled' this is a fact about the world rather than about a range.
+-- What makes it worth stating rather than silently skipping the release is the
+-- report: a release that is merely absent leaves the solver to discover that its
+-- range is empty, which reads as \"no version for foo in …\" when the truth is
+-- that the versions exist and cannot be built here.
+--
+-- Why the instances rather than the versions: the reason may be
+-- assignment-dependent (@buildable: False@ under some flag assignment, a
+-- @pkgconfig-depends@ guarded by a flag), so the /set/ is what carries the claim.
+-- While flags are fixed at their defaults it is one unpinned cell per release
+-- slot, which is every instance of that release; with flags searched it would be
+-- the region where the release's buildability condition is false, and nothing
+-- here would change.
+--
+-- Adjacent unbuildable versions need not be stated together: adjacent slots
+-- touch, so "PubGrub.Store" unions two of these into one contiguous clause as
+-- they arrive, exactly as it does for dependency facts.
+unbuildable :: PackageName -> InstanceSet -> Incompatibility
+unbuildable p s = Incompatibility (Map.singleton p (Positive s)) (CauseUnbuildable p s)
 
 -- | Dependency incompatibility: @package@ in @instances@ requires @dep@ in
 -- @depSet@ — encoded @{ package: Positive instances, dep: Negative depSet }@.

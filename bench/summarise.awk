@@ -18,7 +18,11 @@
 /^Learned /              { learned++; hist[depth]++; inres = 0 }
 /^Backtracked /          { backtracked++ }
 /^read .* \.cabal files/ { reads = $2; reused = $5 }
-/^[0-9]+\. /             { proof++ }   # numbered proof lines, on failure only
+# Proof lines, on failure only. Matched by the connective each line opens with,
+# not by a leading number: the reporter numbers only the conclusions it refers
+# back to (references/pubgrub.md:582), so most lines of a proof carry no number.
+# Counting "^[0-9]+\. " reported 9 lines for a 57-line aeson proof.
+/^([0-9]+\. )?(Because|And because|So, because|Thus,)/ { proof++ }
 END {
     printf "deciding=%d chose=%d conflicts=%d learned=%d resolving=%d backtracked=%d noversion=%d reads=%d reused=%d proof=%d\n",
         deciding, chose, conflicts, learned, resolving, backtracked, noversion, reads, reused, proof

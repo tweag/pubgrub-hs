@@ -1,0 +1,7 @@
+Because no version for a in >1.0.0 && <2 and a ==1.0.0 depends on b >=2.0.0 && <3, a >=1.0.0 && <2 requires b >=2.0.0 && <3
+And because foo ==1.0.0 depends on b >=1.0.0 && <2, a >=1.0.0 && <2 and foo ==1.0.0 are incompatible
+1. And because foo ==1.0.0 depends on a >=1.0.0 && <2 and no version for foo in >1.0.0 && <1.1.0 || >1.1.0 && <2, foo >=1.0.0 && <1.1.0 || >1.1.0 && <2 is forbidden
+Because no version for x in >1.0.0 && <2 and x ==1.0.0 depends on y >=2.0.0 && <3, x >=1.0.0 && <2 requires y >=2.0.0 && <3
+And because foo ==1.1.0 depends on both y >=1.0.0 && <2 and x >=1.0.0 && <2, foo ==1.1.0 is forbidden
+And because foo >=1.0.0 && <1.1.0 || >1.1.0 && <2 is forbidden (1), foo >=1.0.0 && <2 is forbidden
+So, because root ==1.0.0 depends on foo >=1.0.0 && <2, version solving failed

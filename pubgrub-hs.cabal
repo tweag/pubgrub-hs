@@ -9,6 +9,10 @@ maintainer:      andrea.bedini@moduscreate.com
 build-type:      Simple
 extra-doc-files: CHANGELOG.md
 
+-- The expected proofs that test/PaperSpec.hs compares against. The test-suite
+-- reads them at run time, so the source distribution must ship them.
+extra-source-files: test/golden/*.txt
+
 common warnings
     ghc-options: -Wall
 
@@ -124,6 +128,7 @@ test-suite pubgrub-hs-test
         , containers
         , mtl
         , tasty
+        , tasty-golden
         , tasty-hunit
         , tasty-quickcheck
         , text
