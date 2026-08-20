@@ -547,6 +547,36 @@ set exercises the thing. Two other claims in `CLAUDE.md` fell to the same set �
 "exactly one known instance" (9 of 17 carry those lines) and gap 4's "stray space",
 which is a real NUL byte that makes GNU `grep` silently treat every proof as binary.
 
+### The last non-cosmetic reporting gap, and a harness that was not following the spec
+
+*Aug 20.* `collapseNoInstances` — absorb every "no version for p in r" leaf into the
+sibling it was resolved against, and drop the step. It had sat on the list as report
+polish since July.
+
+The implementation is smaller than the write-up because of one observation:
+**resolving a unit clause against a dependency fact on the pivot unions the two terms
+about that package and leaves the other side alone, so the step's conclusion already
+IS the dependency with the pivot's term adjusted.** So the pass recomputes nothing. It
+keeps the node's terms and re-labels them as the leaf they are equivalent to, which is
+why it cannot weaken a proof — and why the test that matters asserts
+terms-preservation rather than any wording.
+
+Then the interesting part. With the pass in, the spec's own linear example still came
+out three lines against its published two, and the extra line was not the reporter's
+fault: `PaperSpec`'s toy provider used the decided release as the depender term, which
+is the per-version emission `references/pubgrub.md:456` tells us not to do and which
+the bridge stopped doing eight days earlier. **The conformance test was diverging from
+the spec in the harness, and reporting it as our divergence.** Given release slots, the
+example matches sentence for sentence.
+
+Two lessons, and the second is the reusable one. A gap can be another gap's blocker —
+the holes sat between dependency facts, so the chain fusion could not pair them, and
+freeing it took the fusion from "seen once, in the spec's example" to 13 of 17 real
+problems. And **a test harness that paraphrases the system under test will eventually
+be measuring the paraphrase**: this is the second time that has bitten here, after
+`FlagSolveSpec`'s hand-written provider went on passing while the real emission
+changed under it.
+
 ---
 
 ## Open right now

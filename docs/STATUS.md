@@ -418,17 +418,14 @@ Full arguments in the linked sections; this is the index.
 3. **Should the set algebra be allowed to read flag declarations?** Would make
    emptiness exact and remove the one-sided slack, at the cost of the core/bridge
    boundary. Cost/benefit, not correctness.
-4. **`collapseNoInstances` — now the top item, on two independent arguments.** Filed
-   under report polish in `CLAUDE.md` (Reporting gap 2), and it is not that. The first
-   argument is the measurement below: it is where all the deep conflict resolution
-   goes, since the three deepest resolutions in `aeson <2` (9, 10 and 18 iterations)
-   are each a gappy range being learned one hole at a time. The second arrived with
-   chain collapsing on 2026-08-20 — the `no version for …` siblings are what stop the
-   chain fusion from firing, so on the spec's own worked example they are the entire
-   difference between its published two lines and our three
-   ([Chain collapsing](#chain-collapsing-the-proofs-are-half-as-long-2026-08-20)).
-   Both arguments point the same way, and chain collapsing — which used to be
-   scheduled after this — is done.
+4. ~~**`collapseNoInstances`**~~ — **done 2026-08-20**, see
+   [Reporting gap 2](#reporting-gap-2-and-the-specs-example-matched-line-for-line-2026-08-20).
+   Both arguments for it held up: it was where the deep conflict resolution went, and
+   it was what stopped the chain fusion from firing. What it did *not* do is empty the
+   `no version for` column — 7 of the 17 harvested problems still carry such lines,
+   because the pass declines a hole whose sibling is itself derived (pubgrub-rs's
+   `TODO` as well). `matterhorn` is 10 of its 16 lines, so that residue is what a
+   further pass would have to take on.
 
 ### Notes on the version axis, before anyone starts it
 
@@ -1447,6 +1444,65 @@ test so it cannot claim more than the two facts do. Three of the harvested probl
 their `no version for` lines to it, which is why gap 2's instance count is 9 of 17 and
 not 12.
 
+### Reporting gap 2, and the spec's example matched line for line (2026-08-20)
+
+`collapseNoInstances`, the last of the reporting gaps that was not cosmetic. Every
+`no version for p in r` leaf is absorbed into the sibling it was resolved against and
+the step disappears — the post-pass pubgrub-rs runs as
+`DerivationTree::collapse_no_versions`.
+
+**It recomputes nothing.** Resolving a unit clause `{p ∈ r}` against a dependency fact
+on the pivot `p` unions the two terms about `p` and leaves the other side alone, so the
+step's conclusion *already is* that dependency with `p`'s term adjusted. The node keeps
+its terms exactly and is re-labelled as the leaf it is equivalent to, which is why this
+is not a weakening: a step that said nothing new stops being a step.
+[`test/ReportSpec.hs`](../test/ReportSpec.hs) asserts terms-preservation directly,
+since a rendered proof cannot show it, along with the three cases the pass declines
+(two holes; a wholly empty dependee range; a derived sibling).
+
+| | no-version lines | proofs shortened |
+|---|---|---|
+| harvested corpus (17) | 30 → **22** | `cpsa` 5→4, `atelier-testing` 4→3, `hjsonschema` 7→6, `scion-browser` 16→14 |
+| `bench/problems.txt` | unchanged (3/2/1) | `conduit <1.3` 7→6, `aeson <2` 57→56 |
+
+Solver counts are untouched: the pass runs between the solver and the renderer.
+
+**The second half of the win is the one it was promoted for.** The holes sat *between*
+dependency facts, so the chain fusion built two days earlier could not pair them.
+Freed, it now appears in **13 of the 17** harvested problems — it had only ever been
+seen in the spec's own worked example, which is exactly why it looked like a rule that
+never fires on real input.
+
+#### And the harness was diverging from the spec, not the reporter
+
+With the pass in, `references/pubgrub.md:1005` still came out three lines against its
+published two, and the residue was **not** the reporter: `PaperSpec`'s toy provider
+used the decided release as the depender term, which is the per-version emission
+`:456` tells us not to do and which the bridge stopped doing on 2026-08-12. A range
+wider than one release therefore left a hole for the solver to discover, and the hole
+was the third line.
+
+Given release **slots** — the harness now mints them the way `withSlots` does — the
+derivation graph comes out the shape `:1005` draws:
+
+```
+Because foo >=1.0.0 depends on bar >=2.0.0 && <3 which depends on baz >=3.0.0 && <4, foo >=1.0.0 requires baz >=3.0.0 && <4
+So, because root >=1.0.0 depends on both baz >=1.0.0 && <2 and foo >=1.0.0 && <2, version solving failed
+```
+
+against the spec's
+
+```
+Because every version of foo depends on bar ^2.0.0 which depends on baz ^3.0.0, every version of foo requires baz ^3.0.0.
+So, because root depends on both baz ^1.0.0 and foo ^1.0.0, version solving failed.
+```
+
+Same two sentences. What is left between them is Reporting gap 4 — "every version of
+foo" where we write `foo >=1.0.0`, the synthetic root's version, terminal periods —
+plus Dart's `^1.0.0` against cabal's range syntax, which is deliberate. The branching
+example keeps its six lines; its remaining difference from the spec is which pair of
+facts each line fuses, not how many lines there are.
+
 ### The explanation target, now concrete
 
 cabal's `aeson <2` failure is 25 lines of search trace ending in a list of suspects:
@@ -1553,7 +1609,7 @@ moves; treat a cited line number as a hint, and grep for the identifier.
 
 | deliverable | state |
 |---|---|
-| **Explanation showcase** — real failing problems, pubgrub-hs vs cabal side by side | **the problem set now exists**: 17 real failures harvested from Hackage's build reports, six failure kinds, five positive controls ([`failure-cases.md`](failure-cases.md)). We are shorter than cabal's message on **16 of 17**, and on the two benchmark unsat problems too (`lens <4` 4 lines against 22, `conduit <1.3` 7 against 16; `aeson <2` 57 against 30 is the outlier). Both of the spec's published examples are pinned as golden tests. Still missing: the harness, side-by-side rendering, and gap 2 — which stays the top reporting item because it is also what blocks the last fusion |
+| **Explanation showcase** — real failing problems, pubgrub-hs vs cabal side by side | **the problem set now exists**: 17 real failures harvested from Hackage's build reports, six failure kinds, five positive controls ([`failure-cases.md`](failure-cases.md)). We are shorter than cabal's message on **16 of 17**, and on the two benchmark unsat problems too (`lens <4` 4 lines against 22, `conduit <1.3` 6 against 16; `aeson <2` 56 against 30 is the outlier). Both of the spec's published examples are pinned as golden tests and the linear one now matches it sentence for sentence. Every reporting gap but the cosmetics is closed. Still missing: **the harness** and side-by-side rendering |
 | **Benchmark report** — time + peak residency on real sat/unsat problems | **current numbers exist** for five problems, two sat and three unsat, both solvers ([Merge on insert](#merge-on-insert-the-collapsing-trade-is-gone-2026-08-17)), and they are now favourable on every problem. Not a report: index build still not separated from solve, timings are one or two runs against ±25% noise, and what the ~22 MB memory floor consists of is unestablished — which is the next thing to settle, since a memory claim is now the strongest one we have |
 
 The baseline and the shared index are done — `cabal-install-solver` drives cabal's

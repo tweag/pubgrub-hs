@@ -70,29 +70,35 @@ ghc-9.12.2, base-4.21.0.0, this machine's pkg-config db (`libpq`, `libzmq`, `bla
 | `purescript ==0.15.15` | base bound | **2** | 8 | 0 |
 | `haddock ==2.29.1` | base bound, seven windows | **2** | 8 | 0 |
 | `hpqtypes-extras ==1.20.0.0` | pkg-config `libpq` | **2** | 8 | 0 |
-| `stackctl ==1.7.3.7` | base via amazonka | **3** | 8 | 1 |
-| `atelier-testing ==0.2.0.0` | dead range | **4** | 7 | 2 |
+| `stackctl ==1.7.3.7` | base via amazonka | **3** | 8 | 0 |
+| `atelier-testing ==0.2.0.0` | dead range | **3** | 7 | 1 |
 | `cabal-install ==3.18.1.0` | Cabal / hackage-security | **4** | 13 | 0 |
 | `calamity ==0.12.1.0` | base via aeson-optics | **4** | 11 | 1 |
 | `haskoin-store-data ==1.6.0` | pkg-config `libsecp256k1` | **4** | 12 | 0 |
-| `language-puppet ==1.5.1` | `ghc-prim` via aeson | **5** | 12 | 1 |
-| `cpsa ==4.4.9` | installed `deepseq` | **5** | 10 | 3 |
+| `language-puppet ==1.5.1` | `ghc-prim` via aeson | **5** | 12 | 0 |
+| `cpsa ==4.4.9` | installed `deepseq` | **4** | 10 | 2 |
+| `hjsonschema ==1.10.0` | aeson / bytestring chain | **6** | 14 | 1 |
 | `happstack-hsp ==7.3.7.8` | `template-haskell` history | **7** | 9 | 0 |
-| `hjsonschema ==1.10.0` | aeson / bytestring chain | **7** | 14 | 2 |
 | `futhark ==0.27.1` | regex / time chain | **8** | 11 | 2 |
-| `scion-browser ==0.5.0` | haskeline / tar chain | 16 | 12 | 7 |
-| `matterhorn ==90000.1.1` | hashable / bytestring chain | **16** | 18 | 11 |
+| `scion-browser ==0.5.0` | haskeline / tar chain | 14 | 12 | 5 |
+| `matterhorn ==90000.1.1` | hashable / bytestring chain | **16** | 18 | 10 |
 
 **Shorter on 16 of 17.** The one loss, `scion-browser`, has the shape `aeson '<2'`
 has: the proof walks a dependency's bound history release by release, one sentence per
-adjacent pair. That is the outlier to fix, and `matterhorn` (16 against 18, with 11
-`no version for` lines) shows why it is worth fixing — half its length is gap 2.
+adjacent pair. That is the outlier left to fix.
+
+These numbers are **after Reporting gap 2** (2026-08-20), which absorbed the
+`no version for …` leaves into the sibling they were resolved against. It took the
+`noVer` column from 30 lines to 22 across the set and four proofs with it — `cpsa`
+5 → 4, `atelier-testing` 4 → 3, `hjsonschema` 7 → 6, `scion-browser` 16 → 14 — and
+`matterhorn`, the longest, is still 10 lines of hole out of 16.
 
 Two things this table is evidence for beyond length:
 
 - **The chain fusion fires in the wild.** `depends on X which depends on Y` appears in
   13 of the 17. It had only ever been seen in the spec's own worked example, and on
-  the strength of that it looked like a rule that never fires on real input.
+  the strength of that it looked like a rule that never fires on real input — which is
+  also what made gap 2 look cosmetic, since the holes were what kept it from pairing.
 - **`:476` now pays.** `hpqtypes-extras` says `hpqtypes >=1.10.0.2 cannot be built
   here` where cabal says `pkg-config package libpq-any, not found in the pkg-config
   database`; both name the cause, and ours takes two lines against eight. Before the

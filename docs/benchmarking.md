@@ -4,7 +4,7 @@ How to reproduce every number in [STATUS.md](STATUS.md), and what each one is wo
 The short version:
 
 ```sh
-cabal test                    # 136 unit, property and golden tests, ~0.3 s
+cabal test                    # 145 unit, property and golden tests, ~0.3 s
 bench/compare.sh              # both solvers over bench/problems.txt
 ```
 
@@ -40,8 +40,14 @@ Two groups repay knowing about:
 - **`PubGrub paper examples`** — the six worked examples from
   [`references/pubgrub.md`](../references/pubgrub.md). The four satisfiable ones assert
   the solution the spec reports; the two unsatisfiable ones assert the **rendered
-  proof**, against the wording the spec publishes at `:1005` and `:1150`. A change to
-  report wording shows up here first, and should.
+  proof**, against the wording the spec publishes at `:1005` and `:1150` — and since
+  2026-08-20 the linear one matches it sentence for sentence. A change to report
+  wording shows up here first, and should. Its provider mints release **slots**, as
+  `Bridge.Provider` does: a harness that emits per-version dependers is not following
+  `:456`, and the divergence shows up as an extra proof line that looks like ours.
+- **`PubGrub.Report.collapseNoInstances`** — the empty-range post-pass, on trees built
+  by hand. The case that matters is the last one: the pass must leave a node's *terms*
+  untouched, because it re-labels a derivation step rather than recomputing it.
 
 ### Golden tests, and how to update them
 
