@@ -1,0 +1,71 @@
+# The UNSAT problem set: real Hackage packages that fail to resolve here, one
+# problem per line, "<package> [version-range]". Blank lines and #-comments are
+# ignored. Quote nothing — the range is the rest of the line.
+#
+#   OUT=/tmp/unsat bench/compare.sh   # (reads bench/problems.txt, not this file)
+#   while read -r p; do pubgrub $p; done < bench/unsat-problems.txt
+#
+# Why a second file. bench/problems.txt measures the SEARCH — index throughput and
+# conflict work — and its three unsat entries were found incidentally. These were
+# found on purpose, by harvesting Hackage's own build reports for the releases
+# where cabal itself failed to plan, and they exist to measure the EXPLANATION:
+# every one of them has cabal's message for the same problem next to ours.
+# docs/failure-cases.md holds the method, the failure kinds and the table.
+#
+# Two things to know before quoting any of these.
+#
+#  * They are pinned to THIS machine and THIS index. Four of the six failure kinds
+#    depend on what the compiler provides (base 4.21, ghc 9.12.2) or on what
+#    pkg-config can see — here libpq, libzmq, blas and lapack are ABSENT while
+#    cairo, pango, gtk, zlib, libsodium and libgit2 are present. On a machine with
+#    libpq installed, hpqtypes-extras resolves.
+#  * cabal solves setup and build-tool depends (solveExecutables = True) and we do
+#    not (rung 4 is unbuilt). On a package with a custom Setup.hs the two solvers
+#    are answering different questions. None of the 17 below has one, but check
+#    before adding.
+
+# --- pkg-config: a C library this machine does not have -------------------------
+# The most common kind among popular packages, and the one that exercises
+# references/pubgrub.md:474 — every release in range is unbuildable, so the proof
+# has to say so rather than call the range empty.
+hpqtypes-extras ==1.20.0.0      # libpq. 2 lines against cabal's 8
+haskoin-store-data ==1.6.0      # libsecp256k1, two hops down through haskoin-core
+
+# --- the installed base, and other boot packages -------------------------------
+# A bound that excludes the base the compiler provides. Nothing can move it, so
+# the interesting part is how briefly we can say so.
+purescript ==0.15.15            # base <4.17 against installed 4.21
+haddock ==2.29.1                # base in seven windows, none of them 4.21
+liquidhaskell ==0.9.14.1.1      # installed ghc
+language-puppet ==1.5.1         # ghc-prim, via aeson
+stackctl ==1.7.3.7              # base, via amazonka
+calamity ==0.12.1.0             # base, via aeson-optics
+hjsonschema ==1.10.0            # base and bytestring, via aeson
+
+# --- dead range: a declared bound naming a version never published -------------
+# `widen` puts the declared range into the term verbatim, so the dead space
+# survives into the proof.
+atelier-testing ==0.2.0.0       # atelier-core >=0.3 && <0.3.0.0, and two more
+cpsa ==4.4.9                    # deepseq >=1.4.8 && <1.4.8.0; base >=4.13 && <4.13.0
+happstack-hsp ==7.3.7.8         # template-haskell history
+
+# --- plain dependency conflict, no boot package involved -----------------------
+hadolint ==2.15.1               # time, against language-docker. The cleanest specimen
+cabal-install ==3.18.1.0        # Cabal / hackage-security
+futhark ==0.27.1                # regex / time chain
+
+# --- the two long ones, kept because they are where we still lose --------------
+# Both walk a dependency's bound history release by release, one sentence per
+# adjacent pair — the shape aeson '<2' has. Fix that and these are the measure.
+scion-browser ==0.5.0           # 16 lines against cabal's 12: the only loss
+matterhorn ==90000.1.1          # 16 against 18, and 11 no-version lines
+
+# --- positive controls: these RESOLVE here --------------------------------------
+# Each failed on Hackage's builder and succeeds here, which is the point: a
+# problem set for explanations has to contain problems that do not fail, or it
+# cannot show that a failure was real. Uncomment to run them.
+# vulkan ==3.27                 # builder lacked pkg-config vulkan; this machine has it
+# dataframe-csv ==2.3.0.0
+# xmobar ==0.51.1
+# timeplot ==1.0.33
+# gloss ==1.13.2.2
