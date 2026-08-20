@@ -115,6 +115,7 @@ test-suite pubgrub-hs-test
         InstanceSetSpec
         PaperSpec
         PartialSolutionSpec
+        ReportSpec
         SolverSpec
         StoreSpec
         VersionSetSpec

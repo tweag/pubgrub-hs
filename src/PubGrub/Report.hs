@@ -34,9 +34,12 @@
 -- being referred to.
 module PubGrub.Report
     ( reportConflict
+    , collapseNoInstances
     ) where
 
+import           Control.Monad           (guard)
 import qualified Data.Map.Strict         as Map
+import           Data.Maybe             (fromMaybe)
 import           Data.Text               (Text)
 import qualified Data.Text               as T
 import           PubGrub.Incompatibility (IncompatCause (..),
@@ -52,15 +55,87 @@ data Out = Out
     , outNext  :: !Int
     }
 
+-- | Absorb \"no version for @p@ in @r@\" facts into the sibling they were resolved
+-- against, and drop the step.
+--
+-- Intensional ranges are why these exist at all: a dependency's declared range is
+-- put into a term verbatim, so the solver has to /separately/ learn that the range's
+-- holes hold no releases, and each such discovery is a leaf of the derivation. They
+-- are honest facts, and they are noise.
+--
+-- __Why this is sound, and why it is not even a weakening.__ Resolving a unit clause
+-- @{p ∈ r}@ against a dependency fact on the pivot @p@ unions the two terms about
+-- @p@ and keeps the other side unchanged, so the step's own conclusion /already is/
+-- that dependency with @p@'s term adjusted. The pass therefore does not recompute
+-- anything: it keeps the derived node's terms exactly and re-labels them as the leaf
+-- they are equivalent to. Nothing in the proof gets wider or narrower; a step that
+-- said nothing new stops being a step. A fact about a version that does not exist
+-- constrains nothing.
+--
+-- Three cases are deliberately left alone:
+--
+--  * __both causes are holes.__ There is no dependency to absorb into, and two empty
+--    ranges do not make a sentence.
+--  * __the dependee's whole range is empty.__ Then the union over the pivot is ⊤, the
+--    dependee entry drops out of the resolvent, and rebuilding would produce a
+--    dependency fact whose dependee range is /gone/ — the proof would say \"haddock
+--    >=2.29.1 is forbidden\" and never mention @base@. @pair@ renders that case as
+--    \"depends on … , which has no versions\", which keeps the range, so the guard
+--    here is that the node must still carry a term for both packages.
+--  * __the sibling is itself derived.__ Only an external dependency fact is
+--    absorbed into; dropping the hole beside a derived sibling would print a
+--    conclusion wider than the line's two causes justify.
+collapseNoInstances :: Incompatibility -> Incompatibility
+collapseNoInstances inc = case incompCause inc of
+    CauseDerivedFrom c1 c2 ->
+        let c1' = collapseNoInstances c1
+            c2' = collapseNoInstances c2
+            node = Incompatibility (incompTerms inc) (CauseDerivedFrom c1' c2')
+         in fromMaybe node (absorb node c1' c2' `orElse` absorb node c2' c1')
+    _ -> inc
+  where
+    orElse (Just x) _ = Just x
+    orElse Nothing y  = y
+
+    -- @hole@ is a range known empty, @other@ the dependency fact it was resolved
+    -- against. Answers with the node re-labelled as that dependency, over the node's
+    -- own terms.
+    absorb node hole other = do
+        p <- emptyRange hole
+        (p1, q) <- dependencyPackages other
+        guard (p == p1 || p == q)
+        guard (Map.size (incompTerms node) == 2)
+        s1 <- positive =<< Map.lookup p1 (incompTerms node)
+        r2 <- negative =<< Map.lookup q (incompTerms node)
+        pure (Incompatibility (incompTerms node) (CauseDependency p1 s1 (q, r2)))
+
+    emptyRange c = case incompCause c of
+        CauseNoInstances p _ -> Just p
+        _                    -> Nothing
+
+    dependencyPackages c = case incompCause c of
+        CauseDependency p1 _ (q, _) | p1 /= q -> Just (p1, q)
+        _                                     -> Nothing
+
+    positive (Positive s) = Just s
+    positive _            = Nothing
+    negative (Negative s) = Just s
+    negative _            = Nothing
+
 -- | Render an incompatibility and its derivation as a human-readable proof.
 reportConflict :: Incompatibility -> Text
-reportConflict root = case incompCause root of
+reportConflict root0 = case incompCause root of
     CauseDerivedFrom _ _ ->
         render (reverse (outLines (derived True root (Out [] 1))))
     -- The terminal incompatibility is itself an external fact: nothing was
     -- derived, so the fact is the whole explanation.
     _ -> leaf root
   where
+    -- The holes go first: a derivation step that only established that a range is
+    -- empty is not a step worth a line, and leaving them in is what stops the chain
+    -- fusion below from ever firing on a real problem.
+    root = collapseNoInstances root0
+
     render ls = T.intercalate "\n" [prefix n <> t | (n, t) <- ls]
     prefix Nothing  = ""
     prefix (Just n) = T.pack (show n) <> ". "
