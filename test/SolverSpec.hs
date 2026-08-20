@@ -55,14 +55,14 @@ mkProvider deps = Provider expand'
   where
     expand' p range =
         case filter (`memberInstance` range) allInstances of
-            [] -> pure Nothing
+            [] -> pure (Nothing, [])
             candidates ->
                 let chosen = maximumBy (comparing version) candidates
                     incs =
                         [ fromDependency p (singletonInstance chosen) d (setOf ds)
                         | (d, ds) <- deps chosen
                         ]
-                 in pure (Just (chosen, incs))
+                 in pure (Just chosen, incs)
 
 -- | Run the solver purely, discarding the solver's log trace. A failure is kept
 -- as its rendered report rather than 'show'n: the derived 'Show' would expand

@@ -58,6 +58,7 @@ import           PubGrub.Incompatibility        (IncompatRelation (..),
                                                  isTerminal, noInstances,
                                                  notRoot, priorCause)
 import           PubGrub.InstanceSet            (Instance, InstanceSet,
+                                                 emptyInstanceSet,
                                                  singletonInstance)
 import           PubGrub.Provider               (Provider (..))
 import           PubGrub.SetOps                 (SetOps (..))
@@ -442,9 +443,33 @@ solve provider rootPkg rootV =
                         ((p, range) : _) -> do
                             logMsg (Deciding p range)
                             expand provider p range >>= \case
-                                Nothing -> do
-                                    logMsg (NoVersionFor p range)
-                                    go (insertClause (noInstances p range) incompats') ps'
-                                Just (i, depIncs) -> do
+                                (Just i, incs) -> do
                                     logMsg (Chose p i)
-                                    go (insertClauses depIncs incompats') (addDecision p i ps')
+                                    go (insertClauses incs incompats') (addDecision p i ps')
+                                (Nothing, facts) -> do
+                                    logMsg (NoVersionFor p range)
+                                    go (insertClauses facts (banRest p range facts incompats')) ps'
+
+        -- The provider has nothing to offer in @range@, and may have said why:
+        -- clauses banning the releases it rejected on the way
+        -- (@references\/pubgrub.md:475@). Those are a better explanation than
+        -- "no version for p in range" — they name the reason rather than the
+        -- symptom — but they are not necessarily a complete one, so what is left
+        -- of the range gets the weaker statement it deserves and no more.
+        --
+        -- __Progress does not depend on the provider being thorough.__ Whatever it
+        -- says, this bans all of @range@ between them: the facts cover part, the
+        -- @noInstances@ clause covers the remainder. So @p@ cannot be offered the
+        -- same set twice, which is the property termination rests on. 'isEmpty' is
+        -- one-sided on an 'InstanceSet' — it may miss that a set is empty — and it
+        -- errs in the safe direction here: a redundant clause, never a missing one.
+        banRest p range facts
+            -- Said nothing: the range itself, untouched. A @difference@ against the
+            -- empty set would give an equivalent but differently shaped DNF, and so
+            -- change the search for every provider that states no facts.
+            | null stated = insertClause (noInstances p range)
+            | isEmpty leftover = id
+            | otherwise = insertClause (noInstances p leftover)
+          where
+            leftover = range `difference` foldr union emptyInstanceSet stated
+            stated = [s | inc <- facts, Just (Positive s) <- [incompGet p inc]]

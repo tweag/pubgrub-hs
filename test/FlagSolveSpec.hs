@@ -349,7 +349,7 @@ bootPackageStatesItself =
                     (\_ _ -> error "this world has no releases to read")
         result <- BP.mkExpand db source [] (mkPackageName name) (everything name)
         case result of
-            Just (UsePreInstalled _, incs) -> pure incs
+            (Just (UsePreInstalled _), incs) -> pure incs
             _ -> liftIO (assertFailure "expected the installed unit to be chosen")
 
     -- What the solver offers before it knows anything: the installed unit, or any
@@ -412,6 +412,25 @@ unbuildableStatesItself =
                         , (pkg "foo", v2, [])
                         ]
                     )
+        , -- The case the fact used to be dropped in, and the one that actually
+          -- The case that occurs on Hackage: the offered range holds *nothing
+          -- but* unbuildable releases, so the scan exhausts and there is no
+          -- decision for the facts to ride out with. They are reported anyway
+          -- ('expand' answers @(Nothing, facts)@): `hpqtypes >=1.13` is three
+          -- releases all needing libpq, and without the facts the proof says the
+          -- range is empty when the releases exist and cannot be built.
+          testCase "a range of only unbuildable releases still says why" $ do
+            let onlyBad = [(pkg "foo", v2), (pkg "foo", v1)]
+            result <- solveWorldWith onlyBad world
+            case result of
+                Right sol -> assertFailure ("expected no solution, got " ++ show (Map.keys sol))
+                Left proof -> do
+                    assertBool
+                        ("the proof should still say foo cannot be built here:\n" <> T.unpack proof)
+                        (T.pack "cannot be built here" `T.isInfixOf` proof)
+                    assertBool
+                        ("and must not call the unbuildable range empty:\n" <> T.unpack proof)
+                        (not (T.pack "no version for foo in >=1" `T.isInfixOf` proof))
         , -- And the fact itself, at the point it is minted: the scan passes 2.0.0,
           -- settles on 1.0.0, and hands both out together — an incompatibility need
           -- not be about the instance just decided.
@@ -419,7 +438,7 @@ unbuildableStatesItself =
             let provider = worldProviderWith [(pkg "foo", v2)] world
             result <- runTestM (expand provider (pkg "foo") anyInstance)
             case result of
-                Just (BuildSource v _, incs) -> do
+                (Just (BuildSource v _), incs) -> do
                     v @?= v1
                     [p | CauseUnbuildable p _ <- map incompCause incs] @?= [pkg "foo"]
                 _ -> assertFailure "expected 1.0.0 to be chosen"

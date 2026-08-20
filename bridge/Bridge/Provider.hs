@@ -305,7 +305,7 @@ mkExpand
     -- ^ the synthetic root's targets, which are not in the index
     -> PackageName
     -> InstanceSet
-    -> m (Maybe (Instance, [Incompatibility]))
+    -> m (Maybe Instance, [Incompatibility])
 mkExpand installedDb source root = expand'
   where
     -- An 'InstanceSet' is a symbolic description (version ranges plus flag
@@ -314,11 +314,11 @@ mkExpand installedDb source root = expand'
     -- and then source (version, cell) pairs newest first, and commit to the
     -- first the offered set admits. A source candidate's @.cabal@ is parsed
     -- only when it is tried.
-    expand' :: PackageName -> InstanceSet -> m (Maybe (Instance, [Incompatibility]))
+    expand' :: PackageName -> InstanceSet -> m (Maybe Instance, [Incompatibility])
     expand' pn range
             | pn == rootName
             , memberInstance rootInstance range
-            = pure (Just (rootInstance, incs))
+            = pure (Just rootInstance, incs)
                 where
                     incs = [ fromDependency rootName (singletonInstance rootInstance) depName (widen depName vs)
                            | (depName, vs) <- root
@@ -329,7 +329,7 @@ mkExpand installedDb source root = expand'
         case listToMaybe admissible of
             Just chosen -> do
                 incs <- consequencesOfUsePreInstalled chosen
-                pure (Just (UsePreInstalled chosen, onlyInstalledFact pn ++ incs))
+                pure (Just (UsePreInstalled chosen), onlyInstalledFact pn ++ incs)
             -- No admissible installed unit. For most packages that means falling
             -- through to source releases; for a non-reinstallable one it means
             -- nothing at all, because its Hackage releases cannot be built against
@@ -338,7 +338,7 @@ mkExpand installedDb source root = expand'
             -- installed ones. Without it @aeson '<2'@ resolves by planning to build
             -- @base 4.15.1.0@ from Hackage, which cabal rejects.
             Nothing
-                | isNonReinstallable pn -> pure Nothing
+                | isNonReinstallable pn -> pure (Nothing, [])
                 | otherwise -> firstUsable (withSlots (rsVersionsOf source pn))
 
                 where
@@ -354,13 +354,14 @@ mkExpand installedDb source root = expand'
                     -- (@docs\/flags-semantics.md@ §10).
                     firstUsable = scan []
 
-                    -- An exhausted list is the solver's business: it turns @Nothing@
-                    -- into "no instances in range". The facts in @stated@ are lost
-                    -- here, since there is no instance to return them with, and
-                    -- keeping them would mean changing what @expand@ returns. So a
-                    -- range whose every release is unbuildable still reports as "no
-                    -- version for p in range".
-                    scan _stated [] = pure Nothing
+                    -- An exhausted list answers @Nothing@, and the facts go with it.
+                    -- That is why 'expand' reports its clauses outside the 'Maybe': a
+                    -- range holding nothing but unbuildable releases is the commonest
+                    -- way a real Hackage package fails to resolve, and without the
+                    -- facts the report says "no version for hpqtypes in >=1.13" where
+                    -- cabal says "pkg-config package libpq-any, not found in the
+                    -- pkg-config database".
+                    scan stated [] = pure (Nothing, reverse stated)
                     scan stated ((v, slot):rest) = do
                         result <- rsReadRelease source pn v
                         case result of
@@ -418,7 +419,7 @@ mkExpand installedDb source root = expand'
                                                   inst `memberInstance` sourceInstances slot assignment
                                                 , dep <- deps
                                                 ]
-                                        pure (Just (inst, reverse stated ++ incs))
+                                        pure (Just inst, reverse stated ++ incs)
 
                     -- The assignments this release could be built under, in
                     -- preference order, keeping only those the offered set

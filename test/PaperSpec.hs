@@ -124,14 +124,14 @@ mkProvider world = Provider expand'
 
     expand' p range =
         case filter (`memberInstance` range) (universe p) of
-            [] -> pure Nothing
+            [] -> pure (Nothing, [])
             candidates ->
                 let chosen = maximumBy (comparing version) candidates
                     incs =
                         [ fromDependency p (singletonInstance chosen) d (widen d vs)
                         | (d, vs) <- depsOf p chosen
                         ]
-                 in pure (Just (chosen, incs))
+                 in pure (Just chosen, incs)
 
 -- | Run the solver purely, discarding the solver's log trace.
 runSolve

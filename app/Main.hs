@@ -306,15 +306,13 @@ dependencyMap provider solution =
     Map.fromList <$> mapM childrenOf (Map.toList solution)
   where
     childrenOf (pn, inst) = do
-        result <- expand provider pn (singletonInstance inst)
-        let deps = case result of
-                Just (_, incs) ->
-                    [ d
-                    | inc <- incs
-                    , CauseDependency p _ (d, _) <- [incompCause inc]
-                    , p == pn
-                    ]
-                Nothing -> []
+        (_, incs) <- expand provider pn (singletonInstance inst)
+        let deps =
+                [ d
+                | inc <- incs
+                , CauseDependency p _ (d, _) <- [incompCause inc]
+                , p == pn
+                ]
         pure (pn, deps)
 
 -- | Render the solution as a dependency tree from the synthetic root, in the
