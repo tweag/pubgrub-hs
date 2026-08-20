@@ -519,6 +519,34 @@ never been exercised by a measurement — only by tests. **A problem set that ne
 a path cannot report anything about it**, which is a requirement on the unsat problem
 set the deliverables still need, not on the code.
 
+### Hackage's build reports are where the failures were, and one of them moved a corner into the middle
+
+*Aug 20.* The explanation deliverable had three unsat problems, all found by accident.
+Hackage keeps the build bot's report per release, and `PlanningFailed` means cabal
+failed to *resolve* — with its solver log attached, which is the baseline half of a
+side-by-side for free. About 10% of latest versions are `PlanningFailed`, so the supply
+was never the constraint; nobody had looked. 17 reproduce here, over six failure kinds,
+plus five that reproduce as *successes* and are kept as controls
+([failure-cases.md](failure-cases.md)).
+
+The finding that cost the most to have been wrong about: **pkg-config failures are the
+most common kind** — 14 of 28 among the top 101–500 by downloads — and they arrive in
+the shape we had just decided was a corner. `references/pubgrub.md:476` had been
+implemented that morning for the case where the scan passes over an unbuildable release
+and settles on an older one; the case where the *whole range* is unbuildable dropped the
+facts, and this log's own entry called that acceptable. It is the reachable shape, every
+time. So the clause was emitted exactly when it could not help and dropped exactly when
+it would, and `pubgrub hpqtypes '>=1.13'` said "no version for hpqtypes in >=1.13" where
+cabal said "pkg-config package libpq-any, not found in the pkg-config database".
+
+**A five-problem set chosen to measure search cannot report on a path it never walks.**
+Zero of the five meets an unbuildable release, which is why the hole survived a
+measurement, a test suite and a written caveat on the same day. The lesson is not about
+buildability: it is that "measured, no change" means nothing until you know the problem
+set exercises the thing. Two other claims in `CLAUDE.md` fell to the same set — gap 2's
+"exactly one known instance" (9 of 17 carry those lines) and gap 4's "stray space",
+which is a real NUL byte that makes GNU `grep` silently treat every proof as binary.
+
 ---
 
 ## Open right now

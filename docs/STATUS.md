@@ -77,6 +77,7 @@ the "authoritative on" column says who owns the question.
 | [`pubgrub-intro.md`](pubgrub-intro.md) | tutorial introduction to PubGrub | useful, three stale sections (flagged in it) |
 | [`flags-semantics-review.md`](flags-semantics-review.md) | an independent review of the flag spec | 2026-08-05; findings folded in, kept as the record |
 | [`benchmarking.md`](benchmarking.md) | **how to run the tests and benchmarks**, and which numbers to trust | current, 2026-08-12 |
+| [`failure-cases.md`](failure-cases.md) | **the unsat problem set**: where it came from, the six failure kinds, ours against cabal | current, 2026-08-20 |
 | [`collapsing.md`](collapsing.md) | **depender collapsing**: what landed, its cost, and the five ways to finish it | design note, 2026-08-12, **closed 2026-08-17** by merging in the store (its option 4). Kept as the record of what each option was worth; its numbers predate the release-1 scope cut and one of its two motivations was the 2^k re-offer that cut removes |
 | [`decision-log.md`](decision-log.md) | project history | narrative, not authoritative |
 | [`related-work.md`](related-work.md) | external literature → our problems | reading map, not authoritative |
@@ -1386,18 +1387,65 @@ What landed:
   which is the "as well as any adjacent versions" half of `:476`, for free;
 - a proof line now reads `foo >=2.0.0 cannot be built here`.
 
-**Two honest caveats.** The *exhausted* case still loses the facts: if every release in
-range is unbuildable the provider answers `Nothing`, and with no instance to return
-there is nowhere to put them short of changing what `expand` returns. And — the finding
-worth carrying — **none of the five benchmark problems meets an unbuildable release at
-all**. Instrumenting the scan counted zero on all five, so both the pre-existing skip
-and this clause are dead code on the current problem set: the measured cost of the
-change is nil and so is its measured benefit. It is exercised only by
-`test/FlagSolveSpec.hs` (end to end: the same world solves when the release is
-buildable, and explains itself when it is not) and `test/StoreSpec.hs` (the adjacency
-merge). Any problem set meant to evidence the explanation deliverable should include a
-package with `pkgconfig-depends` this machine lacks, or the buildability rung goes
-unmeasured.
+**Two caveats, and the first of them was wrong within the day.** As landed, the
+*exhausted* case still lost the facts: if every release in range was unbuildable the
+provider answered `Nothing`, and with no instance to return there was nowhere to put
+them short of changing what `expand` returns. This section called that a corner. It is
+not — it is the commonest way a popular Hackage package fails to plan, and it is fixed:
+see [Reporting why a range is unbuildable](#reporting-why-a-range-is-unbuildable-2026-08-20).
+
+The second caveat stands and is why the first went unnoticed: **none of the five
+benchmark problems meets an unbuildable release at all.** Instrumenting the scan counted
+zero on all five, so on *that* problem set both the skip and the clause are dead code,
+with a measured cost and benefit of nil. The lesson is about the problem set rather than
+the code — a five-problem set chosen to measure search cannot report on a path it never
+walks, which is what [`failure-cases.md`](failure-cases.md) exists to fix.
+
+### Reporting why a range is unbuildable (2026-08-20)
+
+`references/pubgrub.md:476` had been half implemented since earlier the same day: the
+provider stated "this release cannot be built here" for each release its scan passed
+over, but when the offered range held nothing *but* unbuildable releases the scan
+exhausted, there was no instance to carry the facts out with, and they were dropped.
+
+**The clause was being emitted exactly when it could not help, and dropped exactly when
+it would.** A plain `pubgrub hpqtypes` skips five releases and resolves to 1.10.0.1, so
+the facts land in a solve that succeeds and no proof ever shows them. Constrain into the
+skipped region and the scan exhausts:
+
+| | |
+|---|---|
+| before | `no version for hpqtypes in >=1.13` |
+| after | `hpqtypes >=1.10.0.2 cannot be built here` |
+| cabal | `pkg-config package libpq-any, not found in the pkg-config database` |
+
+`expand` now answers `(Maybe Instance, [Incompatibility])` — what it chose, and what it
+learned, the second independent of the first. That was the interface change this file
+had flagged as the price and deferred; the harvested problem set is what made it worth
+paying, because pkg-config failures are **14 of the 28** planning failures among the top
+101–500 packages by downloads.
+
+The solver keeps its own progress guarantee rather than trusting the provider to be
+thorough. On `Nothing` it inserts the facts and then bans whatever part of the offered
+range they do not cover: nothing said → `noInstances` over the whole range exactly as
+before; facts covering it → no `noInstances` at all, so the proof cites the reason;
+facts covering part → `noInstances` over the remainder only. Either way the whole range
+is banned, so the same set cannot be offered twice — the property termination rested on
+when `noInstances` was unconditional.
+
+**Measured: identical on all five benchmark problems** — same decisions, reads,
+allocation, residency, no-version events and proof lengths, because none of them meets
+an unbuildable release. The gain is on the harvested set: `hpqtypes-extras ==1.20.0.0`
+is 2 proof sentences against cabal's 8 and names `libpq`; `haskoin-store-data ==1.6.0`
+went 6 sentences to 4.
+
+A second wording fix landed with it. A dependency whose dependee range the solver has
+already found empty used to print that range twice in one sentence — `haddock ==2.29.1`
+printed base's seven-window bound at both ends of the same line. It now reads
+"… depends on base >=4.13.0.0 && <4.14 || …, which has no versions", guarded by a subset
+test so it cannot claim more than the two facts do. Three of the harvested problems lost
+their `no version for` lines to it, which is why gap 2's instance count is 9 of 17 and
+not 12.
 
 ### The explanation target, now concrete
 
@@ -1505,7 +1553,7 @@ moves; treat a cited line number as a hint, and grep for the identifier.
 
 | deliverable | state |
 |---|---|
-| **Explanation showcase** — real failing problems, pubgrub-hs vs cabal side by side | proofs now follow the spec's own reporting algorithm and are **shorter than cabal's message on two of the three unsat problems** (`lens <4` 4 lines against 22, `conduit <1.3` 7 against 16, `aeson <2` 57 against 30), with both of the spec's published examples pinned as tests. Still missing: side-by-side rendering, an *unsat* problem set, and gap 2 — which is now the top item because it is also what blocks the last fusion |
+| **Explanation showcase** — real failing problems, pubgrub-hs vs cabal side by side | **the problem set now exists**: 17 real failures harvested from Hackage's build reports, six failure kinds, five positive controls ([`failure-cases.md`](failure-cases.md)). We are shorter than cabal's message on **16 of 17**, and on the two benchmark unsat problems too (`lens <4` 4 lines against 22, `conduit <1.3` 7 against 16; `aeson <2` 57 against 30 is the outlier). Both of the spec's published examples are pinned as golden tests. Still missing: the harness, side-by-side rendering, and gap 2 — which stays the top reporting item because it is also what blocks the last fusion |
 | **Benchmark report** — time + peak residency on real sat/unsat problems | **current numbers exist** for five problems, two sat and three unsat, both solvers ([Merge on insert](#merge-on-insert-the-collapsing-trade-is-gone-2026-08-17)), and they are now favourable on every problem. Not a report: index build still not separated from solve, timings are one or two runs against ±25% noise, and what the ~22 MB memory floor consists of is unestablished — which is the next thing to settle, since a memory claim is now the strongest one we have |
 
 The baseline and the shared index are done — `cabal-install-solver` drives cabal's

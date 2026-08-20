@@ -518,11 +518,22 @@ and no cell is pinned while flags are fixed at their defaults.
    Mostly overtaken by slots (gap 1): holes *between* releases no longer form. What
    is left comes from the other direction — `Bridge.Provider.widen` puts a
    **declared** dependency range into a term verbatim, so dead space still survives.
-   **There is now exactly one known instance**, and it is worth keeping as the test
-   case: `transformers >=0.2.2 && <0.2.2.0` in `conduit <1.3`, a window whose only
-   candidate version does not exist (the oldest matching release is `0.2.2.0`). It is
-   also, identified at last, the single conflict that narrowing removed when it was
-   tried and reverted twice below.
+   **This file claimed until 2026-08-20 that there was exactly one known instance**
+   — `transformers >=0.2.2 && <0.2.2.0` in `conduit <1.3`. That was an artifact of
+   measuring five problems. Against the harvested unsat set
+   ([`docs/failure-cases.md`](docs/failure-cases.md)) **9 of 17 carry
+   `no version for` lines**, several of them the same shape, a declared bound naming
+   a version never published: `cpsa` (`deepseq >=1.4.8 && <1.4.8.0`,
+   `base >=4.13 && <4.13.0`), `atelier-testing` (`atelier-core >=0.3 && <0.3.0.0`,
+   `atelier-prelude >=0.1 && <0.1.0.0`), `hjsonschema`
+   (`aeson >=0.11 && <0.11.0.0`, `bytestring >=0.10.4 && <0.10.4.0`),
+   `futhark` (`time-locale-compat >=0.1 && <0.1.0.0`), `scion-browser`
+   (`tar >=0.3 && <0.3.0.0`, `haskeline >=0.7 && <0.7.0.0`). `matterhorn` carries 11
+   such lines — about half its proof. Note the other three the harvest first found
+   (`haddock`, `purescript`, `liquidhaskell`) lost theirs to the empty-range wording
+   fix in gap 4's sibling, so the count is 9 and not 12. The `conduit` one is still the smallest test case; it is not the only one,
+   and it is the conflict that narrowing removed when it was tried and reverted
+   twice below.
 
    Narrowing that against the version map was tried twice on 2026-08-12 and
    **reverted twice**: it removes one conflict on one of five problems and costs 3.9%
@@ -563,9 +574,15 @@ and no cell is pinned while flags are fixed at their defaults.
 4. Cosmetic, and *two of these came for free with gap 3*: `So,` on the final line
    ✅ and numbering only the lines actually referenced ✅ (a linear proof now carries
    no numbers at all, per `:596`). Still open: terminal periods on non-final lines;
-   omit the synthetic root's version — which also prints the NUL in
-   `Bridge.Provider.rootName` as a stray space; "every version of foo" where the spec
-   says that rather than `foo >=0`; and the blank line the spec puts between branches.
+   omit the synthetic root's version — which also emits the NUL in
+   `Bridge.Provider.rootName` as **a real `\0` byte, not the "stray space" this file
+   used to call it**. GNU `grep` therefore treats every proof as binary and silently
+   reports no matches without `-a`: `grep -c because` finds nothing where
+   `grep -ac because` finds it. `bench/compare.sh` passes `-a` everywhere and
+   `summarise.awk` is unaffected, so no measurement is wrong, but new tooling that
+   greps a proof will read zero and look like it passed. Also open: "every version of
+   foo" where the spec says that rather than `foo >=0`; and the blank line the spec
+   puts between branches.
    Note `bench/summarise.awk` counts proof lines by their opening connective now,
    *because* numbering went sparse — see `docs/benchmarking.md`.
 5. **Collapse cells that exhaust a flag's states.** *Dormant since 2026-08-17: no
