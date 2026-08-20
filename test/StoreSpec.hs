@@ -25,6 +25,7 @@ import           PubGrub.Incompatibility        (IncompatCause (..),
 import           PubGrub.InstanceSet            (InstanceSet (..))
 import           PubGrub.InstanceSet.SourceCell (FlagPin (..), SourceCell (..))
 import           PubGrub.SetOps                 (equivalent)
+import           PubGrub.Term                   (Term (..))
 import           PubGrub.Store                  (emptyStore, insertClause,
                                                  insertClauses, storeClauses)
 import qualified PubGrub.VersionSet             as VersionSet
@@ -76,6 +77,7 @@ tests =
         [ testGroup "merging dependency facts" mergeTests
         , testGroup "merging unbuildable facts" unbuildableTests
         , testGroup "what must not merge" separateTests
+        , testGroup "self-dependencies" selfDepTests
         ]
 
 -- --------------------------------------------------------------------------
@@ -290,3 +292,56 @@ shouldDenote actual expected =
 -- met.
 denotesVersion :: InstanceSet -> Version -> Bool
 denotesVersion s ver = any (\vs -> VersionSet.contains vs ver) (map scVersionSet (isSource s))
+
+-- --------------------------------------------------------------------------
+-- Self-dependencies
+-- --------------------------------------------------------------------------
+
+-- | A dependency of @p@ on @p@ puts /two/ entries about one variable into
+-- 'fromDependency'. They have to be intersected, not overwritten.
+--
+-- 'PubGrub.Store.mergeInto' rebuilds a merged clause through 'fromDependency', so
+-- the shape matters here as well as at the provider, which is the other reason
+-- this lives in this module. The provider does not emit such a fact at all
+-- (@Bridge.Provider@, following cabal\'s @extendOpen@), so these tests are the
+-- guard rather than the rule.
+selfDepTests :: [TestTree]
+selfDepTests =
+    [ testCase "the depender term survives, and the clause stays positive" $ do
+        -- p in [1,2) requires p in [2,3): impossible for every instance of p in
+        -- [1,2), and says nothing whatever about the rest of p.
+        case Map.toList (incompTerms (fromDependency pkgA (slot 1 2) pkgA (range 2 3))) of
+            [(p, Positive s)] -> do
+                p @?= pkgA
+                s `shouldDenote` sourceOnly (halfOpen 1 2)
+            ts ->
+                assertFailure
+                    ( "expected one positive term about a, got "
+                        ++ show (length ts)
+                        ++ " term(s): "
+                        ++ show [(p, negativeTerm t) | (p, t) <- ts]
+                    )
+    , -- The regression proper. Overwriting instead of intersecting left
+      -- Overwriting instead of intersecting would leave @{p: Negative depSet}@ —
+      -- "p must be in depSet", asserted of every instance of p rather than of the
+      -- ones the depender term named. On @lens@ that forces @lens ==1.7@ across a
+      -- whole solve.
+      testCase "it is never a bare requirement on the whole package" $ do
+        let inc = fromDependency pkgA (slot 1 2) pkgA (range 2 3)
+        assertBool
+            "a self-dependency must not become a Negative unit clause"
+            (not (any negativeTerm (Map.elems (incompTerms inc))))
+    , testCase "a self-dependency covering its own slot claims nothing" $ do
+        -- The ordinary case: a component built against its own library, at its own
+        -- version. The difference is empty, so the clause is unsatisfiable — it
+        -- forbids nothing and constrains nothing.
+        case Map.toList (incompTerms (fromDependency pkgA (slot 1 2) pkgA (range 1 3))) of
+            [(_, Positive s)] ->
+                assertBool
+                    "expected an empty positive term"
+                    (s `equivalent` InstanceSet{isInstalled = Set.empty, isSource = []})
+            ts -> assertFailure ("expected one term, got " ++ show (length ts))
+    ]
+  where
+    negativeTerm (Negative _) = True
+    negativeTerm (Positive _) = False

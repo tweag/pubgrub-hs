@@ -153,12 +153,31 @@ unbuildable p s = Incompatibility (Map.singleton p (Positive s)) (CauseUnbuildab
 -- constrains versions; the provider widens that to instances). If @depSet@ is
 -- empty the dependency is unsatisfiable and the entry would be ⊤, so it is
 -- dropped, leaving a unit ban on @package@.
+--
+-- __'Map.fromListWith', not 'Map.fromList'__, and it is load-bearing when
+-- @package == dep@ — a __self-dependency__. Both entries are then about one
+-- variable, and an incompatibility is a conjunction of its terms, so the entry
+-- has to be their /intersection/:
+-- @intersectTerm (Positive V) (Negative R) = Positive (V \\ R)@, exactly the
+-- clause \"no instance of p in @V@ whose own requirement @R@ it falls outside
+-- of\". 'Map.fromList' would keep the last binding instead, dropping the
+-- @Positive@ depender term and turning the conditional fact into the
+-- unconditional unit clause @{p: Negative R}@ — \"p must be in R\", asserted of
+-- every instance of @p@ rather than of the ones in @V@.
+--
+-- A provider should drop a self-dependency before it gets here, so this is the
+-- guard rather than the rule. Keeping it correct rather than rejecting it also
+-- keeps 'PubGrub.Store.mergeInto', which rebuilds through this constructor,
+-- safe by construction.
 fromDependency :: PackageName -> InstanceSet -> PackageName -> InstanceSet -> Incompatibility
 fromDependency pkgName pkgSet depName depSet =
     Incompatibility
         (if isTopTerm (Negative depSet)
             then Map.singleton pkgName (Positive pkgSet)
-            else Map.fromList [(pkgName, Positive pkgSet), (depName, Negative depSet)])
+            else
+                Map.fromListWith
+                    intersectTerm
+                    [(pkgName, Positive pkgSet), (depName, Negative depSet)])
         (CauseDependency pkgName pkgSet (depName, depSet))
 
 -- Judging against the partial solution -----------------------------------------

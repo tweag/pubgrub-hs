@@ -1213,6 +1213,10 @@ And against cabal, which is the comparison that matters:
 | `lens <4` | 1.49 / 1.52, 1.57 | 1.53 | **26.1** | 76.2 MB | 2.55 | **1.88** GB | **9** | 22 |
 | `aeson <2` | 1.66 / 1.66, 1.75 | 2.60 | **22.6** | 80.4 MB | **3.15** | 5.43 GB | 178 | **30** |
 
+> The `lens <4` row predates the intra-package-dependency fix (2026-08-21): its reads,
+> decisions and proof length have all moved. See "Intra-package dependencies dropped".
+> The other four rows are unaffected by the fix but have not been re-run since.
+
 **We are now faster than cabal on all five, leaner in memory on all five (2.2–3.5×),
 and allocate less on four of five.** `lens <4` is the exception on allocation, and it
 is also the problem where our proof is **9 lines against cabal's 22** — the first
@@ -1325,6 +1329,10 @@ one place — where the derivation branches.
 | `conduit <1.3` | 12 | **7** | 16 |
 | `lens <4` | 6 | **4** | 22 |
 | `aeson <2` | 83 | **57** | 30 |
+
+> `lens <4`'s 4 is superseded: it is **7** since the intra-package-dependency fix, and
+> those 4 lines were answering the wrong question. See "Intra-package dependencies
+> dropped" below.
 
 **Nothing else moved, by construction**: the change is confined to rendering, and
 reads, allocation, max residency and every trace count are identical either side of it
@@ -1502,6 +1510,49 @@ foo" where we write `foo >=1.0.0`, the synthetic root's version, terminal period
 plus Dart's `^1.0.0` against cabal's range syntax, which is deliberate. The branching
 example keeps its six lines; its remaining difference from the spec is which pair of
 facts each line fuses, not how many lines there are.
+
+### Intra-package dependencies dropped, and `lens <4`'s proof starts answering the question (2026-08-21)
+
+A dependency of `p` on `p` is no longer emitted, and `fromDependency` no longer collapses
+one if it arrives (CLAUDE.md, "Intra-package dependencies"; `decision-log.md` Era 10 for
+how it was found). `lens <4` was the problem carrying one, so it is the one that moved.
+
+| | before | after |
+|---|---|---|
+| decisions | 317 | **225** |
+| `.cabal` reads | 178 | **274** |
+| proof lines | 4 | **7** (cabal: 22) |
+| no-version events | 0 | 4 |
+| conflicts / resolving steps | — | 137 / 26 |
+
+**The proof got longer and much better, and the last line is why.** It used to open on
+*"lens ==1.7 is required"* — the bogus clause, unbacked — and everything under it
+reasoned about lens 1.7. It now ends
+
+```
+So, because no version for base in >=4.4 && <4.5 and root ==0 depends on lens <4, version solving failed
+```
+
+so the derivation reaches the root fact and the proof explains *the question that was
+asked* rather than the fate of one release. Four lines that answer the wrong question are
+worse than seven that answer the right one, and the old count was not a real win.
+
+**Decisions fell and reads rose, for the same reason.** The bogus unit clause pinned
+`lens` the moment 1.7 was expanded and its conflict terminated the search there, so the
+old run stopped early on a false premise: fewer reads, and *more* decisions, because
+forcing `lens ==1.7` made the solver re-derive around a constraint that was never real.
+The search now runs to a genuine conclusion.
+
+**Four no-version events are back**, where "Where the no-version events came from" had
+them at 0, and two of them reach the proof (`base` in `>=4.5 && <4.7` and in
+`>=4.4 && <4.5`). Both are Reporting gap 2's surviving shape — a declared bound naming a
+version never published — not a regression in the collapsing pass.
+
+**Only `lens <4` is measured.** No timings, allocation or residency for it, and the other
+four problems in `bench/problems.txt` have not been re-run: any of them may carry a
+self-dependency too. Every `lens <4` figure elsewhere in this file predates the fix —
+notably the comparison table in "Merge on insert" and the proof-length table in "Chain
+collapsing" — and so does the `lens <4` claim in "Deliverable status".
 
 ### The explanation target, now concrete
 

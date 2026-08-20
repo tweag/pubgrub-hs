@@ -421,6 +421,10 @@ mkExpand installedDb source root = expand'
                                                   -- makes the fact true of it
                                                   inst `memberInstance` slotInstances slot assignment
                                                 , dep <- deps
+                                                , -- and not a self-dependency: an
+                                                  -- intra-package edge, not a version
+                                                  -- constraint (see the note below)
+                                                  depPkgName dep /= pn
                                                 ]
                                         pure (Just inst, reverse stated ++ incs)
 
@@ -530,6 +534,30 @@ mkExpand installedDb source root = expand'
                     closureEdges installedDb (pipUnitId pip)
                 ]
 
+    -- Why a dependency of @p@ on @p@ itself is dropped rather than stated (the
+    -- @depPkgName dep /= pn@ filter in 'expand'' above).
+    --
+    -- It is not a version constraint. @lens 1.7@ depends on @lens ==1.7@ because
+    -- one of its components (an executable) is built against its own library: an
+    -- /intra-package/ edge, resolved inside the package. Stated as a fact it says
+    -- something much stronger and false: that every instance of @lens@ must be
+    -- @1.7@.
+    --
+    -- __This is cabal\'s rule.__ @Distribution.Solver.Modular.Builder.extendOpen@
+    -- adds no goal and no edge when @qpn == qpn\'@, /except/ for a setup dependency,
+    -- where it adds only a reverse-dependency edge, so that the cycle makes the
+    -- solver pick a different instance for the setup script.
+    -- @Distribution.Solver.Modular.IndexConversion@ likewise drops a
+    -- @build-tool-depends@ on the package\'s own executable (@isInternal@).
+    --
+    -- We model neither setup nor build-tool dependencies yet. When they arrive the
+    -- setup exception must come with them, and qualified goals will __not__ subsume
+    -- this rule: a library dependency inherits its depender\'s qualifier
+    -- (@qualifyDeps@\'s @inheritedQ@), so an executable\'s dependency on its own
+    -- library is a self-dependency under any qualifier scheme.
+    --
+    -- The installed side drops it too: 'Bridge.Installed.closureEdges' emits no
+    -- edge for a self-dependency.
     -- | One guarded dependency occurrence of the decided release, as an
     -- incompatibility over that release\'s __slot__: the half-open range up to the
     -- next release in the index ('withSlots').

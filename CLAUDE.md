@@ -219,7 +219,60 @@ time; each rung leaves a runnable solver and we measure both deliverables at eac
   of `mtl` per solve. This has to be specified before rung 4 is built; the immediate
   job is to understand what cabal actually emits (its plan loses the qualifiers to
   `convCP` on the way out, so reading a flat plan will mislead).
+
+  **Qualified goals were designed 2026-08-21 and shelved, and the reason matters.** We
+  reached for them to fix a self-dependency bug and they do not fix it: `qualifyDeps`'s
+  `inheritedQ` gives a **library** dependency its depender's qualifier — only
+  `setup-depends` and `build-tool-depends` override it — so an executable's dependency
+  on its own library is `qpn == qpn'` under any qualifier scheme. The scope also belongs
+  on the **variable**, not the instance: cabal qualifies `QPN` (the goal) and leaves `I`
+  unqualified, a release of `mtl` is the same release in either scope, and putting it in
+  `Instance` would give `InstanceSet` a third coordinate whose intersection is only ever
+  equal-or-empty. So `incompTerms` becomes `Map QPN (Term InstanceSet)` and the partial
+  solution follows — it cannot live in the partial solution alone, since the whole point
+  is two versions of one name decided at once. Copy `Qualifier` from
+  `Distribution.Solver.Types.PackagePath`, dropping `Namespace` (`--independent-goals`
+  only) and `QualBase` (`qoBaseShim` is False unless an *installed* `base` depends on
+  `base`). **Override-rather-than-nest is load-bearing, not a simplification** — cabal
+  limits itself to one qualifier because nesting "very quickly leads to infinite search
+  trees". The bulk of the work comes first and touches no solver code:
+  `Bridge.Cabal.Flatten.componentDeps` merges library, sublibs and executables into one
+  `GuardedDeps` and discards which component each occurrence came from, which is exactly
+  the label qualification needs — and it reads neither `setup-depends` nor
+  `build-tool-depends` at all.
+
+  **This rung owes the setup self-dependency case.** `Bridge.Provider` drops a
+  dependency of `p` on `p` (see below); cabal's `Builder.extendOpen` makes one
+  exception, adding a reverse-dependency edge for a *setup* self-dependency so the
+  cycle forces a different setup script. There are no setup deps yet, so there is
+  nothing to keep an edge for — when they arrive, the exception comes with them.
 - **Rung 5** — public sublibraries.
+
+**Intra-package dependencies** (not a rung; landed 2026-08-21) — a dependency of `p` on
+`p` is **not emitted**. Real packages declare them constantly, because an executable or
+sublibrary of `p` is built against `p`'s library; it is an intra-package edge resolved
+inside the package, not a version constraint on `p`. Stated as a fact it says something
+far stronger and false, and it did: `Map.fromList` keeps the last binding for a
+duplicate key, so with depender and dependee equal the `Positive` depender term was
+dropped and `lens 1.7`'s `lens ==1.7` became the unconditional `{lens: Negative ==1.7}`
+— "lens must be exactly 1.7", asserted of *every* instance — which pinned a whole solve
+and became the unexplained first premise of its proof. `fromDependency` now uses
+`Map.fromListWith intersectTerm`, so two entries about one variable are intersected
+rather than overwritten (`Positive (V \ R)`, the honest clause), and `Bridge.Provider`
+filters the occurrence out so no such clause is minted at all. **Both are needed**: the
+constructor fix alone makes the clause honest, and an honest clause correctly *bans* the
+release — because its self-dependency genuinely cannot be met — which is still the wrong
+answer. The rule is **cabal's**, not a shortcut: `Builder.extendOpen` on `qpn == qpn'`
+adds no goal and no edge, and `not $ isInternal pkg exeDep` in `IndexConversion` does
+the same for build-tools; `Bridge.Installed.closureEdges` had always done it on the
+installed side, and only the source path let one through. Tests: `StoreSpec`
+"self-dependencies" and `FlagSolveSpec` "self-dependencies", each verified to fail
+without its own half. Consequence to know: `lens <4` moved — decisions 317 → **225**, reads 178 → **274**,
+proof 4 → **7** lines (cabal 22), and its proof now ends on `root ==0 depends on lens <4`
+rather than opening on the bogus `lens ==1.7 is required`, so it answers the question that
+was asked. Four lines answering the wrong question were not a win. Every other `lens <4`
+figure in `docs/STATUS.md` predates the fix, and the remaining four benchmark problems are
+unmeasured.
 
 **Caveat on "measure both deliverables at each rung".** We did not do this for
 rungs 0–3, which were built unmeasured; measurement only started 2026-08-12, once the

@@ -55,7 +55,7 @@ import           Distribution.Types.Flag        (FlagName, mkFlagAssignment,
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.UnitId      (mkUnitId)
 import           Distribution.Types.Version     (Version, mkVersion)
-import           Distribution.Version           (anyVersion)
+import           Distribution.Version           (anyVersion, thisVersion)
 import           PubGrub.Incompatibility        (IncompatCause (..),
                                                  Incompatibility (..))
 import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
@@ -302,6 +302,7 @@ tests =
         , irrelevantFlagsDoNotCompound
         , bootPackageStatesItself
         , unbuildableStatesItself
+        , selfDependencyDropped
         ]
 
 -- | 8. Not about flags, but about the same provider rule and needing the same
@@ -710,3 +711,87 @@ irrelevantFlagsDoNotCompound =
                     ]
                 )
         Map.lookup (pkg "foo") asks @?= Just 2
+
+-- | 10. Also not about flags: a release that declares a dependency on __itself__
+-- must not produce a fact about its own package.
+--
+-- Real packages do this constantly — an executable or a sublibrary of @p@ is built
+-- against @p@\'s library, so @p@\'s flattened dependencies contain @p@. That is an
+-- /intra-package/ edge, resolved inside the package, and it is not a version
+-- constraint on @p@ at all.
+--
+-- Stated as a fact it says something far stronger and false. The depender and the
+-- dependee are the same variable, so the clause collapses to a bare requirement:
+-- @lens 1.7@\'s @lens ==1.7@ becomes @{lens: Negative ==1.7}@ — \"lens must be
+-- exactly 1.7\" — asserted of every instance of @lens@, which pins an entire
+-- solve to one release and is the unexplained first premise of its proof.
+--
+-- __Dropping it is cabal\'s rule.__
+-- @Distribution.Solver.Modular.Builder.extendOpen@ matches @qpn == qpn\'@ and adds
+-- no goal and no edge, except for a setup dependency where it adds a
+-- reverse-dependency edge alone. Qualified goals would not subsume this: library
+-- dependencies inherit their depender\'s qualifier (@qualifyDeps@), so an
+-- executable\'s dependency on its own library is a self-dependency under any
+-- qualifier scheme.
+--
+-- The world is the smallest one that shows it: @p 1.0.0@ depends on itself at a
+-- version it is not, plus a real dependency. Both must hold — the self-dependency
+-- silent, the real one stated — because dropping too much is as wrong as stating
+-- too much.
+selfDependencyDropped :: TestTree
+selfDependencyDropped =
+    testGroup
+        "self-dependencies"
+        [ testCase "a release depending on itself states nothing about itself" $ do
+            incs <- runTestM expandSelfDep
+            [q | CauseDependency _ _ (q, _) <- map incompCause incs, q == pkg "p"] @?= []
+        , testCase "its other dependencies are still stated" $ do
+            incs <- runTestM expandSelfDep
+            [q | CauseDependency _ _ (q, _) <- map incompCause incs] @?= [pkg "q"]
+        , testCase "and the world still solves" $ do
+            result <- solveWorld selfDepWorld
+            result @?= Right (solutionOf [(root, v1, []), (pkg "p", v1, []), (pkg "q", v1, [])])
+        ]
+  where
+    -- @p 1.0.0@ depends on @p ==2.0.0@ (which it is not) and on @q@.
+    selfDepWorld =
+        [ (root, plain [pkg "p"])
+        ,
+            ( pkg "p"
+            , Pkg [] [Release v1 [(Lit True, [dep (pkg "q"), depAt (pkg "p") v2])]]
+            )
+        , (pkg "q", leaf)
+        ]
+
+    depAt p v = mkDependency p (thisVersion v) mainLibSet
+
+    -- The real provider rule, asked to expand @p@ with everything on offer.
+    expandSelfDep = do
+        let source =
+                BP.ReleaseSource
+                    { BP.rsVersionsOf = \p ->
+                        maybe Set.empty (Set.fromList . map relVersion . pkgReleases) (lookup p selfDepWorld)
+                    , BP.rsReadRelease = \p v ->
+                        pure
+                            ( maybe
+                                (Left (ParseException (toException (userError "not in world"))))
+                                Right
+                                (Map.lookup (p, v) reduced)
+                            )
+                    }
+            reduced =
+                Map.fromList
+                    [ ((p, relVersion r), BP.Release (pkgFlags pk) (relGuarded r) True)
+                    | (p, pk) <- selfDepWorld
+                    , r <- pkgReleases pk
+                    ]
+        result <- BP.mkExpand (mkInstalledDb []) source [] (pkg "p") anySource
+        case result of
+            (Just (BuildSource _ _), incs) -> pure incs
+            _ -> liftIO (assertFailure "expected p 1.0.0 to be chosen")
+
+    anySource =
+        InstanceSet
+            { isInstalled = Set.empty
+            , isSource = [SourceCell VersionSet.fullVersionSet Map.empty]
+            }

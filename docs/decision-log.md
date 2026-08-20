@@ -579,6 +579,81 @@ changed under it.
 
 ---
 
+## Era 10 — Intra-package dependencies are not constraints (Aug 21)
+
+### A package depending on itself pinned a whole solve, and the report was innocent
+
+*Aug 21.* Found by reading `lens <4`'s proof, whose first line was
+*"lens ==1.7 is required"* — a premise with nothing behind it, and the reason every
+line below it reasoned about lens 1.7 rather than about all of `lens <4`.
+
+The clause was real and in the store: `{lens: Negative ==1.7}`, a lone negative term,
+which nothing in the tree should have been able to mint. Instrumenting the trace with
+each clause's cause named it `CauseDependency`. `lens 1.7` declares a dependency on
+`lens ==1.7` — a component of it is built against its own library — and
+
+```haskell
+Map.fromList [(pkgName, Positive pkgSet), (depName, Negative depSet)]
+```
+
+keeps the **last** binding for a duplicate key. With `pkgName == depName` the
+`Positive` depender term was silently dropped, and the conditional fact
+"lens ∈ slot(1.7) ⇒ lens ∈ ==1.7" became the unconditional "lens must be exactly
+1.7", asserted of every instance of `lens`. It forced the version for the rest of the
+solve, and it was the clause whose conflict *terminated* the search.
+
+**Two fixes, and reverting them separately is what shows why both are needed.**
+`fromDependency` now uses `Map.fromListWith intersectTerm`, so two entries about one
+variable are intersected rather than overwritten —
+`intersectTerm (Positive V) (Negative R) = Positive (V \ R)`, which `Term`'s algebra
+already had. And `Bridge.Provider` no longer emits the fact at all. With only the
+first, the clause becomes *honest* — and an honest clause correctly bans the release,
+because its self-dependency genuinely cannot be met. Still the wrong answer, now for
+a defensible reason. The second fix is the one that says the constraint was never
+real.
+
+**The rule is cabal's, not a shortcut.**
+`Distribution.Solver.Modular.Builder.extendOpen` matches `qpn == qpn'` and adds no
+goal and no edge, *except* for a setup dependency, where it adds a reverse-dependency
+edge alone so the cycle makes the solver pick a different setup script. Its own
+comment says the general case waits on component-based solving. There is a second
+filter for build-tools — `not $ isInternal pkg exeDep` in `IndexConversion` — because
+a `build-tool-depends` on your own executable is internal too. The installed side here
+had always done this: `closureEdges` emits no edge for a self-dependency. Only the
+source path let one through.
+
+Three things worth carrying forward.
+
+**An intra-package edge is not a version constraint.** It is resolved inside the
+package. This is a category error the types permitted: depender and dependee are both
+`PackageName`, so nothing distinguished "two packages" from "one package twice".
+
+**Qualified goals will not subsume it.** This was the reason we reached for them, and
+it is wrong: `qualifyDeps`'s `inheritedQ` gives library dependencies their depender's
+qualifier — only `setup-depends` and `build-tool-depends` override it — so an
+executable's dependency on its own library is `qpn == qpn'` under any qualifier
+scheme. Qualified goals were shelved on that finding, with the design written up but
+unbuilt.
+
+**Rung 4 owes the setup case.** We have no setup or build-tool dependencies yet, so
+there is no setup self-dependency to keep an edge for. When they arrive, cabal's
+exception has to come back with them.
+
+Regression tests were checked by reverting each half: `StoreSpec`'s three cases fail
+without the constructor fix, `FlagSolveSpec`'s three without the emission filter. The
+`FlagSolveSpec` world also asserts that `p`'s *other* dependencies are still stated —
+dropping too much is as wrong as stating too much.
+
+**Re-measured.** `lens <4`: decisions 317 → **225**, reads 178 → **274**, proof
+4 → **7** lines against cabal's 22. The proof got longer and much better — it used to
+open on the bogus premise and reason about lens 1.7; it now ends on
+`root ==0 depends on lens <4`, so the derivation reaches the root fact and explains the
+question that was asked. Four lines answering the wrong question were never a win. Reads
+rose and decisions fell for one reason: the bad clause stopped the search early *and*
+made the solver work around a constraint that was never real.
+
+---
+
 ## Open right now
 
 Four things are genuinely undecided or unbuilt. In roughly the order the existing
