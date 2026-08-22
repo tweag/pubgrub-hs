@@ -474,8 +474,9 @@ mkExpand installedDb source root = expand'
                                     Nothing -> scan stated rest
                                     Just flags -> do
                                         let inst = BuildSource v flags
-                                            incs =
-                                                [ dependencyInc pn slot assignment dep
+                                        incs <-
+                                            sequence
+                                                [ dependencyInc pn v slot guard assignment dep
                                                 | -- for each guarded dependency of the chosen release
                                                   (guard, deps) <- relGuarded release
                                                 , Just assignment <- [NE.nonEmpty (expandGuard guard)]
@@ -621,28 +622,76 @@ mkExpand installedDb source root = expand'
     -- The installed side drops it too: 'Bridge.Installed.closureEdges' emits no
     -- edge for a self-dependency.
     -- | One guarded dependency occurrence of the decided release, as an
-    -- incompatibility over that release\'s __slot__: the half-open range up to the
-    -- next release in the index ('withSlots').
+    -- incompatibility whose depender starts from that release\'s __slot__, the
+    -- half-open range up to the next release in the index ('withSlots').
     --
     -- @references\/pubgrub.md:456@ asks for identical dependencies of adjacent
-    -- versions of the depender to be /one/ incompatibility. A slot names one
-    -- release, so that happens in 'PubGrub.Store' instead, which unions the
-    -- depender terms of two facts that agree about the dependee as they arrive.
-    -- Adjacent slots /touch/, so the union is one interval with no hole, and no
-    -- neighbour\'s @.cabal@ is read. Establishing the range here would mean
-    -- parsing the neighbours: on @pandoc@, a problem with one conflict, that cost
-    -- 167 to 2834 reads and 22.9 MB to 81.0 MB of residency
-    -- (@docs\/collapsing.md@).
+    -- versions of the depender to be /one/ incompatibility. Two mechanisms deliver
+    -- that, and both run. 'spanningOccurrence', below, reads the decided release\'s
+    -- neighbours and widens the slot while the occurrence is identical.
+    -- 'PubGrub.Store' unions the depender terms of two facts that agree about the
+    -- dependee as they arrive; adjacent slots /touch/, so the union is one interval
+    -- with no hole.
     --
-    -- What is given up is the releases the solver never expanded. Those had no
-    -- clause either way, so propagation cannot tell the difference, and a proof
-    -- can cite only what was derived.
-    dependencyInc pn slot assignment dep =
-        fromDependency
-            pn
-            (slotInstances slot assignment)
-            (depPkgName dep)
-            (widen (depPkgName dep) (VersionSet.fromVersionRange (depVerRange dep)))
+    -- The walk is affordable only because a neighbour read is a decode from the
+    -- derived index rather than a parse (@docs\/collapsing.md@).
+    dependencyInc pn v slot guard assignment dep = do
+        dependers <- spanningOccurrence pn v slot guard dep
+        pure
+            ( fromDependency
+                pn
+                (slotInstances dependers assignment)
+                (depPkgName dep)
+                (widen (depPkgName dep) (VersionSet.fromVersionRange (depVerRange dep)))
+            )
+
+    -- | The range to name a release's neighbours by: walk out from @v@ in both
+    -- directions while each neighbour carries this same occurrence, then take the
+    -- half-open range from the lowest such release up to the first release above the
+    -- highest. This is @references\/pubgrub.md:456@ done where the spec asks for it,
+    -- at generation time, rather than left to @PubGrub.Store@ to rebuild one
+    -- expanded release at a time.
+    --
+    -- \"The same occurrence\" is compared per /dependency/, not per group: a neighbour
+    -- qualifies when any of its guarded groups has this guard and contains this exact
+    -- 'Dependency', whatever else it declares (@docs\/flags-semantics.md@ §4.2).
+    -- Comparing whole groups would refuse to merge two releases that differ in
+    -- something unrelated.
+    --
+    -- Requiring the guard to be __identical__ keeps this sound on the flag axis:
+    -- every release in the span declares the flags the guard mentions, since one
+    -- that did not could not have produced that guard.
+    --
+    -- The walk costs a release read per neighbour tried. When a read was a @.cabal@
+    -- parse (2.0 ms and ~7.7 MB), @pandoc@, a problem with a single conflict, went
+    -- from 167 reads to 2834 and from 22.9 MB to 81.0 MB of residency
+    -- (@docs\/collapsing.md@). It is affordable because a read is now a 0.073 ms
+    -- decode from 'Bridge.Hackage.Store', which is keyed by __package__, so a walk
+    -- stays inside one slice that is already in hand.
+    spanningOccurrence pn v slot guard dep = do
+        lo <- walk Set.lookupLT v
+        hi <- walk Set.lookupGT v
+        pure $ case (lo, hi) of
+            -- Neither neighbour carries it: just the release's own slot.
+            (l, h) | l == v && h == v -> slot
+            (l, h) -> spanSlot (VersionSet.halfOpenVersionSet l (Set.lookupGT h releases))
+      where
+        releases = rsVersionsOf source pn
+
+        -- The furthest release in one direction still carrying the occurrence.
+        walk step from = case step from releases of
+            Nothing -> pure from
+            Just w -> do
+                result <- rsReadRelease source pn w
+                case result of
+                    -- An unparseable neighbour stops the walk rather than being
+                    -- stepped over: we cannot claim a fact about a release we cannot
+                    -- read, and widening across it would do exactly that.
+                    Right neighbour | carries neighbour -> walk step w
+                    _ -> pure from
+
+        carries neighbour =
+            any (\(g, ds) -> g == guard && dep `elem` ds) (relGuarded neighbour)
 
     -- Widen a dependency's version range into an instance set. The installed
     -- half is extensional: the compiler's database is small and fully known.
@@ -708,6 +757,18 @@ newtype Slot = Slot VersionSet
 -- and how much the result denotes follows from how much they pin (see 'pinnedCell').
 -- 'NonEmpty' because an empty union is the empty set, and a guard that no assignment
 -- satisfies is dropped before it gets here.
+-- | A slot spanning a __run of adjacent releases__ that all carry the same
+-- dependency occurrence, which is the collapsed form @references\/pubgrub.md:456@
+-- asks for.
+--
+-- It is a 'Slot' for the same reason one release's slot is: the invariant the type
+-- protects is that a depender term is never a single version, and a span satisfies
+-- that more strongly rather than less. 'Bridge.Provider.spanningOccurrence' is the
+-- only thing that builds one, and it establishes the run by reading every release in
+-- it.
+spanSlot :: VersionSet -> Slot
+spanSlot = Slot
+
 slotInstances :: Slot -> NE.NonEmpty (Map.Map FlagName Bool) -> InstanceSet
 slotInstances (Slot vs) pinSets =
     InstanceSet
