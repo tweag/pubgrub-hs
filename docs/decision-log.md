@@ -23,15 +23,20 @@
 
 ## How to read this
 
-Each entry is tagged:
+Each entry is tagged with **what happened next**, not with what is true today:
 
-- **STUCK** — still true today.
+- **HELD** — this decision was never undone.
 - **REVERSED** — we did this, then undid it. The interesting ones.
 - **ABANDONED** — built or drafted, then dropped without replacement.
-- **OPEN** — decided but not built, or not decided.
 
-If you only read one section, read **[Open right now](#open-right-now)** at the
-bottom. That's the actionable part.
+**This file contains no present tense, on purpose.** It used to carry an "Open right
+now" section and `STUCK` / `OPEN` tags, which were a second and unmaintained copy of
+the current state. One of them ended up asserting the opposite of the code. For what is
+true today, read [STATUS.md](STATUS.md).
+
+**Record a reversal by appending a new era with a forward pointer.** Do not edit an old
+verdict. The point of this file is that a decision made, reversed and remade must not
+look like one that was right the first time.
 
 ---
 
@@ -43,7 +48,7 @@ The original plan was to encode dependency solving as Answer Set Programming and
 hand it to Clingo (Potassco).
 
 **It never had any code.** Searching the whole history for `clingo` finds it only
-in `CLAUDE.md` and design docs; no `.lp` file was ever added, no solver was ever
+in `CLAUDE.md` and design docs. No `.lp` file was ever added, no solver was ever
 called. The framing was dropped in favour of implementing PubGrub natively in
 Haskell before implementation started.
 
@@ -66,7 +71,7 @@ This **worked end to end on real Hackage data**. It was not a failure, and it wa
 not abandoned because it was broken. Era 4 restarted it for modelling reasons, not
 correctness ones.
 
-### `chooseVersion` + `getDependencies` → `expand` — STUCK (but see [Open](#1-should-expand-split-back-into-two-functions))
+### `chooseVersion` + `getDependencies` → `expand` — HELD, and still questioned
 
 *Jun 24.* The provider had two callbacks: pick a version, then fetch that
 version's dependencies. They were merged into one `expand`.
@@ -77,7 +82,7 @@ was in range.
 
 Note the date: this is **pre-reboot**. `expand` is one of the few pieces of Era 2
 that survived the rewrite intact, which is why it can feel older than the code
-around it. It is now under discussion to split *back* — see Open #1.
+around it. Splitting it *back* is still an open question — [STATUS.md](STATUS.md) §8.
 
 ---
 
@@ -90,15 +95,15 @@ A `Lattice` / `Boolean` / `Sets` class hierarchy, a `Pow` powerset type, and
 (installed units × source configurations), with flags folded into the source
 component.
 
-**Why it was dropped:** the value domain doesn't need a Boolean algebra. It needs
+**Why it was dropped:** the value domain does not need a Boolean algebra. It needs
 intersection, union, difference and an emptiness test — and specifically **not a
 complement**, because a complement needs a universe of values that nothing in the
-algorithm ever wants. Negation is needed in exactly one place, `Term`, where it's
+algorithm ever wants. Negation is needed in exactly one place, `Term`, where it is
 a polarity flip that costs nothing.
 
 Replaced in Era 4 by `SetOps`: four operations, no complement, no lattice
 vocabulary. This is one of the clearest "we made it more general and that was the
-wrong direction" turns in the project, and it's worth remembering before
+wrong direction" turns in the project, and it is worth remembering before
 generalising anything again.
 
 ### An Alloy model of Cabal build-plan structure — ABANDONED
@@ -121,22 +126,22 @@ plumbing came back.
 (source or a specific installed unit), and per-flag terms. Each got its own term
 type and its own negation helpers (`notVersion`, `notProvenance`, `notFlag`).
 
-### Step 2 — one whole instance (`Small.hs`, "move to whole instance") — STUCK
+### Step 2 — one whole instance (`Small.hs`, "move to whole instance") — HELD
 
 *Jul 22.* The axes collapsed into a single value. One solver variable per package
-name; its value is one **`Instance`** — either a specific pre-installed unit, or
+name. Its value is one **`Instance`** — either a specific pre-installed unit, or
 one source version under one *total* flag assignment.
 
 **Why:** choosing the instance settles version, provenance and every flag at once,
 so conditional dependencies are already resolved by the time the solver sees them.
-The separate-axes version needed machinery to keep the coordinates consistent; the
+The separate-axes version needed machinery to keep the coordinates consistent. The
 merged one gets it for free.
 
-This is still the model today, and it's the single most important decision in the
+This is still the model today, and it is the single most important decision in the
 project. `flags-semantics.md` §1.4 is the retrospective argument for it, including
-what it costs (see Open #2).
+what it costs.
 
-### Step 3 — `Small.hs` deleted, exploded into modules — STUCK
+### Step 3 — `Small.hs` deleted, exploded into modules — HELD
 
 *Jul 22, "rework".* 649 lines became `src/PubGrub/{Term,VersionSet,Relation,
 Incompatibility,Solver,Report,Pretty,…}`, and real Cabal types replaced
@@ -150,7 +155,7 @@ It is **not** in the tree. It was briefly restored on 2026-08-05 and removed the
 same day — see Era 7. Recover it from history if you want to read it:
 `git show bedf1210:Small.hs`.
 
-### Step 4 — the algorithm, again, properly — STUCK
+### Step 4 — the algorithm, again, properly — HELD
 
 *Jul 23.* Unit propagation and conflict resolution reimplemented on the new model.
 Provider extracted. Partial solution stored oldest-first in a `Seq`. Real Hackage
@@ -161,7 +166,7 @@ including the two PubGrub paper examples.
 
 ## Era 5 — Making the sets symbolic (Jul 29 – Jul 31)
 
-### Extensional → intensional `InstanceSet` — STUCK
+### Extensional → intensional `InstanceSet` — HELD
 
 *Jul 29.* `Small.hs` had stored a set of instances literally
 (`Set Instance`), with a comment saying a symbolic representation could replace it
@@ -175,14 +180,14 @@ has to be undone again to show a user a range. So `InstanceSet` became a list of
 set being the *union* of its cells.
 
 That shape is **disjunctive normal form** (DNF) — an OR of ANDs. Within one cell the
-conditions are ANDed ("version in this range, *and* `simd` on"); the cells are ORed
+conditions are ANDed ("version in this range, *and* `simd` on"). The cells are ORed
 together to make the whole set. The term is used without expansion in `CLAUDE.md` and
 the specs, so: cells-you-union is all it means here.
 
 **What it cost**, and these are consequences of the choice, not bugs:
 
-- no lawful `Eq` (the representation isn't canonical — use mutual containment);
-- **the set cannot be enumerated**, which forced the next entry;
+- no lawful `Eq`. The representation is not canonical, so use mutual containment.
+- **the set cannot be enumerated**, which forced the next entry.
 - emptiness became one-sided: allowed to miss that a set is empty, never allowed
   to claim emptiness wrongly.
 
@@ -192,14 +197,14 @@ the specs, so: cells-you-union is all it means here.
 preference order and took the first admissible one. A day later it instead took
 the offered set's own cells and completed each cell's free flags.
 
-**Why:** the direct consequence of the entry above. A symbolic set can't be
+**Why:** the direct consequence of the entry above. A symbolic set cannot be
 enumerated, so "enumerate the universe, then filter by membership" is not
 available. You have to work from the cells you were handed.
 
-### Drop the synthetic root for seed incompatibilities — OPEN, decided but not built
+### Drop the synthetic root for seed incompatibilities — UNBUILT AT THE TIME, decided but not built
 
 *Jul 30.* Decided: real cabal projects have **several** local packages, not one
-root, so `syntheticRoot` / `rootName` is the wrong shape. `solve` should take a
+root, so `syntheticRoot` / `rootName` is the wrong shape. `solve` must take a
 list of seed incompatibilities instead, and "finished" becomes "satisfied by the
 level-0 assignments alone".
 
@@ -207,15 +212,15 @@ level-0 assignments alone".
 reads `solve provider rootPkg rootV` and seeds with `notRoot`. The payoff is real —
 `constraints: bar <2` is not a dependency, and as a root dependency it wrongly
 *forces* `bar` into the plan, whereas a seed incompatibility bans the range
-without requiring the package. See Open #3.
+without requiring the package. Still unbuilt.
 
 ---
 
 ## Era 6 — Flags, written down (Aug 3)
 
-This is one day, and it's the densest in the project.
+This is one day, and it is the densest in the project.
 
-### Two-state flag pins → three states — STUCK, and the reason is subtle
+### Two-state flag pins → three states — HELD, and the reason is subtle
 
 A pin was "flag is on" / "flag is off". It became **on / off / not declared here**.
 
@@ -223,24 +228,24 @@ A pin was "flag is on" / "flag is off". It became **on / off / not declared here
 `parser 1.1` may have none. The opposite of "simd is on" is therefore "simd is off
 **or** this version has no simd flag". With two states the negation silently
 dropped every version lacking the flag, which makes set difference come out **too
-small** — and too small a difference lets the solver derive a fact that isn't true
+small** — and too small a difference lets the solver derive a fact that is not true
 and report failure for a solvable problem.
 
 This had shipped, twice, fixed locally both times without the rule being written
 down. That is why `flags-semantics.md` exists at all (its §0).
 
-### Subsumption pruning — STUCK, and load-bearing
+### Subsumption pruning — HELD, and load-bearing
 
 The third state doubled how fast the DNF splits, so pruning had to arrive with it.
 Measured on 24 successive instance bans over 4 flags: **28293 cells without
 subsumption pruning, 41 with it**, for a denotation of 56 instances. Pruning
-*between* operations is what bounds it; pruning only at the end is too late.
+*between* operations is what bounds it. Pruning only at the end is too late.
 
-### `flags-design.md` superseded by `flags-semantics.md` — STUCK
+### `flags-design.md` superseded by `flags-semantics.md` — HELD
 
 The older design doc had chosen the **lenient** rule: an undeclared flag makes a
 constraint vacuously true. That's the *safe* direction but still not exact, and
-because it was implemented as a global rule in membership it couldn't be scoped —
+because it was implemented as a global rule in membership it cannot be scoped —
 it applied equally to constraints the solver derives itself, where the strict
 reading is the required one.
 
@@ -256,24 +261,24 @@ times as the position it argues against.
 
 Both are cases where a draft asserted something stronger than the truth:
 
-- *"O6's remedy is search; the 'never select' fact is not an alternative to it."*
+- *"O6's remedy is search. The 'never select' fact is not an alternative to it."*
   Returning "never select this instance" as a fact does **not** remove the need to
-  search for an admissible flag assignment. Both are the same fact used twice; one
-  doesn't replace the other.
+  search for an admissible flag assignment. Both are the same fact used twice. One
+  does not replace the other.
 - *"`expand` never needs a 'no decision, but learn this' answer."* An earlier draft
-  of §10 said the split would require a new interface case. It doesn't — the solver
+  of §10 said the split requires a new interface case. It does not — the solver
   adds returned incompatibilities unexamined and never requires them to be *about*
   the instance just decided, so what the provider learned along the way can ride
   along with the decision it settles on.
 
-### Performance work — STUCK, all measured
+### Performance work — HELD, all measured
 
 Four changes, and the numbers are the point:
 
 | change | effect |
 |---|---|
 | index the partial solution by package, cache each package's term | **3.7–4.5× faster** |
-| memoise a release's *reduced* form, never its parsed description | uncached 3.7 s / 83 MB; caching descriptions **27.2 s / 904 MB** on `pandoc` |
+| memoise a release's *reduced* form, never its parsed description | uncached 3.7 s / 83 MB. Caching descriptions cost **27.2 s / 904 MB** on `pandoc` |
 | version-set algebra on intervals, not on `VersionRange` syntax | — |
 | test the cheap half of subsumption first | — |
 
@@ -282,7 +287,7 @@ bigger, because ~170 retained parse trees each pin their slice of the index and
 every major garbage collection copies the lot. If you ever think "why not just cache the
 descriptions" — that was measured, and it was much worse.
 
-### A Lean specification — STUCK (as an artifact)
+### A Lean specification — HELD (as an artifact)
 
 `specification/` — a Lean formalisation. Unrelated to the abandoned Alloy model
 from Era 3.
@@ -294,7 +299,7 @@ from Era 3.
 - **Solution rendered as a dependency tree**, not a flat alphabetical list.
 - **An installed unit pins its whole closure**, not just its direct dependencies.
 - **`Small.hs` restored, then removed again the same day** (Aug 5). Recovered from
-  `bedf1210` and wired as `library small`; removed within hours because **a second
+  `bedf1210` and wired as `library small`. Removed within hours because **a second
   model of the same concepts, sitting in the tree and building, is confusing rather
   than clarifying** — it shows an extensional `InstanceSet` and a two-field
   `Provider` that the real code deliberately rejected.
@@ -307,7 +312,7 @@ from Era 3.
   current-state entry point, abandoned directions moved to [attic/](attic/), and the
   three competing flag documents reduced to one live authority.
 
-### Condition decisions specified — OPEN, specified and not implemented
+### Condition decisions specified — UNBUILT AT THE TIME, specified and not implemented
 
 *Aug 4.* [decision-semantics.md](decision-semantics.md), 26 KB, and the most
 consequential unimplemented thing in the project. **This is the revisit that
@@ -330,18 +335,18 @@ the `2^N` corners of the flag hypercube. So: decide the *version* first, decide 
 flag condition only when some dependency's guard needs it, and resolve the remaining
 flags to their defaults at the very end.
 
-**Why it's more than an optimisation.** It changes what a decision *is* — from "the
+**Why it is more than an optimisation.** It changes what a decision *is* — from "the
 answer for this package" to "a term narrowing this package" — with the answer moving
 to a *witness* the provider exhibits. Its §1 is a deviation register listing exactly
 which lines of `references/pubgrub.md` it departs from and why the algorithm
-tolerates it (a decision need only be cause-less and removable; neither property
+tolerates it (a decision need only be cause-less and removable. Neither property
 mentions being a single point).
 
 **Two things to know before picking it up:**
 
 - **It collects the `expand`-split's benefits for free.** Its §10 states that the
   three arguments for splitting the provider all fall out of §2–§3 — so the two
-  items should be scheduled as one, not raced.
+  items must be scheduled as one, not raced.
 - **The sequencing note is the actionable part**, and it argues *against* starting
   here: per-fact guarded emission (`flags-semantics.md` §4.2) is the prerequisite,
   is independently valuable, and alone removes the 2^k re-offer and the depender
@@ -359,10 +364,10 @@ be declared.
 
 ## Era 8 — The baseline, and the first-release scope (Aug 12 – Aug 17)
 
-### cabal's own solver, over our index — STUCK
+### cabal's own solver, over our index — HELD
 
 *Aug 12.* `Bridge.Cabal.Baseline` drives `Distribution.Solver.Modular.modularResolver`
-over the same index our solver reads, with **no `cabal-install` dependency**;
+over the same index our solver reads, with **no `cabal-install` dependency**.
 `pubgrub --cabal <target>` runs it. One `withWorld` opens the index, the installed db
 and (from Aug 17) the `pkg-config` db, so both solvers are fed from one read — which
 is what makes the comparison structural rather than arranged. First five-problem
@@ -373,7 +378,7 @@ non-reinstallable, we only *preferred* installed units, and `aeson <2` was resol
 by planning to build `base 4.15.1.0` from Hackage. Three of five verdicts disagreed
 until our provider carried the same rule. **A baseline earns its cost by disagreeing.**
 
-### Depender collapsing at generation time — OPEN, landed and unfinished
+### Depender collapsing at generation time — UNBUILT AT THE TIME, landed and unfinished
 
 *Aug 12.* `spanningOccurrence` emits one incompatibility per guarded occurrence over
 adjacent releases, which is what `references/pubgrub.md:456` asks for. It is a
@@ -386,7 +391,7 @@ all in [collapsing.md](collapsing.md).
 
 *Aug 17.* **Flags stop being a search dimension.** They are still parsed and applied —
 dependencies are the ones the defaults select — but no flag is a variable the solver
-may set. Ours resolves flag conditions at flatten time (`componentDepsAtDefaults`);
+may set. Ours resolves flag conditions at flatten time (`componentDepsAtDefaults`).
 cabal's is told at the shared index read (`lookupGPD` marks every flag manual, so
 `enforceManualFlags` pins it to the same value). One instance per release, both sides.
 
@@ -394,10 +399,11 @@ Three things worth having on the record, because each is easy to misread later:
 
 - **It is a scope cut, not a retraction.** [flags-semantics.md](flags-semantics.md) is
   unchanged as a specification and its property suite still exercises the full
-  three-state algebra; only the degenerate case runs. The machinery stays, and the
+  three-state algebra. Only the degenerate case runs. The machinery stays, and the
   `flags` jj bookmark marks where the axis stands.
 - **It silently disarmed the project's worst trap.** Buildability landed the same week
-  — the thing Open #2 says must not land alone — and the completeness bug did not
+  — the thing that must not land alone, without the O6-complete search — and the
+  completeness bug did not
   appear, because with one completion per release the bad case has no instances. The
   trap re-arms when flag search returns, and by then `buildable:` will look finished.
 - **It invalidates every measurement taken before it**, including the whole of Era 8's
@@ -409,19 +415,23 @@ escape an unsatisfiable dependency, so some problems that resolved will now fail
 solvers fail together, which is fair — but any published benchmark or showcase has to
 say so.
 
-### Merge on insert, and the walk deleted — STUCK
+### Merge on insert, and the walk deleted — REVERSED in Era 11
 
 *Aug 17.* The collapsing trade above was resolved by moving the collapsing from
 generation time to insert time. `PubGrub.Store` — new, and the first structure the
 core has kept beyond a list of clauses — unions the depender terms of two dependency
-facts that agree about the dependee, as they arrive; the provider emits per release
+facts that agree about the dependee, as they arrive. The provider emits per release
 **slot**, so adjacent facts touch and their union is contiguous without reading
-anything. `spanningOccurrence` and its `.cabal` walk are gone.
+anything. `spanningOccurrence` and its `.cabal` walk were deleted.
+
+**The walk came back on 2026-08-23 — see Era 11.** The store merge stayed. What
+changed was the price of a neighbour read, not the analysis below.
 
 Every metric improved at once, which the walk could not do: `pandoc` 2871 reads → 167,
-17.31 → 1.53 GB allocated, 81.0 → 22.6 MB resident; `lens <4`'s proof 80 → 9 lines
-against cabal's 22. We are now faster than cabal on all five problems and leaner in
-memory on all five.
+17.31 → 1.53 GB allocated, 81.0 → 22.6 MB resident. `lens <4`'s proof went 80 → 9 lines
+against cabal's 22. At that point we were faster than cabal on all five problems and
+leaner in memory on all five. (The set has since grown to six, and `yesod` is where
+cabal wins — [STATUS.md](STATUS.md) §3.1.)
 
 Three lessons worth the entry:
 
@@ -436,7 +446,7 @@ Three lessons worth the entry:
   loop, which is the hot path. Keeping the clauses a plain list in scan order and
   paying `O(position)` only on an actual merge costs nothing where it matters.
 
-### The no-version rise, explained — STUCK
+### The no-version rise, explained — HELD
 
 *Aug 17.* An unexplained counter had been sitting in the collapsing notes since the
 walk landed: `noversion` events up from 1, 1, 0 to 6, 8, 9 on the three unsat
@@ -458,13 +468,13 @@ Three lessons, and the first is the reason this entry exists:
   the actual events answered it, and the answer was in a different subsystem than the
   one the counter was filed under.
 - **The fix was to state a rule we were already enforcing.** The provider had refused
-  source releases of boot packages since 2026-08-12; what was missing was *saying* so.
+  source releases of boot packages since 2026-08-12. What was missing was *saying* so.
   Our own baseline had it right all along, as an input constraint.
 - **A cause type is part of the fix, not a decoration.** Rendered through the existing
   `CauseNoInstances`, the new fact reads "no version for base in >=0" — false-sounding
   to anyone who knows Hackage has hundreds of them.
 
-### Buildability, and the pkg-config db — STUCK
+### Buildability, and the pkg-config db — HELD
 
 *Aug 17.* A release whose library cannot be built here is no longer offered:
 `buildable: False`, plus `pkgconfig-depends` checked against the machine's real
@@ -501,9 +511,9 @@ sibling, and a fact so paired is never adjacent to the next dependency fact. The
 fusion therefore cannot fire, and on the spec's own linear example that single effect
 is the entire difference between its two published lines and our three.
 `collapseNoInstances` had been filed as report polish and scheduled *after* chain
-collapsing; it is now the top item, on two independent arguments. **A gap can be
+collapsing. It is now the top item, on two independent arguments. **A gap can be
 someone else's blocker, and the way we found out was writing down what the spec says
-the output should be.**
+the output must be.**
 
 Alongside it, `references/pubgrub.md:476`: an unbuildable release is now *stated* as an
 incompatibility rather than silently skipped, so a proof says `foo >=2.0.0 cannot be
@@ -525,7 +535,7 @@ set the deliverables still need, not on the code.
 Hackage keeps the build bot's report per release, and `PlanningFailed` means cabal
 failed to *resolve* — with its solver log attached, which is the baseline half of a
 side-by-side for free. About 10% of latest versions are `PlanningFailed`, so the supply
-was never the constraint; nobody had looked. 17 reproduce here, over six failure kinds,
+was never the constraint. Nobody had looked. 17 reproduce here, over six failure kinds,
 plus five that reproduce as *successes* and are kept as controls
 ([failure-cases.md](failure-cases.md)).
 
@@ -533,7 +543,7 @@ The finding that cost the most to have been wrong about: **pkg-config failures a
 most common kind** — 14 of 28 among the top 101–500 by downloads — and they arrive in
 the shape we had just decided was a corner. `references/pubgrub.md:476` had been
 implemented that morning for the case where the scan passes over an unbuildable release
-and settles on an older one; the case where the *whole range* is unbuildable dropped the
+and settles on an older one. The case where the *whole range* is unbuildable dropped the
 facts, and this log's own entry called that acceptable. It is the reachable shape, every
 time. So the clause was emitted exactly when it could not help and dropped exactly when
 it would, and `pubgrub hpqtypes '>=1.13'` said "no version for hpqtypes in >=1.13" where
@@ -543,9 +553,10 @@ cabal said "pkg-config package libpq-any, not found in the pkg-config database".
 Zero of the five meets an unbuildable release, which is why the hole survived a
 measurement, a test suite and a written caveat on the same day. The lesson is not about
 buildability: it is that "measured, no change" means nothing until you know the problem
-set exercises the thing. Two other claims in `CLAUDE.md` fell to the same set — gap 2's
-"exactly one known instance" (9 of 17 carry those lines) and gap 4's "stray space",
-which is a real NUL byte that makes GNU `grep` silently treat every proof as binary.
+set exercises the thing. Two other claims in `CLAUDE.md` fell to the same set. The
+empty-range clutter was said to have "exactly one known instance", where 9 of 17 carried
+those lines. And the synthetic root's name was called a "stray space", where it is a
+real NUL byte that makes GNU `grep` silently treat every proof as binary.
 
 ### The last non-cosmetic reporting gap, and a harness that was not following the spec
 
@@ -588,7 +599,7 @@ changed under it.
 line below it reasoned about lens 1.7 rather than about all of `lens <4`.
 
 The clause was real and in the store: `{lens: Negative ==1.7}`, a lone negative term,
-which nothing in the tree should have been able to mint. Instrumenting the trace with
+which nothing in the tree was able to mint. Instrumenting the trace with
 each clause's cause named it `CauseDependency`. `lens 1.7` declares a dependency on
 `lens ==1.7` — a component of it is built against its own library — and
 
@@ -646,7 +657,7 @@ dropping too much is as wrong as stating too much.
 
 **Re-measured.** `lens <4`: decisions 317 → **225**, reads 178 → **274**, proof
 4 → **7** lines against cabal's 22. The proof got longer and much better — it used to
-open on the bogus premise and reason about lens 1.7; it now ends on
+open on the bogus premise and reason about lens 1.7. It now ends on
 `root ==0 depends on lens <4`, so the derivation reaches the root fact and explains the
 question that was asked. Four lines answering the wrong question were never a win. Reads
 rose and decisions fell for one reason: the bad clause stopped the search early *and*
@@ -654,168 +665,107 @@ made the solver work around a constraint that was never real.
 
 ---
 
-## Open right now
+## Era 11 — A derived index, and the walk restored (Aug 22 – Aug 23)
 
-Four things are genuinely undecided or unbuilt. In roughly the order the existing
-docs suggest.
+### A boot package says once why it has no source release — HELD
 
-### 1. Should `expand` split back into two functions?
+*Aug 22.* `base` is non-reinstallable, so any range holding no installed unit made
+`expand` answer `Nothing`, and the solver learned `noInstances base <that range>` once
+per distinct range. The provider now states the fact once, when it first commits to an
+installed unit of such a package, and a proof line reads `base cannot be built from
+source`.
 
-**Status: design item, not a decision.** Written up at
-[flags-semantics.md §8](flags-semantics.md) (lines 571–614).
+This removed nearly every `no version for …` line in the failure corpus without
+targeting them.
 
-> **Read this alongside condition decisions.**
-> [decision-semantics.md](decision-semantics.md) §10 says the condition-decision
-> model **inherits all three benefits below** — completeness dissolving into the
-> loop, propagation running between attempts, and reasons becoming first-class — so
-> the two questions should be scheduled as **one item**. Deciding this one in
-> isolation risks paying for it twice.
+### Every release parsed once, ahead of time — HELD
 
-The provider is one function today: pick an instance *and* report what it entails,
-in one step. The reference Rust implementation keeps them separate —
-`choose_version` for policy, `get_dependencies` returning
-`Available | Unavailable(reason)`, where a rejection adds a "never select this"
-fact and **goes back to propagation without deciding anything**.
+*Aug 23.* `Bridge.Hackage.Store`. `cabal run pubgrub-index` parses all 152,987 releases
+into `_cache/derived-index.cbor` (62.5 MB) plus a 0.4 MB offset map, and a read became
+a CBOR decode: **2.007 ms → 0.073 ms**.
 
-Three arguments for splitting:
+Four choices, each with its reason:
 
-1. A correctness obligation gets much easier. Today the provider must never say
-   "nothing available" when something is — a delicate property of code *inside* the
-   provider. Split, the solver's own loop does that searching, and terminates
-   because each rejection shrinks the set.
-2. Propagation would run *between* candidate attempts. A provider looping
-   internally works against a snapshot its own discovery has already invalidated.
-3. **Rejection reasons become first-class.** Right now an unusable release can only
-   appear in a failure report as "no instances in range". The doc calls this a
-   *deliverable #1 problem, not cosmetic* — and since explanation quality is half
-   of why this project exists, this is the strongest argument.
+- **cache, not source of truth.** Every miss parses instead, so removing the store
+  costs speed and never correctness.
+- **the pre-environment form, not the flattened one.** `envConfVar` resolves `os`,
+  `arch` and `impl` against this machine, so a flattened store would be silently wrong
+  after a GHC upgrade. Parsing is 106× the cost of flattening, so caching only the parse
+  gives up almost nothing.
+- **CBOR, not `binary`.** 410 B per release against 1040. `binary` decodes 2.5× faster,
+  but decode had stopped being the scarce resource.
+- **the package is the granularity, not the release.** One slice holds every version,
+  which is what makes walking a release's neighbours cheap.
 
-The sharpest counter-argument to the original merge: its rationale was that the
-choice and its consequences must travel together. That requires **ordering**, not
-merging — the decision is recorded only after `Available`.
+**It made no solve faster on its own.** Parsing was 0.3–0.6 s of runs taking 0.7–6.8 s,
+and elapsed time was unchanged within noise. Its whole value was that it changed the
+price of the thing the next entry needed.
 
-**Cost:** the picker needs a total flag assignment, so it must read the package
-description, and the consequences step reads it again. That's already paid for by
-`releaseReader`'s memoised reduced form.
+### The walk came back — REVERSES Era 8's deletion
 
-### 2. `buildable:`, the completeness search, and a missing test are ONE work item
+*Aug 23.* `spanningOccurrence` was restored unchanged in shape: no `k`, no gating, no
+span cache. Both mechanisms now run — the walk widens at generation time, and the store
+still merges on insert.
 
-The most important trap in the project.
+`pandoc` still does 167 lookups → 2873, the same explosion that got the walk deleted.
+It now costs that problem 22.6 → 33.1 MB of residency and under 1% of allocation,
+against 17.31 GB before.
 
-**Still open, and the trigger moved.** `buildable:` landed on 2026-08-17 without the
-completeness search and nothing broke — see Era 8: fixing every flag at its default
-leaves one completion per release, so the bad case has no instances. The item below
-now belongs to whoever restores flag search, who will find buildability looking like
-finished work. Read it as written and then read that caveat again.
+**The largest search win the project has recorded:** `futhark ==0.27.1` 4287 → **805**
+decisions and 6.62 → **2.19 s**, `aeson <2` 758 → **309**, `conduit <1.3` 137 → **16**.
 
-The argument as it stood, when `buildable:` was ignored entirely:
+**The lesson is the one worth keeping.** Era 8's entry named the debt it was taking on
+— "a change that makes re-expansion expensive again should look at this first" — and
+that is exactly the sentence that came due. Every option weighed in
+[collapsing.md](collapsing.md) §4 was a way of *rationing* the walk's cost. The cheaper
+move was to remove the cost.
 
-- Nothing in the tree is currently un-buildable *depending on flag values*. So the
-  provider's "try one completion per cell" shortcut cannot currently miss a valid
-  instance — it's correct **by accident**.
-- The moment `buildable:` is implemented, that accident ends, and the shortcut can
-  miss a valid instance — which produces a confident **wrong "no solution"**.
-- The test that would catch this needs a world where a cell's *default* completion
-  is unusable but another completion of the same cell is fine. That world is
-  unconstructible until `buildable:` exists.
+### `yesod` finishes — a consequence, not a change
 
-So: buildability, the completeness search, and the test are **one item, not three**.
-Doing the first alone introduces the bug. Splitting `expand` (Open #1) makes this
-item *smaller*, which is why the doc schedules them together.
+*Aug 23.* `yesod` had never resolved. It ran past 90 s with thousands of decisions and
+every conflict at depth 0, so it was commented out of the benchmark set and kept only
+so that it was not forgotten. Its problem was churn, not depth.
 
-### 3. Seed incompatibilities instead of a synthetic root
+It now resolves in **2.49 s**, with 827 decisions and 11 conflicts. Nothing was done to
+it. The generation-time walk is what changed, and churn is exactly what a
+pre-emptively wide clause removes.
 
-Decided 2026-07-30, **not built**. See Era 5. Agreed ordering: do this *before*
-depender-range collapsing, because it's the smaller change and it removes a special
-case that collapsing would otherwise have to preserve.
+**Worth the entry because of what it says about benchmark sets.** A problem parked as
+"does not finish" stops being re-run, so the change that fixes it went unnoticed.
 
-### 4. Depender-range collapsing
+It was then enabled, and the gate re-baselined to 23 problems. It immediately earned
+its place: it is the only *satisfiable* problem in the set with real search in it, and
+it is the first problem on which cabal beats us — 1.72 s against our 2.49 s, and 1.94 GB
+of allocation against our 4.44 GB. The set could not report that before, because every
+other row was a walk-through or an unsatisfiable proof.
 
-The one outright **divergence from the PubGrub spec** rather than a choice.
+### A run of same-pair steps is one sentence — HELD
 
-**Largely closed since this was written** — flag axis Aug 5, version axis Aug 12 (Era
-8) — and still open in the sense that matters: what landed is a trade, and choosing
-how to finish it needs a fresh measurement. [collapsing.md](collapsing.md) is the live
-document. The 2^k argument below is also *currently* moot, since flags are fixed.
+*Aug 23.* Widening clauses changes which conflict surfaces first, and `matterhorn`'s new
+one was explained by walking `hashable`'s bound history one adjacent pair at a time.
+`PubGrub.Report` now states such a run once, as the union of its facts.
 
-The case as it stood, when we emitted the per-version form:
+Pure rendering, so every solver count is identical either side of it. `happstack-hsp`
+7 → 4, `matterhorn` 10 → 8, corpus total 66 → 62 sentences.
 
-The spec requires identical dependencies of adjacent versions to collapse into one
-incompatibility — `foo >=1.0 && <1.3 depends on bar >=1.0 && <2`, not one per
-version of `foo` (`references/pubgrub.md:456`).
-
-It costs **both** deliverables:
-
-- *Explanations:* proof lines read `foo 1.2.3 depends on …` where the spec's own
-  examples read `foo >=1.0 && <1.3 depends on …`.
-- *Performance:* and this is the part that's easy to miss. Because the depender is a
-  single instance, refuting one version teaches the solver nothing about that
-  version under a *different* flag assignment. So a version rejected for a reason
-  that has nothing to do with flags gets re-offered once per irrelevant flag
-  assignment — **2^k**. `test/FlagSolveSpec.hs` records the k=1 case.
-
-This is the fix for the price Era 4's whole-instance model charges — which is why
-`flags-semantics.md` §1.4 names collapsing, rather than a change of model, as the
-answer.
-
-**Two corrections worth carrying, because the obvious approach is wrong:**
-
-- **Do not group a package's instances by identical flattened dependency *set*.**
-  `flags-semantics.md` §4.2 rejects that as *"a serious mistake, not a conservative
-  one"*: two assignments that agree on the dependency in question but differ on an
-  unrelated one fail to group, so the depender term still names the irrelevant flag
-  and the 2^k cost survives intact. The unit is one **guarded dependency
-  occurrence** — `C ⇒ q ∈ R`, with the guard used verbatim as the depender's flag
-  component. `CLAUDE.md`'s Reporting gap 1 still prescribes the rejected form; see
-  [STATUS.md](STATUS.md)'s contradictions section.
-- **This is the recommended next implementation step.** Per
-  [decision-semantics.md](decision-semantics.md)'s sequencing note, per-fact emission
-  is the prerequisite for the kernel change, is valuable on its own, and should be
-  built and *measured* before anything larger is decided.
-
-### Smaller, also open
-
-- ~~**Manual flags**~~ — **settled, and now implemented in its degenerate case.** The
-  rule was verified against `cabal-install-solver` on 2026-08-05
-  (`Preference.enforceManualFlags`, reading `flagManual` off each `PackageFlag`) and
-  owned by input translation, not admissibility (`flags-semantics.md` §1.6). Since
-  2026-08-17 *every* flag is marked manual at the index read, so the rule is what both
-  solvers run on. What is still unbuilt is the general case: some flags manual, some
-  values user-supplied.
-- **Give the set algebra access to flag declarations?** Would make emptiness exact
-  and delete the one-sided slack, at the cost of the core/bridge boundary. A
-  cost/benefit call, not a correctness one.
-- **A brute-force verdict oracle** for testing is owed. The current one-sided
-  properties are necessary but not sufficient.
-- **`collapseNoInstances`** in reports, then chain collapsing, then cosmetics.
+**This is not `references/pubgrub.md:456`'s collapsing.** That merges facts whose
+dependee range is *identical*. This one merges facts whose ranges *differ*, which is
+exactly why the solver had to derive along them.
 
 ---
 
-## Settled — please stop re-litigating
+## What is open now
 
-Things decided with reasons recorded, where revisiting has already cost time:
+**Not here.** Read [STATUS.md](STATUS.md) §8. This file used to carry its own list, and
+it drifted into asserting the opposite of the code.
 
-- **No complement in the value algebra.** Four operations plus emptiness. Negation
-  lives in `Term` as a polarity flip. (Era 3 tried the Boolean-algebra version.)
-- **No `Eq` / `Ord` on `InstanceSet`.** The representation isn't canonical, so
-  structural equality would be unlawful. Use mutual containment.
-- **Sets stay intensional.** An extensional `Set Instance` isn't a cheaper PubGrub,
-  it's the encoding PubGrub exists to avoid.
-- **Emptiness stays one-sided.** Missing an empty set costs time. Claiming emptiness
-  wrongly gives wrong answers. Test `isEmpty ⟹ empty`, never `⟺`.
-- **Flags live in the value, not as solver variables.** A flag variable would need
-  conditional existence, which PubGrub has no notion of. The price is the 2^k
-  re-offer, and the answer to that price is Open #4, not a change of model. (Since
-  2026-08-17 the price is not being paid, because the search is not being done —
-  Era 8. That is a scope cut, not a third answer.)
-- **The property suite's universe must be non-uniform** — versions must differ in
-  which flags they declare, including one declaring none. A uniform universe cannot
-  tell the three flag readings apart, which is exactly how a wrong `difference`
-  passed for weeks.
-- **Don't chase byte-parity with pub's output.** `^1.0.0` is Dart; cabal writes
-  `>=1.0.0 && <2`. Same sentences, cabal's syntax.
+## What is settled
+
+**Not here either.** [STATUS.md](STATUS.md) §8 carries "Settled — please stop
+re-litigating", where it is re-read.
 
 ---
+
 
 ## A known hazard
 

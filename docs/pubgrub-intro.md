@@ -1,27 +1,18 @@
 # PubGrub: A Dependency Solver for Haskell Packages
 
-> **Status: tutorial. Current on the algorithm, stale in three places.** This is the
-> gentlest introduction in the repository and a good starting point — but it was
-> written before the reboot, so do not take its interface or roadmap as current.
-> See [STATUS.md](STATUS.md) for what is actually true.
+> **What this is.** A tutorial introduction to the PubGrub algorithm, and the gentlest
+> starting point in the repository.
 >
-> Specifically:
+> **What decides.** `references/pubgrub.md` is the authority on the algorithm. Where
+> this file and the spec disagree, the spec is right. This file exists to make the spec
+> readable, not to replace it.
 >
-> - **§2 "The Type Class Interface"** shows the provider as two methods,
->   `chooseVersion` and `getDependencies`. They were **merged into one `expand`** on
->   2026-06-24. (Splitting them back is an open question —
->   [flags-semantics.md](flags-semantics.md) §8.)
-> - **§8 "Connection to Answer Set Programming"** describes a framing that was
->   **abandoned before any code was written**. There is no ASP component and never
->   was. See [attic/](attic/) §1.
-> - **§9 "Implementation Roadmap"** is superseded by the rung ladder in
->   `../CLAUDE.md` and by [STATUS.md](STATUS.md).
->
-> Nothing here covers flags or the instance model, which are the parts that took the
-> most work. Those are [flags-semantics.md](flags-semantics.md) and
-> [decision-semantics.md](decision-semantics.md).
+> **What it does not cover.** Flags and the instance model, which are the parts that
+> took the most work. Those are [flags-semantics.md](flags-semantics.md) and
+> [decision-semantics.md](decision-semantics.md). For the current state of the code,
+> see [STATUS.md](STATUS.md).
 
-This document introduces the PubGrub version-solving algorithm and explains how it will be implemented in this project. All examples use Cabal package names and PVP version syntax. The goal is to give enough precision to drive implementation, not to be a formal proof.
+This document introduces the PubGrub version-solving algorithm and how this project implements it. All examples use Cabal package names and PVP version syntax. The goal is enough precision to drive implementation, not a formal proof.
 
 ---
 
@@ -44,56 +35,62 @@ The naive approach — enumerate every combination of versions and test consiste
 - a `Map PackageName Version` assigning exactly one version to every required package, or
 - a human-readable derivation tree explaining why no such assignment exists.
 
-> **Scope note, corrected.** Cabal already ships its own solver. This project
-> reimplements PubGrub — the algorithm used by Dart's `pub`, Python's `uv` and others —
-> as a proof of concept whose two questions are **explanation quality** and
-> **performance** against cabal-install's solver (`../CLAUDE.md`, "Project goal").
-> An earlier version of this note said the goal was "to understand the algorithm deeply
-> and explore its relationship to Answer Set Programming". The ASP half of that was
-> abandoned before any code existed — see the banner at the top of this file and §8.
+> **Scope note.** Cabal already ships its own solver. This project reimplements
+> PubGrub — the algorithm used by Dart's `pub` and Python's `uv` — as a proof of
+> concept. Its two questions are **explanation quality** and **performance** against
+> cabal-install's solver.
 
 ---
 
-## 2. The Type Class Interface
+## 2. The Interface
 
-> **Stale.** The two provider methods below, `chooseVersion` and `getDependencies`,
-> were **merged into a single `expand`** on 2026-06-24, and the value a decision
-> takes is no longer a bare version but a whole *instance* (a version plus a total
-> flag assignment, or a pre-installed unit). The split shown here is still how the
-> reference Rust implementation does it, and splitting back is an open question —
-> [flags-semantics.md](flags-semantics.md) §8. Read this section for the *shape* of
-> the seam, not for the current API, which is `src/PubGrub/Provider.hs`.
+Two abstractions anchor the algorithm, and one callback connects it to the world.
 
-Three abstractions anchor the entire algorithm. Every subsequent section is defined in terms of them.
+**Values.** The solver's variables are package names. Its values are whatever the
+provider hands back. In this project a value is an `Instance` — one concrete way of
+having a package, either a pre-installed unit or a source release under a total flag
+assignment.
+
+**Value sets.** The algebra needs four operations plus an emptiness test:
+`intersect`, `union`, `difference`, `isEmpty`. It needs **no complement**. A complement
+requires a universe of values that nothing in the algorithm ever asks for, and negation
+is needed in exactly one place — `Term`, where it is a polarity flip.
 
 ```haskell
--- A package is anything with equality, ordering, and a printable name.
--- In practice: newtype PackageName = PackageName Text
-class (Eq p, Ord p, Show p) => Package p
-
--- A version set is a lattice of version constraints.
--- Concrete instance: Cabal's VersionRange.
-class VersionSet vs where
-  empty        :: vs             -- no versions satisfy this
-  full         :: vs             -- all versions satisfy this
-  complement   :: vs -> vs
-  union        :: vs -> vs -> vs
-  intersection :: vs -> vs -> vs
-  contains     :: vs -> Version -> Bool
-
--- The external oracle: knows about packages and their dependencies.
-class (Package p, VersionSet vs) => DependencyProvider dp p vs where
-  -- Choose the best version of p currently allowed by vs.
-  -- Returns Nothing if no valid version exists.
-  chooseVersion   :: dp -> p -> vs -> Maybe Version
-  -- Return the dependency map for a specific resolved version.
-  getDependencies :: dp -> p -> Version -> Map p vs
+class SetOps a where
+  intersect  :: a -> a -> a
+  union      :: a -> a -> a
+  difference :: a -> a -> a
+  isEmpty    :: a -> Bool
 ```
 
-Two points about `chooseVersion`:
+**The provider** is one callback:
 
-1. It receives the *intersection* of all current constraints on `p` — the solver has already narrowed the range. The implementation only needs to pick the best version inside that range.
-2. Correctness does not depend on the choice. PubGrub will eventually find the solution (or prove none exists) regardless of which valid version is returned. The choice only affects performance: "highest satisfying version" is standard because it minimises conflicts with other packages that also want recent versions.
+```haskell
+newtype Provider m = Provider
+  { expand :: PackageName -> InstanceSet -> m (Maybe Instance, [Incompatibility]) }
+```
+
+Given a package and the accumulated constraint on it, commit to one instance and report
+the incompatibilities that decision entails, in one atomic step.
+
+Four points about it:
+
+1. It receives the *intersection* of all current constraints on the package. The solver
+   has already narrowed the set.
+2. The returned instance **must** be a member of that set. This is a precondition, not
+   a hint.
+3. Correctness does not depend on *which* member. PubGrub finds the solution, or proves
+   there is none, whatever valid instance comes back. The choice affects performance
+   only. "Newest satisfying" is standard because it minimises conflicts with other
+   packages that also want recent releases.
+4. The incompatibility list sits **outside** the `Maybe` deliberately. A provider that
+   skips releases it cannot use must be able to answer "no decision, and here is what I
+   learned".
+
+The choice and its consequences always travel together, so the solver never holds one
+without the other. The reference Rust implementation keeps them as two methods, and
+splitting ours back is an open question ([flags-semantics.md](flags-semantics.md) §8).
 
 > **PVP vs SemVer.** Cabal uses the [Package Versioning Policy](https://pvp.haskell.org/). In PVP, `^>=1.2` means `>= 1.2 && < 1.3` — the two *leftmost* version components form the major version. This differs from SemVer's `^1.2`, which means `>= 1.2.0 && < 2.0.0`. Be careful when reading Cargo or npm documentation: their version range semantics differ.
 
@@ -142,7 +139,7 @@ Positive r₁  ∧  Negative r₂  =  Positive (r₁ ∩ complement r₂)
 Negative r₁  ∧  Negative r₂  =  Negative (r₁ ∪ r₂)
 ```
 
-*Lives in: `src/PubGrub/Types.hs`*
+*Lives in: [`src/PubGrub/Term.hs`](../src/PubGrub/Term.hs)*
 
 ---
 
@@ -153,10 +150,13 @@ An **incompatibility** is a set of terms (at most one per package) that cannot a
 In SAT solving this would be called a *clause*. In Answer Set Programming it is a *nogood*. PubGrub uses the word incompatibility throughout.
 
 ```haskell
-data IncompatCause p vs
-  = RootCause
-  | DependencyCause
-  | Derived (Incompatibility p vs) (Incompatibility p vs)
+data IncompatCause
+  = CauseRoot PackageName Instance
+  | CauseNoInstances PackageName InstanceSet
+  | CauseOnlyInstalled PackageName
+  | CauseUnbuildable PackageName InstanceSet
+  | CauseDependency PackageName InstanceSet (PackageName, InstanceSet)
+  | CauseDerivedFrom Incompatibility Incompatibility
 
 data Incompatibility p vs = Incompatibility
   { terms :: Map p (Term vs)
@@ -169,10 +169,15 @@ data Incompatibility p vs = Incompatibility
 **1. Root seed**
 
 ```
-{ root: Negative empty }
+{ root: Negative {the root instance} }
 ```
 
-Reads: "it is impossible for root to be absent." This is the first incompatibility added to every solve. It is immediately a unit clause, forcing the solver to select the root package.
+Reads: "it is impossible for root to be anything other than *this* instance." This is
+the first incompatibility added to every solve. It is immediately a unit clause, so it
+forces the solver to select the root package.
+
+Note the term is `Negative` of the **singleton**, not of the empty set. `Negative empty`
+is the always-true term, which would make the clause vacuous.
 
 **2. Dependency incompatibility**
 
@@ -190,50 +195,49 @@ More precisely, for a specific version `v` of `aeson`:
 { aeson: Positive {v}, text: Negative (^>=2.0) }
 ```
 
-Adjacent versions with identical dependency ranges can be collapsed into a single incompatibility covering the whole range — an important optimisation for large version histories.
+Adjacent versions with identical dependency ranges are collapsed into a single
+incompatibility covering the whole range. The spec **requires** this
+(`references/pubgrub.md:456`). It is not an optimisation you can skip. See
+[collapsing.md](collapsing.md) for how this project does it.
 
 **3. Conflict-derived incompatibility**
 
-Created during conflict resolution (§6.2) when the solver detects a contradiction and applies the Rule of Resolution to two existing incompatibilities. These carry a `Derived i₁ i₂` cause for error reporting (§7).
+Created during conflict resolution (§6.2) when the solver detects a contradiction and applies the Rule of Resolution to two existing incompatibilities. These carry a `CauseDerivedFrom` cause for error reporting (§7). Every other constructor is a **leaf**: a fact about the world rather than a step of reasoning.
 
 ### Special case: unit incompatibility
 
-An incompatibility with a single term `{ p: Positive r }` bans all versions of `p` in range `r`. This arises naturally when `chooseVersion` returns `Nothing` (§6.3) — the solver creates `{ p: Positive currentRange }` and re-enters conflict resolution to learn why `p` has no valid version.
+An incompatibility with a single term `{ p: Positive r }` bans all versions of `p` in range `r`. This arises when `expand` returns no instance (§6.3). The solver creates `{ p: Positive currentRange }` and re-enters conflict resolution to learn why `p` has no valid version.
 
-*Lives in: `src/PubGrub/Types.hs`*
+*Lives in: [`src/PubGrub/Incompatibility.hs`](../src/PubGrub/Incompatibility.hs)*
 
 ---
 
 ## 5. The Partial Solution — State of the Solver
 
-The **partial solution** is an ordered sequence of assignments, oldest first. It represents everything the solver currently believes about the package selection.
+The **partial solution** is everything the solver currently believes about the package
+selection: an ordered sequence of assignments, oldest first.
 
 ```haskell
-data Assignment p vs
-  = Decision
-      { pkg           :: p
-      , version       :: Version
-      , decisionLevel :: Int
-      }
-  | Derivation
-      { pkg   :: p
-      , term  :: Term vs
-      , cause :: Incompatibility p vs
-      }
-
-newtype PartialSolution p vs = PartialSolution
-  { assignments :: [Assignment p vs] }
+data AssignmentKind
+  = Decided Instance                     -- a guess
+  | Derived (Term InstanceSet) Incompatibility   -- a consequence, and its cause
 ```
 
-**Decisions** are guesses: "let's try version `v` for package `p`." Each decision increments a monotone counter (the decision level). A decision is equivalent to the term `Positive {v}`.
+**Decisions** are guesses: "let us try this instance of `p`." Each decision increments a
+monotone counter, the decision level. A decision is equivalent to the term
+`Positive {that instance}`.
 
 **Derivations** are consequences: "package `p` must satisfy range `r`, because incompatibility `i` forced it." Multiple derivations for the same package accumulate — their effective constraint is the intersection of all their terms.
 
 Because a Decision can be treated as the term `Positive {v}`, both assignment kinds participate identically in the satisfiability checks used by unit propagation. The distinction only matters during conflict resolution, which needs to know "was this a guess or a consequence, and at what decision level?"
 
-**Backtracking** is implemented by truncating `assignments` to everything before a target decision level. All derivations added after that decision are discarded; the solver is in a consistent state from before the problematic guess.
+**Backtracking** discards everything after a target decision level. The solver is then
+in a consistent state from before the problematic guess.
 
-*Lives in: `src/PubGrub/Types.hs`*
+*Lives in: [`src/PubGrub/Solver.hs`](../src/PubGrub/Solver.hs). Note the real structure
+is indexed by package name rather than being a flat list, and it caches each package's
+accumulated term. That change made the solver 3.7–4.5× faster, and backtracking has to
+rebuild the caches.*
 
 ---
 
@@ -247,7 +251,7 @@ For each incompatibility, count how many of its terms are *not* satisfied by the
 
 - **Zero unsatisfied** — all terms hold: this is a contradiction. Pass the incompatibility to conflict resolution and stop.
 - **Exactly one unsatisfied** — all other terms hold. The unsatisfied term must be false to keep the incompatibility from becoming a contradiction. Add a derivation negating that term and restart the scan.
-- **Two or more unsatisfied** — not yet actionable; move on.
+- **Two or more unsatisfied** — not yet actionable. Move on.
 
 Repeat until a fixpoint (no new derivations, no conflict).
 
@@ -305,184 +309,115 @@ After unit propagation completes without conflict, the solver chooses a new pack
 
 1. Find a package `p` that has a positive derivation (the solver knows it must be selected) but no Decision yet.
 2. Compute the current allowed range for `p` (intersection of all derivation terms).
-3. Call `chooseVersion provider p allowedRange`.
-   - If `Nothing`: no valid version exists in the allowed range. Add `{ p: Positive allowedRange }` as a new incompatibility (banning the entire range) and re-enter conflict resolution. This is required for completeness — without it the solver could loop indefinitely on an unsatisfiable constraint.
-   - If `Just v`: record a Decision for `(p, v)`. Call `getDependencies provider p v` and add one incompatibility per dependency entry `(q, range)`:
-     ```
-     { p: Positive {v}, q: Negative range }
-     ```
-     Then return to unit propagation with the package name as the starting point.
+3. Call `expand provider p allowedSet`. It answers with an instance or nothing, **and** with the incompatibilities it learned on the way. The two travel together.
+   - If it answers no instance: add `{ p: Positive allowedSet }` as a new incompatibility, which bans the whole set, and re-enter conflict resolution. This is required for completeness. Without it the solver can loop indefinitely on an unsatisfiable constraint.
+   - If it answers an instance: record a decision for it, add the returned incompatibilities, and return to unit propagation.
 
-```haskell
-decideNext
-  :: (Package p, VersionSet vs, DependencyProvider dp p vs)
-  => dp
-  -> [Incompatibility p vs]
-  -> PartialSolution p vs
-  -> Either SolveError ([Incompatibility p vs], PartialSolution p vs)
+The incompatibilities it returns are the instance's dependencies, one per dependency entry `(q, range)`:
+
+```
+{ p: Positive {the slot of v}, q: Negative range }
 ```
 
-> **Lazy loading.** `getDependencies` is called only when a package version is actually decided. The solver never loads the full dependency graph up front. This is what makes PubGrub tractable for large registries like Hackage, where the full graph has tens of thousands of versions.
+The depender term is the release's **slot**, not the single version. That is
+`references/pubgrub.md:456`'s adjacent-version collapsing, and
+[collapsing.md](collapsing.md) explains it.
+
+> **Lazy loading.** `expand` is called only when a package is actually decided. The solver never loads the full dependency graph up front. This is what makes PubGrub tractable for a registry the size of Hackage.
+>
+> **Facts can arrive without a decision.** The list sits outside the answer, so a provider that skips releases it cannot use can still report why. That is how a proof says `foo >=2.0.0 cannot be built here` instead of `no version for foo in >=2`.
 
 ### The Main Loop
 
 ```haskell
-solve
-  :: (Package p, VersionSet vs, DependencyProvider dp p vs)
-  => dp -> p -> Version
-  -> Either SolveError (Map p Version)
-solve provider root rootVersion = do
-  let seed = Incompatibility
-        { terms = Map.singleton root (Negative empty)
-        , cause = RootCause
-        }
-  go [seed] (PartialSolution []) root
+solve :: Provider m -> PackageName -> Instance -> m (Either SolveError Solution)
+solve provider rootPkg rootInstance = go (seed rootPkg rootInstance)
   where
-    go incompats ps pkg = do
-      ps' <- unitPropagate incompats ps   -- may trigger conflictResolution internally
-      (incompats', ps'') <- decideNext provider incompats ps'
-      case nextUndecided ps'' of
-        Nothing   -> Right (collectDecisions ps'')
-        Just next -> go incompats' ps'' next
+    -- seed = { rootPkg: Negative {rootInstance} }, cause CauseRoot
+    go store = do
+      -- propagate; conflict resolution runs inside on a conflict
+      -- then pick an undecided package and call expand
+      -- until every positive term is decided, or the root fails
 ```
 
-*Lives in: `src/PubGrub/Solver.hs`*
+*Lives in: [`src/PubGrub/Solver.hs`](../src/PubGrub/Solver.hs)*
 
 ---
 
 ## 7. Error Reporting — The Derivation Tree
 
-Because every derived incompatibility carries its two parents in `Derived i₁ i₂`, the final conflict is the root of a DAG traceable back to the original dependency facts. This is what allows PubGrub to produce messages like:
+Because every derived incompatibility carries its two parents in `CauseDerivedFrom`, the final conflict is the root of a DAG traceable back to the original dependency facts. This is what allows PubGrub to produce messages like:
 
 > Because `aeson ^>=2.2` requires `text ^>=2.0` and `servant 0.20` requires `text ^>=1.2`, `aeson ^>=2.2` and `servant 0.20` are incompatible.
 
 ```haskell
-class Reporter r p vs where
-  reportConflict :: r -> Incompatibility p vs -> String
+reportConflict :: Incompatibility -> [Text]
 ```
 
-A default implementation performs post-order traversal of the DAG:
+The printer walks the DAG:
 
-- **Leaf (`DependencyCause`):** "package X at version V requires Y in range R."
-- **Leaf (`RootCause`):** trivial seed; usually suppressed.
-- **Internal (`Derived i₁ i₂`):** "Because [render i₁] and [render i₂], therefore [render this incompatibility]."
+- **a leaf** is a fact about the world. `CauseDependency` prints "X depends on Y in range R". `CauseNoInstances` prints "no version for Y in R". `CauseOnlyInstalled` prints "Y cannot be built from source". `CauseUnbuildable` prints "Y cannot be built here".
+- **`CauseRoot`** is the trivial seed, and is usually suppressed.
+- **`CauseDerivedFrom`** prints "Because [cause 1] and [cause 2], [this conclusion]".
 
-> **Deduplication.** The derivation structure is a DAG, not a tree — the same incompatibility can appear as a parent of multiple nodes. A printer that naïvely recurses will repeat large subtrees. Assign a line number to any incompatibility that is referenced more than once and replace repeated expansions with a back-reference ("as shown on line N").
+> **Deduplication.** The derivation structure is a DAG, not a tree, so the same incompatibility can be a parent of several nodes. A printer that recurses naively repeats large subtrees. Give a line number to any incompatibility referenced more than once, and replace repeated expansions with a back-reference.
 
-*Lives in: `src/PubGrub/Solver.hs`*
+**The real reporter does more than this.** It follows the spec's own reporting algorithm (`references/pubgrub.md:504`), which fuses chains, skips every other derived step, and absorbs empty-range leaves. That is what takes a proof from hundreds of lines to a handful. See [STATUS.md](STATUS.md) §4.9.
+
+*Lives in: [`src/PubGrub/Report.hs`](../src/PubGrub/Report.hs)*
 
 ---
 
-## 8. Connection to Answer Set Programming
+## 8. Why PubGrub is not a SAT or ASP instance
 
-> **Abandoned framing — there is no ASP component, and there never was.** The
-> `ASP.hs` module this section refers to was never written; no `.lp` file was ever
-> committed and Clingo was never invoked. The plan to encode solving as Answer Set
-> Programming was dropped *before any code*, in favour of implementing PubGrub
-> natively. See [attic/README.md](attic/README.md) §1.
->
-> The *analogy* below is still accurate and still worth reading — PubGrub really is
-> a CDNL algorithm, and the mapping illuminates it. Only the implied deliverable is
-> gone. The role of an independent checker is now played by the Lean specification
-> in [../specification/](../specification/).
+PubGrub is an instance of **Conflict-Driven NoGood Learning**, the core algorithm in
+modern SAT and Answer Set Programming solvers. The vocabulary maps directly:
 
-PubGrub is an instance of **Conflict-Driven NoGood Learning (CDNL)**, the core algorithm in modern Answer Set Programming solvers such as Clingo. Understanding this connection motivates the `ASP.hs` module and clarifies what "Answer Set Solving" buys us.
+| CDNL term | PubGrub term |
+| --- | --- |
+| Boolean variable | package, with a value set |
+| Nogood | incompatibility |
+| Unit propagation | unit propagation (§6.1) |
+| Conflict analysis | conflict resolution (§6.2) |
+| Decision | decision (§5, §6.3) |
+| Learned clause | derived incompatibility (§4) |
+| Answer set | the resolved plan |
 
-### The Mapping
+**Four features separate it from a plain encoding**, and `references/pubgrub.md:1165`
+lists them. Each one is a reason not to reach for an off-the-shelf solver.
 
-| ASP / CDNL term        | PubGrub term                    |
-|------------------------|---------------------------------|
-| Boolean variable       | Package (with version set)      |
-| Nogood                 | Incompatibility                 |
-| Unit propagation       | Unit propagation (§6.1)         |
-| Conflict analysis      | Conflict resolution (§6.2)      |
-| Decision               | Decision (§5, §6.3)             |
-| Learned clause         | Derived incompatibility (§4)    |
-| Answer set             | Resolved `Map p Version`        |
+1. **Version ranges.** A package's version space is potentially unbounded, and a range
+   represents a whole interval without enumerating it. Expanding ranges into concrete
+   version sets costs work *and* has to be undone again to talk to a user. This is why
+   our set type is intensional — see [STATUS.md](STATUS.md) §4.2.
+2. **Lazy formulas.** In a standard encoding all clauses are stated before solving
+   begins. PubGrub adds dependency incompatibilities on demand, as releases are
+   decided. For a registry the size of Hackage, loading every dependency of every
+   release up front would be prohibitive.
+3. **Implicit mutual exclusivity.** A package has exactly one version in a valid
+   solution. Encoding that in Boolean SAT needs O(n²) "at most one" clauses per
+   package. PubGrub gets it for free: a decision sets a singleton positive term, and a
+   second decision for the same package conflicts immediately.
+4. **Error reporting.** A general solver explains unsatisfiability in terms of its own
+   internal encoding. PubGrub's derivation tree is in terms of package dependency
+   chains, which is the half of this project's thesis that a SAT encoding cannot
+   deliver.
 
-### Why PubGrub Is Not Literally an ASP Instance
-
-Three features distinguish PubGrub from a plain SAT/ASP encoding:
-
-1. **Infinite domain.** A package's version space is potentially unbounded. Version *ranges* represent entire intervals without enumerating individual values — impossible in a Boolean variable encoding.
-
-2. **Lazy clause loading.** In standard ASP all nogoods are stated before solving begins. PubGrub adds dependency incompatibilities on demand as versions are decided. This is critical: for a registry the size of Hackage, loading every dependency of every version up front would be prohibitive.
-
-3. **Implicit mutual exclusivity.** A package has exactly one version in a valid solution. Encoding this in Boolean SAT requires O(n²) "at most one" clauses per package (one clause per pair of candidate versions). PubGrub encodes it implicitly: a Decision sets a singleton positive term, and any subsequent Decision for the same package would immediately conflict via unit propagation.
-
-### Two Implementation Strategies
-
-**Encode to ASP.** Translate the dependency problem into a Clingo ground program and decode the answer set. This is straightforward to implement and useful for validating solver results:
-
-```prolog
-% Candidate versions (loaded from Hackage index)
-version(aeson, "2.2.1.0"). version(aeson, "2.1.0.0"). ...
-version(text,  "2.0.2").   version(text,  "1.2.5.0"). ...
-
-% Select exactly one version per required package
-1 { selected(P, V) : version(P, V) } 1 :- required(P).
-
-% Dependency constraint: if P@V is selected, Q must satisfy range R
-:- selected(P, V), dep(P, V, Q, R), not satisfies_range(Q, R).
-
-% Prefer newer versions
-#minimize { 1@1, P, V : selected(P, V) }.
-```
-
-This approach cannot produce derivation-tree error messages — Clingo explains unsatisfiability in terms of its internal encoding, not in terms of package dependency chains.
-
-**Native CDNL with range arithmetic.** Implement PubGrub's loop directly in Haskell (§6), with Clingo used only in `ASP.hs` for independent cross-validation. This is the primary approach and is what the architecture (`Solver.hs` separate from `ASP.hs`) reflects.
-
-Suggested use: implement the native solver first, then use the ASP encoding as a test oracle — run both on the same inputs and assert they agree on satisfiability.
-
-*Lives in: `src/PubGrub/ASP.hs`*
+> **There is no ASP component in this project, and there never was.** An early plan to
+> encode solving for Clingo was dropped before any code was written. See
+> [attic/README.md](attic/README.md) §1. The role of an independent checker is played
+> by the Lean model in [../specification/](../specification/), which is itself a draft.
 
 ---
 
-## 9. Implementation Roadmap
+## 9. Where the code is
 
-> **Superseded.** The module map and phasing below describe the pre-reboot tree.
-> For what exists now see `../CLAUDE.md` (architecture and the rung ladder) and
-> [STATUS.md](STATUS.md) (what is built, what is specified, what is open).
-
-### Module Map
-
-| Concept | Module |
-|---------|--------|
-| `Package`, `VersionSet`, `DependencyProvider` type classes | `src/PubGrub/Types.hs` |
-| `Term`, `Incompatibility`, `IncompatCause`, `Assignment`, `PartialSolution` | `src/PubGrub/Types.hs` |
-| Range arithmetic over Cabal `VersionRange` | `src/PubGrub/VersionSet.hs` |
-| `unitPropagate`, `conflictResolution`, `decideNext`, main loop, `Reporter` | `src/PubGrub/Solver.hs` |
-| ASP encoder and Clingo interface | `src/PubGrub/ASP.hs` |
-| CLI, Hackage integration | `app/Main.hs` |
-
-### Suggested Build Order
-
-1. **`VersionSet.hs`** — implement all range arithmetic over Cabal's `VersionRange`. Write `QuickCheck` properties first:
-   - `complement (complement r) == r`
-   - De Morgan's laws: `complement (union a b) == intersection (complement a) (complement b)`
-   - `contains (intersection a b) v == contains a v && contains b v`
-
-2. **`Types.hs`** — define all data types with `Eq`/`Show` instances. Add smart constructors: `mkDependency :: p -> vs -> p -> vs -> Incompatibility p vs`.
-
-3. **`Solver.hs`** — implement unit propagation first (testable with hand-constructed incompatibilities), then conflict resolution, then the full loop.
-
-4. **`ASP.hs`** — write the encoder and decoder for cross-validation of solver results.
-
-5. **`Main.hs`** — wire everything to a local fixture or the Hackage index API.
-
-### Cabal Dependencies to Add
-
-```cabal
-build-depends:
-    base         ^>=4.21
-  , Cabal        ^>=3.12    -- for VersionRange, Version
-  , containers   ^>=0.7     -- for Map, Set
-  , text         ^>=2.0
-  , QuickCheck   ^>=2.15    -- for property tests
-```
+For the current layout, the rung ladder and the invariants, read
+[`../CLAUDE.md`](../CLAUDE.md). For what is built, what is specified and what is open,
+read [STATUS.md](STATUS.md).
 
 ---
+
 
 ## 10. Comparison to the Cabal Modular Solver
 
@@ -515,7 +450,7 @@ data Tree a
   | Fail       (ConflictSet QPN) FailReason    -- explicit failure
 ```
 
-Nodes represent choices; edges represent assignments. This is **not** the dependency tree — it is the solver's search tree, built lazily so that validation and pruning passes only materialise nodes they actually visit.
+Nodes represent choices. Edges represent assignments. This is **not** the dependency tree — it is the solver's search tree, built lazily so that validation and pruning passes only materialise nodes they actually visit.
 
 PubGrub has **no explicit search tree**. Its state is a flat partial solution plus a set of incompatibilities. The "tree" is implicit in the sequence of decisions and derivations.
 
@@ -529,32 +464,38 @@ However, the conflict set is **discarded once backtracking completes**. No new c
 
 **PubGrub — clause learning.** When conflict resolution terminates, the derived root-cause incompatibility is **permanently added** to the global incompatibility list. It is a new constraint that will be active for the rest of the solve. Unit propagation will fire on it immediately after backtracking, preventing the solver from ever entering the same region of the search space regardless of how it got there.
 
-In formal terms: backjumping is **non-chronological backtracking** with local pruning; clause learning is **non-chronological backtracking with global pruning**. Clause learning subsumes backjumping — every conflict set can be derived from the learned clause — and is strictly more powerful for hard instances with many interacting constraints.
+In formal terms: backjumping is **non-chronological backtracking** with local pruning. Clause learning is **non-chronological backtracking with global pruning**. Clause learning subsumes backjumping — every conflict set can be derived from the learned clause — and is strictly more powerful for hard instances with many interacting constraints.
 
-The trade-off is implementation complexity: clause learning requires the Rule of Resolution and the satisfier/previous-satisfier machinery (§6.2); backjumping only needs to track which packages caused each failure.
+The trade-off is implementation complexity: clause learning requires the Rule of Resolution and the satisfier/previous-satisfier machinery (§6.2). Backjumping only needs to track which packages caused each failure.
 
 ### Search Strategy and Ordering
 
-The modular solver explores depth-first, left-to-right. The order of branches matters; the preferences and heuristics phases reorder subtrees before exploration begins. Two standard heuristics:
+The modular solver explores depth-first, left-to-right. The order of branches matters, and the preferences and heuristics phases reorder subtrees before exploration begins. Two standard heuristics:
 
 - **Prefer later versions** (reorder `PChoice` children newest-first).
 - **Prefer goals with fewer valid choices** (the "fail-first" principle: resolve packages with tighter constraints earlier to surface conflicts sooner).
 
-PubGrub is also effectively depth-first — it commits to one version at a time — but the "order" is encoded in `chooseVersion`. There is no explicit reordering pass; the `DependencyProvider` implementation simply returns whichever version it considers best, and `prioritize` (in the Rust API) selects which package to resolve next. The effect is the same but the mechanism is different: a single callback rather than a composable tree transformation.
+PubGrub is also effectively depth-first, because it commits to one instance at a time. The order is encoded in the provider. There is no explicit reordering pass: `expand` returns whichever instance it considers best. The effect is the same as the modular solver's, and the mechanism is different — a single callback rather than a composable tree transformation.
 
 ### Haskell-Specific Features
 
 The modular solver handles two features of the Cabal dependency problem that the basic PubGrub specification does not:
 
-**Boolean flags.** Cabal `.cabal` files can declare conditional dependencies gated on boolean flags (e.g., `flag use-bytestring-builder`). The modular solver interleaves flag decisions (`FChoice` nodes) with package decisions. PubGrub as specified treats dependencies as unconditional; handling flags requires either pre-expanding all flag combinations or extending the value domain. This project does the latter — a solver variable's value is an *instance* (version × total flag assignment) rather than a version — and `docs/flags-semantics.md` specifies what that costs and requires.
+**Boolean flags.** Cabal `.cabal` files can declare conditional dependencies gated on boolean flags (for example, `flag use-bytestring-builder`). The modular solver interleaves flag decisions with package decisions.
 
-**Installed vs. new instances.** The modular solver distinguishes packages already installed in the GHC package database from new packages to be downloaded. It prefers installed instances to avoid unnecessary reinstalls. PubGrub's `chooseVersion` can implement this preference, but the distinction is not built into the algorithm.
+PubGrub as specified treats dependencies as unconditional. Handling flags needs either a pre-expansion of every flag combination, or a richer value domain. This project takes the second option: a solver variable's value is an *instance*, which is a version together with a total flag assignment. [flags-semantics.md](flags-semantics.md) specifies what that costs and requires.
 
-**The destructive-update problem.** The old (pre-modular) Cabal solver never backtracks. It resolves packages greedily and can produce install plans that destructively overwrite existing installed packages (replacing `A-1` with `A-2` even though other installed packages depend on `A-1`). The modular solver can detect and refuse such plans. PubGrub is unaffected by this issue because it is invoked without knowledge of the installed package database, but a real Hackage integration would need to thread installed-instance information through `DependencyProvider`.
+Note that flags are **not currently searched**. Every flag takes its declared default, so a release has exactly one instance. See [STATUS.md](STATUS.md) §5.1.
+
+**Installed against new instances.** The modular solver distinguishes packages already installed in the GHC package database from new packages to be downloaded, and it prefers installed instances. Our provider does the same, in `expand`. The distinction is not built into the algorithm: it lives entirely in the provider, which is where an `Instance` can be a pre-installed unit.
+
+**The destructive-update problem.** The old, pre-modular Cabal solver never backtracks. It resolves packages greedily and can produce install plans that overwrite installed packages, replacing `A-1` with `A-2` even though other installed packages need `A-1`. The modular solver detects and refuses such plans.
+
+PubGrub has no built-in notion of this either, and it does not need one here. Our provider reads the installed database, offers installed units as instances, and pins an installed unit's whole closure to the exact units it was built against. A plan that overwrites an installed package therefore cannot be constructed.
 
 ### Error Reporting
 
-The modular solver's approach: accumulate a trace of every decision and its rationale; error messages are excerpts of the trace with irrelevant steps removed, guided by conflict sets. As Löh noted, "all the information is there" but the presentation is not yet polished.
+The modular solver's approach: accumulate a trace of every decision and its rationale. Error messages are excerpts of that trace with irrelevant steps removed, guided by conflict sets. As Löh noted, "all the information is there" but the presentation is not yet polished.
 
 PubGrub's approach: the derivation tree is structurally embedded in the `IncompatCause` of each derived incompatibility. Rendering it is a pure recursive function over the tree structure (§7). The output takes the form of a logical proof: "Because X requires Y and Z requires ¬Y, X and Z are incompatible." This structure is always available regardless of how complex the conflict was.
 
@@ -568,7 +509,7 @@ Both approaches aim at the same goal. PubGrub's advantage is that the derivation
 | Conflict knowledge | Discarded | Discarded after jump | Permanently retained |
 | Search structure | Greedy, linear | Explicit lazy tree | Implicit (partial solution) |
 | Boolean flags | Yes | Yes (FChoice nodes) | Not in base spec |
-| Installed packages | Yes | Yes (preferred) | Via DependencyProvider |
+| Installed packages | Yes | Yes (preferred) | Yes, through the provider |
 | Modularity | Low | High (pipeline of passes) | Medium (single provider callback) |
 | Error messages | Poor | Good (trace-based) | Principled (derivation tree) |
 | Inspiration | Ad-hoc | Modular Lazy Search (2001) | CDNL / ASP (2012) |

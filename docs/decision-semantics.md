@@ -1,15 +1,14 @@
 # Specification: condition decisions
 
-> **Status:** specification, drafted 2026-08-04. Nothing below is implemented.
-> §12 records the code this document was checked against at drafting time and
-> is expected to be edited whenever the tree moves.
+> **Status:** specification. Nothing in §2–§9 is implemented. §11 records the code this
+> document generalises, by name rather than by line.
 >
-> **Dormant since 2026-08-17, and deliberately not withdrawn.** Flags stopped being
-> a search dimension ([STATUS.md](STATUS.md), "Release-1 scope"): every flag is fixed
+> **Dormant, and deliberately not withdrawn.** Flags are not
+> a search dimension ([STATUS.md](STATUS.md) §5.1): every flag is fixed
 > at its declared default, so a release has exactly one instance and the costs this
 > document exists to remove — re-offering a version per irrelevant flag assignment,
 > searching assignments outside the constraint store, naming uninvolved flags in every
-> trace — are all currently **zero**. Nothing here is wrong; there is simply nothing
+> trace — are all currently **zero**. Nothing here is wrong. There is simply nothing
 > for it to fix until the flag axis returns, at which point it becomes live again
 > unchanged. Do not schedule it, and do not delete the machinery it depends on.
 >
@@ -21,13 +20,13 @@
 >
 > **Authority:** this document deliberately deviates from
 > [references/pubgrub.md](../references/pubgrub.md) in exactly the places §1
-> registers, and nowhere else; outside §1 the PubGrub spec still wins. On flag
+> registers, and nowhere else. Outside §1 the PubGrub spec still wins. On flag
 > semantics it defers to [flags-semantics.md](flags-semantics.md) and amends it
 > only as §11 lists. Like that document, it says what must be *true* — no
 > types, no data structures, no functions.
 >
 > **New here?** Read *Plain version* immediately below first. It is an informal
-> paragraph-level summary with an analogy and a vocabulary table; §0 onwards
+> paragraph-level summary with an analogy and a vocabulary table. §0 onwards
 > assumes the vocabulary.
 
 ## Plain version
@@ -46,7 +45,7 @@ recipe: parser 1.0
   IF simd is OFF  → nothing extra
 ```
 
-Some switches change which ingredients you need. Most don't.
+Some switches change which ingredients you need. Most do not.
 
 ### What happens today
 
@@ -54,7 +53,7 @@ To choose this recipe, you must flip **every switch on the box** — including t
 ones no rule mentions. Two things then go wrong.
 
 **You redo the same work.** Give `parser 1.0` one switch that matters (`simd`) and
-four that don't (`docs`, `debug`, `fast`, `pretty`). You try it; it fails, because of
+four that do not (`docs`, `debug`, `fast`, `pretty`). You try it. It fails, because of
 `simd`. But the note you write says:
 
 > *parser 1.0 with simd ON and docs ON and debug OFF and fast ON and pretty ON does
@@ -62,7 +61,7 @@ four that don't (`docs`, `debug`, `fast`, `pretty`). You try it; it fails, becau
 
 That note is about **one exact setting of all five switches**. So next you flip
 `docs`, and fail identically. Then `debug`. Four irrelevant switches means **16
-identical failures**; ten means 1024.
+identical failures**. Ten flags mean 1024.
 
 **And your error messages name switches nobody touched**, because the note did. The
 reader sees five switches when the answer was only ever about one.
@@ -101,7 +100,7 @@ factory setting been **ON**, you would leave with a shopping list missing
 Hence **D1**: before declaring success, look at the final switch settings, find every
 IF-rule they turn **on**, and confirm those ingredients were actually required. Rules
 your settings leave off need no attention — an ingredient list you never trigger
-cannot matter. (That weaker form is deliberate; the stronger "settle every rule" was
+cannot matter. (That weaker form is deliberate. The stronger "settle every rule" was
 drafted and rejected, because it burns a decision on rules the answer never touches.)
 
 ### The prerequisite: what §4.2 is
@@ -109,7 +108,7 @@ drafted and rejected, because it burns a decision on rules the answer never touc
 [flags-semantics.md §4.2](flags-semantics.md) is about **how you write the note**, and
 it is listed above as this document's prerequisite.
 
-Today you record the exact setting you tried. §4.2 says: don't. Look at the IF-rule
+Today you record the exact setting you tried. §4.2 says: do not. Look at the IF-rule
 you got the dependency from —
 
 ```
@@ -127,7 +126,7 @@ on the box, so you copy it rather than compute it.
 
 > **A trap §4.2 records.** Do *not* instead group settings that need the same
 > ingredients. Two settings can agree about `simd-utils` and differ about some
-> unrelated documentation dependency; they then fail to group, and the irrelevant
+> unrelated documentation dependency. They then fail to group, and the irrelevant
 > switch stays in the note. Copying the guard is both simpler and more correct.
 
 The relationship in one line:
@@ -222,7 +221,7 @@ guards, not assignments — but three costs survive it, all traceable to the
 decision still being a *point instance*:
 
 1. **Backjumps are whole-instance.** Refuting a flag choice discards the
-   version decision with it; the provider re-enumerates and re-offers a version
+   version decision with it. The provider re-enumerates and re-offers a version
    that was never in question.
 2. **The provider searches what propagation could derive.** Completion-per-cell
    candidate enumeration re-does, outside the constraint store, narrowing that
@@ -231,8 +230,8 @@ decision still being a *point instance*:
    trace, log and report of it mentions flags no guard mentions.
 
 The observation that removes them: a `.cabal` file's conditional structure is
-a small set of **guarded, additive blocks** (`BuildInfo` is a monoid;
-else-branches normalise to negated guards), so the search dimension for a
+a small set of **guarded, additive blocks**. `BuildInfo` is a monoid and
+else-branches normalise to negated guards, so the search dimension for a
 release is its guards — the cells of the Karnaugh map over the flags guards
 mention — not the `2^N` corners of the flag hypercube. Guards already appear in
 incompatibility terms (§4.2), and under a decided version they form a plain
@@ -259,16 +258,16 @@ elsewhere in this repository.
 
 | pubgrub.md | says | here |
 |---|---|---|
-| `:169` | decisions "select individual package versions" | decisions are **cause-less positive terms** (§2.1); the first decision for a package selects a version (§2.2), later ones refine its condition region (§2.3) |
-| `:443` | decision making requires "the partial solution *doesn't* contain a decision for that package" | requires no **version** decision; a version-decided package re-enters decision making while the D1 check fails (§3) |
-| `:451` | dependencies are converted to incompatibilities "lazily when each package version is first chosen" | same timing, but per guarded fact (§2.2); facts whose guard the term does not yet satisfy stay **dormant**, which `:451`'s flooding concern already tolerates — the count is one per guarded occurrence, not per assignment |
-| `:184` | total solution: "for every positive derivation, a corresponding decision that satisfies that assignment" | replaced by **D1** (§3): version decision + exhibited witness + fired guards entailed. Decisions no longer satisfy derivations pointwise; the witness does |
+| `:169` | decisions "select individual package versions" | decisions are **cause-less positive terms** (§2.1). The first decision for a package selects a version (§2.2), later ones refine its condition region (§2.3) |
+| `:443` | decision making requires "the partial solution *doesn't* contain a decision for that package" | requires no **version** decision. A version-decided package re-enters decision making while the D1 check fails (§3) |
+| `:451` | dependencies are converted to incompatibilities "lazily when each package version is first chosen" | same timing, but per guarded fact (§2.2). Facts whose guard the term does not yet satisfy stay **dormant**, which `:451`'s flooding concern already tolerates — the count is one per guarded occurrence, not per assignment |
+| `:184` | total solution: "for every positive derivation, a corresponding decision that satisfies that assignment" | replaced by **D1** (§3): version decision + exhibited witness + fired guards entailed. Decisions no longer satisfy derivations pointwise. The witness does |
 | `:492` | no matching version ⇒ add `{term}` | unchanged, and it also covers the refinement path: a provider that finds `Adm(p) ∩ ⟦term⟧ = ∅` while asked to certify D1 answers exactly as O6 prescribes |
 | `:499` | add the decision "unless this would produce a conflict" | applies verbatim to refinement decisions (§2.3) |
 
-**Explicitly not deviated from:** unit propagation; the generalised resolution
-rule (`:350`); satisfier location, prior causes and backjumping
-(`:383`–`:417`); decision levels (`:178`); error reporting. The licence for
+**Explicitly not deviated from:** unit propagation. The generalised resolution
+rule (`:350`). Satisfier location, prior causes and backjumping
+(`:383`–`:417`). Decision levels (`:178`). Error reporting. The licence for
 the whole table is that the algorithm demands only two things of a decision —
 it is **cause-less** (`:364`–`:367`: a decision terminates conflict
 resolution because there is no cause to resolve against) and **removable**
@@ -307,7 +306,7 @@ never reasoned about) and a hazard (§3 exists because of it).
 
 Version-axis collapsing — widening `{v}` to a range shared with adjacent
 releases — is [flags-semantics.md §4.2](flags-semantics.md)'s remaining half
-and composes with everything here; it changes the depender's version
+and composes with everything here. It changes the depender's version
 component, never the decision model. Where a widened depender spans releases
 that differ in what they declare, the third pin state carries it, unchanged
 (§7).
@@ -321,7 +320,7 @@ A refinement decision for a version-decided package `p` is a term
 where `G` is a condition region — in the canonical per-guard form, a single
 guard `C` or its negation `¬C` — that the accumulated term does not already
 entail. Per-guard versus whole-region refinement is **policy, not semantics**
-(a region is a conjunction of guard decisions); §6 fixes the policy.
+(a region is a conjunction of guard decisions). §6 fixes the policy.
 
 A refinement must make progress in the sense D2 defines (§4). Which package
 decision making attends to first — an undecided package or an
@@ -349,11 +348,11 @@ exact dual of the false "no solution" that
 > only when every package `p` with a positive accumulated term satisfies all
 > of:
 >
-> 1. **(version)** `p` has a version decision `{v}`;
+> 1. **(version)** `p` has a version decision `{v}`.
 > 2. **(witness)** the provider has exhibited a witness instance
 >    `(v, α) ∈ Adm(p) ∩ ⟦accumulated term⟧`, with `dom α = D(v)` exactly
 >    (totality per [flags-semantics.md §1.2](flags-semantics.md) — required
->    of the witness, no longer of any decision);
+>    of the witness, no longer of any decision).
 > 3. **(fired guards are entailed)** for every guarded dependency occurrence
 >    `C ⇒ q ∈ R` of `v`: if `α` satisfies `C`, then the accumulated term
 >    detectably satisfies the depender `p ∈ {v} × C` — under **the same
@@ -366,7 +365,7 @@ Notes, each load-bearing:
   witness. The witness's dependencies are the base occurrences plus exactly
   the occurrences whose guards `α` fires
   ([flags-semantics.md §4.1](flags-semantics.md)). Base facts propagated at
-  the version decision; fired guarded facts propagated by clause 3; each
+  the version decision. Fired guarded facts propagated by clause 3. Each
   propagated fact put `q ∈ R` into `q`'s accumulated term, and `q`'s own
   witness lies inside it by clause 2. So every dependency edge of the plan is
   satisfied. No step consults `D` outside the provider.
@@ -376,16 +375,16 @@ Notes, each load-bearing:
   refinement per guard even when the default completion avoids every block —
   the common case — polluting decision levels for nothing. The weakening is
   sound because an unfired block contributes no dependencies to the delivered
-  instance; the term still admitting instances that *would* fire it is
+  instance. The term still admitting instances that *would* fire it is
   irrelevant, since only the witness is delivered.
 - **Only the provider can certify D1.** Clause 2 is `Adm` and reality
-  (`D`-knowledge, [flags-semantics.md §1.1](flags-semantics.md)); clause 3's
-  guard list is index data. The kernel asks; the provider answers; a provider
+  (`D`-knowledge, [flags-semantics.md §1.1](flags-semantics.md)). Clause 3's
+  guard list is index data. The kernel asks. The provider answers. A provider
   that finds the term really empty answers as O6's `None` and `:492` applies
   unchanged.
 - **Buildability needs no seat in D1.** "Unbuildable when `C`" is the fact
   `{p ∈ {v} × C}` — a single positive term — emitted with the others at the
-  version decision. Unit propagation immediately derives its negation; no
+  version decision. Unit propagation immediately derives its negation. No
   determination question ever arises. When
   [flags-semantics.md §1.5](flags-semantics.md) is implemented, its guards
   join the *emission* of §2.2, not this obligation. (This also discharges
@@ -415,8 +414,8 @@ way.
 >    test (§9), not an assumption.
 > 3. *(termination metric)* Each refinement strictly increases the number of
 >    **detectably determined** dep-guards of its package. Guards per version
->    and versions per package are finite; version decisions per package per
->    branch are single; the remaining argument is PubGrub's own. Note the
+>    and versions per package are finite. Version decisions per package per
+>    branch are single. The remaining argument is PubGrub's own. Note the
 >    *semantic* term need not shrink — a redundant refinement shrinks nothing
 >    — which is why the metric counts detectability, not denotation.
 
@@ -429,7 +428,7 @@ rule here.
 > **D3 — the answer is the witnesses.** The solution delivered to the user is,
 > per package, the witness of D1 clause 2 — not any decision. Its assignment
 > is total (`dom α = D(v)`), so every flag has a value in the plan: flags
-> pinned by the final term take their pinned values; all others take the
+> pinned by the final term take their pinned values. All others take the
 > release's declared defaults, per the choice policy below.
 
 Existence is not a search at solve end: D1 clause 2 already exhibited the
@@ -441,14 +440,14 @@ step that could *fail* would be D1 mis-stated.
 ## 6. Choice policy is not semantics
 
 As in [flags-semantics.md §5](flags-semantics.md): any admissible choice is
-correct; policy changes the solution found and the time taken, never
+correct. Policy changes the solution found and the time taken, never
 solvability. The policy adopted:
 
 1. **Between releases**: newest first (unchanged).
 2. **Intended witness**: for a version-decided package, the fewest-deviations
    completion of the accumulated term (deviation measured against the
    release's declared defaults — a property of the completed assignment,
-   never of a cell; both recorded traps in
+   never of a cell. Both recorded traps in
    [flags-semantics.md §5](flags-semantics.md) apply verbatim).
 3. **Refinement direction**: refine toward the guards the intended witness
    fires — equivalently, decide each guard the way the intended witness
@@ -477,7 +476,7 @@ required**. Refinement terms are DNFs over `PinnedTo` literals — *disjunctive 
 form*, an OR of ANDs: a union of cells, each cell pinning some flags — that is, the
 existing cell language, no new representation.
 
-`NotDeclared` is not dissolved; it stays load-bearing exactly where it always
+`NotDeclared` is not dissolved. It stays load-bearing exactly where it always
 was — dependers that span versions differing in what they declare, i.e. the
 version-axis half of §4.2 collapsing, whose acceptance witness is
 [flags-semantics.md §9](flags-semantics.md)'s. The clean split worth stating:
@@ -501,7 +500,7 @@ parser 1.1    declares  no flags
 
 Inside the decided version there are exactly two cases, because "does this release
 declare `simd`?" already has an answer — yes. `¬(+simd)` is `-simd` and nothing else.
-The `parser ∉ {1.0}` disjunct is the version axis doing its ordinary work; it is not a
+The `parser ∉ {1.0}` disjunct is the version axis doing its ordinary work. It is not a
 third *flag* state. This is why refinement needs no `NotDeclared`.
 
 **Three-valued, where you collapse.** Now the depender spans a range, which is what
@@ -521,12 +520,12 @@ release is excluded that is not — the unsound direction, which lets it report 
 for a solvable problem.
 
 The contrast in one line: **deciding fixes one release, so the flag's domain is
-known; collapsing spans releases, so the domain itself varies and has to be
+known. Collapsing spans releases, so the domain itself varies and has to be
 speakable.**
 
 The second half is checkable without a solver — it is exactly
 [flags-semantics.md §9](flags-semantics.md)'s acceptance witness, an assertion about
-`A ∖ B` — and the current implementation satisfies it. Evaluated 2026-08-05,
+`A ∖ B` — and the current implementation satisfies it. Evaluated by hand,
 `difference` on those two sets yields precisely two cells:
 
     [(simd, PinnedTo False)]     -- retains 1.0 -simd
@@ -562,30 +561,30 @@ base 4.21.0.0     pre-installed: the only base obtainable
 | (5) | `{simd-utils 0.3}` | conflict resolution, (4) + (3) |
 | (6) | `{parser ∈ {1.0} × +simd}` | conflict resolution, (5) + (2) |
 
-**Level 1.** Decide `myapp 0.1`; derive `parser >=1.0 && <2`.
+**Level 1.** Decide `myapp 0.1`. Derive `parser >=1.0 && <2`.
 
 **Level 2.** Version decision `parser ∈ {1.0}`. Emission adds (2), dormant —
 its depender is not satisfied by a term that pins no flag. D1 check: the
-intended witness is the default completion `+simd`, which fires the guard;
+intended witness is the default completion `+simd`, which fires the guard.
 not entailed → refine.
 
 **Level 3.** Refinement `parser ∈ {1.0} × +simd` (§6 rule 3). (2)'s depender
-is now satisfied; derive `simd-utils ==0.3`.
+is now satisfied. Derive `simd-utils ==0.3`.
 
-**Level 4.** Decide `simd-utils 0.3`, giving (3); derive `base >=4.22`.
+**Level 4.** Decide `simd-utils 0.3`, giving (3). Derive `base >=4.22`.
 
 **Conflict.** (4), then resolution: (4)+(3) → (5), (5)+(2) → **(6)**. The
-earliest satisfier of (6) is the *refinement* at level 3; the previous
+earliest satisfier of (6) is the *refinement* at level 3. The previous
 satisfier is the version decision at level 2. **Backjump to level 2: the
 version decision survives.** No re-expansion of `parser` occurs.
 
-**Propagation.** (6) is unit; derive its negation intersected with the
+**Propagation.** (6) is unit. Derive its negation intersected with the
 current term: `parser ∈ {1.0} × ¬(+simd)` — computed in the two-valued
 algebra of §7.
 
 **D1 check.** Intended witness: fewest-deviations member of
 `{1.0} × -simd`, which is `parser 1.0 -simd`. It fires no dep-guard, so
-clause 3 holds vacuously; the provider exhibits the witness; no package has
+clause 3 holds vacuously. The provider exhibits the witness. No package has
 an unsatisfied positive term. **Success.**
 
 **D3.** The plan is the witnesses: `myapp 0.1`, `parser 1.0 -simd`.
@@ -597,7 +596,7 @@ completions to re-offer `parser 1.0 -simd`.
 **Variant B — inert flags (the 2^k witness).** Give `parser 1.0` k further
 flags `docs₁ … docsₖ` (any defaults) mentioned by no guard. The trace above is
 **identical, symbol for symbol**: no incompatibility, decision, refinement or
-derivation names any `docsᵢ`; they first appear in the answer, at D3, at
+derivation names any `docsᵢ`. They first appear in the answer, at D3, at
 their defaults. Compare [flags-semantics.md §9](flags-semantics.md)'s price
 paragraph: the point-decision model wastes 2^k rounds pre-§4.2 and still
 *decides and names* the inert flags post-§4.2.
@@ -643,93 +642,45 @@ D1's witness-relative form.
 ## 10. Non-goals
 
 - The provider interface shape (`expand` vs pick/consequences vs a `refine`
-  form) — design, not semantics; recorded where
+  form) — design, not semantics. Recorded where
   [flags-semantics.md §8](flags-semantics.md) records its sibling question.
   Note only that this document *subsumes the benefits* §8 lists for the
   split: completeness dissolving into the loop, propagation running between
   attempts, and reasons becoming first-class all fall out of §2–§3.
 - Implementation sequencing (see §11's closing note).
 - Manual flags, buildability, user flag constraints: their obligations live
-  in [flags-semantics.md](flags-semantics.md) and are unchanged; §3 and §6
-  note the two interaction points (buildability joins emission; manual flags
-  constrain refinement policy). User flag constraints are ordinary terms and
+  in [flags-semantics.md](flags-semantics.md) and are unchanged. §3 and §6
+  note the two interaction points. Buildability joins emission, and manual flags
+  constrain refinement policy. User flag constraints are ordinary terms and
   compose without any new rule.
-- Setup dependencies, sublibraries — other rungs; nothing here moves for
+- Setup dependencies, sublibraries — other rungs. Nothing here moves for
   them.
 
-## 11. Amendments to other documents
+## 11. What holds today
 
-Listed here so review happens in one place. **All five were applied 2026-08-05**;
-the drafted text below is retained as the record of what changed and why. The
-substance of this document is unaffected — these were edits *to other files*.
+Everything in §2–§9 is **specified, not implemented**.
 
-1. **flags-semantics.md §1.2** — the instance definition is untouched; what
-   moves is *when* totality is demanded. Proposed addition after the
-   `dom α = D(p, v)` display:
+**The prerequisite is paid.** §4.2 per-fact guarded emission is implemented on both
+axes, so this document is no longer inert. Its §0 costs are the live argument for or
+against building it.
 
-   > Totality is a property of an **instance**, and is demanded wherever an
-   > instance is produced — under condition decisions
-   > ([decision-semantics.md](decision-semantics.md)) that is the witness of
-   > D1, not any decision: decisions there are terms and pin only what a
-   > guard made relevant.
+**It is dormant all the same.** While every flag takes its declared default there is
+one assignment per release, so the cost condition decisions remove is currently zero.
+It becomes live again the moment the flag axis returns.
 
-2. **flags-semantics.md §1.4, Status paragraph** — proposed replacement:
-
-   > **Status.** Revisited 2026-08-04:
-   > [decision-semantics.md](decision-semantics.md) collects the
-   > alternative's advantage — irrelevant flags never enter clauses *or
-   > decisions* — without flag variables: decisions generalise to condition
-   > terms on the package variable, made under a decided version, so
-   > conditional existence never arises. The modelling choice recorded here
-   > (the flag lives in the value) is unchanged and is what makes that
-   > generalisation cheap.
-
-3. **flags-semantics.md §8** — add a note that the pick/consequences split's
-   three benefits are inherited by the condition-decision model, and the two
-   items should be scheduled as one.
-
-4. **flags-semantics.md §10** — add rows: D1, D2, D3, §2.2 emission — all
-   "specified ([decision-semantics.md](decision-semantics.md)), not
-   implemented".
-
-5. **CLAUDE.md, Reporting gap 1** — currently prescribes grouping "by
-   identical flattened dependency set", which
-   [flags-semantics.md §4.2](flags-semantics.md) explicitly rejects ("a
-   serious mistake, not a conservative one"); flags-semantics wins by its own
-   authority clause. Rewrite the gap around per-fact guarded emission and add
-   a pointer here.
-
-**Sequencing note (recorded, not part of this spec's obligations).** §4.2
-per-fact emission is the prerequisite and is independently valuable under
-point decisions — it alone removes the 2^k re-offer and the depender wording
-gap. Implement it first, measure on real problems, and only then decide
-whether costs 1–3 of §0 justify the kernel generalisation. If they do, the
-oracle (§9) lands before or with it, not after.
-
-**Where that sequence now stands (2026-08-12).** Steps one and two are done: §4.2 is
-implemented on both axes and measured — the re-offer is gone, and the wording gap with
-it, but the version axis is a *trade* rather than a win ([collapsing.md](collapsing.md)
-§1). So the decision this note defers to is now live, and it is the third step: do §0's
-costs 1–3 justify the kernel generalisation? Two things should be settled first, because
-both change the answer — `collapsing.md`'s open cost question, and §6's verdict oracle,
-which is still owed and still blocking.
-
-## 12. What holds today
-
-Re-checked against the tree **2026-08-12**. Everything in §2–§9: **specified, not
-implemented.** But note the headline change since 2026-08-04: **the prerequisite is
-now built.** §4.2 per-fact guarded emission is implemented on both axes, so the row
-that used to read "dependers are singleton instances" is gone — this document is no
-longer inert, and its §0 costs 1–3 are the live argument for or against it.
-
-The code this document generalises:
+The code this document generalises. **Cited by name, not by line** — every line number
+in an earlier version of this table had drifted, some by 300 lines:
 
 | fact | where |
-|---|---|
-| decisions are point instances, at most one per package | `paDecision :: Maybe Instance`, `src/PubGrub/Solver.hs:124`; `addDecision` `:171` |
-| the solution is read off decisions | `extractSolution`, `src/PubGrub/Solver.hs:219` — the concept §2.4 deletes |
-| success = no undecided positive term | `undecidedPositive`, `src/PubGrub/Solver.hs:225`; `solve` `:428` — the criterion D1 replaces |
-| **dependers are guarded occurrences over a release span** — §4.2 implemented, so this row records the prerequisite as *paid*, not owed | `dependencyInc`, `bridge/Bridge/Provider.hs:453`; `spanningOccurrence` `:483` |
-| the provider searches completions per cell — the machinery §2–§3 makes mostly redundant | `usableAssignments`, `bridge/Bridge/Provider.hs:397`; `preferDefaults` `:417` |
-| guards exist per release, environment resolved, flags-only | `GuardedDeps`, `bridge/Bridge/Cabal/Flatten.hs:71`; `flattenComponent` `:156` |
-| flags-semantics rows this document leans on | O2 (exact algebra), O4 (slack direction), O6 soundness + cell-completion lemma: hold. §6 verdict oracle: **owed, and blocking here** (§9) |
+| --- | --- |
+| decisions are point instances, at most one per package | `paDecision`, `addDecision` — `src/PubGrub/Solver.hs` |
+| the solution is read off decisions | `extractSolution` — the concept §2.4 deletes |
+| success is "no undecided positive term" | `undecidedPositive`, `solve` — the criterion D1 replaces |
+| dependers are guarded occurrences over a release span | `dependencyInc`, `spanningOccurrence` — `bridge/Bridge/Provider.hs`. This row records the prerequisite as **paid** |
+| the provider searches completions per cell | `usableAssignments`, `preferDefaults` — the machinery §2–§3 makes mostly redundant |
+| guards exist per release, environment resolved, flags only | `GuardedDeps`, `flattenComponent` — `bridge/Bridge/Cabal/Flatten.hs` |
+| the flags-semantics rows this document leans on | O2 (exact algebra), O4 (slack direction), O6 soundness and the cell-completion lemma all hold. §6's verdict oracle is **owed, and blocking here** (§9) |
+
+**§11 used to list five amendments to other documents.** All five were applied, and the
+section held verbatim copies of paragraphs that live in
+[flags-semantics.md](flags-semantics.md). It has been removed.

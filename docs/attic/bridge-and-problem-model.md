@@ -1,5 +1,11 @@
 # Bridge, problem model, and PInfo adapter
 
+> **ATTIC.** A planning record from 2026-07-23, written before the bridge existed.
+> Three of its substantive decisions were then reversed — most importantly the decision
+> to reuse `convPIs`, which is not what was built. Read
+> [`../../CLAUDE.md`](../../CLAUDE.md) instead for the architecture and the dependency
+> boundary. See [README.md](README.md) §8 for what was reversed.
+
 > **Status: part live, part dead.** Read for *why the bridge is shaped as it is* —
 > that reasoning is current and is the load-bearing content. Do not read it as an
 > API description.
@@ -22,13 +28,13 @@
 >   tarball is on disk". `preferred-versions` is still unhandled. `../CLAUDE.md`'s
 >   dependency boundary note is the current statement; prefer it over anything below.
 >
-> See [STATUS.md](STATUS.md) for current state and `../CLAUDE.md` for the
+> See [STATUS.md](../STATUS.md) for current state and `../CLAUDE.md` for the
 > architecture as built.
 
 Design notes from the 2026-07-23 planning session. This records *decisions and
 sketches*, not finished code. Some type names here predate the reboot and no
 longer exist; flags, described below as "later", are implemented — see
-[flags-semantics.md](flags-semantics.md) for their specification. See `CLAUDE.md` for the one-paragraph version and
+[flags-semantics.md](../flags-semantics.md) for their specification. See `CLAUDE.md` for the one-paragraph version and
 the rung ladder.
 
 ## Goal recap

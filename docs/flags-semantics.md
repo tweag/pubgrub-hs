@@ -6,24 +6,22 @@
 > **Implemented by:** `src/PubGrub/InstanceSet/SourceCell.hs` (`FlagPin`, the cell
 > algebra), `src/PubGrub/InstanceSet.hs` (membership), `bridge/Bridge/Provider.hs`
 > and `bridge/Bridge/Cabal/Flatten.hs` (the O6 provider obligations). The guards
-> for §3 and §6 are in `test/InstanceSetSpec.hs`; the end-to-end cases are in
-> `test/FlagSolveSpec.hs`. **§10 records which obligations actually hold today**,
-> which are satisfied only accidentally, and what is coupled to what — check it
-> before relying on any of them.
+> for §3 and §6 are in `test/InstanceSetSpec.hs`. The end-to-end cases are in
+> `test/FlagSolveSpec.hs`. **§10 records which obligations hold today**, which are
+> satisfied only by accident, and what is coupled to what. Read it before you rely on
+> any of them.
 >
 > **Authority:** on the questions it answers, this file wins over
 > [flags-design.md](attic/flags-design.md) (which chose a different rule — see §2.3)
 > and over `CLAUDE.md`. It does not overrule
-> [references/pubgrub.md](../references/pubgrub.md); where PubGrub already
+> [references/pubgrub.md](../references/pubgrub.md). Where PubGrub already
 > decides something, this file cites it.
 >
-> **Reviewed** 2026-08-05 —
-> [flags-semantics-review.md](flags-semantics-review.md). Its verdict was that the
-> core three-state model is sound, and that four claims overreached their own
-> arguments. All four are now folded in: §1.5 and §1.6 (who owns the manual-flag
-> rule), §2.5 (a project decision, not a PubGrub requirement), §5 (the recipe must
-> consume an O6-complete search), and O4 (a local result, not a whole-solver one).
-> The review is kept as the record of why those changed.
+> **Reviewed** by [attic/flags-semantics-review.md](attic/flags-semantics-review.md).
+> Its four findings are folded in: §1.5 and §1.6 (who owns the manual-flag rule),
+> §2.5 (a project decision, not a PubGrub requirement), §5 (the recipe must consume
+> an O6-complete search), and O4 (a local result, not a whole-solver one). The review
+> is kept in the attic as the record of why those changed.
 
 ## 0. Why this exists
 
@@ -53,7 +51,7 @@ this project's index reader resolves `.cabal` revisions last-wins, so ρ is
 a solve reads one index, and stops being dormant the moment local packages or a
 second source enter.
 
-`D` is index data. Only the bridge can answer it; the core algebra cannot, and
+`D` is index data. Only the bridge can answer it. The core algebra cannot, and
 per the architecture boundary must not try.
 
 ### 1.2 An instance
@@ -71,7 +69,7 @@ while a solve reads one index and stops being dormant with local packages or a
 second source, at which point **the instance value must also retain ρ**, since a
 version plus a flag assignment cannot tell two such releases apart.
 
-Totality is the load-bearing half (no conditional is left unresolved); exactness
+Totality is the load-bearing half (no conditional is left unresolved). Exactness
 is the half we keep forgetting (α never mentions a flag the version does not
 declare, so "α has no value for `f`" is meaningful and observable).
 
@@ -90,7 +88,7 @@ contains at most one version of `foo`.
 ### 1.4 The flag lives in the value — the one modelling choice
 
 A flag is **not** a solver variable in its own right. The variable is the package
-name; the flag is part of the value. Everything downstream in this document —
+name. The flag is part of the value. Everything downstream in this document —
 in particular the three-case atom of §2.3 — follows from this, so it is worth
 saying why, and what it costs.
 
@@ -119,7 +117,7 @@ is bad for every version": the clause still names `foo 1.2`, and a flag variable
 shared across versions would anyway impose exactly the cross-version identity §1.3
 denies, while a version-keyed one would not generalise either. The honest
 comparison is therefore: a shared flag variable may generalise more but imposes an
-identity Cabal does not have; a version-keyed one keeps the semantics and needs
+identity Cabal does not have. A version-keyed one keeps the semantics and needs
 conditional-existence machinery.
 
 Here, each `(version, assignment)` pair is its own atom, so — *absent §4.2* — an
@@ -143,7 +141,7 @@ under a decided version, so conditional existence never arises. The modelling
 choice recorded here (the flag lives in the value) is unchanged and is what makes
 that generalisation cheap.
 
-Nothing in §2 or §3 depends on this choice being the right one; if the retry cost
+Nothing in §2 or §3 depends on this choice being the right one. If the retry cost
 ever dominates, this is the decision to revisit, and §2.3 largely dissolves when it
 is. It is recorded here as a decision with a price, because the previous record of
 it (see [flags-design.md](attic/flags-design.md) §1) gave a reason that does not
@@ -169,7 +167,7 @@ question went wrong the first time:
    - the components in scope are buildable under α. A `buildable: False`
      reachable only under some assignments makes exactly those instances
      inadmissible, and PubGrub asks for that to be expressed as "never select
-     this" rather than as dependencies (`references/pubgrub.md:476`);
+     this" rather than as dependencies (`references/pubgrub.md:476`).
    That is the whole of it. **Manual flags are deliberately not on this list** —
    see below.
 3. **Eligibility for a query** — intrinsic admissibility *plus* membership in the
@@ -187,14 +185,14 @@ The division that works, and it is all translation (§1.6):
 
 - **no user value for a manual flag `f`** — translate the manual-default rule into
   an initial constraint, `(f is default) ∨ (f is not declared)`, leniently as §1.6
-  requires;
-- **a user value for `f`** — translate that value instead, by the same rule;
+  requires.
+- **a user value for `f`** — translate that value instead, by the same rule.
 - **the provider's notion of admissibility never mentions user input at all.**
 
 This matches what cabal does: `enforceManualFlags` lets only the default survive
 when the flag is unconstrained, and admits the mentioned values when the user names
 it, after which ordinary constraint enforcement picks. The behaviour is unchanged
-from the earlier draft; what changed is which layer owns it. (And it is no longer
+from the earlier draft. What changed is which layer owns it. (And it is no longer
 asserted from memory — see §8.)
 
 Note that intrinsic admissibility is **assignment-dependent**: whether an
@@ -249,7 +247,7 @@ never solver-level flag constraints. They are evaluated at the chosen assignment
 `references/pubgrub.md:84`–`:121` defines terms, satisfies/contradicts/
 inconclusive, and the identities `S satisfies t ⟺ ⋂S ⊆ t` and
 `S contradicts t ⟺ ⋂S ∩ t = ∅`. All of it applies verbatim with "set of
-versions" read as "set of instances". Nothing about flags changes the algorithm;
+versions" read as "set of instances". Nothing about flags changes the algorithm.
 flags change only what a *set of values* has to be able to say.
 
 ### 2.2 Atoms
@@ -259,7 +257,7 @@ the flag is part of the value rather than a variable of its own (§1.4), such a
 constraint has to be able to talk about flags, and it is built from two kinds of
 atom:
 
-1. **version**: the version lies in a version range;
+1. **version**: the version lies in a version range.
 2. **flag**: a statement about one flag name.
 
 A flag atom must be able to distinguish all three mutually exclusive
@@ -288,8 +286,8 @@ all, so for it:
 "Not applicable" is the operational reading — *absent from this instance's
 solver-visible flag domain* — and is why the third case is not called "not
 declared" here: the source that produced an installed unit may well have declared
-`f`; what is absent is any assignment the solver could choose. If a report ever
-names this case for an installed unit it should say "not applicable", not "not
+`f`. What is absent is any assignment the solver could choose. If a report ever
+names this case for an installed unit it must say "not applicable", not "not
 declared".
 
 Note the consequence, since it is easy to mistake for a defect: a flag *request*
@@ -297,7 +295,7 @@ cannot exclude an installed unit. That is correct — an installed unit's flags 
 already baked, so the request can be neither honoured nor violated — and it is
 what the lenient translation of §1.6 delivers, `(f is b) ∨ (f is not
 applicable)`. It also means a constraint carrying flag conditions must carry its
-installed instances as a separate disjunct; a representation that keeps the
+installed instances as a separate disjunct. A representation that keeps the
 installed side extensional gets this structurally.
 
 ### 2.3 Why three cases, and not two
@@ -336,7 +334,7 @@ minimal one under which every set operation is exact, and it needs no knowledge 
 the instance answers it.
 
 What is rejected here is the lenient *atom*, not lenient *behaviour*. Both
-readings above remain expressible — strictly, as `f is b`; leniently, as
+readings above remain expressible — strictly, as `f is b`. Leniently, as
 `(f is b) ∨ (f is not declared)` — so each boundary says which it means. §1.6 is
 where the lenient one is still required.
 
@@ -365,7 +363,7 @@ must enumerate the version axis — some would not. So keying flags by version i
 reasons are the ones §1.4 gives: such designs need conditional-existence
 machinery, complicate incompatibilities, and either impose a cross-version flag
 identity §1.3 denies or fail to generalise. An earlier draft of this section said
-the exclusion followed from `:1172` "not as a matter of taste"; that overstated
+the exclusion followed from `:1172` "not as a matter of taste". That overstated
 what the citation supports.
 
 The version axis being open is a real constraint on any such design and is worth
@@ -386,7 +384,7 @@ happens to declare.
   `⟦A ∩ B⟧ = ⟦A⟧ ∩ ⟦B⟧`, and likewise for `∪` and `∖`. No slack. §2.3 exists to
   make this achievable.
 - **O3 — emptiness is one-sided.**
-  - *(a, soundness)* if the emptiness test says empty, then `⟦X⟧ = ∅`;
+  - *(a, soundness)* if the emptiness test says empty, then `⟦X⟧ = ∅`.
   - *(b, completeness where it must be)* if `X` is vacuously empty, the test
     must say empty.
 
@@ -410,7 +408,7 @@ happens to declare.
   backjump level from it, so noticing satisfaction later than it semantically
   occurs could change which incompatibility is learned, whether it is asserting
   after backjumping, and whether the loop progresses. §6 already says this and
-  owes the verdict oracle; O5 discharges one case (the provider's `{X}`,
+  owes the verdict oracle. O5 discharges one case (the provider's `{X}`,
   recognisable through `R ∖ R`) and not the loop. The formal model draws the same
   line — relation and propagation soundness use conservative emptiness, while the
   satisfier-search results in `specification/PubGrub/PartialSolution.lean` require
@@ -432,10 +430,10 @@ happens to declare.
       choose(p, X) = Some i   ⟹   i ∈ Adm(p) ∩ ⟦X⟧
       choose(p, X) = None     ⟺   Adm(p) ∩ ⟦X⟧ = ∅
 
-  The `⟸` half of the second line is the easy one; the **`⟹` half is the
+  The `⟸` half of the second line is the easy one. The **`⟹` half is the
   obligation that matters**, and it is not a formality. PubGrub turns "no
   candidate" into the external incompatibility `{X}`, which forbids the entire
-  offered set — so a `None` that should have been a `Some` is a false external
+  offered set — so a `None` where a `Some` was available is a false external
   fact, and yields a confident "no solution" for a solvable problem. Note it is
   *stronger* than "the provider may test its preferred assignment": it must find a
   satisfying admissible assignment if one exists.
@@ -460,21 +458,21 @@ happens to declare.
   it can be used twice over:
 
   - **locally**, intersected into the set being searched, which removes the whole
-    inadmissible region rather than one completion at a time;
+    inadmissible region rather than one completion at a time.
   - **globally**, returned as an incompatibility, so propagation gets it and the
     proof can say *why* — which is what PubGrub asks for at
     `references/pubgrub.md:476` ("add an incompatibility indicating that it should
     never be selected" **instead of adding its dependencies**).
 
-  Both are the same fact; neither replaces the search. Note what `:476` does *not*
+  Both are the same fact. Neither replaces the search. Note what `:476` does *not*
   say: nothing there requires the provider to decline to decide. A rejected
   completion's incompatibility travels back with whatever instance the provider
   does settle on (§10), so no interface case is needed for it.
 
-  Also: the assignment offered must be total per §1.2; the dependencies reported
-  must be those **at exactly the assignment the offered instance pins**; and
+  Also: the assignment offered must be total per §1.2. The dependencies reported
+  must be those **at exactly the assignment the offered instance pins**. And
   nothing outside the provider may consult `D`.
-- **O7 — the algebra may not enumerate instances; the provider may enumerate
+- **O7 — the algebra may not enumerate instances, and the provider may enumerate
   releases.** Precisely: no operation of the constraint algebra, and no
   term-relation query, may enumerate a package's concrete instance universe. The
   provider *may* enumerate available releases and construct assignments lazily,
@@ -519,14 +517,14 @@ Soundness and policy are separate, and only the first is a requirement:
   which is why the per-instance form we emit today is correct but useless.
 - *policy*: make `D` as general as is practical, above all by **omitting flag
   conditions the guard does not mention**. PubGrub describes collapsing as a
-  strategy rather than a logical prerequisite; for us it is the strategy that pays
+  strategy rather than a logical prerequisite. For us it is the strategy that pays
   for §1.4's price.
 
 What the guard does and does not buy. A `.cabal` file's conditional tree yields
 guarded occurrences directly, so **the flag component of `D` is the guard** — no
 enumeration of assignments, and no need to compute per-assignment dependency sets
 at all. Several occurrences may constrain the same `q` (an unconditional
-`q >=1`, a guarded `q <3`, a guarded `q /=2`); emit them as separate facts and let
+`q >=1`, a guarded `q <3`, a guarded `q /=2`). Emit them as separate facts and let
 propagation intersect them, rather than computing one effective range per
 assignment, whose region would need a Boolean combination of guards. What remains
 genuinely to be done is the **version** axis, and it splits in two:
@@ -540,20 +538,26 @@ genuinely to be done is the **version** axis, and it splits in two:
   buys is that adjacent slots **touch**, so the version algebra coalesces them
   instead of accumulating fragments, and a `difference` never leaves an empty
   between-releases hole for the solver to learn about separately.
-- **Several releases — still open, and still needs reads.** Widening `D` across
-  *distinct* releases requires knowing they have the same dependency, which means
-  inspecting them — including whether each declares the flag the guard mentions at
-  all, since where it does not the guard is not merely false but inapplicable
-  (§2.2). Slots make this cheaper rather than harder: two adjacent slots union into
-  one contiguous range with no gap to justify, so the only remaining question is the
-  dependency-identity one.
+- **Several releases — implemented.** Widening `D` across *distinct* releases
+  requires knowing that they carry the same dependency, so the provider must read
+  them. `Bridge.Provider.spanningOccurrence` does that walk. Slots make it cheaper
+  rather than harder: two adjacent slots union into one contiguous range with no gap
+  to justify, so only dependency-identity is left to establish.
+
+  The third pin state turns out **not** to be needed on this path. Requiring the
+  guard to be *identical* means every release in the span declares the flags the
+  guard mentions. A release that did not declare them could not have produced that
+  guard.
+
+  The walk is affordable because a read is a CBOR decode rather than a parse. See
+  [collapsing.md](collapsing.md) for the cost, and for the five ways to walk less.
 
 ### 4.3 Reports
 
 A depender constraint appears verbatim in the explanation, so it must render as
 something a user can act on: cabal range syntax plus a readable statement of the
 flag conditions. The not-applicable case (§2.2) is part of the language and can
-appear in a report; it must read as a fact about the package rather than as an
+appear in a report. It must read as a fact about the package rather than as an
 internal marker — "does not have a `simd` flag" for a source release, "not
 applicable" for an installed unit, never a bare sigil.
 
@@ -584,7 +588,7 @@ Two ways to get this wrong, both of which we have written down at some point:
 
 - "a flag only moves when a conflict forces it" is not a policy. When the
   accumulated constraint says only `not (+simd +docs)`, *something* must decide
-  which flag moves; the constraint does not.
+  which flag moves. The constraint does not.
 - ranking candidate cells by **number of pins** is not the same as ranking
   assignments by deviation. A one-pin cell `f = False` beats a two-pin cell
   `f = True, g = True` on pin count, yet with both flags defaulting to `True` the
@@ -602,7 +606,7 @@ non-members and inadmissible completions, deduplicate, then order by cost". Read
 with §5's own vocabulary, "complete each candidate cell" means *its default
 completion*, so if that one completion is inadmissible the cell is discarded
 without the rest of it being tried — which is exactly the false `None` that O6 and
-§10 warn about. Dropping a *non-member* is fine; dropping a cell because one
+§10 warn about. Dropping a *non-member* is fine. Dropping a cell because one
 completion of it was **inadmissible** is not.
 
 That recipe is sound only while admissibility is assignment-independent, which is
@@ -641,15 +645,15 @@ wrongly Satisfied or Contradicted, allowed to be Inconclusive.
 
   The obligation is a **brute-force verdict oracle** over generated finite
   worlds — not a second solver. Enumerate all legal selections directly (at most
-  one instance per package; reachable from the root with no extras; intrinsically
-  admissible; every selected instance's dependency facts satisfied; translated
+  one instance per package. Reachable from the root with no extras. Intrinsically
+  admissible. Every selected instance's dependency facts satisfied. Translated
   user constraints satisfied) and assert:
 
       solver succeeds  ⟺  the oracle's solution set is non-empty
       the solver's answer, when it succeeds, is in that set
 
   plus a step bound or repeated-state detector, which is what actually catches a
-  lost-progress regression. This is not a termination proof; it tests the risk
+  lost-progress regression. This is not a termination proof. It tests the risk
   conservative emptiness creates far more directly than set-level properties can.
 
   It must include a generated world in which **the default completion of a cell is
@@ -659,10 +663,10 @@ wrongly Satisfied or Contradicted, allowed to be Inconclusive.
 
 ## 7. Non-goals
 
-- flag preference heuristics beyond §5;
+- flag preference heuristics beyond §5.
 - any relationship between flags of different versions (§1.3) or of different
-  packages — there is no global flag;
-- exploring manual flags (§1.5);
+  packages — there is no global flag.
+- exploring manual flags (§1.5).
 - setup/build-tool dependency scopes, sublibraries, Backpack — other rungs, and
   none of them change §2 or §3.
 
@@ -672,27 +676,26 @@ wrongly Satisfied or Contradicted, allowed to be Inconclusive.
   behaviour is supported by `enforceManualFlags` in
   `cabal-install-solver`'s `Distribution.Solver.Modular.Preference`: with the flag
   unconstrained only the default survives, and when the user names it the mentioned
-  values are admitted, after which ordinary constraint enforcement selects. The
-  source is not vendored in this repository, but there is an adjacent Cabal
-  checkout, so this is checkable locally rather than recalled.
+  values are admitted, after which ordinary constraint enforcement selects.
+  `cabal-install-solver` is a direct build dependency of `bridge`, so this is
+  checkable locally rather than recalled.
 
-  §1.5 previously listed the rule under *admissibility*, which contradicted §1.6;
-  it is now stated as **input translation**, which is where §1.6 puts every other
-  user flag value. What remains open is only the qualification for multiple package
-  goals, and whether we want a strict mode.
+  The rule is **input translation**, which is where §1.6 puts every other user flag
+  value. What remains open is the qualification for multiple package goals, and
+  whether we want a strict mode.
 - **Whether to give the algebra access to `D`.** It would make emptiness exact
   and delete the O3 slack, at the cost of the boundary in §1.1 and of O7. The
-  slack is believed harmless (O4); this is a cost/benefit decision, not a
+  slack is believed harmless (O4). This is a cost/benefit decision, not a
   correctness one.
 - **Sub-library and component-level flags** interact with §4.1's "components in
-  scope"; deferred with the rung that introduces them.
+  scope". Deferred with the rung that introduces them.
 - **Whether to split the provider back into "pick" and "consequences".** Design
   item, not a decision. The interface was two functions before it was merged into
   one `expand`, and the reference implementation still is: `choose_version`
   (policy) plus `get_dependencies` returning `Available | Unavailable(reason)`,
   where the rejection path adds the "never select this" fact and **loops back to
   propagation without deciding** (`references/pubgrub/src/provider.rs:91,119` and
-  `solver.rs:212`; the spec-level statement is `references/pubgrub.md:476`).
+  `solver.rs:212`. The spec-level statement is `references/pubgrub.md:476`).
 
   What it would buy, in the order that matters:
 
@@ -704,7 +707,7 @@ wrongly Satisfied or Contradicted, allowed to be Inconclusive.
      stops being a delicate property of provider-internal code.
   2. **Propagation runs between candidate attempts.** A provider looping internally
      iterates against a snapshot of the offered set that its own discovery has just
-     invalidated; the solver, told about it, can narrow other packages' terms or
+     invalidated. The solver, told about it, can narrow other packages' terms or
      surface a conflict immediately.
   3. **The reason becomes first-class.** `Incompatibility::custom_version(p, v,
      reason)` carries an explanation. We have no equivalent, so an unusable release
@@ -724,8 +727,8 @@ wrongly Satisfied or Contradicted, allowed to be Inconclusive.
   a solve. Note it memoises the *reduced* form deliberately — retaining parsed
   descriptions instead cost 27.2 s / 904 MB on `pandoc` against 3.7 s / 83 MB with
   no cache at all. And
-  `Unavailable` must not become a place to hide what the picker should have
-  avoided: preferring defaults is policy and belongs in the picker (§5); only
+  `Unavailable` must not become a place to hide what the picker must have
+  avoided: preferring defaults is policy and belongs in the picker (§5). Only
   genuine unusability belongs in `Unavailable`.
 
   Schedule it with the buildability work item in §10, which it makes smaller rather
@@ -822,7 +825,7 @@ complement.
 
 Decision making runs again. The provider enumerates `parser`'s releases, finds
 1.0, and — per §5 — tries the all-default assignment first, which the accumulated
-constraint now excludes; the surviving disjunct **pins `simd` to False**. Decide
+constraint now excludes. The surviving disjunct **pins `simd` to False**. Decide
 `parser 1.0 -simd`, whose dependency set at that assignment is empty. The solve
 succeeds.
 
@@ -831,11 +834,11 @@ succeeds.
 **The flip is learned, not preferred.** The solver decided instances, derived
 `{parser 1.0 +simd}` by ordinary conflict resolution, and read the flip off that
 unit incompatibility. Remove §5's default-first policy and the same trace runs
-with a different starting instance; the *verdict* is unchanged, as §5 claims.
+with a different starting instance. The *verdict* is unchanged, as §5 claims.
 
 **Where the third case of §2.3 earns its place — and where it does not.** Not
 here. Add a `parser 1.1` that dropped the `simd` flag and it is admitted by the
-`parser ≠ 1.0` disjunct, whatever it declares; the not-applicable disjunct does no
+`parser ≠ 1.0` disjunct, whatever it declares. The not-applicable disjunct does no
 work in this trace. That is worth stating explicitly because it explains how a
 two-valued pin survived so long: **while a depender term names a single
 release, negating a learned decision never needs the not-applicable case** — the
@@ -873,7 +876,7 @@ second, irrelevant flag `docs`. *Before §4.2*, (2) and (6) named
 `parser 1.0 +simd +docs`, so propagation left `+simd -docs` open: the solver offered
 it, re-read the same dependency, failed identically, learned
 `{parser 1.0 +simd -docs}`, and only then reached `-simd`. Two flags, two wasted
-rounds; k irrelevant flags, 2^k. Dependency collapsing (§4.2) is what removes it —
+rounds. K irrelevant flags, 2^k. Dependency collapsing (§4.2) is what removes it —
 the depender term becomes "1.0 with simd on, any `docs`" — which is why §1.4 names
 collapsing as the answer to this cost rather than a change of model.
 
@@ -890,8 +893,8 @@ observable today.
 ## 10. What holds today
 
 A specification nobody has checked against the code is how the last round of
-confusion started, so: this is the state as of **2026-08-17**, and it is expected to
-be edited whenever the tree moves.
+confusion started. This is the state as of **2026-08-23**. Edit it whenever the tree
+moves.
 
 > **Read this first, or the table below will mislead you.** Since 2026-08-17 the
 > implementation runs in this specification's **degenerate case**: every flag is
@@ -907,30 +910,30 @@ be edited whenever the tree moves.
 > guards are genuine conditions — including §9's worked trace. That coverage is the
 > only reason it is safe to leave the machinery in place. What changes is which rows below are *exercised*
 > rather than merely *held*, and the table now says so. This is a scope cut for a
-> first release, recorded in [STATUS.md](STATUS.md)'s "Release-1 scope"; the flag axis
+> first release, recorded in [STATUS.md](STATUS.md) §5.1. The flag axis
 > is expected back, and §10's couplings are written for whoever brings it back.
 
 | obligation | status |
 |---|---|
 | O1 membership exact | holds |
-| O2 exact ∩ ∪ ∖ | holds (since the three-case pin); guarded by the model-homomorphism properties |
-| O3a / O3b one-sided emptiness | holds; guarded by "emptiness is one-sided" |
+| O2 exact ∩ ∪ ∖ | holds (since the three-case pin). Guarded by the model-homomorphism properties |
+| O3a / O3b one-sided emptiness | holds. Guarded by "emptiness is one-sided" |
 | O4 per-query soundness | holds, and is all O4 claims since the 2026-08-05 review |
-| O4 whole-loop verdict preservation | **owed, not held.** §6's oracle is the discharge; do not cite O4 for it |
-| O5 progress | the provider's `{X}` case holds; the conflict-resolution loop is unproven (§6 owes the oracle) |
+| O4 whole-loop verdict preservation | **owed, not held.** §6's oracle is the discharge. Do not cite O4 for it |
+| O5 progress | the provider's `{X}` case holds. The conflict-resolution loop is unproven (§6 owes the oracle) |
 | O6 soundness | holds |
 | O6 completeness | **latent — see below** |
 | O7 enumeration boundary | holds: the algebra never enumerates, the provider enumerates releases only |
 | §1.5 buildability | **implemented for one assignment** (2026-08-17): `buildableCondition` computes the condition (`buildable:` plus `pkgconfig-depends` against the machine's `PkgConfigDb`, library only), `buildableAtDefaults` evaluates it, and the provider does not offer the release. *Satisfying* the condition rather than evaluating it is the flag-axis half, still owed |
-| §1.5 unbuildable as a stated fact (`pubgrub.md:476`) | **implemented 2026-08-20.** The provider states `unbuildable p slot` for each release its scan passes over and hands them out with the release it settles on; `PubGrub.Store` unions adjacent slots. The term is one unpinned cell per slot, which is exact while flags are fixed at their defaults and becomes the region where `buildableCondition` is false when the flag axis returns. Still owed: the *exhausted* case, where every release in range is unbuildable and there is no instance to attach the facts to |
+| §1.5 unbuildable as a stated fact (`pubgrub.md:476`) | **implemented.** The provider states `unbuildable p slot` for each release its scan passes over and hands them out with the release it settles on. `PubGrub.Store` unions adjacent slots. The term is one unpinned cell per slot, which is exact while flags are fixed at their defaults and becomes the region where `buildableCondition` is false when the flag axis returns. The *exhausted* case — every release in range unbuildable — was closed on 2026-08-20 by making `expand` answer `(Maybe Instance, [Incompatibility])`. `test/FlagSolveSpec.hs` covers it |
 | §1.5 manual flags | **implemented in the degenerate case** (2026-08-17): every flag is manual and no user values exist, so the translation is "take the default" and it is applied at input rather than as a solver constraint. The general rule — some flags manual, some values user-supplied — is untouched |
 | §1.6 lenient user constraints | not implemented (no user flag constraints yet), and while every flag is manual they are the only thing that could move one |
-| §4.1 dependencies at the decided assignment | holds; currently trivial, since there is one assignment per release |
-| §4.2 per-fact collapsing | **implemented, both axes.** Flag axis 2026-08-05 (the guard is the depender's flag component); version axis 2026-08-12 (`spanningOccurrence` over adjacent releases carrying the same occurrence) — a measured trade, see [collapsing.md](collapsing.md) |
+| §4.1 dependencies at the decided assignment | holds. Currently trivial, since there is one assignment per release |
+| §4.2 per-fact collapsing | **implemented, both axes.** The flag axis makes the guard the depender's flag component. The version axis runs in two places: `spanningOccurrence` walks adjacent releases carrying the same occurrence, and `PubGrub.Store` merges facts that agree about the dependee as they arrive. See [collapsing.md](collapsing.md) |
 | §4.3 report wording | partial: constraints render, the not-applicable wording is not aligned |
 | §5 choice policy | implemented as release-major then fewest deviations, but over a **one-completion-per-cell** search — correct only while admissibility is assignment-independent (below). Currently vacuous: one completion exists, so "fewest deviations" ranks a single candidate |
 | §6 non-uniform universe, one-sided properties | in place |
-| §6 verdict oracle | owed, **and blocking for condition decisions** |
+| §6 verdict oracle | owed, **and blocking for condition decisions**. Note `specification/PubGrub/Oracle.lean` shares the name and is a different artifact: it is a Lean model, not a differential test against the real solver |
 | D1 determination before success | specified ([decision-semantics.md](decision-semantics.md) §3), not implemented |
 | D2 progress | specified ([decision-semantics.md](decision-semantics.md) §4), not implemented |
 | D3 concretisation | specified ([decision-semantics.md](decision-semantics.md) §5), not implemented |
@@ -963,39 +966,29 @@ default completion is inadmissible while another completion of the same cell is
 admissible" is unconstructible while admissibility is assignment-independent. So
 the oracle, the O6 search, and buildability are one work item, not three.
 
-**O6's preferred remedy needs no new interface case.** (An earlier draft of this
-section said it did. It does not.) `expand` returns
-`Maybe (Instance, [Incompatibility])`, and the solver adds those incompatibilities
-to its store unexamined — it never requires them to be *about* the instance just
-decided, and incompatibilities are context-independent by construction
-(`references/pubgrub.md:131`), so "`foo 1.2 +simd` is unbuildable" is a valid fact
-whatever was decided. A provider that skips inadmissible completions can therefore
-report what it learned on the way *alongside* the decision it settles on, and
-"never select this instance" (`:476`) rides along with a `Some`.
+**O6's remedy is that the provider may report what it rejected.** `expand` returns
+`(Maybe Instance, [Incompatibility])`. The solver adds those incompatibilities to its
+store unexamined. It never requires them to be *about* the instance just decided, and
+incompatibilities are context-independent by construction
+(`references/pubgrub.md:131`). So "`foo 1.2 +simd` cannot be built here" is a valid
+fact whatever was decided.
 
-There is no case where the provider needs to answer "no decision, and here is what
-to learn". The one situation that falls outside the above is "every candidate was
-inadmissible", where it answers `None` and the per-instance reasons are dropped in
-favour of the solver's set-level "no instances in `X`". That costs explanation
-quality only, and the fix belongs in the *cause* attached to that incompatibility,
-not in the return type.
+**The list sits outside the `Maybe` deliberately, and that was the hard case.** A
+provider that skips inadmissible releases must be able to answer "no decision, and
+here is what I learned". Where the offered set holds nothing but unbuildable
+releases, there is no instance to carry the facts out with. Dropping them is what
+made a report say "no version for hpqtypes in >=1.13" where the truth is that every
+release in that range needs a C library this machine lacks.
 
-**This stopped being hypothetical on 2026-08-17.** The provider now skips releases
-whose library is unbuildable here, and says nothing about them. Two paths follow
-directly from the paragraph above, and the second is the smaller job:
+That case is not a corner. On real Hackage problems it is the commonest way a popular
+package fails to resolve: pkg-config failures are 14 of the 28 planning failures among
+the top 101–500 packages by downloads.
 
-- where the scan eventually settles on a release, the skipped ones' facts —
-  `{ foo 1.2 }`, "never select this", `pubgrub.md:476`, collapsed over adjacent
-  releases like a dependency — can ride along with the `Some`, **no interface change
-  required**;
-- where every release was skipped, the reasons are lost and the report reads "no
-  versions in range", which is the cause-side gap above rather than a new one.
+The solver keeps its own progress guarantee rather than trusting the provider to be
+thorough. On `Nothing` it inserts the facts, then bans whatever part of the offered
+range they do not cover.
 
-A code comment in `Bridge.Provider` briefly claimed this was blocked on `expand`
-being able to answer "no decision, but learn this". It is not; only the second case
-would want that, and even there the cause is the right place.
-
-The tree already leans on the same reasoning for uninterpretable descriptions:
+The same reasoning covers uninterpretable descriptions:
 they are skipped with a warning and no incompatibility, which §1.5 makes correct —
 a release outside the universe is not a fact to learn about, it is a release that
 does not exist for this solve.
@@ -1003,5 +996,5 @@ does not exist for this solve.
 Naming: the code calls the third case `NotDeclared`, which is accurate for source
 cells — pins only ever apply to the source side — while this document calls the
 case *not applicable*, because for an installed unit the reason differs (§2.2).
-They describe the same partition; if the divergence ever causes a
+They describe the same partition. If the divergence ever causes a
 misunderstanding, rename the constructor rather than the semantics.

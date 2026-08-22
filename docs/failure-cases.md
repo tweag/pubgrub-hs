@@ -1,9 +1,11 @@
-# Failure cases: where the unsat problem set comes from, and what is in it
+# Failure cases: the unsat problem set
 
-The explanation deliverable needs problems that **fail**, and until 2026-08-20 the
-project had three, all found by accident while measuring something else. This is the
-set that was found on purpose, the method that found it, and what it says about our
-proofs against cabal's messages.
+The explanation deliverable needs problems that **fail**. This file is that set, the
+method that found it, and what it says about our proofs against cabal's messages.
+
+Before it existed the project had three failing problems, all found by accident while
+measuring something else. A small problem set chosen to measure search cannot report on
+a path it never walks.
 
 The problems themselves are [`bench/unsat-problems.txt`](../bench/unsat-problems.txt),
 which carries the per-problem notes. This file is the argument around them.
@@ -33,8 +35,9 @@ they are worth as much as the failures (below).
 
 ## The six kinds, ranked by how often they occur
 
-1. **pkg-config missing** — a C library the machine does not have. 14 of the 28 hits
-   in the top 101–500, making it **the single most common cause**. `vulkan`, `cairo`,
+1. **pkg-config missing** — a C library the machine does not have. 14 hits in the top
+   101–500, which is **the single most common cause** and about half of them.
+   `vulkan`, `cairo`,
    `pango`, `gtk`, `gi-*`, `hruby`, `hpqtypes-extras`, `secp256k1-haskell`.
 2. **base bound vs the installed base** — a bound that excludes the `base` the
    compiler provides. `purescript`, `haddock`, `futhark`, `hlint` (two hops, via
@@ -55,13 +58,14 @@ Kinds 1–5 all reproduce. Kind 6 does not, and is recorded so nobody hunts it t
 
 ## The 17 that reproduce, against cabal
 
-ghc-9.12.2, base-4.21.0.0, this machine's pkg-config db (`libpq`, `libzmq`, `blas`,
-`lapack` absent; `cairo`, `pango`, `gtk+-2.0`, `gtk+-3.0`, `gtk4`, `gio-2.0`, `zlib`,
-`libsodium`, `libgit2` present). Every one runs in under 3 s.
+ghc-9.12.2, base-4.21.0.0, and this machine's pkg-config database. Absent there:
+`libpq`, `libzmq`, `blas`, `lapack`. Present: `cairo`, `pango`, `gtk+-2.0`, `gtk+-3.0`,
+`gtk4`, `gio-2.0`, `zlib`, `libsodium`, `libgit2`. Every problem runs in under 3 s.
 
 `ours` counts proof sentences. `cabal` counts the non-blank lines of its
 `Could not resolve dependencies:` block — its actual explanation, not the whole log.
-`noVer` counts our `no version for …` lines, which is Reporting gap 2's clutter.
+`noVer` counts our `no version for …` lines. Those say a range holds no release, which
+is true but not a cause, so a proof carrying one is explaining less than it could.
 
 | target | kind | ours | cabal | noVer |
 | --- | --- | --- | --- | --- |
@@ -83,48 +87,32 @@ ghc-9.12.2, base-4.21.0.0, this machine's pkg-config db (`libpq`, `libzmq`, `bla
 | `futhark ==0.27.1` | regex / time chain | **8** | 10 | 1 |
 | `matterhorn ==90000.1.1` | hashable / bytestring chain | **8** | 17 | 0 |
 
-**Shorter on all 17**, 62 proof sentences against cabal's 152, and one `no version`
-line left in the set. The margin is narrowest on `futhark` (8 against 10) and
-`matterhorn` (8 against 17 — long, but against cabal's longest message).
+**Shorter on all 17: 62 proof sentences against cabal's 162**, and one `no version`
+line left in the whole set. The margin is narrowest on `futhark` (8 against 10) and
+widest on `scion-browser` (4 against 11). `matterhorn` is our longest at 8, against
+cabal's longest message at 17.
 
-**Two changes on 2026-08-23 moved almost every row**, and they pull in opposite
-directions on one problem each:
-
-* *generation-time collapsing came back* — `spanningOccurrence` walks a decided
-  release's neighbours again, now that a read is a CBOR decode rather than a
-  parse. It took `cabal-install` 4 → 2 and `hjsonschema` 6 → 5, and it cost
-  `matterhorn` 6 → 10: widening clauses changes which conflict surfaces first, and
-  the one `matterhorn` now finds is explained through `hashable`.
-* *a run of same-pair steps became one sentence* — where a proof walked a
-  dependency's bound history one adjacent pair at a time, the run is stated once
-  as the union of its facts. That is what this file used to call the outlier
-  shape. It took `happstack-hsp` 7 → 4 and gave `matterhorn` back 10 → 8.
-
-Net across the corpus: **66 → 62 sentences and 3 → 1 `no version` lines.**
-
-These numbers are **after Reporting gap 2** (2026-08-20), which absorbed the
-`no version for …` leaves into the sibling they were resolved against. It took the
-`noVer` column from 30 lines to 22 across the set and four proofs with it — `cpsa`
-5 → 4, `atelier-testing` 4 → 3, `hjsonschema` 7 → 6, `scion-browser` 16 → 14 — and
-`matterhorn`, the longest, is still 10 lines of hole out of 16.
+[`scripts/gate.sh`](../scripts/gate.sh) re-runs every row and holds both totals as
+ceilings, so a regression here fails the gate rather than being noticed later.
 
 Two things this table is evidence for beyond length:
 
 - **The chain fusion fires in the wild.** `depends on X which depends on Y` appears in
-  13 of the 17. It had only ever been seen in the spec's own worked example, and on
-  the strength of that it looked like a rule that never fires on real input — which is
-  also what made gap 2 look cosmetic, since the holes were what kept it from pairing.
-- **`:476` now pays.** `hpqtypes-extras` says `hpqtypes >=1.10.0.2 cannot be built
-  here` where cabal says `pkg-config package libpq-any, not found in the pkg-config
-  database`; both name the cause, and ours takes two lines against eight. Before the
-  exhausted case was fixed, ours said `no version for hpqtypes in >=1.13` — the
-  symptom, and false-sounding.
+  14 of the 17. It had only ever been seen in the spec's own worked example, so it
+  looked like a rule that never fires on real input. That is also what made the empty-range
+  clutter look cosmetic ([STATUS.md](STATUS.md) §4.9, rule 4): those holes were what
+  kept the fusion from pairing.
+- **`references/pubgrub.md:476` pays.** `hpqtypes-extras` says
+  `hpqtypes >=1.10.0.2 cannot be built here` where cabal says `pkg-config package
+  libpq-any, not found in the pkg-config database`. Both name the cause, and ours takes
+  two lines against eight. Our solver used to say `no version for hpqtypes in >=1.13`,
+  which is the symptom and sounds false.
 
 ### The positive controls
 
 `vulkan ==3.27`, `dataframe-csv ==2.3.0.0`, `xmobar ==0.51.1`, `timeplot ==1.0.33`
-and `gloss ==1.13.2.2` all failed on Hackage's builder and **resolve here** (verified
-2026-08-20). `vulkan` is the clearest: the builder had no pkg-config `vulkan`, this
+and `gloss ==1.13.2.2` all failed on Hackage's builder and **resolve here**.
+`vulkan` is the clearest: the builder had no pkg-config `vulkan`, this
 machine does. A problem set for explanations needs these, or it cannot show that the
 failures in it are real rather than an artefact of the environment.
 
@@ -133,9 +121,9 @@ failures in it are real rather than an artefact of the environment.
 - **Environment-pinned.** Four of the six kinds depend on the compiler's own packages
   or on the local pkg-config db. Install `libpq` and `hpqtypes-extras` resolves. Any
   published figure has to state the environment.
-- **Both solvers run with every flag pinned to its declared default** (the release-1
-  scope cut). That is a restriction of the problem, and it removes exactly the escape
-  cabal's *automatic* flags would provide.
+- **Both solvers run with every flag pinned to its declared default**
+  ([STATUS.md](STATUS.md) §5.1). That is a restriction of the problem, and it removes
+  exactly the escape cabal's *automatic* flags would provide.
 - **cabal solves setup and build-tool depends and we do not.** On a package with a
   custom `Setup.hs` the two are answering different questions. None of the 17 has one.
 - **Four of them fail for different reasons on the two sides** (`atelier-testing`,
@@ -144,12 +132,12 @@ failures in it are real rather than an artefact of the environment.
 
 ## What is still missing
 
-The harness. These 17 are run one at a time, by hand, and the numbers above were
-counted by grep. One process that runs both solvers per problem, renders the two
-explanations side by side and diffs the verdicts is what turns this table into the
-deliverable — see [STATUS.md](STATUS.md), "Deliverable status".
+The harness. `scripts/gate.sh` does the regression half: it runs both solvers over
+every row and fails on any regression in verdict agreement or proof length. It does not
+render the two explanations side by side, and side-by-side rendering is what turns this
+table into the deliverable. See [STATUS.md](STATUS.md) §9.
 
-One trap for whoever writes it: **our proofs contain a NUL byte** (the synthetic
-root's name), so GNU `grep` treats them as binary and silently reports no matches
-without `-a`. `bench/compare.sh` passes `-a` everywhere; new tooling must too, or the
+One trap for whoever writes it: **our proofs contain a NUL byte** (the synthetic root's
+name), so GNU `grep` treats them as binary and silently reports no matches without
+`-a`. `bench/compare.sh` passes `-a` everywhere. New tooling must too, or the
 proof-line count will read zero and look like a passing measurement.

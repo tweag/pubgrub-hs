@@ -242,7 +242,7 @@ data Release = Release
     -- itself, which 'Bridge.Cabal.Flatten.buildableCondition' returns.
     }
 
--- | A memoising reader for 'Release', with a @(parsed, reused)@ count.
+-- | A memoising reader for 'Release', with a @(parsed, decoded, reused)@ count.
 --
 -- Do not memoise the 'GenericPackageDescription' instead. Retaining every
 -- description a solve touches cost 27.2 s and 904 MB on @pandoc@, against
@@ -633,8 +633,12 @@ mkExpand installedDb source root = expand'
     -- dependee as they arrive; adjacent slots /touch/, so the union is one interval
     -- with no hole.
     --
-    -- The walk is affordable only because a neighbour read is a decode from the
-    -- derived index rather than a parse (@docs\/collapsing.md@).
+    -- The walk is affordable only because a neighbour read is a CBOR decode rather
+    -- than a parse (2.007 ms to 0.073 ms). As a parse it took @pandoc@, a problem
+    -- with one conflict, from 167 reads to 2834 and from 22.9 MB to 81.0 MB of
+    -- residency; as a decode it costs that problem 22.6 MB to 33.1 MB of residency
+    -- and under 1% of allocation. @docs\/collapsing.md@ has the trade, and five ways
+    -- to walk less if read-dominated problems ever matter more.
     dependencyInc pn v slot guard assignment dep = do
         dependers <- spanningOccurrence pn v slot guard dep
         pure

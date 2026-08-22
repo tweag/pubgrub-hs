@@ -231,7 +231,7 @@ openStore dir = do
 -- touches is pure cost, because 'Bridge.Provider.releaseReader' already memoises
 -- the 'Release' it derives per @(package, version)@. Measured on @pandoc@, which
 -- touches ~150 packages and barely more than one version of each, an unbounded
--- slice cache cost __23.0 MB of peak residency against 39.6__.
+-- slice cache costs __39.6 MB of peak residency where holding one costs 23.0__.
 --
 -- One slot is enough because the access pattern that needs it is package-local:
 -- a walk asks for a release's neighbours, and those are all in the slice just

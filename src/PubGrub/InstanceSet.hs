@@ -70,12 +70,14 @@ data InstanceSet = InstanceSet
     , isSource    :: [SourceCell]
     }
 
--- Every operation ends in 'pruneCells'. Correctness does not need it: the union
--- of cells is deliberately not canonical, and the solver only asks emptiness
--- questions. But the cell count does not track the denotation, so without
--- pruning at each step a chain of derivations grows a disjunction of thousands
--- of cells describing a handful of instances. Pruning only at the end would be
--- too late, since the blow-up is in the intermediate results.
+-- Every operation prunes with 'pruneCells', 'difference' once per rhs cell, so
+-- an rhs with no source cells passes the lhs through untouched. Correctness
+-- does not need any of this: the union of cells is deliberately not canonical,
+-- and the solver only asks emptiness questions. But the cell count does not
+-- track the denotation, so without pruning at each step a chain of derivations
+-- grows a disjunction of thousands of cells describing a handful of instances.
+-- Pruning only at the end would be too late, since the blow-up is in the
+-- intermediate results.
 instance SetOps InstanceSet where
     union lhs rhs  =
         InstanceSet

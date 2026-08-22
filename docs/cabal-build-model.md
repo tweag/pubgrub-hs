@@ -1,16 +1,20 @@
-# Specification: Building Cabal Packages and Projects
+# Cabal's build model
 
 > **Status: forward-looking reference. None of this is implemented.** A model of
-> *Cabal's* build structure — components, scopes, build units, installed units,
-> setup programs, Backpack — not of our solver. It is the reference for **rungs 4
-> and 5** (setup / build-tool dependencies, public sublibraries), which have not
-> been started.
+> *Cabal's* build structure — components, scopes, build units, installed units, setup
+> programs, Backpack — not of our solver. It is the reference for **rungs 4 and 5**
+> (setup and build-tool dependencies, public sublibraries), which have not been
+> started.
 >
-> Do not confuse it with [`../specification/`](../specification/), which is a Lean
-> formalisation of the **PubGrub kernel**. Different subject, similar name.
+> **"Scope" here is cabal's "qualifier".** `Distribution.Solver.Types.PackagePath`
+> calls it `Qualifier`, and that is the word `../CLAUDE.md` and the shelved
+> qualified-goals design use. Same concept, two names. Read them as synonyms.
 >
-> The solver as built handles one component per package and ignores scopes
-> entirely. See [STATUS.md](STATUS.md).
+> Do not confuse this file with [`../specification/`](../specification/), which is a
+> Lean model of the **PubGrub kernel**. Different subject, similar name.
+>
+> The solver as built handles one component per package and ignores scopes entirely.
+> See [STATUS.md](STATUS.md) §5.2.
 
 ## Scope of this specification
 
@@ -18,10 +22,13 @@ This specification describes a simplified semantic model of building Cabal packa
 
 The following Cabal features are intentionally simplified or ignored:
 
-* package revisions are ignored;
-* Cabal command-line target selectors are ignored;
-* the detailed semantics of `buildable: false` are ignored;
-* custom setup scripts are treated as opaque package-level build procedures;
+* package revisions are ignored.
+* Cabal command-line target selectors are ignored.
+* the detailed semantics of `buildable: false` are ignored here. The solver does
+  implement it: `Bridge.Cabal.Flatten`'s `buildableCondition` and
+  `buildableAtDefaults`, plus `pkgconfig-depends` against the machine's real
+  `pkg-config` database.
+* custom setup scripts are treated as opaque package-level build procedures.
 * Backpack is modelled only at the level needed to describe requirements, mixins, instantiations, and definite/indefinite units.
 
 In this model, a project builds all enabled components of all local packages.

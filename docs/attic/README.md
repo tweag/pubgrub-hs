@@ -1,18 +1,17 @@
 # Attic — ideas that were tried and dropped
 
 > **What this is.** Approaches this project pursued and then abandoned, with why.
-> Nothing in this directory describes the current system. Read it to understand a
-> decision that looks arbitrary, or before proposing something that was already
+> Nothing in this directory describes the current system. Read it when a
+> decision looks arbitrary. Read it before you propose something that was already
 > tried.
 >
 > **For the current state**, see [../STATUS.md](../STATUS.md). For the ordered
 > history of turns, see [../decision-log.md](../decision-log.md).
 
-**Abandoned is not the same as unfinished.** Things that are merely *not built yet*
-— `buildable:`, manual flags, setup dependencies, sublibraries, the benchmark
-harness — are **not** here. They are live work, listed in
-[../STATUS.md](../STATUS.md). This directory is only for directions we walked away
-from.
+**Abandoned is not the same as unfinished.** Things that are merely *not built yet* —
+setup dependencies, sublibraries, user flag constraints, the benchmark harness — are
+**not** here. They are live work, listed in [../STATUS.md](../STATUS.md). This
+directory is only for directions we walked away from.
 
 ---
 
@@ -73,9 +72,9 @@ and every flag at once. See [../decision-log.md](../decision-log.md) Era 4.
 A formal model of build-plan structure in Alloy. Recoverable only from git history.
 
 **Why dropped:** not recorded at the time. The instinct outlived it twice: once as
-`../specification.md` (a prose model of Cabal's build structure, still live as a
-reference for rungs 4–5) and once as `../../specification/` (a Lean formalisation of
-the PubGrub kernel, 2026-08-03). Neither is a descendant of the Alloy work in any
+[`../cabal-build-model.md`](../cabal-build-model.md), a prose model of Cabal's build
+structure that is still live as a reference for rungs 4 and 5, and once as
+[`../../specification/`](../../specification/), a Lean model of the PubGrub kernel. Neither is a descendant of the Alloy work in any
 technical sense.
 
 ## 4. `flags-design.md` — the lenient flag rule
@@ -133,7 +132,7 @@ including one that declares none. Keep the file as the evidence for that rule.
 2026-06-24.
 
 These describe the **first implementation**, which was rewritten from scratch in the
-July reboot. They are not wrong about what they planned; they describe code that no
+July reboot. They are not wrong about what they planned. They describe code that no
 longer exists, in terms of modules that no longer exist.
 
 Important: that first implementation **worked end to end on real Hackage data**. It
@@ -145,14 +144,52 @@ What became of each idea:
 | plan | fate |
 |---|---|
 | `pubgrub-native-solver` | **idea survived, code did not.** Rewritten in the reboot. Its provider interface is the two-method `chooseVersion`/`getDependencies` form, merged into `expand` on 2026-06-24 — and now under discussion to split back (`../flags-semantics.md` §8) |
-| `hackage-integration` | **survived in spirit.** We still read a cached `01-index.tar` ourselves and avoid `cabal-install`/`hackage-security`; the code is new (`bridge/Bridge/Hackage.hs`) |
+| `hackage-integration` | **survived in spirit.** We still read a cached `01-index.tar` ourselves and avoid `cabal-install`. We do *not* avoid `hackage-security` — we read through it, in `bridge/Bridge/Hackage.hs` |
 | `lazy-index-loading` | **survived, and then some.** Parse-on-demand is still the model, and the memoisation question was later settled by measurement — cache the *reduced* form, never parsed descriptions (7× slower, 10× bigger) |
 | `solver-progress-tracing`, `startup-and-streaming-tracing` | **survived.** `co-log` is still a dependency and still used in `Solver`, `Provider`, `Hackage` and `Main` |
-| `with-compiler-option` | **gone.** No `--with-compiler` anywhere in the tree; the CLI is now plain `getArgs`, and `optparse-applicative` went with it |
+| `with-compiler-option` | **gone.** No `--with-compiler` anywhere in the tree. The CLI still uses `optparse-applicative`, so only the option went |
 | `installed-source-providers` | **idea survived, shape did not.** Installed packages are rung 3 and work, but as `PreInstalled` instances in one provider, not as two providers combined |
 | `solver-lattice-generalization`, `choice-lattice-design` | **dropped.** See §2 above |
 
-## 7. Two representations that were replaced
+## 7. `flags-semantics-review.md` — a review of a draft that was then rewritten
+
+**File:** `flags-semantics-review.md`
+
+An independent review of [`../flags-semantics.md`](../flags-semantics.md). Its four
+findings were folded into that file on the same day, and the passages it quotes to
+object to no longer exist. It argues against text that has been rewritten.
+
+**Kept for two things it says better than the spec does:** why O4 is a *local* result
+only, and what the "false `None`" failure mode is — the provider reporting "nothing
+available" when something is available.
+
+Its own links have rotted. It points at a Cabal checkout outside the repository, and it
+cites `references/pubgrub.md` by heading anchor where this project requires line
+numbers.
+
+## 8. `bridge-and-problem-model.md` — a planning record whose decisions were reversed
+
+**File:** `bridge-and-problem-model.md`, written 2026-07-23
+
+It planned the bridge before the bridge existed. Three of its substantive decisions
+were then reversed, most importantly the central one:
+
+- it decided to **reuse `convPIs`** and derive both solvers from the same `PInfo`,
+  with a thin adapter. That is not what happened. `Bridge.Cabal.Flatten` does our own
+  flattening without `finalizePD`, and cabal's side gets `SourcePackage` records while
+  `modularResolver` runs `convPIs` itself. The counter-preference the document records
+  as the losing option is what was built.
+- it describes the bridge as an executable with a `tar` dependency. It is a private
+  library, and there is no `tar` dependency.
+- it says our model enumerates flag assignments into instances. There is one instance
+  per release.
+
+**Rescued before it moved:** its three-way analysis of what `cabal-install` would have
+supplied, which is the *evidence* for a boundary decision that `../../CLAUDE.md` now
+merely asserts. Everything else live in it is stated better, and currently, in
+`../../CLAUDE.md`'s Architecture section.
+
+## 9. Two representations that were replaced
 
 Not in this directory, but abandoned, and easy to propose again:
 
@@ -181,7 +218,7 @@ Not in this directory, but abandoned, and easy to propose again:
      version range plus some pinned flags, unioned together. Nothing reduces that list
      to a unique form, so two different lists can denote the same set.)*
 
-  Worth remembering as a general shape: "it's behind an interface, so we can swap it
+  Worth remembering as a general shape: "it is behind an interface, so we can swap it
   later" was false here in both directions at once — the abstraction did not make the
   choice free, and the choice was not free to change.
 - **Two-state flag pins.** On/off only. The negation of "flag is on" then collapses

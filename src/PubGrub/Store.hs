@@ -7,17 +7,18 @@
 --
 -- PubGrub states identical dependencies of /adjacent versions of the depender/
 -- as one incompatibility — @{foo >=1.0 && <1.3, not bar >=1.0 && <2}@ rather
--- than one fact per version of @foo@. Doing that when a fact is generated means
--- walking out from the release asked about and parsing its neighbours' @.cabal@
--- files to learn whether they carry the same dependency: reads, and residency,
--- spent on releases the search may never contest.
+-- than one fact per version of @foo@. There are two places to do that, and
+-- __both run__. When a fact is generated, the provider walks out from the
+-- release it was asked about and reads its neighbours to learn whether they
+-- carry the same dependency. That is affordable only because a read is a decode
+-- of the derived index rather than a @.cabal@ parse.
 --
--- This module does it on insert instead. The provider emits one fact per
+-- This module is the other place. The provider emits one fact per
 -- release __slot__ — the half-open range up to the next release in the index —
 -- so adjacent slots /touch/, and this module unions the depender terms of two
 -- facts that agree about the dependee. @unionVersionSet@ then coalesces the
--- touching ranges into one contiguous interval. No neighbour is read, because
--- the only releases that merge are ones the solver expanded anyway.
+-- touching ranges into one contiguous interval. No neighbour is read /here/,
+-- because the only releases that merge are ones the solver expanded anyway.
 --
 -- The rule is weaker than PubGrub's: it collapses the releases the solver
 -- expanded, not every release that carries the dependency. But those are the

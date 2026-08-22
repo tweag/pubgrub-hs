@@ -16,8 +16,8 @@
 > Wissensverarbeitung group's publication list,
 > <https://www.cs.uni-potsdam.de/wv/publications/>. Quotations were taken from the
 > PDFs, not from summaries. **This is not an exhaustive sweep** of that page — the
-> items below were each checked individually; there are likely more. Note also that
-> the page lists the whole group, so several papers here have no Gebser on them; the
+> items below were each checked individually, and there are likely more. Note also that
+> the page lists the whole group, so several papers here have no Gebser on them. The
 > author list is given in full for each. Where an entry says *unread*, it means the
 > title and venue were verified but the paper was not opened — treat those as leads.
 
@@ -39,10 +39,10 @@ Ranked by how much each one bears on live work:
 | narrowing the universe before/while solving | `Bridge.Hackage`, and `collapsing.md`'s read cost | §1.2, §2.4 |
 | no lawful `Eq`, order-dependent pruning | `InstanceSet`, `SetOps.equivalent` | §2.1 |
 | one-sided `isEmpty`, `Relation.Inconclusive` | [`flags-semantics.md`](flags-semantics.md) O3/O4 | §2.2 |
-| three-state `FlagPin` | [`flags-semantics.md`](flags-semantics.md) §2 | §2.3 (analogy only) |
+| three-state `FlagPin` | [`flags-semantics.md`](flags-semantics.md) §2. Specified and tested, but no pin is created while flags take their defaults | §2.3 (analogy only) |
 | correctness of conflict resolution | [`../specification/`](../specification/) — itself a draft, authoritative on nothing | §3 |
 | over-specific learned clauses (the old "2^k") | [`flags-semantics.md`](flags-semantics.md) §4.2 — **landed** | §8 |
-| prefer-installed / prefer-defaults / prefer-newest | `Bridge.Provider.preferDefaults`, rung 3 | §5 |
+| prefer-installed / prefer-defaults / prefer-newest | `Bridge.Provider.preferDefaults`, rung 3. It never runs on real input while flags take their defaults | §5 |
 | explaining failure | `PubGrub.Report` | §6 |
 
 ---
@@ -96,13 +96,16 @@ follow-up installation:
 > Hence, packages outside `𝒞` need not be reflected in ASP facts, so that both
 > instance and residual problem size can be reduced."
 
-A **relevance-closure prepass over the index, before solving.** We read
-parse-on-demand instead — and [`collapsing.md`](collapsing.md) §2 is now the sharpest
-statement of what that costs us: "you cannot know whether the adjacent release carries
-the same dependency without parsing its `.cabal`", which is why the version axis cost
-`pandoc` 17× the reads. An eager, bounded prepass is a real and unexplored point in our
-design space, and this is the published algorithm for it. It is not among
-`collapsing.md`'s five options; it is arguably a sixth.
+A **relevance-closure prepass over the index, before solving.**
+
+We now do an eager whole-index prepass of our own — the derived index parses every
+release once, ahead of time. It is **unbounded and not relevance-closed**, so it
+answers the question "what does a read cost" and not the question aspcud answers,
+which is "which packages need to be read at all".
+
+That second question is still unexplored here, and this is the published algorithm for
+it. It is not among [`collapsing.md`](collapsing.md) §4's five options. It is arguably
+a sixth.
 
 Two riders, both of which bear on us:
 
@@ -135,11 +138,11 @@ hold"). Two differences worth noticing:
 - **Granularity.** Theirs collapses only when *all* versions share the relation. The
   spec asks us for *adjacent runs* (`references/pubgrub.md:456`), which is strictly
   finer and strictly harder — it needs the intervening releases inspected, which is
-  precisely the read cost in [`collapsing.md`](collapsing.md) §2.
+  precisely the read cost in [`collapsing.md`](collapsing.md) §3.
 - **Side.** Their `id_P` interning is the *dependee*-side dual: two dependencies whose
   matching-version sets coincide share one constant, so they collapse. We cannot do
   that, because we never compute the matching set — the price of §1.1 running the
-  other way. Note that [`collapsing.md`](collapsing.md) §4 establishes we *can* key on
+  other way. Note that [`collapsing.md`](collapsing.md) §2 establishes we *can* key on
   the dependee term structurally, for the narrower reason that `widen`-minted terms are
   canonical by construction.
 
@@ -178,19 +181,19 @@ q(X) ← ¬p(X) ∧ v(X)        v(2)  v(3)
 
 Syntactically distinct output, semantically equal, dependent on operation order,
 caused by simplification. That is `InstanceSet` and `pruneCells` precisely. Their
-remedy is the one we should adopt in writing:
+remedy is the one to adopt in writing:
 
 > "Our main result shows that the stable models of a non-ground input program coincide
 > with the ones of the ground output program returned by our grounding algorithm upon
 > termination."
 
-**Do not characterise the output syntactically; characterise it semantically.** If
+**Do not characterise the output syntactically. Characterise it semantically.** If
 [`../specification/`](../specification/) — a draft, and authoritative on nothing —
-ever states anything about pruning, this is the shape it should take: *`pruneCells`
+ever states anything about pruning, this is the shape it must take: *`pruneCells`
 and `mergeCells` preserve the denotation*, never *`pruneCells` yields a normal form*.
 It is also, from the general theory, why `SetOps.equivalent` (mutual containment) is
 the right notion of equality and why `Eq` cannot be: there is no normal form to
-compare. `../CLAUDE.md` already forbids adding `Eq`; this is the principled version of
+compare. `../CLAUDE.md` already forbids adding `Eq`. This is the principled version of
 the reason.
 
 ### 2.2 One-sided emptiness is their trade too, made deliberately
@@ -245,7 +248,7 @@ paper gives you is the vocabulary for saying which instances you are entitled to
 and what you must prove about it — which is the argument
 [`flags-semantics.md`](flags-semantics.md) §4.2 makes informally when it says use the
 guard `C` verbatim rather than enumerating assignments. It does not hand you the
-algorithm; see §8.
+algorithm. See §8.
 
 **Sections to read:** §2.5 (program simplification) and §5 (approximate models along
 an instantiation sequence). The rest is aggregates and infinitary formulas, and does
@@ -282,7 +285,7 @@ not", it is this difference and nothing else.
 OASIcs 52, 2:1–2:15. *(unread)*
 
 **Banbara, M., Kaufmann, B., Ostrowski, M., & Schaub, T. (2017). Clingcon: The Next
-Generation.** TPLP 17(4):408–461. *(no Gebser; unread)*
+Generation.** TPLP 17(4):408–461. *(no Gebser, unread)*
 
 The principled form of what we built by hand: do not ground the ordered domain,
 attach a propagator to it, and accept that the propagator's incompleteness is sound
@@ -326,7 +329,7 @@ declarative decision heuristics as a first-class construct. The direct analogue 
 
 For the general theory of preference, if it is ever wanted: **asprin** (Brewka,
 Delgrande, Romero & Schaub, AAAI'15:1467–1474, and *A general framework for
-preferences in answer set programming*, AIJ 325:104023, 2023). *(no Gebser; unread)*
+preferences in answer set programming*, AIJ 325:104023, 2023). *(no Gebser, unread)*
 Not currently relevant — we have three fixed preference rules, not a preference
 language.
 
@@ -342,7 +345,7 @@ Read this as *support* for [`attic/README.md`](attic/README.md) §1 rather than 
 technique to borrow. Explaining "no answer set" in ASP requires a separate
 meta-encoding layer bolted on top of the solver, and what it produces is a diagnosis
 of a *logic program*, not a proof about packages and versions in cabal's range syntax.
-Deliverable 1 is half the point of the PoC; this is the evidence that a general-purpose
+Deliverable 1 is half the point of the PoC. This is the evidence that a general-purpose
 solver does not hand it to you.
 
 ---
@@ -363,7 +366,7 @@ space:
   theory, let clingo supply CDCL. If [`attic/README.md`](attic/README.md) §1's
   "SAT/UNSAT oracle for differential testing" is ever built, build it this way, not as
   a plain encoding.
-- **ASPIF, as boundary discipline.** Their split is grounder | solver; ours is
+- **ASPIF, as boundary discipline.** Their split is grounder | solver. Ours is
   `bridge` | `pubgrub-hs`, and the mapping is closer than it looks — our `Provider` is
   playing the grounder's role, being the only component that consults the index
   (`expand'` is where reality is consulted). Their argument is that pinning that
@@ -389,7 +392,7 @@ Worth a section because the internal name was misleading, and because it is now
 **fixed** — [`flags-semantics.md`](flags-semantics.md) §4.2's flag axis landed
 2026-08-05 and `Bridge.Provider.dependencyInc` pins only the flags the guard mentions.
 
-**The defect was not really exponential arithmetic; it was an over-specific learned
+**The defect was not really exponential arithmetic. It was an over-specific learned
 clause.** The depender term named a single point in the version × assignment space, so
 refuting it failed to *generalise* to the sibling assignments of the same version, and
 the solver rediscovered the same conflict once per irrelevant assignment. Stated that
@@ -428,9 +431,9 @@ decisions are the same move applied to decisions rather than clauses.
 ## Caveats, restated
 
 1. **Not an exhaustive sweep.** The publications page is large and resists machine
-   reading; each item above was verified individually, but absence from this file means
+   reading. Each item above was verified individually, but absence from this file means
    "not found", not "not there". Entries marked *unread* were not opened.
-2. **The page is the group's, not one author's.** Author lists are given in full;
+2. **The page is the group's, not one author's.** Author lists are given in full.
    Clingcon and asprin have no Gebser.
 3. **Nothing here changes a decision, a rule, or a line of code.** If a future change
    is made *because* of something in this file, it belongs in

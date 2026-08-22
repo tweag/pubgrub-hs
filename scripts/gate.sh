@@ -7,34 +7,38 @@
 #   OUT=/tmp/gate scripts/gate.sh    # keep the per-problem logs
 #   SKIP_LEAN=1 scripts/gate.sh      # everything but the Lean build
 #
-# The gates, in summary order:
+# The gates, in order:
 #
-#   problems   the union of bench/problems.txt and bench/unsat-problems.txt still
-#              holds EXPECT_PROBLEMS problems
+#   problems   the union set still holds every problem it is meant to
 #   corpus     every problem in bench/unsat-problems.txt still fails to resolve
 #              under our solver (docs/failure-cases.md: all 17 reproduce here)
-#   agreement  ours and cabal's solver return the SAME verdict, over the union set
-#   vs-cabal   no corpus proof is longer than cabal's own message
-#   proof      the corpus's total proof sentences and "no version for" lines
+#   agreement  ours and cabal's solver return the SAME verdict, over the union of
+#              bench/problems.txt and bench/unsat-problems.txt
+#   vs-cabal   our proof is no longer than cabal's message on any corpus problem
+#   proof      the corpus totals: proof sentences, and "no version for" lines
 #   golden     the two published PubGrub examples still render their exact proofs
 #   pkgconfig  the pkg-config / buildable: False modelling tests
 #   unit       the whole test suite
 #   lean       the Lean kernel model still builds
 #
-# The problem count below is exact; the other baselines are floors or ceilings,
-# not targets. A run that beats one prints IMPROVED and still exits 0, and the
-# number here is then stale on purpose — move it in the same change that earned it.
+# Baselines are the five numbers below. EXPECT_PROBLEMS is exact. The other four
+# are floors or ceilings, not targets: a run that beats one prints IMPROVED and
+# still exits 0, and the number here is then stale on purpose — move it in the
+# same change that earned it.
 set -uo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
 
 # --- baselines --------------------------------------------------------------
-# Measured on 2026-08-22. See the header: floors and ceilings, not targets.
-: "${MIN_AGREEMENT:=22}"    # problems where both solvers return the same verdict
-: "${EXPECT_PROBLEMS:=22}"  # problems in the union set; a drop means a lost case
+# Measured on 2026-08-23. See the header: floors and ceilings, not targets.
+#
+# The proof baselines are over the CORPUS only, so adding a problem to
+# bench/problems.txt moves MIN_AGREEMENT and EXPECT_PROBLEMS and nothing else.
+: "${MIN_AGREEMENT:=23}"    # problems where both solvers return the same verdict
+: "${EXPECT_PROBLEMS:=23}"  # problems in the union set. A drop means a lost case
 : "${EXPECT_CORPUS:=17}"    # reproducible failure cases
 : "${MAX_PROOF:=62}"        # total proof sentences over the corpus (ceiling)
-: "${MAX_NOVER:=1}"         # total "no version for" lines: Reporting gap 2's residue
+: "${MAX_NOVER:=1}"         # total "no version for" lines over the corpus (ceiling)
 
 OUT=${OUT:-$(mktemp -d)}
 TIMEOUT=${TIMEOUT:-300}

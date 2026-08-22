@@ -1,16 +1,22 @@
 # Independent review of `flags-semantics.md`
 
+> **ATTIC.** This is a review of a draft that has since been rewritten. All four of its
+> findings were folded into [`../flags-semantics.md`](../flags-semantics.md), so the
+> passages it quotes to object to no longer exist. It is kept for two things it states
+> better than the spec does: why O4 is a local result only, and what the "false `None`"
+> failure mode is. See [README.md](README.md) §7.
+
 **Reviewed:** 2026-08-05
 
 ## Scope
 
 This is a semantic and design review of
-[`flags-semantics.md`](flags-semantics.md), not an implementation review. The
+[`flags-semantics.md`](../flags-semantics.md), not an implementation review. The
 review also checked the claims on which that document depends against:
 
-- [`references/pubgrub.md`](../references/pubgrub.md);
-- [`decision-semantics.md`](decision-semantics.md);
-- the formal kernel model in [`specification/`](../specification/);
+- [`references/pubgrub.md`](../../references/pubgrub.md);
+- [`decision-semantics.md`](../decision-semantics.md);
+- the formal kernel model in [`specification/`](../../specification/);
 - the relevant `InstanceSet`, provider, and Cabal solver code.
 
 ## Overall assessment
@@ -54,7 +60,7 @@ Whether the same non-default instance is admissible would otherwise change when
 the user supplies a flag constraint.
 
 The intended Cabal behavior is supported by
-[`enforceManualFlags`](../../cabal/cabal-install-solver/src/Distribution/Solver/Modular/Preference.hs):
+[`enforceManualFlags`](../../../cabal/cabal-install-solver/src/Distribution/Solver/Modular/Preference.hs):
 without a constraint, only the default survives; when the user mentions a
 manual flag, the mentioned values are also allowed, and ordinary constraint
 enforcement selects the requested value. The behavioral rule therefore appears
@@ -116,7 +122,7 @@ loop as unproved.
 The formal model reflects the same boundary. Relation and unit-propagation
 soundness use conservative emptiness, while the current executable
 satisfier-search results in
-[`PartialSolution.lean`](../specification/PubGrub/PartialSolution.lean) require
+[`PartialSolution.lean`](../../specification/PubGrub/PartialSolution.lean) require
 exact emptiness.
 
 The justified conclusion at O4 is:
@@ -137,7 +143,7 @@ version ranges remain intensional. It then says that the same requirement
 excludes version-keyed flags “not as a matter of taste”.
 
 The cited
-[`Version Ranges`](../references/pubgrub.md#version-ranges) section establishes
+[`Version Ranges`](../../references/pubgrub.md#version-ranges) section establishes
 that version constraints should not be expanded into one Boolean atom per
 concrete version. It does not establish that every possible release-scoped or
 lazy flag-variable design must enumerate the version axis.
