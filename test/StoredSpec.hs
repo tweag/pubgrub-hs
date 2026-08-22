@@ -1,0 +1,179 @@
+-- | Tests for the derived index's entry format ('Bridge.Cabal.Flatten.toStored')
+-- and its CBOR codec ('Bridge.Hackage.Store').
+--
+-- The store exists to avoid re-parsing a @.cabal@, so the one property that
+-- matters is that __reading a release through it is indistinguishable from
+-- parsing it__. Everything here asserts that equality, on @.cabal@ sources
+-- covering the shapes that could break it: @else@ branches, @os@\/@arch@\/@impl@
+-- conditions (which the /flatten/ resolves and the /store/ must therefore leave
+-- alone), flags at their defaults, sub-libraries and executables, and the two
+-- inputs to buildability.
+--
+-- Every case also puts the entry through 'serialise' and back before resolving,
+-- so a codec that loses a branch or reorders a constructor fails here rather
+-- than in a solve.
+module StoredSpec (tests) where
+
+import           Bridge.Cabal.Flatten                   (buildableAtDefaults,
+                                                         buildableAtDefaultsStored,
+                                                         componentDepsAtDefaults,
+                                                         componentDepsAtDefaultsStored,
+                                                         toStored)
+import           Bridge.Hackage.Store                   ()
+import           Codec.Serialise                        (deserialise, serialise)
+import           Data.ByteString.Char8                  (pack)
+import           Distribution.Compiler                  (AbiTag (NoAbiTag),
+                                                         CompilerFlavor (GHC),
+                                                         CompilerId (..),
+                                                         CompilerInfo,
+                                                         unknownCompilerInfo)
+import           Distribution.PackageDescription.Parsec (parseGenericPackageDescription,
+                                                         runParseResult)
+import           Distribution.Solver.Types.PkgConfigDb  (PkgConfigDb,
+                                                         pkgConfigDbFromList)
+import           Distribution.System                    (Arch (X86_64),
+                                                         OS (Linux),
+                                                         Platform (..))
+import           Distribution.Types.GenericPackageDescription (GenericPackageDescription)
+import           Distribution.Version                   (mkVersion)
+import           Test.Tasty                             (TestTree, testGroup)
+import           Test.Tasty.HUnit                       (assertFailure, testCase,
+                                                         (@?=))
+
+testPlatform :: Platform
+testPlatform = Platform X86_64 Linux
+
+testCompiler :: CompilerInfo
+testCompiler = unknownCompilerInfo (CompilerId GHC (mkVersion [9, 12, 2])) NoAbiTag
+
+testPkgConfigDb :: PkgConfigDb
+testPkgConfigDb = pkgConfigDbFromList [("zlib", "1.3.1")]
+
+gpdOf :: String -> IO GenericPackageDescription
+gpdOf src = case snd (runParseResult (parseGenericPackageDescription (pack src))) of
+    Right gpd -> pure gpd
+    Left err  -> assertFailure ("could not parse the test .cabal: " <> show err)
+
+-- | The two resolvers must agree with their description-taking counterparts,
+-- both directly off 'toStored' and after a trip through the codec.
+agrees :: String -> String -> TestTree
+agrees name src = testCase name $ do
+    gpd <- gpdOf src
+    let stored = toStored gpd
+        roundTripped = deserialise (serialise stored)
+        db = Just testPkgConfigDb
+
+    componentDepsAtDefaultsStored testPlatform testCompiler stored
+        @?= componentDepsAtDefaults testPlatform testCompiler gpd
+    buildableAtDefaultsStored db testPlatform testCompiler stored
+        @?= buildableAtDefaults db testPlatform testCompiler gpd
+
+    componentDepsAtDefaultsStored testPlatform testCompiler roundTripped
+        @?= componentDepsAtDefaults testPlatform testCompiler gpd
+    buildableAtDefaultsStored db testPlatform testCompiler roundTripped
+        @?= buildableAtDefaults db testPlatform testCompiler gpd
+
+tests :: TestTree
+tests =
+    testGroup
+        "Bridge.Hackage.Store (derived index entries)"
+        [ agrees "plain library" $
+            unlines
+                [ "name: p"
+                , "version: 1.0"
+                , "library"
+                , "  build-depends: base >=4 && <5, containers"
+                ]
+        , -- The environment is what the store must NOT resolve: these conditions
+          -- have to survive encoding and be resolved on the way out, or the store
+          -- would answer for the machine that wrote it.
+          agrees "os, arch and impl conditions" $
+            unlines
+                [ "name: p"
+                , "version: 1.0"
+                , "library"
+                , "  build-depends: base"
+                , "  if os(linux)"
+                , "    build-depends: unix >=2"
+                , "  if os(windows)"
+                , "    build-depends: Win32 >=2"
+                , "  if arch(x86_64)"
+                , "    build-depends: wide >=1"
+                , "  if impl(ghc >= 9.4)"
+                , "    build-depends: newghc >=1"
+                , "  else"
+                , "    build-depends: oldghc >=1"
+                ]
+        , agrees "flags, with an else branch" $
+            unlines
+                [ "name: p"
+                , "version: 1.0"
+                , "flag fast"
+                , "  default: True"
+                , "flag extra"
+                , "  default: False"
+                , "library"
+                , "  build-depends: base"
+                , "  if flag(fast)"
+                , "    build-depends: fastdep >=2 && <3"
+                , "  else"
+                , "    build-depends: slowdep >=1"
+                , "  if flag(extra) && os(linux)"
+                , "    build-depends: extradep"
+                ]
+        , agrees "sub-libraries and executables" $
+            unlines
+                [ "name: p"
+                , "version: 1.0"
+                , "library"
+                , "  build-depends: base"
+                , "library sub"
+                , "  build-depends: subdep >=1"
+                , "executable e"
+                , "  main-is: Main.hs"
+                , "  build-depends: exedep >=3"
+                ]
+        , agrees "buildable: False in the library" $
+            unlines
+                [ "name: p"
+                , "version: 1.0"
+                , "library"
+                , "  build-depends: base"
+                , "  buildable: False"
+                ]
+        , agrees "a satisfied pkgconfig-depends" $
+            unlines
+                [ "name: p"
+                , "version: 1.0"
+                , "library"
+                , "  build-depends: base"
+                , "  pkgconfig-depends: zlib"
+                ]
+        , agrees "an unsatisfiable pkgconfig-depends" $
+            unlines
+                [ "name: p"
+                , "version: 1.0"
+                , "library"
+                , "  build-depends: base"
+                , "  pkgconfig-depends: libpq"
+                ]
+        , agrees "pkgconfig-depends under a flag" $
+            unlines
+                [ "name: p"
+                , "version: 1.0"
+                , "flag pkg-config"
+                , "  default: True"
+                , "library"
+                , "  build-depends: base"
+                , "  if flag(pkg-config)"
+                , "    pkgconfig-depends: libpq"
+                ]
+        , agrees "no library at all" $
+            unlines
+                [ "name: p"
+                , "version: 1.0"
+                , "executable e"
+                , "  main-is: Main.hs"
+                , "  build-depends: base"
+                ]
+        ]

@@ -8,6 +8,7 @@ import qualified PartialSolutionSpec
 import qualified PaperSpec
 import qualified ReportSpec
 import qualified SolverSpec
+import qualified StoredSpec
 import qualified StoreSpec
 import           Test.Tasty     (defaultMain, testGroup)
 import qualified VersionSetSpec
@@ -22,6 +23,7 @@ main =
             , PartialSolutionSpec.tests
             , SolverSpec.tests
             , StoreSpec.tests
+            , StoredSpec.tests
             , PaperSpec.tests
             , ReportSpec.tests
             , FlattenSpec.tests

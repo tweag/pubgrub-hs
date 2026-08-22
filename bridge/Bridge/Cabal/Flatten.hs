@@ -88,9 +88,30 @@ module Bridge.Cabal.Flatten (
     prettyMap,
     parseCondition,
     Guard,
+
+    -- * The pre-environment form
+    --
+    -- | What a @.cabal@ parse yields once everything the /environment/ decides is
+    -- still undecided: the conditional trees as they were written, with
+    -- 'ConfVar' guards unresolved. This is the form a derived index stores,
+    -- because parsing is 106x the cost of flattening and only the flatten
+    -- depends on the machine ('envConfVar' resolves @os@\/@arch@\/@impl@, and
+    -- 'buildableCondition' additionally resolves @pkgconfig-depends@).
+    --
+    -- The two @Stored@ resolvers below run the /same/ 'flattenWith' over the
+    -- /same/ trees as their 'GenericPackageDescription' counterparts, so they
+    -- agree by construction rather than by a second implementation kept in step.
+    -- @test\/StoredSpec.hs@ asserts it anyway, on hand-written @.cabal@ sources.
+    StoredRelease (..),
+    LibNode (..),
+    toStored,
+    componentDepsAtDefaultsStored,
+    buildableAtDefaultsStored,
 ) where
 
 import           Control.Applicative                          (Alternative (..))
+import           Control.Monad                                 (void)
+import           GHC.Generics                                 (Generic)
 import           Data.Bool                                    (bool)
 import           Data.Char                                    (isAlphaNum)
 import qualified Data.Map.Merge.Strict                        as Map
@@ -418,3 +439,71 @@ prettyMap = unwords . map (\m -> "{" ++ unwords [ bool "-" "+" b ++ unFlagName f
 -- "{-a} {-b}"
 -- >>> test "!(flag(a) || flag(b))"
 -- "{-a -b}"
+
+
+-- --------------------------------------------------------------------------
+-- The pre-environment form
+-- --------------------------------------------------------------------------
+
+-- | The bits of a library node's @BuildInfo@ that decide buildability. Nothing
+-- else from a 'BuildInfo' is ever consulted, so nothing else is kept.
+data LibNode = LibNode
+    { lnBuildable :: Bool
+    , lnPkgConfig :: [PkgconfigDependency]
+    }
+    deriving (Eq, Show, Generic)
+
+-- | One release, parsed and no further. The trees are Cabal-syntax's own, so the
+-- resolvers below are the existing walk rather than a paraphrase of it.
+--
+-- The library tree keeps a 'LibNode' because buildability is read off the library
+-- only; the others keep @()@, since 'flattenComponent' reads
+-- 'condTreeConstraints' and never the node data.
+data StoredRelease = StoredRelease
+    { srFlags   :: [(FlagName, Bool)]
+    , srLibrary :: Maybe (CondTree ConfVar [Dependency] LibNode)
+    , srOthers  :: [CondTree ConfVar [Dependency] ()]
+    }
+    deriving (Eq, Show, Generic)
+
+-- | Reduce a parsed description to the form a derived index stores.
+toStored :: GenericPackageDescription -> StoredRelease
+toStored gpd =
+    StoredRelease
+        { srFlags = [(flagName f, flagDefault f) | f <- genPackageFlags gpd]
+        , srLibrary = fmap (fmap libNode) (condLibrary gpd)
+        , srOthers =
+            [void t | (_, t) <- condSubLibraries gpd]
+                ++ [void t | (_, t) <- condExecutables gpd]
+        }
+  where
+    libNode lib =
+        let bi = libBuildInfo lib
+         in LibNode{lnBuildable = buildable bi, lnPkgConfig = pkgconfigDepends bi}
+
+-- | 'componentDepsAtDefaults' over a stored release.
+componentDepsAtDefaultsStored :: Platform -> CompilerInfo -> StoredRelease -> GuardedDeps
+componentDepsAtDefaultsStored platform compiler sr =
+    concat $
+        [flattenComponent env t | t <- maybeToList (srLibrary sr)]
+            ++ [flattenComponent env t | t <- srOthers sr]
+  where
+    defaults = Map.fromList (srFlags sr)
+    env = envConfVar (\f -> Right (Map.findWithDefault False f defaults)) platform compiler
+
+-- | 'buildableAtDefaults' over a stored release.
+buildableAtDefaultsStored
+    :: Maybe PkgConfigDb -> Platform -> CompilerInfo -> StoredRelease -> Bool
+buildableAtDefaultsStored db platform compiler sr =
+    evalCond (mkFlagAssignment (srFlags sr)) $
+        foldr cAnd (Lit True) $
+            [ cNot guard
+            | tree <- maybeToList (srLibrary sr)
+            , (guard, ln) <- flattenWith env (condTreeData) tree
+            , not (usable ln)
+            ]
+  where
+    env = envConfVar Left platform compiler
+    usable ln = lnBuildable ln && all present (lnPkgConfig ln)
+    present (PkgconfigDependency n range) =
+        maybe False (\d -> pkgConfigPkgIsPresent d n range) db

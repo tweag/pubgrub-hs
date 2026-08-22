@@ -176,6 +176,12 @@ lookupGPD cbs pn v =
 cacheFormatVersion :: Int
 cacheFormatVersion = 3
 
+-- | The directory the index cache lives in, as a plain 'FilePath'. The derived
+-- index ('Bridge.Hackage.Store') is written beside the index it is derived from,
+-- so it is found and invalidated with it rather than needing a path of its own.
+cacheDirOf :: Sec.Cache -> FilePath
+cacheDirOf = toFilePath . Sec.cacheRoot
+
 -- | Read the version cache, returning 'Nothing' if the file is corrupt or was
 -- written by a different 'cacheFormatVersion'.
 readVersionCache :: FilePath -> IO (Maybe (Map PackageName (Set Version)))

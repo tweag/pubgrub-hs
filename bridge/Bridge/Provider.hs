@@ -31,13 +31,17 @@ module Bridge.Provider
     ) where
 
 import           Bridge.Cabal.Flatten                         (GuardedDeps,
-                                                               buildableAtDefaults,
-                                                               componentDepsAtDefaults,
-                                                               expandGuard)
+                                                               buildableAtDefaultsStored,
+                                                               componentDepsAtDefaultsStored,
+                                                               expandGuard,
+                                                               srFlags, toStored)
+import           Bridge.Hackage.Store                         (StoreReader (..),
+                                                               openStore)
 import           Bridge.Cabal.InstalledPkg                    (getInstalledPackageIndex,
                                                                reduceIndex)
 import           Bridge.Hackage                               (IndexHandle (..),
                                                                ParseError,
+                                                               cacheDirOf,
                                                                withHackageIndex)
 import           Bridge.Installed                             (InstalledDb (..),
                                                                isNonReinstallable,
@@ -123,8 +127,13 @@ withProvider cache manager root act =
             platform = wPlatform world
             cInfo = wCompiler world
             installed = reduceIndex (wInstalled world)
+        -- The derived index, when one has been built here. It is a cache and not
+        -- a source of truth: 'openStore' answers 'Nothing' for a missing,
+        -- unreadable or stale-format store, and every miss falls back to parsing,
+        -- so its absence costs speed and never correctness.
+        store <- liftIO (openStore (cacheDirOf cache))
         (readRelease, lookupStats) <-
-            liftIO (releaseReader platform cInfo (wPkgConfig world) handle)
+            liftIO (releaseReader platform cInfo (wPkgConfig world) handle store)
         let provider =
                 Provider
                     ( mkExpand
@@ -137,12 +146,14 @@ withProvider cache manager root act =
                         root
                     )
         result <- act provider
-        (parsed, reused) <- liftIO lookupStats
+        (parsed, decoded, reused) <- liftIO lookupStats
         logMsg
             ( T.pack
                 ( "read "
                     ++ show parsed
-                    ++ " .cabal files, served "
+                    ++ " .cabal files, decoded "
+                    ++ show decoded
+                    ++ " from the derived index, served "
                     ++ show reused
                     ++ " repeat lookups from cache"
                 )
@@ -253,27 +264,58 @@ releaseReader
     -> CompilerInfo
     -> Maybe PkgConfigDb
     -> IndexHandle
-    -> IO (PackageName -> Version -> IO (Either ParseError Release), IO (Int, Int))
-releaseReader platform cInfo pkgConfig handle = do
-    ref <- newIORef (Map.empty, 0 :: Int, 0 :: Int)
+    -> Maybe StoreReader
+    -> IO (PackageName -> Version -> IO (Either ParseError Release), IO (Int, Int, Int))
+releaseReader platform cInfo pkgConfig handle store = do
+    -- (entries, parsed, decoded, reused). @parsed@ counts .cabal files actually
+    -- put through Cabal-syntax and @decoded@ counts entries served by the derived
+    -- index. They are kept apart because a parse costs about 27 times a decode
+    -- (2.0 ms against 0.073 ms), and every measurement this project quotes is in
+    -- parses.
+    ref <- newIORef (Map.empty, 0 :: Int, 0 :: Int, 0 :: Int)
     let readRelease pn v = do
-            (entries, _, _) <- readIORef ref
+            (entries, _, _, _) <- readIORef ref
             case Map.lookup (pn, v) entries of
                 Just hit -> do
-                    atomicModifyIORef' ref (\(es, p, reused) -> ((es, p, reused + 1), ()))
+                    atomicModifyIORef' ref
+                        (\(es, p, d, reused) -> ((es, p, d, reused + 1), ()))
                     pure hit
                 Nothing -> do
-                    result <- fmap reduce <$> ihLookupGPD handle pn v
-                    atomicModifyIORef' ref $ \(es, p, reused) ->
-                        ((Map.insert (pn, v) result es, p + 1, reused), ())
+                    (result, fromStore) <- fromStoreOrParse pn v
+                    atomicModifyIORef' ref $ \(es, p, d, reused) ->
+                        ( ( Map.insert (pn, v) result es
+                          , if fromStore then p else p + 1
+                          , if fromStore then d + 1 else d
+                          , reused
+                          )
+                        , ()
+                        )
                     pure result
-        reduce gpd =
+
+        -- The derived index first, the index tar second. Both arrive at a
+        -- 'Release' by the same route: the store keeps the /pre-environment/ form,
+        -- so the environment-dependent half — @os@\/@arch@\/@impl@, and
+        -- @pkg-config@ for buildability — is resolved here either way, against this
+        -- machine as it is now rather than as it was when the store was written.
+        fromStoreOrParse pn v = do
+            hit <- case store of
+                Nothing -> pure Nothing
+                Just s  -> srLookup s pn v
+            case hit of
+                Just stored -> pure (Right (fromStored stored), True)
+                Nothing     -> do
+                    parsed <- fmap reduce <$> ihLookupGPD handle pn v
+                    pure (parsed, False)
+
+        fromStored sr =
             Release
-                { relFlags = [(flagName f, flagDefault f) | f <- genPackageFlags gpd]
-                , relGuarded = componentDepsAtDefaults platform cInfo gpd
-                , relBuildable = buildableAtDefaults pkgConfig platform cInfo gpd
+                { relFlags = srFlags sr
+                , relGuarded = componentDepsAtDefaultsStored platform cInfo sr
+                , relBuildable = buildableAtDefaultsStored pkgConfig platform cInfo sr
                 }
-    pure (readRelease, (\(_, p, reused) -> (p, reused)) <$> readIORef ref)
+
+        reduce = fromStored . toStored
+    pure (readRelease, (\(_, p, d, reused) -> (p, d, reused)) <$> readIORef ref)
 
 -- | Where a package's /source releases/ come from: which versions exist, and
 -- how to read one. These are the only two questions 'mkExpand' asks about the
