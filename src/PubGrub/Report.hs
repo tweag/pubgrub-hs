@@ -45,7 +45,8 @@ import qualified Data.Text               as T
 import           PubGrub.Incompatibility (IncompatCause (..),
                                           Incompatibility (..))
 import           PubGrub.Pretty          (Pretty (..))
-import           PubGrub.SetOps          (equivalent, isSubsetOf)
+import           PubGrub.SetOps          (SetOps (union), equivalent,
+                                          isSubsetOf)
 import           PubGrub.Term            (Term (..))
 
 -- | The proof under construction: its lines __newest first__, and the next free
@@ -172,6 +173,35 @@ reportConflict root0 = case incompCause root of
         _ -> emit (leaf inc) out
 
     -- Case 2, with @d@ the derived cause and @e@ the external fact.
+    --
+    -- Before the ordinary every-other-step skip, look for a __run__ of steps that
+    -- all say the same kind of thing: this range of @p@ depends on @q@, and so does
+    -- the next range, and the next. That is one fact about @p@ as a whole, and
+    -- printed a range at a time it walks one bound's history an adjacent pair of
+    -- releases at a time (four of @matterhorn@'s ten lines did this to @hashable@).
+    --
+    -- It is /not/ the same thing as references/pubgrub.md:456's collapsing, which
+    -- merges facts with an __identical__ dependee range. Here the dependee ranges
+    -- differ — that is why the solver had to derive its way along them — and what is
+    -- printed is their union.
+    oneDerived final d e inc out
+        | Just (p, s, q, r) <- asDependency e
+        , (rest', extra@(_ : _)) <- depRun p q d
+        , let ss = foldr1 union (s : map fst extra)
+        , let rs = foldr1 union (r : map snd extra)
+        , -- Only when the conclusion really is "p requires q", and the collapsed
+          -- depender range is one the conclusion covers. Stating the union of the
+          -- facts is sound on its own — each says @p ∈ Sᵢ@ requires @q ∈ Rᵢ@, so
+          -- @p ∈ ⋃S@ requires @q ∈ ⋃R@ — but a line may not claim to justify more
+          -- of @p@ than the step it is attached to concluded, and this is what stops
+          -- it. 'isSubsetOf' is one-sided the safe way: it can only refuse a
+          -- collapse that would have been fine.
+          concludesRequires p q inc
+        , Just (Positive sInc) <- Map.lookup p (incompTerms inc)
+        , ss `isSubsetOf` sInc =
+            emit
+                (opening final "And because " <> dep p ss q rs <> ", " <> says final inc)
+                (derived False rest' out)
     oneDerived final d e inc out = case chainStep d of
         -- Case 2.ii — the every-other-step skip. @d@'s own conclusion is left
         -- unsaid and the two external facts are named together here, which is
@@ -186,6 +216,27 @@ reportConflict root0 = case incompCause root of
             emit
                 (opening final "And because " <> leaf e <> ", " <> says final inc)
                 (derived False d out)
+
+    -- Walk down the derived spine collecting external dependency facts that are all
+    -- about the same @(depender, dependee)@ package pair. Answers where the run
+    -- bottoms out and what it collected; an empty collection means there was no run
+    -- and the ordinary cases apply.
+    depRun p q = go []
+      where
+        go acc node = case chainStep node of
+            Just (pd, pe)
+                | Just (p', s, q', r) <- asDependency pe
+                , p' == p
+                , q' == q ->
+                    go ((s, r) : acc) pd
+            _ -> (node, acc)
+
+    -- Is this step's conclusion of the shape "p requires q"? Anything else and the
+    -- collapsed sentence would be attached to a claim it does not support.
+    concludesRequires p q inc = case Map.toList (incompTerms inc) of
+        [(a, Positive _), (b, Negative _)] -> (a, b) == (p, q)
+        [(b, Negative _), (a, Positive _)] -> (a, b) == (p, q)
+        _                                  -> False
 
     -- A derived node that can be folded into its parent's line: exactly one
     -- derived cause and one external fact. Answers with the pair, the derived

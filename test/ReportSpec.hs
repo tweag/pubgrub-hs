@@ -9,6 +9,7 @@
 -- what the proof claims.
 module ReportSpec (tests) where
 
+import           Data.List                       (isInfixOf)
 import qualified Data.Map.Strict                 as Map
 import qualified Data.Set                        as Set
 import           Distribution.Types.PackageName  (PackageName, mkPackageName)
@@ -21,9 +22,11 @@ import           PubGrub.Incompatibility         (IncompatCause (..),
                                                   onlyInstalled, priorCause)
 import           PubGrub.InstanceSet             (InstanceSet (..))
 import           PubGrub.InstanceSet.SourceCell  (SourceCell (..))
-import           PubGrub.Report                  (collapseNoInstances)
+import           PubGrub.Report                  (collapseNoInstances,
+                                                  reportConflict)
 import           PubGrub.SetOps                  (equivalent)
 import           PubGrub.Term                    (Term (..))
+import qualified Data.Text                       as T
 import qualified PubGrub.VersionSet              as VersionSet
 import           Test.Tasty                      (TestTree, testGroup)
 import           Test.Tasty.HUnit                (assertBool, assertFailure,
@@ -82,6 +85,7 @@ tests =
         [ testGroup "what is absorbed" absorbed
         , testGroup "what is left alone" untouched
         , testGroup "the property that makes it sound" soundness
+        , testGroup "a run of same-pair steps is one sentence" sameePairRun
         ]
 
 -- --------------------------------------------------------------------------
@@ -123,6 +127,55 @@ absorbed =
             outer = priorCause inner (hole pkgQ (range 4 5)) pkgQ
         holesIn outer @?= 2
         holesIn (collapseNoInstances outer) @?= 0
+    ]
+
+-- --------------------------------------------------------------------------
+-- Collapsing a run of steps that all say the same kind of thing
+-- --------------------------------------------------------------------------
+
+-- | @a@ over @dependers@ depends on @q@ over @dependees@.
+aDependsOn :: InstanceSet -> InstanceSet -> Incompatibility
+aDependsOn dependers dependees = fromDependency pkgA dependers pkgQ dependees
+
+-- | A linear chain of steps, each adding one more range of @a@ with a slightly
+-- wider requirement on @q@ — the shape a proof takes when it walks a
+-- dependency's bound history one adjacent pair at a time.
+chainOf :: [(InstanceSet, InstanceSet)] -> Incompatibility
+chainOf [] = error "chainOf: needs at least two facts"
+chainOf ((s0, r0) : rest) =
+    foldl step (aDependsOn s0 r0) rest
+  where
+    step acc (s, r) = priorCause acc (aDependsOn s r) pkgA
+
+proofLines :: Incompatibility -> [String]
+proofLines = map T.unpack . T.lines . reportConflict
+
+sameePairRun :: [TestTree]
+sameePairRun =
+    [ testCase "four same-pair steps collapse below one line each" $ do
+        let inc = chainOf [(range 1 2, range 1 5), (range 2 3, range 1 6), (range 3 4, range 1 7), (range 4 5, range 1 8)]
+            ls = proofLines inc
+        assertBool
+            ("expected fewer lines than facts, got:\n" ++ unlines ls)
+            (length ls < 4)
+    , -- The collapsed sentence may only state the union of the facts it stands in
+      -- for. Each says @a in Si@ requires @q in Ri@, so together they imply that
+      -- @a in union S@ requires @q in union R@, since every @Ri@ lies within it.
+      testCase "the collapsed sentence states the union, not one member" $ do
+        let inc = chainOf [(range 1 2, range 1 5), (range 2 3, range 1 6), (range 3 4, range 1 7), (range 4 5, range 1 8)]
+            proof = unlines (proofLines inc)
+        assertBool
+            ("the widest dependee bound should appear:\n" ++ proof)
+            ("<8" `isInfixOf` proof)
+    , -- The rule keys on the (depender, dependee) pair. A step about a different
+      -- dependee is a different kind of thing and must stop the run, or the
+      -- sentence would merge two unrelated claims.
+      testCase "a step about a different dependee stops the run" $ do
+        let other = fromDependency pkgA (range 3 4) (mkPackageName "r") (range 1 9)
+            base = priorCause (aDependsOn (range 1 2) (range 1 5)) (aDependsOn (range 2 3) (range 1 6)) pkgA
+            inc = priorCause base other pkgA
+            proof = unlines (proofLines inc)
+        assertBool ("r should still be named:\n" ++ proof) ("r " `isInfixOf` proof)
     ]
 
 -- --------------------------------------------------------------------------

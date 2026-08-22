@@ -65,36 +65,42 @@ ghc-9.12.2, base-4.21.0.0, this machine's pkg-config db (`libpq`, `libzmq`, `bla
 
 | target | kind | ours | cabal | noVer |
 | --- | --- | --- | --- | --- |
-| `hpqtypes-extras ==1.20.0.0` | pkg-config `libpq` | **2** | 7 | 0 |
-| `purescript ==0.15.15` | base bound | **2** | 7 | 0 |
+| `cabal-install ==3.18.1.0` | Cabal / hackage-security | **2** | 12 | 0 |
 | `haddock ==2.29.1` | base bound, seven windows | **2** | 7 | 0 |
-| `liquidhaskell ==0.9.14.1.1` | installed `ghc` | **2** | 7 | 0 |
-| `stackctl ==1.7.3.7` | base via amazonka | **2** | 7 | 0 |
 | `hadolint ==2.15.1` | `time` vs language-docker | **2** | 9 | 0 |
-| `calamity ==0.12.1.0` | base via aeson-optics | **3** | 10 | 0 |
+| `hpqtypes-extras ==1.20.0.0` | pkg-config `libpq` | **2** | 7 | 0 |
+| `liquidhaskell ==0.9.14.1.1` | installed `ghc` | **2** | 7 | 0 |
+| `purescript ==0.15.15` | base bound | **2** | 7 | 0 |
+| `stackctl ==1.7.3.7` | base via amazonka | **2** | 7 | 0 |
 | `atelier-testing ==0.2.0.0` | dead range | **3** | 6 | 0 |
+| `calamity ==0.12.1.0` | base via aeson-optics | **3** | 10 | 0 |
 | `cpsa ==4.4.9` | installed `deepseq` | **3** | 9 | 0 |
-| `cabal-install ==3.18.1.0` | Cabal / hackage-security | **4** | 12 | 0 |
+| `happstack-hsp ==7.3.7.8` | `template-haskell` history | **4** | 8 | 0 |
 | `scion-browser ==0.5.0` | haskeline / tar chain | **4** | 11 | 0 |
 | `haskoin-store-data ==1.6.0` | pkg-config `libsecp256k1` | **5** | 11 | 0 |
+| `hjsonschema ==1.10.0` | aeson / bytestring chain | **5** | 13 | 0 |
 | `language-puppet ==1.5.1` | `ghc-prim` via aeson | **5** | 11 | 0 |
-| `hjsonschema ==1.10.0` | aeson / bytestring chain | **6** | 13 | 1 |
-| `matterhorn ==90000.1.1` | hashable / bytestring chain | **6** | 17 | 0 |
-| `happstack-hsp ==7.3.7.8` | `template-haskell` history | **7** | 8 | 0 |
-| `futhark ==0.27.1` | regex / time chain | **8** | 10 | 2 |
+| `futhark ==0.27.1` | regex / time chain | **8** | 10 | 1 |
+| `matterhorn ==90000.1.1` | hashable / bytestring chain | **8** | 17 | 0 |
 
-**Shorter on all 17**, 66 proof sentences against cabal's 152. The margin is
-narrowest on `happstack-hsp` (7 against 8) and `futhark` (8 against 10), and those
-two are where a regression would show first.
+**Shorter on all 17**, 62 proof sentences against cabal's 152, and one `no version`
+line left in the set. The margin is narrowest on `futhark` (8 against 10) and
+`matterhorn` (8 against 17 — long, but against cabal's longest message).
 
-**The last loss went on 2026-08-22**, and not from a reporting change. Stating
-*why* a boot package has no source release — the rule that a non-reinstallable
-package's source-only range rides out a fact instead of nothing — took
-`scion-browser` from 14 lines to **4** and `matterhorn` from 16 to **6**, because
-the `no version for base in …` leaves those proofs were built around stopped being
-emitted at all. Across the set `noVer` went 22 lines to **3**: one in
-`hjsonschema`, two in `futhark`, both the dead-range shape that
-`collapseNoInstances` leaves alone by design.
+**Two changes on 2026-08-23 moved almost every row**, and they pull in opposite
+directions on one problem each:
+
+* *generation-time collapsing came back* — `spanningOccurrence` walks a decided
+  release's neighbours again, now that a read is a CBOR decode rather than a
+  parse. It took `cabal-install` 4 → 2 and `hjsonschema` 6 → 5, and it cost
+  `matterhorn` 6 → 10: widening clauses changes which conflict surfaces first, and
+  the one `matterhorn` now finds is explained through `hashable`.
+* *a run of same-pair steps became one sentence* — where a proof walked a
+  dependency's bound history one adjacent pair at a time, the run is stated once
+  as the union of its facts. That is what this file used to call the outlier
+  shape. It took `happstack-hsp` 7 → 4 and gave `matterhorn` back 10 → 8.
+
+Net across the corpus: **66 → 62 sentences and 3 → 1 `no version` lines.**
 
 These numbers are **after Reporting gap 2** (2026-08-20), which absorbed the
 `no version for …` leaves into the sibling they were resolved against. It took the
