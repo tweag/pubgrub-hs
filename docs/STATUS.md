@@ -8,16 +8,24 @@
 > table below decide. If this file contradicts one of them, that one is right and
 > this file is stale — fix it.
 >
-> **Last checked against the tree:** 2026-08-17, 128 tests passing.
+> **Last checked against the tree:** 2026-08-23, 165 tests passing.
 >
-> **If you have been away**, three sections carry everything that changed on
-> 2026-08-17: [Release-1 scope](#release-1-scope-flags-are-fixed-at-their-defaults-2026-08-17)
+> **The current numbers are
+> [A derived index, and collapsing at generation time again](#a-derived-index-and-collapsing-at-generation-time-again-2026-08-23).**
+> Quote that section and no other: every measurement section above it is dated and
+> historical, and most of them were taken when reading a release meant parsing its
+> @.cabal@.
+>
+> **If you have been away**, that section carries what changed on 2026-08-23 — every
+> release's `.cabal` is now parsed once into a derived index, which made
+> generation-time depender collapsing affordable again — and the three from
+> 2026-08-17 remain the background to it:
+> [Release-1 scope](#release-1-scope-flags-are-fixed-at-their-defaults-2026-08-17)
 > (flags are no longer searched),
 > [Re-measured after the scope cut](#re-measured-after-the-scope-cut-2026-08-17)
 > (which found a memory regression), and
 > [Merge on insert](#merge-on-insert-the-collapsing-trade-is-gone-2026-08-17)
-> (which removed it, and holds the current numbers). Every other measurement
-> section is dated and historical.
+> (which removed it).
 >
 > History lives in [decision-log.md](decision-log.md) (how we got here);
 > abandoned ideas live in [attic/](attic/) (what we tried and dropped).
@@ -33,21 +41,29 @@ correctly is table stakes. It exists to answer two questions:
 2. Can it **match cabal-install on time and peak memory** on real problems?
 
 **The solver works.** It resolves real Hackage packages end to end, with version
-ranges, Cabal flags, buildability, and installed/boot-package pinning. 136 tests
+ranges, Cabal flags, buildability, and installed/boot-package pinning. 165 tests
 pass, including all six worked examples from the PubGrub spec — the two
 error-reporting ones now assert the __rendered proof__ against a golden file
-(`test/golden/`), checked against the wording the spec publishes.
+(`test/golden/`), checked against the wording the spec publishes. One command,
+[`scripts/gate.sh`](../scripts/gate.sh), runs the whole corpus, both solvers, the
+proofs and the Lean model, and exits non-zero on any regression.
 
 **Neither deliverable has been delivered, but the comparison has started.** cabal's
 own solver runs over our index (`pubgrub --cabal`, no `cabal-install` dependency),
 and the current five-problem numbers are in
-[Merge on insert](#merge-on-insert-the-collapsing-trade-is-gone-2026-08-17): **all
-five verdicts agree, we are faster than cabal on all five, leaner in memory on all
-five (2.2–3.5×), and allocate less on four of five.** Our proofs are **shorter than
-cabal's message on two of the three unsat problems** — `lens <4` 6 lines against 22,
-`conduit <1.3` 12 against 16 — which is the explanation thesis with evidence under
-it; `aeson <2` (83 against 30) is the outlier. What is missing is the harness — one run doing both, diffing plans,
-repeating for timing — and the explanation side-by-side.
+[A derived index](#a-derived-index-and-collapsing-at-generation-time-again-2026-08-23):
+**all five verdicts agree, and we are faster than cabal on all five, leaner in peak
+memory on all five (2.3–3.6×), and — as of 2026-08-23 — allocate less on all five,
+by 1.2× to 7.0×.**
+
+On the explanation side there are now two problem sets, and they say different
+things. On the **harvested corpus of 17 real failures**
+([`failure-cases.md`](failure-cases.md)) we are **shorter than cabal on all 17**, 62
+proof sentences against its 152. On the **benchmark set's three unsat problems** we
+win two — `lens <4` 8 lines against 22 and `conduit <1.3` 10 against 16 — and
+`aeson <2` remains the outlier at 64 against 30, though it was 178. What is still
+missing is the harness — one run doing both and diffing plans — and the explanation
+side-by-side written up.
 
 **And the problem got smaller on 2026-08-17.** Flags are no longer a search
 dimension: every flag is fixed at its declared default, on *both* sides of the
@@ -1028,6 +1044,11 @@ project claims.
 
 ### Generation-time depender collapsing: landed, and it is a trade (2026-08-12)
 
+> **Historical twice over.** The walk described here was deleted on 2026-08-17 and
+> restored on 2026-08-23, when the derived index made a neighbour read a decode
+> rather than a parse. The costs below are what a *parse* per neighbour bought;
+> see [A derived index](#a-derived-index-and-collapsing-at-generation-time-again-2026-08-23).
+
 `Bridge.Provider.spanningOccurrence` implements `references/pubgrub.md:456` where the
 spec asks for it. For each guarded dependency occurrence of the chosen release, walk
 neighbouring releases in both directions while each carries the *same* occurrence
@@ -1095,6 +1116,9 @@ this one lacks — `pandoc`'s residency tripled — which makes option 4 more ur
 less.
 
 ### Re-measured after the scope cut (2026-08-17)
+
+> Historical. Current numbers are in
+> [A derived index](#a-derived-index-and-collapsing-at-generation-time-again-2026-08-23).
 
 Open question 0, discharged. `bench/compare.sh` over the whole set, one machine, warm
 index, `-v` on for our solver (so our elapsed figures are upper bounds); quiet
@@ -1180,6 +1204,13 @@ cabal's goal ordering changed. If so, we made the baseline slower by constrainin
 which is fair but has to be said out loud in any published comparison.
 
 ### Merge on insert: the collapsing trade is gone (2026-08-17)
+
+> **Superseded on 2026-08-23**, and the trade it describes no longer exists in
+> either direction — see
+> [A derived index](#a-derived-index-and-collapsing-at-generation-time-again-2026-08-23).
+> The walk is back *and* the store still merges; what changed is that a neighbour
+> read is now a CBOR decode. Its warning about decisions is the one that came due:
+> `aeson <2` is 758 → 309 and `conduit <1.3` 137 → 16. Numbers below are historical.
 
 [`collapsing.md`](collapsing.md)'s option 4, built. The provider no longer walks
 neighbouring releases to find out what they declare; it emits one dependency fact per
@@ -1511,6 +1542,95 @@ plus Dart's `^1.0.0` against cabal's range syntax, which is deliberate. The bran
 example keeps its six lines; its remaining difference from the spec is which pair of
 facts each line fuses, not how many lines there are.
 
+### A derived index, and collapsing at generation time again (2026-08-23)
+
+**These are the current numbers.** Every measurement section above this one was taken
+when reading a release meant parsing its `.cabal`, and that is no longer what a read
+is.
+
+Three changes, in the order they had to happen:
+
+1. **A derived index** ([`Bridge.Hackage.Store`](../bridge/Bridge/Hackage/Store.hs)).
+   Every release's `.cabal` is parsed once, ahead of time, and kept in the
+   *pre-environment* form. `derived-index.cbor` is **62.5 MB**, built in **201 s** by
+   `cabal run pubgrub-index`, plus a 0.4 MB package-keyed offset map. A solve now
+   reports `read 0 .cabal files`.
+2. **`spanningOccurrence` restored.** Generation-time depender collapsing
+   (`references/pubgrub.md:456`) was deleted on 2026-08-17 because the walk cost
+   `pandoc` 167 reads → 2834. It still does — but they are decodes now.
+3. **A run of same-pair steps is one sentence** (`PubGrub.Report`), which is what
+   pays for the one proof the walk made longer.
+
+#### Against cabal, on the benchmark set
+
+| problem | verdict | ours `-v` | cabal | ours res | cabal res | ours alloc | cabal alloc | our proof | cabal's message |
+|---|---|---|---|---|---|---|---|---|---|
+| `vector` | both sat | **0.71** | 1.13 | **22.3** | 50.7 MB | **0.40** | 0.85 GB | — | 55 |
+| `pandoc` | both sat | **1.39** | 1.77 | **33.2** | 80.2 MB | **1.53** | 1.79 GB | — | 385 |
+| `conduit <1.3` | both UNSAT | **0.80** | 1.26 | **22.3** | 50.7 MB | **0.38** | 1.31 GB | **10** | 16 |
+| `lens <4` | both UNSAT | **0.87** | 1.54 | **22.3** | 76.5 MB | **0.48** | 1.87 GB | **8** | 22 |
+| `aeson <2` | both UNSAT | **0.83** | 2.48 | **22.3** | 80.4 MB | **0.78** | 5.42 GB | 64 | **30** |
+
+**Faster on all five, leaner in peak memory on all five (2.3–3.6×), and — for the
+first time — allocating less on all five**, by 1.2× (`pandoc`) to 7.0× (`aeson <2`).
+`lens <4` was the standing exception on allocation at 2.55 GB against cabal's 1.88;
+it is now 0.48 against 1.87.
+
+Single unrepeated runs with the trace on, so read the times as ±25% and the
+allocation as the stable figure ([`benchmarking.md`](benchmarking.md)).
+
+#### Against the previous numbers
+
+| problem | time | allocation | max residency | proof | decisions |
+|---|---|---|---|---|---|
+| `vector` | 0.77 → **0.71** | 0.38 → 0.40 GB | 22.6 → **22.3** MB | — | 39 |
+| `pandoc` | 1.18 → 1.39 | 1.53 GB | 22.6 → 33.2 MB | — | 270 |
+| `conduit <1.3` | 1.24 → **0.80** | 1.20 → **0.38** GB | 22.6 → **22.3** MB | 43 → **10** | 137 → **16** |
+| `lens <4` | 1.49 → **0.87** | 2.55 → **0.48** GB | 26.1 → **22.3** MB | 9 → **8** | 106 → **60** |
+| `aeson <2` | 1.66 → **0.83** | 3.15 → **0.78** GB | 22.6 → **22.3** MB | 178 → **64** | 758 → **309** |
+
+**The decision counts are the story.** `aeson <2` 758 → 309 and `conduit <1.3`
+137 → 16: one conflict now eliminates a whole run of releases instead of one at a
+time, which is what "Merge on insert" gave up when it traded the walk for merging in
+the store. That section's own warning — *"a change that makes re-expansion expensive
+again should look at this first"* — is what this reverses.
+
+Off the benchmark set, `futhark ==0.27.1` is the clearest case: **4287 → 805
+decisions, 53 → 8 conflicts, 6.62 → 2.19 s, 23.1 → 3.99 GB**. Its cost was never
+reads — it re-decided 78 packages per backtrack while each conflict eliminated one
+`regex` release, and only 12 of the 187 packages it decided ever appeared in a
+learned clause.
+
+#### `pandoc` is the one that got worse, and it is the expected one
+
+Time 1.18 → 1.39 s and residency 22.6 → 33.2 MB. `pandoc` has **one conflict**, so
+the walk buys it nothing and it pays for the neighbours anyway: 167 lookups → 2873.
+That is the same explosion that got the walk deleted, at 1/30th the price — **+0.17 s
+and +6% allocation, against 17.31 GB before**. It is still faster and leaner than
+cabal on the same problem. If read-dominated problems ever matter more than search,
+this is the row to attack, and the lever would be walking less rather than reading
+more cheaply.
+
+#### What the derived index does not do
+
+It does not speed up a solve on its own. Parsing was 0.3–0.6 s of runs taking
+0.7–6.8 s, and measured *before* the walk returned, elapsed time was unchanged within
+noise. Its whole value is that it changed the price of a neighbour read, and every
+gain above is the walk spending that.
+
+Two properties worth keeping:
+
+- **The store is a cache, not a source of truth.** `openStore` answers `Nothing` for
+  a missing, unreadable or stale-format store and every miss falls back to parsing, so
+  deleting `_cache/derived-index.*` costs speed and never correctness.
+- **What is cached is the pre-environment form, not the flattened one.** `envConfVar`
+  resolves `os`/`arch`/`impl` against this machine and buildability additionally
+  resolves `pkgconfig-depends` against its `pkg-config` db, so a flattened store would
+  be silently wrong after a GHC upgrade or an `apt install`. Parsing is 106× the cost
+  of flattening (2.007 ms against 0.019 ms, measured in
+  [`prototype/IndexBench.hs`](../prototype/IndexBench.hs)), so caching only the parse
+  gives up almost nothing and keeps one store valid across toolchains.
+
 ### Intra-package dependencies dropped, and `lens <4`'s proof starts answering the question (2026-08-21)
 
 A dependency of `p` on `p` is no longer emitted, and `fromDependency` no longer collapses
@@ -1660,16 +1780,20 @@ moves; treat a cited line number as a hint, and grep for the identifier.
 
 | deliverable | state |
 |---|---|
-| **Explanation showcase** — real failing problems, pubgrub-hs vs cabal side by side | **the problem set now exists**: 17 real failures harvested from Hackage's build reports, six failure kinds, five positive controls ([`failure-cases.md`](failure-cases.md)). We are shorter than cabal's message on **16 of 17**, and on the two benchmark unsat problems too (`lens <4` 4 lines against 22, `conduit <1.3` 6 against 16; `aeson <2` 56 against 30 is the outlier). Both of the spec's published examples are pinned as golden tests and the linear one now matches it sentence for sentence. Every reporting gap but the cosmetics is closed. Still missing: **the harness** and side-by-side rendering |
-| **Benchmark report** — time + peak residency on real sat/unsat problems | **current numbers exist** for five problems, two sat and three unsat, both solvers ([Merge on insert](#merge-on-insert-the-collapsing-trade-is-gone-2026-08-17)), and they are now favourable on every problem. Not a report: index build still not separated from solve, timings are one or two runs against ±25% noise, and what the ~22 MB memory floor consists of is unestablished — which is the next thing to settle, since a memory claim is now the strongest one we have |
+| **Explanation showcase** — real failing problems, pubgrub-hs vs cabal side by side | **the problem set exists and we win on all of it**: 17 real failures harvested from Hackage's build reports, six failure kinds, five positive controls ([`failure-cases.md`](failure-cases.md)). Shorter than cabal's message on **17 of 17** — 62 proof sentences against its 152 — and on two of the three benchmark unsat problems (`lens <4` 8 lines against 22, `conduit <1.3` 10 against 16; `aeson <2` 64 against 30 is the outlier, down from 178). Both of the spec's published examples are pinned as golden tests and the linear one matches it sentence for sentence. Every reporting gap but the cosmetics is closed. Still missing: **the harness** and side-by-side rendering |
+| **Benchmark report** — time + peak residency on real sat/unsat problems | **current numbers exist** for five problems, two sat and three unsat, both solvers ([A derived index](#a-derived-index-and-collapsing-at-generation-time-again-2026-08-23)), and they are favourable on every problem and every axis: faster on all five, 2.3–3.6× leaner in peak memory on all five, and allocating less on all five. Not a report: index build still not separated from solve, timings are single runs against ±25% noise, and what the ~22 MB memory floor consists of is unestablished — which is now the *first* thing to settle, since the memory claim is the strongest one we have and the floor is most of it |
 
 The baseline and the shared index are done — `cabal-install-solver` drives cabal's
 resolver from the same `withWorld`, which is what makes the comparison
 apples-to-apples rather than arranged. What remains for both deliverables is the
 **harness**: one process running both solvers per problem, diffing plans rather than
 eyeballing them, separating index build from solve, repeating runs, and rendering the
-two failure explanations side by side. Plus an unsat problem set, which neither
-deliverable can be evidenced without and which does not exist yet.
+two failure explanations side by side. (The unsat problem set this used to also ask
+for now exists — [`failure-cases.md`](failure-cases.md) — and
+[`scripts/gate.sh`](../scripts/gate.sh) does the regression half of the job, running
+both solvers over all 22 problems and failing on any regression in verdict agreement
+or proof length. It is not the harness: it does not diff plans, separate index build
+from solve, or repeat runs.)
 
 **One thing the deliverables now have to state outright.** Both solvers run with
 every flag pinned to its declared default, which is a restriction of the problem, not
