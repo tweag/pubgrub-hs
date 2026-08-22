@@ -81,11 +81,23 @@ is a summary and not authoritative; the documents below decide. Project history 
 
 ```sh
 cabal build
-cabal test                      # 145 tests, ~0.3 s
+cabal test                      # 165 tests, ~0.3 s
 cabal run pubgrub -- aeson      # the driver; add -v for the search trace
 cabal run pubgrub -- --cabal aeson   # cabal's solver, same index (the baseline)
+cabal run pubgrub-index         # build the derived index (~200 s, once)
+scripts/gate.sh                 # every check that must not regress; see below
 bench/compare.sh                # both solvers over bench/problems.txt
 ```
+
+**`scripts/gate.sh` is what decides whether a change is kept.** Nine gates over one
+pass of the problem set: the 17-case failure corpus, ours-vs-cabal verdict agreement
+over all 22 problems, proof length against cabal's own message, the proof and
+no-version totals, the golden proofs, the pkg-config modelling tests, the whole suite
+and the Lean build. One line per gate, non-zero exit on any regression. Its three
+numeric baselines are ceilings and floors, not targets — beating one prints
+`IMPROVED` and still exits 0, and the rule is to tighten it in the change that earned
+it. They are currently tight (62 proof sentences, 1 no-version line), so a reporting
+change has to earn its way past them.
 
 **[`docs/benchmarking.md`](docs/benchmarking.md) is the reference for measuring
 anything** — how to run a subset of the tests, what `bench/compare.sh` and
@@ -130,7 +142,7 @@ Current layout (4 cabal components):
   which is where `references/pubgrub.md:456`'s collapsing happens (see Reporting gap 1).
   Unbuildable facts about one package merge the same way, which is `:476`'s half of it.
 - `bridge/` — private library `bridge`. `Bridge/{Hackage,Installed,Provider}.hs`,
-  `Bridge/Hackage/{HttpClient,Unlifted}.hs`, and
+  `Bridge/Hackage/{HttpClient,Store,Unlifted}.hs`, and
   `Bridge/Cabal/{Baseline,Flatten,InstalledPkg}.hs`: index reader, installed-db
   reader, the cabal-solver baseline, flag-parametric `GenericPackageDescription`
   flattening, and the real `Provider`. `Flatten` reads two things off the same walk of
@@ -141,8 +153,18 @@ Current layout (4 cabal components):
   description. Retaining those instead cost 27.2s / 904MB on `pandoc` against
   3.7s / 83MB uncached: ~170 parse trees pinning their slices of the index is
   enough live data to make every major GC copy it.
-- `app/Main.hs` — executable `pubgrub`: the CLI driver.
-- `test/` — `{VersionSet,InstanceSet,PartialSolution,Solver,Store,Paper,Report,Flatten,FlagSolve,Installed}Spec.hs`,
+  **`Bridge/Hackage/Store.hs` is the derived index** (landed 2026-08-23): every
+  release's `.cabal` parsed once, ahead of time, into the *pre-environment* form, so a
+  read is a CBOR decode. See "The derived index" below — it is the thing that changed
+  what the rest of this file used to say about the cost of reading a release.
+- `app/Main.hs` — executable `pubgrub`: the CLI driver. `app/BuildIndex.hs` —
+  executable `pubgrub-index`, which builds the derived index.
+- `prototype/IndexBench.hs` — executable `index-bench`, **throwaway**: it priced the
+  derived index (bytes per entry under `binary` vs `serialise`, and the parse:flatten
+  split) so the design could be decided on numbers. Delete it and its stanza once
+  nothing else needs re-pricing.
+- `scripts/gate.sh` — the one gate command (see "Build & test").
+- `test/` — `{VersionSet,InstanceSet,PartialSolution,Solver,Store,Stored,Paper,Report,Flatten,FlagSolve,Installed}Spec.hs`,
   plus `test/golden/` — the expected proofs for `PaperSpec`'s two error-reporting cases.
 
 The cabal baseline landed 2026-08-12: `bridge` depends on `cabal-install-solver`
@@ -157,14 +179,66 @@ plans, and repeats for timing.
 some CLI-convenience types. We avoid `cabal-install` — including for the baseline,
 see `Bridge.Cabal.Baseline` — by talking to `hackage-security` ourselves:
 `Bridge.Hackage` bootstraps and refreshes the index, keeps a disk-cached
-package→versions map, and reads one release's `.cabal` on demand through
-`indexLookupCabal` + `Cabal-syntax`'s `parseGenericPackageDescription`. (An earlier
+package→versions map, and reads one release's `.cabal` through `indexLookupCabal` +
+`Cabal-syntax`'s `parseGenericPackageDescription` — on demand, and now only when the
+derived index misses. (An earlier
 version of this note claimed we avoid `hackage-security` too and read the tar
 directly with `tar`; we do not, and there is no `tar` dependency.) Still to handle:
 **`preferred-versions`**. **.cabal revisions** need no work — the index
 `hackage-security` hands us already carries only the last revision of each release,
-verified 2026-08-12 (152,746 entries, 152,746 distinct). The single shared index
-reader feeds both solvers, making the apples-to-apples comparison structural.
+verified 2026-08-12 (152,746 entries, 152,746 distinct; 152,987 as of 2026-08-23,
+across 19,419 packages). The single shared index reader feeds both solvers, making the
+apples-to-apples comparison structural.
+
+**We are not as lazy as this file used to imply, and it matters.** The `.cabal`
+*bodies* are read lazily; the package→versions map is **eager and complete** — all
+152,987 releases, deserialised whole at startup on every run, which is most of the
+22.9 MB residency floor a trivial solve pays. Dart's pub, by contrast, has no global
+index at all: it fetches one package's version listing on demand and that listing
+carries every version's manifest. So the two designs are opposite — pub is lazy across
+packages and eager within one, we are eager across packages and lazy within one — and
+neither is simply "lazier". Any claim about our memory advantage over cabal has to
+account for that floor, which is why `docs/STATUS.md` now lists establishing what the
+22 MB consists of as the first thing to settle.
+
+## The derived index
+
+**Reading a release is a CBOR decode, not a parse** (landed 2026-08-23,
+`Bridge.Hackage.Store`). `cabal run pubgrub-index` parses all 152,987 releases once —
+201 s — and writes `_cache/derived-index.cbor` (62.5 MB) plus a 0.4 MB package-keyed
+offset map. `Bridge.Provider` consults it first and falls back to parsing on any miss.
+
+Four things to know before touching it:
+
+- **It is a cache, not a source of truth.** `openStore` answers `Nothing` for a
+  missing, unreadable or stale-format store, and every miss parses instead. Deleting
+  `_cache/derived-index.*` costs speed and never correctness. Bump
+  `storeFormatVersion` on any encoding change — a generic CBOR encoding is positional,
+  so reordering a constructor silently changes meaning.
+- **What is stored is the *pre-environment* form, not the flattened one.** This is the
+  whole design. `Flatten.envConfVar` resolves `os`/`arch`/`impl` against this machine
+  and buildability additionally resolves `pkgconfig-depends` against its `pkg-config`
+  db, so a flattened store would be silently wrong after a GHC upgrade or an
+  `apt install`. Parsing is **106× the cost of flattening** (2.007 ms against
+  0.019 ms, measured), so caching only the parse gives up almost nothing and keeps one
+  store valid across toolchains. `componentDepsAtDefaultsStored` and
+  `buildableAtDefaultsStored` run the *same* `flattenWith` over the *same* trees as
+  their description-taking counterparts, so the two paths agree by construction;
+  `test/StoredSpec.hs` asserts it anyway, on nine `.cabal` shapes and through a
+  `serialise` round-trip.
+- **CBOR, not `binary`** — 410 B/release against 1040, so 62.5 MB against 159. `binary`
+  decodes 2.5× faster, but at 27× cheaper than parsing decode stopped being the scarce
+  resource and size did not.
+- **Granularity is the package, not the release**, which is what pub does and for the
+  same reason: one slice holds every version, so walking a release's neighbours touches
+  data already decoded. The decoded-slice cache holds **one** package, because
+  `releaseReader` already memoises the `Release` per `(package, version)`; an unbounded
+  one cost `pandoc` 39.6 MB of peak residency against 26.7.
+
+**It does not make a solve faster on its own.** Parsing was 0.3–0.6 s of runs taking
+0.7–6.8 s, and measured before the walk returned, elapsed time was unchanged within
+noise. Its entire value is that it changed the price of a *neighbour* read — which is
+what made generation-time collapsing affordable again (Reporting gap 1).
 
 ## Roadmap — rung-by-rung fidelity ladder
 
@@ -267,25 +341,29 @@ adds no goal and no edge, and `not $ isInternal pkg exeDep` in `IndexConversion`
 the same for build-tools; `Bridge.Installed.closureEdges` had always done it on the
 installed side, and only the source path let one through. Tests: `StoreSpec`
 "self-dependencies" and `FlagSolveSpec` "self-dependencies", each verified to fail
-without its own half. Consequence to know: `lens <4` moved — decisions 317 → **225**, reads 178 → **274**,
-proof 4 → **7** lines (cabal 22), and its proof now ends on `root ==0 depends on lens <4`
-rather than opening on the bogus `lens ==1.7 is required`, so it answers the question that
-was asked. Four lines answering the wrong question were not a win. Every other `lens <4`
-figure in `docs/STATUS.md` predates the fix, and the remaining four benchmark problems are
-unmeasured.
+without its own half. Consequence to know: `lens <4`'s proof stopped opening on the bogus
+`lens ==1.7 is required` and now ends on `root ==0 depends on lens <4`, so it answers the
+question that was asked. Four lines answering the wrong question were not a win. (The
+counts recorded here at the time — decisions 317 → 225, reads 178 → 274, proof 4 → 7 —
+have all been overtaken since; `lens <4` is currently 60 decisions, 0 parses and an
+8-line proof against cabal's 22. Current figures for all five are `docs/STATUS.md`,
+"A derived index".)
 
 **Caveat on "measure both deliverables at each rung".** We did not do this for
 rungs 0–3, which were built unmeasured; measurement only started 2026-08-12, once the
 baseline existed, and it immediately found rung 3 incomplete (fixed above) — which is
 the argument for the discipline rather than against it. They are measured now:
-current figures are `docs/STATUS.md`, "Re-measured after the scope cut" (2026-08-17,
-five problems, both solvers). **Quote that section, not the dated ones above it** —
-each of those is against the tree of its own date. There is still no harness. The two
+current figures are `docs/STATUS.md`, **"A derived index, and collapsing at generation
+time again"** (2026-08-23, five problems, both solvers). **Quote that section, not the
+dated ones above it** — each of those is against the tree of its own date, and most
+were taken when reading a release meant parsing its `.cabal`. There is still no
+harness, though `scripts/gate.sh` now does its regression half. The two
 workstreams below are what actually gate the deliverables, and they are not rungs:
 
 - **Explanations** — cause tracking is reinstated (`IncompatCause`) and
-  `PubGrub.Report` renders a numbered proof. Next: `collapseNoInstances`, then
-  the spec's human-friendly wording. See "Reporting" below.
+  `PubGrub.Report` renders a numbered proof. Every reporting gap but the cosmetics
+  (gap 4) is now closed, and we are shorter than cabal on all 17 harvested problems.
+  See "Reporting" below.
 - **Benchmark** — the baseline exists as of 2026-08-12: `Bridge.Cabal.Baseline`
   drives cabal's own modular solver over *our* index, and `pubgrub --cabal <target>`
   runs it. **Without `cabal-install`** — see the module haddock for what the
@@ -412,8 +490,15 @@ incompatibility and emits a numbered proof with backward references. The two
 unsatisfiable `PaperSpec` examples are the reference cases; the spec publishes
 their exact expected English (`references/pubgrub.md:1005` and `:1150`).
 
-Known gaps, in the order worth fixing. **The order is evidence-backed** (2026-08-12,
-first side-by-side against cabal): our proof for `lens <4` is 9 lines against cabal's
+**Status, 2026-08-23: gaps 1, 2 and 3 are closed and gap 5 is dormant; gap 4 (the
+cosmetics) is the only one open.** On the harvested corpus we are shorter than cabal
+on all 17, 62 proof sentences against its 152, with one `no version` line left in the
+whole set. `scripts/gate.sh` holds both totals as ceilings. What follows is the list
+as it was worked, kept because each entry records why the fix is shaped the way it is
+— read the dated notes inside each one, not the ordering.
+
+Known gaps, in the order they were worth fixing. **The order was evidence-backed**
+(2026-08-12, first side-by-side against cabal): our proof for `lens <4` is 9 lines against cabal's
 22, but `conduit <1.3` is **1061** against 16 and `aeson <2` is **2833** against 30.
 Gap 1's version axis is most of that — whole runs of proof lines do nothing but merge
 adjacent releases pairwise at derivation time, which is the collapsing
@@ -421,13 +506,17 @@ adjacent releases pairwise at derivation time, which is the collapsing
 cells (see 5 below) and then chain collapsing. See `docs/STATUS.md`, "The explanation
 deliverable is currently losing".
 
-**Those line counts are historical, twice over.** With gap 1 done and the
+**Those line counts are historical, several times over.** With gap 1 done and the
 boot-package rule stated once rather than per range (2026-08-17) they became `lens
-<4` 6 lines, `conduit <1.3` 12 and `aeson <2` 83. **Gap 3 then landed on 2026-08-20**
-and they are now `lens <4` **4** lines against cabal's 22, `conduit <1.3` **6**
-against 16, and `aeson <2` **56** against 30 — two clear wins and one outlier that
-halved. Those three are a poor sample, though: on the 17 harvested problems
-([`docs/failure-cases.md`](docs/failure-cases.md)) **we are shorter on 16**. Nothing else moved: the change is pure rendering, so reads, allocation,
+<4` 6 lines, `conduit <1.3` 12 and `aeson <2` 83; gap 3 landed 2026-08-20 and made
+them 4, 6 and 56. **As of 2026-08-23** — the walk restored, and a run of same-pair
+steps stated once — they are `lens <4` **8** lines against cabal's 22,
+`conduit <1.3` **10** against 16, and `aeson <2` **64** against 30. Two clear wins and
+one outlier, still. (`lens` and `conduit` went *up* slightly because widening surfaces
+a different conflict, and `aeson` fell from 178 by the same change.) Those three are a
+poor sample, though: on the 17 harvested problems
+([`docs/failure-cases.md`](docs/failure-cases.md)) **we are shorter on all 17**, 62
+proof sentences against cabal's 152. Nothing else moved: the change is pure rendering, so reads, allocation,
 residency and decision counts are identical either side of it.
 
 **Gap 2 is now the top item, and it is no longer only about clutter.** Pinning the
@@ -504,34 +593,55 @@ and no cell is pinned while flags are fixed at their defaults.
    depender term still names the irrelevant flag and the 2^k cost survives intact.
    (This file prescribed the rejected form until 2026-08-05.)
 
-   **Done, 2026-08-17 — and not where this section spent two days assuming it would
-   be.** Doing it at generation time means the provider walking out from the decided
-   release and parsing its neighbours' `.cabal` files to learn what they declare;
-   that was built on 2026-08-12 (`spanningOccurrence`), measured, and **removed**. It
-   cost `pandoc` — one conflict, reads dominate — 167 reads → 2834, 22.9 → 81.0 MB of
-   residency and 17.31 GB of allocation, to widen clauses no search ever contested.
+   **Both mechanisms are live, and the history is worth knowing because this file got
+   it wrong twice.** Doing it at generation time means the provider walking out from
+   the decided release and reading its neighbours to learn what they declare
+   (`Bridge.Provider.spanningOccurrence`). That was built 2026-08-12, **deleted
+   2026-08-17**, and **restored 2026-08-23**.
 
-   What replaced it: the provider emits one fact per release **slot**, and
-   `PubGrub.Store` unions the depender terms of two facts that agree about the
+   It was deleted because a neighbour read meant a `.cabal` parse — 2.0 ms and ~7.7 MB
+   each — so it cost `pandoc`, a problem with one conflict, 167 reads → 2834,
+   22.9 → 81.0 MB of residency and 17.31 GB of allocation, to widen clauses no search
+   ever contested. What replaced it: the provider emits one fact per release **slot**,
+   and `PubGrub.Store` unions the depender terms of two facts that agree about the
    dependee **as they arrive**. Slots touch, so the union is one contiguous interval
-   and nothing is read to discover it. Reads, allocation and residency returned to
-   their pre-collapsing values and the proofs came out *shorter* than the walk made
-   them (`lens <4` 80 → 9 lines, against cabal's 22). Numbers in `docs/STATUS.md`,
-   "Merge on insert"; the full account, including the two rejected store shapes and
-   what each of the five options was worth, in [`docs/collapsing.md`](docs/collapsing.md).
+   and nothing is read to discover it.
 
-   Two things to carry forward. The rule is **weaker than the spec's** — it collapses
-   the releases the solver expanded, not every release carrying the dependency, which
-   nothing observable depends on but is not what `:456` says. And **decisions went up**
-   (`aeson <2` 392 → 758), because merging widens a clause after the second release
-   has been expanded rather than before; that is cheap today and is the first thing to
-   look at if re-expansion ever gets expensive again.
+   It was restored because **the derived index changed the price of the thing it was
+   deleted for**. `pandoc` still does 167 → 2873 lookups, but they are decodes:
+   **+0.17 s and +6% allocation, against 17.31 GB before.** Both mechanisms now run —
+   the walk widens up front, the store still merges what arrives.
+
+   **What that bought, and it is the largest search win the project has recorded.**
+   One conflict now eliminates a *run* of releases rather than one at a time:
+
+   | | before | after |
+   |---|---|---|
+   | `futhark ==0.27.1` decisions | 4287 | **805** |
+   | `futhark` conflicts | 53 | **8** |
+   | `futhark` elapsed | 6.62 s | **2.19 s** |
+   | `aeson <2` decisions | 758 | **309** |
+   | `conduit <1.3` decisions | 137 | **16** |
+
+   That last pair is the debt the merge-on-insert change knowingly took on — its own
+   note said "a change that makes re-expansion expensive again should look at this
+   first" — being paid back.
+
+   Two things to carry forward. The rule is **weaker than the spec's** in one
+   direction and not the other: the walk establishes the run by *reading* every
+   release in it, so the span is real, but a release the walk stopped at is still
+   only bounded by what was read. And **`pandoc` is the row that got worse** —
+   1.18 → 1.39 s, 22.6 → 33.2 MB — because with one conflict the walk buys it nothing
+   and it pays for the neighbours anyway. If read-dominated problems ever matter more
+   than search, that is the row to attack, and the lever is walking *less*, not
+   reading more cheaply. The full account of the five options, including the two
+   rejected store shapes, is in [`docs/collapsing.md`](docs/collapsing.md).
 
    On the **version** axis, the free half landed 2026-08-12: the depender's version
    component is a release's **slot** — `halfOpenVersionSet v next`, reaching up to
    the next release *present in the index* — instead of the single version
    (`Bridge.Provider.withSlots`). This costs no `.cabal` read (the package→versions
-   map is already resident and is what dominates peak residency) and asserts nothing
+   map is already resident) and asserts nothing
    about an unread release, since a slot holds exactly one real release. The point is
    that adjacent slots **touch**, so `unionVersionSet` coalesces them and
    `difference` stops manufacturing empty between-releases holes. Measured on
@@ -539,8 +649,9 @@ and no cell is pinned while flags are fixed at their defaults.
    conflict term became one contiguous interval (`docs/STATUS.md`, "Second pass").
 
    Widening across *distinct* releases — the part that required reads — landed on top
-   of slots later the same day, as the `spanningOccurrence` walk described above, and
-   went away with it. Slots made it cheaper, not harder: two adjacent slots already
+   of slots later the same day, as the `spanningOccurrence` walk described above; it
+   went away with the walk on 2026-08-17 and came back with it on 2026-08-23. Slots
+   made it cheaper, not harder: two adjacent slots already
    union into a contiguous range, so only dependency-identity was left to establish,
    and that was the read. Note the third pin state turned out **not** to be needed on
    that path: requiring the guard to be *identical* means every release in the span
@@ -594,24 +705,22 @@ and no cell is pinned while flags are fixed at their defaults.
    Mostly overtaken by slots (gap 1): holes *between* releases no longer form. What
    is left comes from the other direction — `Bridge.Provider.widen` puts a
    **declared** dependency range into a term verbatim, so dead space still survives.
-   **This file claimed until 2026-08-20 that there was exactly one known instance**
-   — `transformers >=0.2.2 && <0.2.2.0` in `conduit <1.3`. That was an artifact of
-   measuring five problems. Against the harvested unsat set
-   ([`docs/failure-cases.md`](docs/failure-cases.md)) **7 of 17 still carry
-   `no version for` lines after the pass above** — it was 9 before it, and 22 lines
-   rather than 30. What survives is the shape the pass leaves alone, and the specimens
-   are worth keeping because they are all a declared bound naming a version never
-   published: `cpsa` (`deepseq >=1.4.8 && <1.4.8.0`,
-   `base >=4.13 && <4.13.0`), `atelier-testing` (`atelier-core >=0.3 && <0.3.0.0`,
-   `atelier-prelude >=0.1 && <0.1.0.0`), `hjsonschema`
-   (`aeson >=0.11 && <0.11.0.0`, `bytestring >=0.10.4 && <0.10.4.0`),
-   `futhark` (`time-locale-compat >=0.1 && <0.1.0.0`), `scion-browser`
-   (`tar >=0.3 && <0.3.0.0`, `haskeline >=0.7 && <0.7.0.0`). `matterhorn` carries 11
-   such lines — about half its proof. Note the other three the harvest first found
-   (`haddock`, `purescript`, `liquidhaskell`) lost theirs to the empty-range wording
-   fix in gap 4's sibling, so the count is 9 and not 12. The `conduit` one is still the smallest test case; it is not the only one,
-   and it is the conflict that narrowing removed when it was tried and reverted
-   twice below.
+
+   **The count has collapsed twice since, and this file was wrong about it twice.** It
+   claimed until 2026-08-20 that there was exactly one known instance
+   (`transformers >=0.2.2 && <0.2.2.0` in `conduit <1.3`), which was an artifact of
+   measuring five problems; against the harvested set it was **7 of 17, 22 lines**.
+   Two later changes removed nearly all of it without targeting it: stating *why* a
+   boot package has no source release (2026-08-22) and restoring the walk
+   (2026-08-23). **As of 2026-08-23 the whole corpus carries one such line**, in
+   `futhark` (`time-locale-compat >=0.1 && <0.1.0.0`). `matterhorn` used to carry 11 —
+   about half its proof — and now carries none.
+
+   The surviving shape is still worth knowing, because it is what the pass leaves
+   alone by design and it will come back with any change that widens declared ranges:
+   a declared bound naming a version never published. `scripts/gate.sh` holds the
+   count at a ceiling of 1, so a regression here fails the gate rather than being
+   noticed later.
 
    Narrowing that against the version map was tried twice on 2026-08-12 and
    **reverted twice**: it removes one conflict on one of five problems and costs 3.9%
@@ -642,13 +751,33 @@ and no cell is pinned while flags are fixed at their defaults.
      line. Most derivation graphs here are linear chains, so this is the half that
      halves them.
 
-   Measured: `lens <4` 6 → **4** lines, `conduit <1.3` 12 → **7**, `aeson <2`
-   83 → **57**. Two of three are now shorter than cabal's message (22 and 16); `aeson`
-   against 30 is still the outlier. `test/PaperSpec.hs` pins the rendered proof of
-   both of the spec's published examples as **golden files** under `test/golden/`
-   (`cabal test --test-options=--accept` rewrites them; the diff is the review) — the
-   closest thing to a conformance test the reporter has, and what turned gap 2 from a
-   cosmetic item into the top one.
+   Measured when it landed: `lens <4` 6 → **4** lines, `conduit <1.3` 12 → **7**,
+   `aeson <2` 83 → **57**. (Current figures are 8, 10 and 64 — the walk's return moved
+   them; see the note under gap 1.) Two of three are shorter than cabal's message
+   (22 and 16); `aeson` against 30 is still the outlier. `test/PaperSpec.hs` pins the
+   rendered proof of both of the spec's published examples as **golden files** under
+   `test/golden/` (`cabal test --test-options=--accept` rewrites them; the diff is the
+   review) — the closest thing to a conformance test the reporter has, and what turned
+   gap 2 from a cosmetic item into the top one.
+
+   **A third rule landed 2026-08-23: a run of same-pair steps is one sentence.** Where
+   a proof walked a dependency's bound history one adjacent pair at a time —
+   "`hashable >=1.4 && <1.4.0.2` depends on `base` …", then the next range, then the
+   next — `oneDerived` now finds the maximal run of chain steps whose external facts
+   are all dependency facts about the **same `(depender, dependee)` pair** and states
+   them once, as their union. This is *not* `:456`'s collapsing, which merges facts
+   with an **identical** dependee range; here the ranges differ, which is exactly why
+   the solver had to derive along them.
+
+   Sound because each fact says `p ∈ Sᵢ` requires `q ∈ Rᵢ`, so `p ∈ ⋃S` requires
+   `q ∈ ⋃R` — weaker than any of them, hence implied by all. Two guards keep it
+   honest, in the module's existing style: the step's conclusion must really be
+   "p requires q", and the collapsed depender range must be one that conclusion
+   covers, so a line never claims to justify more of `p` than the step it is attached
+   to concluded. Measured: `happstack-hsp` 7 → **4**, `matterhorn` 10 → **8**, corpus
+   total **62**. Pure rendering, so decisions, reads, allocation and residency are
+   identical either side of it. This was the shape `docs/failure-cases.md` had called
+   the remaining outlier.
 4. Cosmetic, and *two of these came for free with gap 3*: `So,` on the final line
    ✅ and numbering only the lines actually referenced ✅ (a linear proof now carries
    no numbers at all, per `:596`). Still open: terminal periods on non-final lines;
