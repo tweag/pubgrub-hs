@@ -65,27 +65,36 @@ ghc-9.12.2, base-4.21.0.0, this machine's pkg-config db (`libpq`, `libzmq`, `bla
 
 | target | kind | ours | cabal | noVer |
 | --- | --- | --- | --- | --- |
-| `hadolint ==2.15.1` | `time` vs language-docker | **2** | 10 | 0 |
-| `liquidhaskell ==0.9.14.1.1` | installed `ghc` | **2** | 8 | 0 |
-| `purescript ==0.15.15` | base bound | **2** | 8 | 0 |
-| `haddock ==2.29.1` | base bound, seven windows | **2** | 8 | 0 |
-| `hpqtypes-extras ==1.20.0.0` | pkg-config `libpq` | **2** | 8 | 0 |
-| `stackctl ==1.7.3.7` | base via amazonka | **3** | 8 | 0 |
-| `atelier-testing ==0.2.0.0` | dead range | **3** | 7 | 1 |
-| `cabal-install ==3.18.1.0` | Cabal / hackage-security | **4** | 13 | 0 |
-| `calamity ==0.12.1.0` | base via aeson-optics | **4** | 11 | 1 |
-| `haskoin-store-data ==1.6.0` | pkg-config `libsecp256k1` | **4** | 12 | 0 |
-| `language-puppet ==1.5.1` | `ghc-prim` via aeson | **5** | 12 | 0 |
-| `cpsa ==4.4.9` | installed `deepseq` | **4** | 10 | 2 |
-| `hjsonschema ==1.10.0` | aeson / bytestring chain | **6** | 14 | 1 |
-| `happstack-hsp ==7.3.7.8` | `template-haskell` history | **7** | 9 | 0 |
-| `futhark ==0.27.1` | regex / time chain | **8** | 11 | 2 |
-| `scion-browser ==0.5.0` | haskeline / tar chain | 14 | 12 | 5 |
-| `matterhorn ==90000.1.1` | hashable / bytestring chain | **16** | 18 | 10 |
+| `hpqtypes-extras ==1.20.0.0` | pkg-config `libpq` | **2** | 7 | 0 |
+| `purescript ==0.15.15` | base bound | **2** | 7 | 0 |
+| `haddock ==2.29.1` | base bound, seven windows | **2** | 7 | 0 |
+| `liquidhaskell ==0.9.14.1.1` | installed `ghc` | **2** | 7 | 0 |
+| `stackctl ==1.7.3.7` | base via amazonka | **2** | 7 | 0 |
+| `hadolint ==2.15.1` | `time` vs language-docker | **2** | 9 | 0 |
+| `calamity ==0.12.1.0` | base via aeson-optics | **3** | 10 | 0 |
+| `atelier-testing ==0.2.0.0` | dead range | **3** | 6 | 0 |
+| `cpsa ==4.4.9` | installed `deepseq` | **3** | 9 | 0 |
+| `cabal-install ==3.18.1.0` | Cabal / hackage-security | **4** | 12 | 0 |
+| `scion-browser ==0.5.0` | haskeline / tar chain | **4** | 11 | 0 |
+| `haskoin-store-data ==1.6.0` | pkg-config `libsecp256k1` | **5** | 11 | 0 |
+| `language-puppet ==1.5.1` | `ghc-prim` via aeson | **5** | 11 | 0 |
+| `hjsonschema ==1.10.0` | aeson / bytestring chain | **6** | 13 | 1 |
+| `matterhorn ==90000.1.1` | hashable / bytestring chain | **6** | 17 | 0 |
+| `happstack-hsp ==7.3.7.8` | `template-haskell` history | **7** | 8 | 0 |
+| `futhark ==0.27.1` | regex / time chain | **8** | 10 | 2 |
 
-**Shorter on 16 of 17.** The one loss, `scion-browser`, has the shape `aeson '<2'`
-has: the proof walks a dependency's bound history release by release, one sentence per
-adjacent pair. That is the outlier left to fix.
+**Shorter on all 17**, 66 proof sentences against cabal's 152. The margin is
+narrowest on `happstack-hsp` (7 against 8) and `futhark` (8 against 10), and those
+two are where a regression would show first.
+
+**The last loss went on 2026-08-22**, and not from a reporting change. Stating
+*why* a boot package has no source release — the rule that a non-reinstallable
+package's source-only range rides out a fact instead of nothing — took
+`scion-browser` from 14 lines to **4** and `matterhorn` from 16 to **6**, because
+the `no version for base in …` leaves those proofs were built around stopped being
+emitted at all. Across the set `noVer` went 22 lines to **3**: one in
+`hjsonschema`, two in `futhark`, both the dead-range shape that
+`collapseNoInstances` leaves alone by design.
 
 These numbers are **after Reporting gap 2** (2026-08-20), which absorbed the
 `no version for …` leaves into the sibling they were resolved against. It took the
