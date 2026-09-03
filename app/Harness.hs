@@ -716,7 +716,10 @@ showcaseReport cfg env results =
     , "counts the non-blank lines of its `Could not resolve dependencies:` block, its"
     , "actual explanation and not the whole log. A proof is shown as the driver"
     , "prints it, wrapped at 80 columns with a hanging indent; a continuation line is"
-    , "not a sentence and is not counted. The line above each of our proofs"
+    , "not a sentence and is not counted. A sentence can run to 400 characters and"
+    , "cabal's lines are unwrapped, so each count is also given as screen lines: the"
+    , "non-blank lines of our proof as printed, and cabal's lines at 80 columns, each"
+    , "counted as the number of 80-column rows it fills. The line above each of our proofs"
     , "names the request and the facts about this machine the proof rests on; it is"
     , "not a sentence of the proof and is not counted, as cabal's `Could not resolve"
     , "dependencies:` line is not. The synthetic root's NUL byte is dropped from the"
@@ -736,11 +739,13 @@ showcaseReport cfg env results =
        , ""
        , "**Shorter on " <> tshow shorter <> " of " <> tshow (length comparable)
             <> " comparable problems: " <> tshow ourTotal <> " proof sentences against cabal's "
-            <> tshow cabalTotal <> " lines.**"
+            <> tshow cabalTotal <> " lines.** On screen lines at 80 columns, "
+            <> tshow ourScreenTotal <> " against " <> tshow cabalScreenTotal
+            <> ", shorter on " <> tshow shorterOnScreen <> " of " <> tshow (length comparable) <> "."
        , "" ]
     ++ table
-        [ "target", "note", "our sentences", "cabal lines" ]
-        [ [ tick (probText p), probNote p, sentences ours, lines' cabal ]
+        [ "target", "note", "our sentences", "our screen lines", "cabal lines", "cabal screen lines" ]
+        [ [ tick (probText p), probNote p, sentences ours, screen ours, lines' cabal, screenAt80 cabal ]
         | (p, ours, cabal) <- comparable ]
     ++ [ "", "## The problems" ]
     ++ concat
@@ -757,7 +762,8 @@ showcaseReport cfg env results =
              , "" ]
           ++ fenced (if null (mMessage cabal) then ["(no message)"] else mMessage cabal)
           ++ [ ""
-             , sentences ours <> " sentences against " <> lines' cabal <> " lines." ]
+             , sentences ours <> " sentences against " <> lines' cabal <> " lines; "
+                <> screen ours <> " screen lines against " <> screenAt80 cabal <> "." ]
         | (p, ours, cabal) <- comparable ]
   where
     withHeadline m body = maybe body (\h -> readable h : "" : body) (mHeadline m)
@@ -768,6 +774,16 @@ showcaseReport cfg env results =
     bothUnsat (_, ours, cabal) = mVerdict ours == Unsat && mVerdict cabal == Unsat
     shorter = length [ r | r <- comparable, bothUnsat r, ourCount r < cabalCount r ]
     ourTotal = sum (map ourCount comparable)
+    -- Screen lines: ours as printed (wrapped at 80 off a terminal, blank lines
+    -- dropped); cabal's at 80 columns, an unwrapped line counting for every row it
+    -- fills.
+    ourScreen (_, ours, _) = length (filter (not . T.null) (mProof ours))
+    cabalScreen (_, _, cabal) = sum [ max 1 ((T.length l + 79) `div` 80) | l <- mMessage cabal ]
+    screen m = tshow (length (filter (not . T.null) (mProof m)))
+    screenAt80 m = tshow (sum [ max 1 ((T.length l + 79) `div` 80) | l <- mMessage m ])
+    shorterOnScreen = length [ r | r <- comparable, bothUnsat r, ourScreen r < cabalScreen r ]
+    ourScreenTotal = sum (map ourScreen comparable)
+    cabalScreenTotal = sum (map cabalScreen comparable)
     cabalTotal = sum (map cabalCount comparable)
     sentences m = tshow (length (filter isProofLine (mProof m)))
     lines' m = tshow (length (mMessage m))

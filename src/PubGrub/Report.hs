@@ -178,8 +178,16 @@ wrapLine width line
                     _ -> (a, Nothing)
         _ -> (a, Nothing)
 
+    -- A preposition joins what is before it to its object: "depends on
+    -- bytestring >=0.10.4 && <0.11" and "pinned to 4.21.0.0 (installed)" are one
+    -- atom each, so neither "depends" nor "on" is left at the end of a line.
     atoms [] = []
-    atoms (t : ts) = let (stuck, rest) = span rangeToken ts in T.unwords (t : stuck) : atoms rest
+    atoms (t : ts) = let (stuck, rest) = span rangeToken ts in go (t : stuck) rest
+    go cur [] = [T.unwords cur]
+    go cur (t : ts)
+        | t `elem` ["on", "of", "to", "with"], (u : us) <- ts =
+            let (stuck, rest) = span rangeToken us in go (cur ++ t : u : stuck) rest
+        | otherwise = let (stuck, rest) = span rangeToken ts in T.unwords cur : go (t : stuck) rest
 
 -- | A token of a rendered sentence that belongs to a range rather than to the
 -- prose: a comparison, @&&@, @||@, @(installed)@, or a bare version (possibly

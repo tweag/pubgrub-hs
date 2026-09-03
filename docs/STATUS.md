@@ -535,13 +535,21 @@ characters on `hjsonschema`, and a terminal that wraps it by itself breaks insid
 range. `wrapProof` wraps every line at the terminal's width, or 80 columns off a
 terminal, with a four-space hanging indent and a range kept whole: a token that
 opens with a comparison, `&&`, `||`, `(installed)` or a bare version sticks to the
-token before it, and a break falls only between such atoms. An atom too long for a
-line of its own breaks before a `||`, the one seam a range has. `reportConflict`
+token before it, a preposition joins what is before it to its object, so "depends
+on bytestring >=0.10.4 && <0.11" is one atom, and a break falls only between such
+atoms. An atom too long for a line of its own breaks before a `||`, the one seam a
+range has. `reportConflict`
 itself is unwrapped, so the golden proofs stay the spec's sentences one per line,
 and a continuation line starts with the indent, which neither the gate nor the
 harness counts as a sentence. The harness keeps the proof as the driver printed it,
 continuation lines and the blank line between two branches included; the showcase
 had been dropping that blank line, the one visual device the spec has.
+
+**The showcase counts screen lines as well as sentences.** A sentence can run to
+400 characters and cabal's lines are unwrapped, so a count of sentences against
+lines flatters neither side honestly. The showcase therefore also gives our proof's
+non-blank lines as printed, wrapped at 80, against cabal's lines at 80 columns, each
+counted as the rows it fills. The gate still counts sentences.
 
 **Colour is a terminal-only layer.** `styleProof` dims every range token, so the
 package names stand out by contrast and a reader can skim the names and skip the

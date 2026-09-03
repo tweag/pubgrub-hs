@@ -364,6 +364,9 @@ breaks inside a range (before a `||` only when the range alone overflows the lin
 `reportConflict` stays one sentence per line for the golden proofs, and a
 continuation line starts with the indent, so the gate and the harness never count it.
 
+**The showcase counts screen lines as well as sentences**: ours as printed at 80
+columns, cabal's lines as the 80-column rows each fills. The gate counts sentences.
+
 **Colour is a terminal-only layer.** `styleProof` dims ranges and bolds the
 connectives, the headline and the `So,` line; stripping the escapes gives the input
 back. The driver applies it only on a terminal with `NO_COLOR` unset and `TERM` not

@@ -248,6 +248,10 @@ wrapping =
             ls
     , testCase "the words survive, in order" $
         words (unwords (wrapped 60 long)) @?= words long
+    , testCase "a preposition is not left at the end of a line" $
+        mapM_
+            (\l -> assertBool ("dangling: " ++ l) (not (any (`isSuffixOf'` l) [" on", " of", " to", " with", " depends"])))
+            (wrapped 60 long ++ wrapped 40 long ++ wrapped 50 long)
     , -- The haddock bound is a hundred characters of one range. It has to break
       -- somewhere, and the only honest place is before a "||".
       testCase "an atom too long for a line breaks before ||" $ do
@@ -261,6 +265,7 @@ wrapping =
   where
     wrapped n = map T.unpack . T.lines . wrapProof n . T.pack
     isPrefixOf' p s = take (length p) s == p
+    isSuffixOf' p s = reverse (take (length p) (reverse s)) == p
     short = "So, because root depends on foo, version solving failed."
     long = "Because aeson >=1.1.0.0 && <1.2.2.0 depends on base >=4.5 && <4.13 and bytestring >=0.10.0.1 && <0.10.6.0 || >=0.10.8.1 && <0.10.9.0 depends on base 4.21.0.0 (installed), aeson >=0.8.1.0 && <1.4.7.0 requires base >=4.2 && <4.15."
     seven = "base ^>=4.13.0.0 || ^>=4.14.0.0 || ^>=4.15.0.0 || ^>=4.16.0.0 || ^>=4.17.0.0 || ^>=4.18.0.0 || ^>=4.19.0.0."

@@ -938,6 +938,26 @@ log went on reading plain text, and no counter moved. Package names were not
 coloured on their own: the rendered text carries no structure that names them, and a
 heuristic that guessed would colour "depends" one day. Contrast did the job.
 
+### Two items from the reading were declined, and one metric was added — HELD
+
+*Sep 3.* The dependency path from the root to the wall, cargo's "required by"
+shape, was not built. The shortest path is not the reason: on `matterhorn` the
+shortest path to `base` was one edge, "every version of matterhorn depends on base
+>=4.8 && <5", and installed `base 4.21` satisfied it. The route that conflicted ran
+through `mattermost-api`, `aeson` and `hashable`, and picking it out meant replaying
+the derivation, which was the proof. A tree that showed the wrong route would have
+misled. The back-reference on a join line, which restated the whole cited conclusion
+before its "(1)", was left as pub's rule: every reporter in the family restated it,
+and a shorter line would have traded a lookup for it.
+
+The wrap learnt to keep a preposition with what was before it and its object, so
+"depends on bytestring >=0.10.4 && <0.11" was one atom and neither "depends" nor
+"on" ended a line. And the showcase started counting screen lines beside sentences:
+ours as printed at 80 columns, cabal's lines as the 80-column rows each filled. A
+sentence could run to 400 characters and cabal's lines were unwrapped, so a count
+of sentences against lines had flattered neither side honestly. The gate went on
+counting sentences.
+
 ---
 
 ## What is open now
