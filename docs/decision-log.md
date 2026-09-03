@@ -875,6 +875,26 @@ proof, wrapping with a hanging indent that never breaks inside a range, the bran
 blank line the harness dropped, and colour as a TTY-only layer in the driver — was
 left for later, in that order.
 
+### A headline stands above the proof — HELD
+
+*Sep 3.* The second content gap from the same reading. The proof was read bottom-up:
+its first line was the deepest fact, and the root appeared only on the last, so the
+reader of the matterhorn proof met `hashable` before learning that `base` was the
+wall. cabal, for all its noise, named the goal on its first line.
+
+**What was built.** `reportHeadline` rendered one line from the same cause tree the
+proof was rendered from: the request, as the root's dependency facts in the proof
+named it, and the proof's world-fact leaves — only-installed and unbuildable —
+verbatim: `No solution for matterhorn ==90000.1.1: base is pinned to 4.21.0.0
+(installed).` A pure version conflict carried no colon. The line claimed nothing the
+proof did not, since every fact it named was a premise of the derivation below it.
+The driver printed it above the proof with a blank line between; the golden proofs
+were the spec's and stayed without one. The harness kept the line apart from the
+sentences it counted and rendered it above each proof in the showcase, and the gate,
+which counted by connective, never saw it — the footing of cabal's own `Could not
+resolve dependencies:` line, left out of its count too. Every gate counter stayed
+where it was.
+
 ---
 
 ## What is open now

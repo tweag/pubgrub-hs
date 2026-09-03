@@ -15,7 +15,8 @@ import qualified Data.Set                        as Set
 import           Distribution.Types.PackageName  (PackageName, mkPackageName)
 import           Distribution.Types.Version      (Version, mkVersion)
 import           Distribution.Types.VersionRange (earlierVersion,
-                                                  orLaterVersion)
+                                                  orLaterVersion,
+                                                  thisVersion)
 import           PubGrub.Incompatibility         (IncompatCause (..),
                                                   Incompatibility (..),
                                                   fromDependency, noInstances,
@@ -23,7 +24,8 @@ import           PubGrub.Incompatibility         (IncompatCause (..),
 import           PubGrub.InstanceSet             (InstanceSet (..))
 import           PubGrub.InstanceSet.SourceCell  (SourceCell (..))
 import           PubGrub.Report                  (collapseNoInstances,
-                                                  reportConflict)
+                                                  reportConflict,
+                                                  reportHeadline)
 import           PubGrub.SetOps                  (equivalent)
 import           PubGrub.Term                    (Term (..))
 import qualified Data.Text                       as T
@@ -87,6 +89,7 @@ tests =
         , testGroup "the property that makes it sound" soundness
         , testGroup "a run of same-pair steps is one sentence" sameePairRun
         , testGroup "the boot-package leaf" bootLeaf
+        , testGroup "the headline" headline
         ]
 
 -- --------------------------------------------------------------------------
@@ -197,6 +200,30 @@ bootLeaf =
         let proof = unlines (proofLines (onlyInstalled pkgA [] (from 1)))
         assertBool proof ("a is not installed and cannot be built from source" `isInfixOf` proof)
     ]
+
+-- | The line above the proof: the request as the proof names it, and the
+-- world-fact leaves verbatim.
+headline :: [TestTree]
+headline =
+    [ testCase "names the request and the wall" $ do
+        let inc = priorCause (rootDependsOn pkgA (range 1 2)) (onlyInstalled pkgA [v 3] (from 1)) pkgA
+        T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2: a is pinned to 3 (installed)."
+    , testCase "a pure version conflict has no wall" $ do
+        let inc = priorCause (rootDependsOn pkgA (range 1 2)) (hole pkgA (range 1 2)) pkgA
+        T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2."
+    , -- Only the root dependencies the proof reaches are the request; a second one
+      -- the derivation never used did not fail.
+      testCase "names every root dependency in the proof, once" $ do
+        let inc =
+                priorCause
+                    (priorCause (rootDependsOn pkgA (range 1 2)) (aDependsOn (range 1 2) (range 5 9)) pkgA)
+                    (rootDependsOn pkgQ (range 1 5))
+                    pkgQ
+        T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2 and q >=1 && <5."
+    ]
+  where
+    root = mkPackageName "root"
+    rootDependsOn = fromDependency root (sourceOnly (VersionSet.fromVersionRange (thisVersion (v 0))))
 
 untouched :: [TestTree]
 untouched =

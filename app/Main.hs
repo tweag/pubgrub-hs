@@ -77,7 +77,8 @@ import           PubGrub.InstanceSet                       (HasVersion (version)
                                                             singletonInstance)
 import           PubGrub.Pretty                            (Pretty (pretty))
 import           PubGrub.Provider                          (Provider (..))
-import           PubGrub.Report                            (reportConflict)
+import           PubGrub.Report                            (reportConflict,
+                                                            reportHeadline)
 import           PubGrub.Solver                            (SolveError (..),
                                                             SolverMsg (..),
                                                             solve)
@@ -495,7 +496,9 @@ runBaseline opts t0 world = do
     component c                   = show c
 
 report :: PlanShape -> Provider App -> Either SolveError (Map PackageName Instance) -> App ()
-report _ _ (Left (NoSolution incompat)) =
+report _ _ (Left (NoSolution incompat)) = do
+    logMsg (reportHeadline incompat)
+    logMsg T.empty
     logMsg (reportConflict incompat)
 report _ _ (Left (NoSatisfier p _)) =
     logMsg (T.pack ("internal error: no satisfier for " ++ prettyShow p))

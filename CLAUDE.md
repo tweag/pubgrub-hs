@@ -352,6 +352,12 @@ negation ("P requires N1 or N2", "if P1 and P2 then N1 or N2", "either X or Y").
 Installed units print by version, never by unit id, and a boot package's fact names
 the version it is pinned to: "base is pinned to 4.21.0.0 (installed)".
 
+**A headline stands above the proof**, from `reportHeadline`: the request as the
+proof names it, and the world-fact leaves verbatim — "No solution for matterhorn
+==90000.1.1: base is pinned to 4.21.0.0 (installed)." It is not a proof sentence.
+The gate and the harness count by connective, so it is never counted, on the same
+footing as cabal's "Could not resolve dependencies:" line.
+
 **Do not chase byte-parity with pub's output.** `^1.0.0` is Dart syntax and cabal
 writes `>=1.0.0 && <2`. The target is the same sentences and information, in cabal's
 range syntax.

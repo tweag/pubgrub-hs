@@ -519,6 +519,17 @@ legible against that version, and nothing else in the proof states it — 11 of 
 `base 4.21.0.0 (installed)`, never by unit id, and not at all when a source range
 in the same set already admits its version.
 
+**A headline stands above the proof.** The proof is read bottom-up — its first line
+is the deepest fact and the root appears only on the last — so `reportHeadline`
+says first what the proof will conclude: the request, as the root's dependency facts
+in the proof name it, and the world facts the proof rests on, verbatim:
+`No solution for matterhorn ==90000.1.1: base is pinned to 4.21.0.0 (installed).`
+It claims nothing the proof does not, since every named fact is a premise of the
+derivation below it. The driver prints it, then a blank line, then the proof. It is
+not a proof sentence: the gate counts by connective and the harness keeps it apart,
+which is the footing of cabal's own `Could not resolve dependencies:` line, left out
+of its count too. The golden proofs are the spec's and carry no headline.
+
 **A declared range is quoted as written.** The dependee term of a dependency fact is
 the declared range with its spelling attached (§4.2), and the store merge keeps that
 term intact, so the proof quotes `base ^>=4.13.0.0 || ^>=4.14.0.0 || … ||

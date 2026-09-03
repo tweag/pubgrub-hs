@@ -36,10 +36,12 @@
 -- being referred to.
 module PubGrub.Report
     ( reportConflict
+    , reportHeadline
     , collapseNoInstances
     ) where
 
 import           Control.Monad                  (guard)
+import           Data.List                      (nub)
 import qualified Data.Map.Strict                as Map
 import           Data.Maybe                     (fromMaybe)
 import           Data.Text                      (Text)
@@ -129,13 +131,54 @@ collapseNoInstances inc = case incompCause inc of
 
 -- | Render an incompatibility and its derivation as a human-readable proof.
 reportConflict :: Incompatibility -> Text
-reportConflict root0 = case incompCause root of
-    CauseDerivedFrom _ _ ->
-        render (reverse (outLines (derived True root (Out [] 1))))
-    -- The terminal incompatibility is itself an external fact: nothing was
-    -- derived, so the fact is the whole explanation.
-    _ -> leaf root
+reportConflict = snd . renderReport
+
+-- | One line to put above the proof: what was asked for, and the facts about this
+-- machine the proof rests on.
+--
+-- The proof is read bottom-up — its first line is the deepest fact and the root
+-- appears only on the last — so a reader of the matterhorn proof meets @hashable@
+-- before learning that @base@ is the wall. This line says both first, in the
+-- proof's own words: the request is the root's dependency facts as the proof
+-- names them, and the walls are its world-fact leaves ('CauseOnlyInstalled',
+-- 'CauseUnbuildable'), verbatim. It claims nothing the proof does not: every
+-- named fact is a premise of the derivation below it.
+--
+--  > No solution for matterhorn ==90000.1.1: base is pinned to 4.21.0.0 (installed).
+reportHeadline :: Incompatibility -> Text
+reportHeadline = fst . renderReport
+
+renderReport :: Incompatibility -> (Text, Text)
+renderReport root0 = (headline, proof)
   where
+    proof = case incompCause root of
+        CauseDerivedFrom _ _ ->
+            render (reverse (outLines (derived True root (Out [] 1))))
+        -- The terminal incompatibility is itself an external fact: nothing was
+        -- derived, so the fact is the whole explanation.
+        _ -> leaf root
+
+    headline = T.concat ["No solution", forWhat, walls, "."]
+      where
+        forWhat = case requests of
+            [] -> ""
+            rs -> " for " <> T.intercalate " and " rs
+        walls = case nub [leaf c | c <- externals root, isWorld c] of
+            [] -> ""
+            ws -> ": " <> T.intercalate "; " ws
+        -- What the root asked for, as the proof itself names it. A root dependency
+        -- the proof never reaches is not the one that failed.
+        requests = nub [bare p r | c <- externals root, Just (rp, _, p, r) <- [asDependency c], Just rp == rootPkg]
+        isWorld c = case incompCause c of
+            CauseOnlyInstalled{} -> True
+            CauseUnbuildable{}   -> True
+            _                    -> False
+
+    -- The external facts at the leaves, in proof order.
+    externals inc = case incompCause inc of
+        CauseDerivedFrom a b -> externals a ++ externals b
+        _                    -> [inc]
+
     -- The holes go first: a derivation step that only established that a range is
     -- empty is not a step worth a line, and leaving them in is what stops the chain
     -- fusion below from ever firing on a real problem.
