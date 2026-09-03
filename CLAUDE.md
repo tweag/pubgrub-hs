@@ -56,7 +56,7 @@ you change anything, read it.
 
 ```sh
 cabal build
-cabal test                           # 165 tests, ~0.3 s
+cabal test                           # 177 tests, ~0.3 s
 cabal run pubgrub -- aeson           # the driver; add -v for the search trace
 cabal run pubgrub -- --stats aeson   # + search counts and phase timings, no trace
 cabal run pubgrub -- --cabal aeson   # cabal's solver, same index (the baseline)
@@ -354,6 +354,12 @@ Installed units print by version, never by unit id.
 **Do not chase byte-parity with pub's output.** `^1.0.0` is Dart syntax and cabal
 writes `>=1.0.0 && <2`. The target is the same sentences and information, in cabal's
 range syntax.
+
+**A declared range is quoted as its author wrote it.** `VersionSet` carries the
+declared `VersionRange` as a display tag that only `fromVersionRange` sets, every
+operation drops, and `Eq`/`Ord` ignore. So `^>=4.13.0.0` prints as `^>=4.13.0.0`, and
+a derived range prints canonically. `fillGaps` is in reserve for derived terms only:
+filling a declared range would discard its spelling.
 
 **One item is dormant, not closed.** Where cells share a version set and their pins
 for one flag exhaust all three states, that flag must drop out of the pin map. No

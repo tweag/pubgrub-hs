@@ -245,6 +245,16 @@ Pruning **between** operations is what bounds the growth. Pruning at the end is 
 late. `test/InstanceSetSpec.hs` is the guard, and it gates the maximum at 48 cells
 to leave headroom.
 
+**A version set remembers how it was spelled.** `VersionSet` carries the declared
+`VersionRange` it was built from beside its canonical intervals. Only
+`fromVersionRange` sets that tag, every operation drops it, `Eq` and `Ord` cannot see
+it, and `toVersionRange` hands it back. So a dependency's term prints as its author
+wrote it, `^>=4.13.0.0` and not `>=4.13.0.0 && <4.14`, while a derived term, which
+nobody wrote, prints canonically. Cabal itself never re-sugars: `fromVersionIntervals`
+rebuilds `==v` and nothing else. This is pub_semver's caret class, a plain range that
+knows its own spelling; there too the sugar survives exactly as far as the declared
+constraint is passed along unchanged. The solver's algebra still runs on intervals.
+
 ### 4.3 A decision is a whole instance
 
 The solver's variables are package names. Its values are instances. An instance is
@@ -505,6 +515,12 @@ negative ones "either X or Y", and a clause with several terms reads "P requires
 or N2" or "if P1 and P2 then N1 or N2". An installed unit is written by version,
 `base 4.21.0.0 (installed)`, never by unit id, and not at all when a source range
 in the same set already admits its version.
+
+**A declared range is quoted as written.** The dependee term of a dependency fact is
+the declared range with its spelling attached (§4.2), and the store merge keeps that
+term intact, so the proof quotes `base ^>=4.13.0.0 || ^>=4.14.0.0 || … ||
+^>=4.19.0.0` where the author wrote that — byte for byte the constraint cabal's own
+message quotes. A range the solver derived has no author and prints canonically.
 
 The linear example matches `:1005` sentence for sentence. The branching one differs
 from `:1150` only in which facts the derivation happened to pair.
@@ -842,13 +858,22 @@ Both are recorded so nobody re-derives them.
 
 **Narrowing declared ranges to published versions.** `Bridge.Provider.widen` puts a
 declared range into a term verbatim, so version space no release occupies survives.
-Narrowing it removes one conflict on one of five problems and costs **3.9% of total
-allocation**. It was tried twice and reverted twice. The second attempt was after
-`ihVersions` became a `Set Version`, which made finding an interval's bounds two
-ordered lookups instead of a traversal — and it cost the same 3.9%. So the price is
-not finding the bounds. What is left unexplained is `snapToVersions`' own `VersionSet`
-round trip against the solver working on differently-shaped ranges. The second would be
-inherent. `PubGrub.VersionSet.snapToVersions` is kept, tested and unused.
+Narrowing it with `snapToVersions` was tried twice in August, reverted twice on cost,
+and re-measured on 2026-09-03 on the current tree, where the cost argument no longer
+applies: it moves the search in both directions (`aeson <2` 400 to 320 decisions and
+11.6% less allocation, `yesod` 827 to 839 decisions and 11.7% more) and it rewrites
+every quoted range in a closed form nobody wrote, down to the user's own `lens <4`
+printing as `lens >=0.1 && <=3.10.3` on the proof's last line. The second is the
+objection, and it holds at any price. Pub never narrows; pubgrub-rs offers
+`Ranges::simplify` and applies it only in the report. `snapToVersions` is kept, tested
+and unused.
+
+Its interior half, `PubGrub.VersionSet.fillGaps`, merges the holes between a range's
+intervals that hold no published release and never moves an outer bound. Measured the
+same day: every search counter identical on eight problems, allocation within noise,
+one proof line changed (`haddock`'s seven `^>=` windows into `>=4.13.0.0 && <4.20`).
+It is kept in reserve for *derived* terms, which nobody wrote. Applying it to a
+declared range would discard the author's spelling, which §4.2 now keeps.
 
 **The fewest-versions decision heuristic.** `references/pubgrub.md:446` suggests
 deciding the package with the fewest versions first. It cuts `futhark` decisions by

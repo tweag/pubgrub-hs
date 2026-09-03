@@ -4,7 +4,9 @@
 --
 -- A terminal 'Incompatibility' carries the 'IncompatCause' tree that produced
 -- it, which is all this module needs: 'reportConflict' replays that tree as a
--- written argument. Ranges print in Cabal syntax (@>=1.0.0 && <2@).
+-- written argument. Ranges print in Cabal syntax (@>=1.0.0 && <2@), and a
+-- declared range prints as its author spelled it (@^>=1.0.0@, see
+-- 'PubGrub.VersionSet.declaredRange').
 --
 -- == Two rules keep the proof short
 --

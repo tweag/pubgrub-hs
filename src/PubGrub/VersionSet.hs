@@ -2,8 +2,15 @@
 {-# LANGUAGE TypeFamilies       #-}
 
 -- | A version set: a canonical, sorted, disjoint, non-adjacent collection of
--- version intervals. Backed by Cabal's 'VersionInterval' so that derived
--- structural equality coincides with semantic equality.
+-- version intervals. Backed by Cabal's 'VersionInterval', and 'Eq' compares the
+-- intervals alone, so structural equality coincides with semantic equality.
+--
+-- Beside the intervals, a set remembers the __declared range__ it was built from,
+-- when it was built from one. That tag is a display hint and nothing more: only
+-- 'fromVersionRange' sets it, every operation below drops it, 'Eq' and 'Ord'
+-- cannot see it, and 'toVersionRange' hands it back so a report quotes a range
+-- the way its author wrote it — @^>=4.13.0.0@ rather than @>=4.13.0.0 && <4.14@.
+-- A derived term has no author, and prints canonically.
 --
 -- Union, intersection and complement are computed /directly on the intervals/,
 -- as one pass of comparisons between bound positions. Going through
@@ -20,8 +27,10 @@ module PubGrub.VersionSet (
     halfOpenVersionSet,
     belowVersionSet,
     snapToVersions,
+    fillGaps,
     fromVersionRange,
     toVersionRange,
+    declaredRange,
     complementVersionSet,
     unionVersionSet,
     intersectionVersionSet,
@@ -29,7 +38,7 @@ module PubGrub.VersionSet (
     intervals,
 ) where
 
-import           Data.Maybe                         (mapMaybe)
+import           Data.Maybe                         (fromMaybe, mapMaybe)
 import           Data.Ord                           (Down (..), comparing)
 import           Data.Set                           (Set)
 import qualified Data.Set                           as Set
@@ -41,9 +50,7 @@ import           Distribution.Types.VersionInterval (Bound (..),
                                                      fromVersionIntervals,
                                                      mkVersionIntervals)
 import           Distribution.Version               (Version, VersionRange,
-                                                     anyVersion, earlierVersion,
-                                                     noVersion, thisVersion,
-                                                     version0)
+                                                     noVersion, version0)
 import           PubGrub.SetOps                     (SetOps (..))
 
 
@@ -85,7 +92,7 @@ cutsOf = map (\(VersionInterval lo hi) -> (lowerCut lo, upperCut hi)) . interval
 -- and friends disappear. An interval is empty exactly when its bounds are the
 -- same position or crossed, so canonicalisation is a comparison.
 fromCuts :: [(Cut, Cut)] -> VersionSet
-fromCuts = VersionSet . mapMaybe interval
+fromCuts cs = VersionSet (mapMaybe interval cs) Nothing
   where
     interval (lo, hi)
         | lo >= hi = Nothing
@@ -97,12 +104,22 @@ fromCuts = VersionSet . mapMaybe interval
     upper (Cut w Before) = UpperBound w ExclusiveBound
     upper (Cut w After)  = UpperBound w InclusiveBound
 
-newtype VersionSet = VersionSet [VersionInterval]
-    deriving stock (Eq, Show)
+data VersionSet = VersionSet
+    { intervals     :: [VersionInterval]
+    -- ^ The raw canonical interval list (for testing / reporting).
+    , declaredRange :: Maybe VersionRange
+    -- ^ The range this set was built from by 'fromVersionRange', if it was, and
+    -- 'Nothing' for anything an operation produced. It always denotes exactly
+    -- 'intervals'. Equality and order ignore it.
+    }
+    deriving stock (Show)
+
+instance Eq VersionSet where
+    a == b = intervals a == intervals b
 
 -- | Order by how high the set reaches, then by how wide it is, then by the
 -- full cut list — the third coordinate is arbitrary and exists only to
--- keep the order total and consistent with the derived 'Eq' (two distinct sets
+-- keep the order total and consistent with 'Eq' (two distinct sets
 -- can share a reach and a start: @[1,2) ∪ [3,4)@ and @[1,4)@).
 --
 -- The empty set has neither reach nor start; @Nothing@ sorts below every
@@ -124,31 +141,35 @@ instance Ord VersionSet where
             (lo, _) : _ -> Just lo
             []          -> Nothing
 
--- | The raw canonical interval list (for testing / reporting).
-intervals :: VersionSet -> [VersionInterval]
-intervals (VersionSet is) = is
-
--- | Build a canonical 'VersionSet' from any 'VersionRange'.
+-- | Build a canonical 'VersionSet' from any 'VersionRange', remembering the
+-- range as the set's 'declaredRange'. This is the one place the tag is set: a
+-- range that arrives here was written by someone, and that spelling is what a
+-- report should quote back.
 fromVersionRange :: VersionRange -> VersionSet
-fromVersionRange = VersionSet . asVersionIntervals
+fromVersionRange r = VersionSet (asVersionIntervals r) (Just r)
 
--- | Convert back to a 'VersionRange' (used to delegate set arithmetic to Cabal),
--- via Cabal's own canonical 'VersionIntervals' round-trip. Our interval list is
--- always canonical (it comes from 'asVersionIntervals'), so 'mkVersionIntervals'
--- always succeeds; the 'noVersion' fallback is unreachable.
+-- | Convert back to a 'VersionRange': the declared range where there is one, and
+-- otherwise Cabal's own canonical 'VersionIntervals' round-trip. Our interval
+-- list is always canonical (it comes from 'asVersionIntervals'), so
+-- 'mkVersionIntervals' always succeeds; the 'noVersion' fallback is unreachable.
+--
+-- Cabal never re-sugars: its 'fromVersionIntervals' rebuilds @==v@ and nothing
+-- else, so a major bound that went through the intervals comes back as
+-- @>=v && <v'@. Handing the declared range back is the only way @^>=v@ survives.
 toVersionRange :: VersionSet -> VersionRange
-toVersionRange (VersionSet is) =
-    maybe noVersion fromVersionIntervals (mkVersionIntervals is)
+toVersionRange vs = fromMaybe canonical (declaredRange vs)
+  where
+    canonical = maybe noVersion fromVersionIntervals (mkVersionIntervals (intervals vs))
 
 emptyVersionSet :: VersionSet
-emptyVersionSet = VersionSet []
+emptyVersionSet = VersionSet [] Nothing
 
 fullVersionSet :: VersionSet
-fullVersionSet = fromVersionRange anyVersion
+fullVersionSet = fromCuts [(Cut version0 Before, Unbounded)]
 
 -- | The set containing exactly one version.
 singletonVersionSet :: Version -> VersionSet
-singletonVersionSet = fromVersionRange . thisVersion
+singletonVersionSet v = fromCuts [(Cut v Before, Cut v After)]
 
 -- | The half-open interval @[lo, hi)@, unbounded above when there is no @hi@.
 -- Empty if @hi <= lo@ ('fromCuts' drops it).
@@ -173,7 +194,7 @@ halfOpenVersionSet lo hi = fromCuts [(Cut lo Before, maybe Unbounded (`Cut` Befo
 -- the @<lo@ piece is a hole the solver would otherwise have to learn is empty,
 -- one @no version for@ at a time.
 belowVersionSet :: Maybe Version -> VersionSet
-belowVersionSet = maybe fullVersionSet (fromVersionRange . earlierVersion)
+belowVersionSet hi = fromCuts [(Cut version0 Before, maybe Unbounded (`Cut` Before) hi)]
 
 -- | Narrow every interval to the versions in @universe@ that it actually
 -- contains: each becomes the closed range from its lowest such version to its
@@ -195,9 +216,11 @@ belowVersionSet = maybe fullVersionSet (fromVersionRange . earlierVersion)
 -- Takes the universe as a 'Set' so each interval costs two ordered lookups rather
 -- than a pass over every version of the package.
 --
--- Nothing calls this yet: applied to every emitted dependency it costs more
--- allocation than the conflicts it removes are worth, and finding the bounds is
--- not where that cost lies.
+-- Nothing calls this, and cost is not the reason: applied to declared dependency
+-- ranges it rewrites every quoted range into a closed form nobody wrote — a
+-- user's own @lens <4@ comes back as @lens >=0.1 && <=3.10.3@ — and that
+-- objection holds at any price. 'fillGaps' is the half of this that does not
+-- touch an outer bound.
 snapToVersions :: Set Version -> VersionSet -> VersionSet
 snapToVersions universe vs = fromCuts (mapMaybe tighten (cutsOf vs))
   where
@@ -218,6 +241,43 @@ snapToVersions universe vs = fromCuts (mapMaybe tighten (cutsOf vs))
     highest (Cut w Before) = Set.lookupLT w universe
     highest (Cut w After)  = Set.lookupLE w universe
     highest Unbounded      = Set.lookupMax universe
+
+-- | Fill every gap between two intervals that no member of @universe@ occupies.
+-- The outer bounds are never touched; only interior holes go. The result is a
+-- __superset__ of the input denoting the __same__ members of the universe, and
+-- it carries no 'declaredRange', since it is no longer what anyone wrote.
+--
+-- This is the other half of 'snapToVersions', and the half that is safe to show
+-- an author: a declared @>=4.7 && <5@ is left alone, while @^>=4.13.0.0 ||
+-- ^>=4.14.0.0 || … || ^>=4.19.0.0@ against a package with nothing published
+-- between @4.13.x@ and @4.14.0.0@ becomes @>=4.13.0.0 && <4.20@. Cabal's own
+-- 'majorUpperBound' keeps two components, so the holes it leaves between
+-- consecutive major bounds — the versions @4.14@ and @4.14.0@, below
+-- @4.14.0.0@ — are real in Cabal's ordering and empty on Hackage.
+--
+-- A single interval costs nothing here. Each gap costs one ordered lookup.
+--
+-- Nothing calls this yet. It is not applied to declared ranges, because a filled
+-- set drops its 'declaredRange' and the report would lose the author's own
+-- spelling. It belongs on a __derived__ term, which nobody wrote and which prints
+-- canonically anyway; that needs the version universe at report time.
+fillGaps :: Set Version -> VersionSet -> VersionSet
+fillGaps universe vs = fromCuts (go (cutsOf vs))
+  where
+    go ((lo1, hi1) : (lo2, hi2) : rest)
+        | occupied hi1 lo2 = (lo1, hi1) : go ((lo2, hi2) : rest)
+        | otherwise = go ((lo1, hi2) : rest)
+    go is = is
+
+    -- Is some member of the universe strictly between the two cuts? @v@ is, iff
+    -- @hi < After v@ and @Before v < lo@; 'above' finds the least @v@ with the
+    -- first property, and the second is one comparison.
+    occupied hi lo = case above hi of
+        Nothing -> False
+        Just v  -> Cut v Before < lo
+    above (Cut w Before) = Set.lookupGE w universe
+    above (Cut w After)  = Set.lookupGT w universe
+    above Unbounded      = Nothing
 
 -- | Merge two sorted interval lists, joining any that overlap or touch.
 --
@@ -273,7 +333,7 @@ instance SetOps VersionSet where
     isEmpty = null . intervals
 
 contains :: VersionSet -> Version -> Bool
-contains (VersionSet is) v = any inside is
+contains vs v = any inside (intervals vs)
   where
     inside (VersionInterval lo hi) = lowerOk lo && upperOk hi
     lowerOk (LowerBound w InclusiveBound) = v >= w

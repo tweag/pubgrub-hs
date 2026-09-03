@@ -817,6 +817,42 @@ version for` line in the corpus (`futhark`, `regex <0.0.0.1`) and one sentence f
 of the proofs were unreadable, because a count of sentences cannot see what is in
 them. The fixes were a day's work once someone read the output.
 
+### A declared range is quoted as written — HELD
+
+*Sep 3.* Andrea asked whether Cabal's major bound, `^>=`, survived into our output.
+Semantically nothing was lost: cabal-install-solver 3.14 made no reference to
+`MajorBoundVersion`, so both solvers saw the same interval, and the one consumer of
+the distinction was `removeUpperBound` for `--allow-newer`, outside the solver and
+unimplemented here. Syntactically it was lost at `fromVersionRange`, and Cabal never
+brought it back: `fromVersionIntervals` rebuilt `==v` and nothing else. In the
+committed showcase, 16 of our 144 bounded ranges were major-bound shaped, against
+15 `^>=` on cabal's side.
+
+**The haddock line was the case.** `^>=4.13.0.0 || … || ^>=4.19.0.0` printed as
+seven `>=a && <b` windows that did not coalesce, because `majorUpperBound` keeps two
+components: `^>=4.13.0.0` stops at `<4.14`, the next window starts at `>=4.14.0.0`,
+and `4.14` and `4.14.0` sit between them in Cabal's order. The hole was real in Cabal's
+semantics and empty on Hackage. Nobody added the `.0.0`; haddock's author wrote it.
+
+**Snapping was re-evaluated, with fresh numbers.** The August attempts had measured
+`aeson <2` at 23 GB of allocation; the same problem allocated 1.0 GB now. Two variants
+ran on eight problems. The closed snap moved the search in both directions and
+rewrote every quoted range, the user's own `lens <4` included. Gap-filling, which
+merged interior holes no release occupied and never moved an outer bound, left every
+counter identical and changed one proof line. The reference implementations
+disagreed with each other and agreed on the placement: pub never narrowed a dependee
+range, and pubgrub-rs offered `Ranges::simplify` to the reporter only.
+
+**What was built.** pub_semver's move: its `^1.0.0` was a subclass of the plain range
+with the same fields and its own `toString`, and `intersect` and `union` never
+constructed it. `VersionSet` gained a `declaredRange` beside its intervals, set only
+by `fromVersionRange`, dropped by every operation, invisible to `Eq` and `Ord`, and
+handed back by `toVersionRange`. The proof then quoted the declared range as its
+author wrote it, `base ^>=4.13.0.0 || … || ^>=4.19.0.0`, byte for byte the constraint
+cabal's own message quoted, and derived terms went on printing canonically. Every
+search counter was identical. `fillGaps` landed tested and unused, in reserve for
+derived terms; a filled set has no author's spelling to keep.
+
 ---
 
 ## What is open now

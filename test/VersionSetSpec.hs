@@ -10,9 +10,11 @@ import           Distribution.Types.VersionInterval (Bound (..),
                                                     LowerBound (..),
                                                     UpperBound (..),
                                                     VersionInterval (..))
+import           Distribution.Pretty   (prettyShow)
 import           Distribution.Version  (Version, VersionRange, anyVersion,
                                         earlierVersion, intersectVersionRanges,
-                                        laterVersion, mkVersion, noVersion,
+                                        laterVersion, majorBoundVersion,
+                                        majorUpperBound, mkVersion, noVersion,
                                         orEarlierVersion, orLaterVersion,
                                         thisVersion, unionVersionRanges)
 import           PubGrub.SetOps        (isSubsetOf)
@@ -133,6 +135,90 @@ tests =
                         === snapToVersions universe vs
             , testProperty "an empty universe snaps everything away" $ \(vs :: VersionSet) ->
                 snapToVersions Set.empty vs === emptyVersionSet
+            ]
+        , testGroup
+            -- A set built from a declared range remembers that range, and only
+            -- that: the tag is what a report quotes, so it has to be the author's
+            -- spelling; it must not leak into equality, or two sets denoting the
+            -- same versions would stop being equal; and nothing an operation
+            -- produces may carry one, because nobody wrote that range.
+            "declared range"
+            [ testProperty "is handed back as written" $
+                forAll genVersion $ \v ->
+                    prettyShow (toVersionRange (fromVersionRange (majorBoundVersion v)))
+                        === prettyShow (majorBoundVersion v)
+            , testProperty "is invisible to Eq and Ord" $
+                forAll genVersion $ \v ->
+                    let sugared = fromVersionRange (majorBoundVersion v)
+                        spelled =
+                            fromVersionRange
+                                ( intersectVersionRanges
+                                    (orLaterVersion v)
+                                    (earlierVersion (majorUpperBound v))
+                                )
+                     in (sugared === spelled) .&&. (compare sugared spelled === EQ)
+            , testProperty "is dropped by every operation" $ \(a :: VersionSet) b ->
+                let untagged vs = declaredRange vs === Nothing
+                 in untagged (unionVersionSet a b)
+                        .&&. untagged (intersectionVersionSet a b)
+                        .&&. untagged (complementVersionSet a)
+                        .&&. untagged (fromVersionRange anyVersion `unionVersionSet` a)
+            , testProperty "the constructors carry none" $
+                forAll genVersion $ \v ->
+                    (declaredRange (singletonVersionSet v) === Nothing)
+                        .&&. (declaredRange (halfOpenVersionSet v Nothing) === Nothing)
+                        .&&. (declaredRange (belowVersionSet (Just v)) === Nothing)
+                        .&&. (declaredRange fullVersionSet === Nothing)
+                        .&&. (declaredRange emptyVersionSet === Nothing)
+            , testProperty "an untagged set prints canonically" $ \(a :: VersionSet) ->
+                prettyShow (toVersionRange a)
+                    === prettyShow (toVersionRange (fromVersionRange (toVersionRange a)))
+            ]
+        , testGroup
+            -- 'fillGaps' is the dual of 'snapToVersions' restricted to interior
+            -- holes: it may only ever add version space that no member of the
+            -- universe occupies, and it may never move an outer bound.
+            "fillGaps"
+            [ testProperty "keeps exactly the universe members it had" $
+                forAll genUniverse $ \universe (vs :: VersionSet) ->
+                    foldr
+                        ((.&&.) . (\v -> contains (fillGaps universe vs) v === contains vs v))
+                        (property True)
+                        (Set.toList universe)
+            , testProperty "never shrinks the set" $
+                forAll genUniverse $ \universe (vs :: VersionSet) ->
+                    isSubsetOf vs (fillGaps universe vs)
+            , testProperty "idempotent" $
+                forAll genUniverse $ \universe (vs :: VersionSet) ->
+                    fillGaps universe (fillGaps universe vs) === fillGaps universe vs
+            , testProperty "leaves the outer bounds where they were" $
+                forAll genUniverse $ \universe (vs :: VersionSet) ->
+                    let bounds s = (take 1 (intervals s), take 1 (reverse (intervals s)))
+                        lower (VersionInterval lo _) = lo
+                        upper (VersionInterval _ hi) = hi
+                        (los, his) = bounds vs
+                        (los', his') = bounds (fillGaps universe vs)
+                     in (map lower los === map lower los') .&&. (map upper his === map upper his')
+            , testProperty "fills the holes Cabal's major bounds leave" $
+                let v = mkVersion
+                    declared =
+                        fromVersionRange
+                            ( unionVersionRanges
+                                (majorBoundVersion (v [4, 13, 0, 0]))
+                                (majorBoundVersion (v [4, 14, 0, 0]))
+                            )
+                    -- @^>=4.13.0.0@ stops at @<4.14@, and @4.14@ and @4.14.0@ sit
+                    -- below @4.14.0.0@ in Cabal's order: a hole no release fills.
+                    published = Set.fromList (map v [[4, 13, 0, 0], [4, 13, 1, 0], [4, 14, 0, 0], [4, 15, 0, 0]])
+                    filled = fromVersionRange (intersectVersionRanges (orLaterVersion (v [4, 13, 0, 0])) (earlierVersion (v [4, 15])))
+                 in (fillGaps published declared === filled)
+                        -- and leaves the hole alone once something is published in it
+                        .&&. (fillGaps (Set.insert (v [4, 14]) published) declared === declared)
+            , testProperty "an empty universe fills every hole" $ \(vs :: VersionSet) ->
+                length (intervals (fillGaps Set.empty vs)) <= 1
+            , testProperty "the result carries no declared range" $
+                forAll genUniverse $ \universe (vs :: VersionSet) ->
+                    declaredRange (fillGaps universe vs) === Nothing
             ]
         , testGroup
             -- The operations work on the intervals directly. The reference is
