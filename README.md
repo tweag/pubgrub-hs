@@ -86,15 +86,20 @@ Everything else resolves to the newest source release in range.
 The failure output is a **proof**, not a search trace:
 
 ```
-Because template-haskell cannot be built from source and lens >=0.1 && <2.4 depends on
-template-haskell >=2.4 && <2.8, lens >=0.1 && <2.4 is forbidden
-And because no version for lens in <0.1, lens <2.4 is forbidden
+Because template-haskell cannot be built from source and lens <2.4 depends on
+template-haskell >=2.4 && <2.8, lens <2.4 is forbidden.
 ...
-So, because root ==0 depends on lens <4, version solving failed
+1. And because array >=0.4.0.1 && <0.5.0.0 depends on base >=4.2 && <4.7 and base
+cannot be built from source, lens <3.10 is forbidden.
+
+Because base cannot be built from source and lens >=3.10 && <4.0 depends on
+base >=4.4 && <4.7, lens >=3.10 && <4.0 is forbidden.
+And because lens <3.10 is forbidden (1), lens <4.0 is forbidden.
+So, because root depends on lens <4, version solving failed.
 ```
 
-That is 8 sentences where cabal prints 18 lines for the same problem. Across a corpus
-of 17 real Hackage failures we are shorter on all 17: 62 sentences against cabal's 166.
+That is 7 sentences where cabal prints 18 lines for the same problem. Across a corpus
+of 17 real Hackage failures we are shorter on all 17: 61 sentences against cabal's 166.
 
 ## Test
 

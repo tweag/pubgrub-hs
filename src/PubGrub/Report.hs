@@ -37,17 +37,19 @@ module PubGrub.Report
     , collapseNoInstances
     ) where
 
-import           Control.Monad           (guard)
-import qualified Data.Map.Strict         as Map
-import           Data.Maybe             (fromMaybe)
-import           Data.Text               (Text)
-import qualified Data.Text               as T
-import           PubGrub.Incompatibility (IncompatCause (..),
-                                          Incompatibility (..))
-import           PubGrub.Pretty          (Pretty (..))
-import           PubGrub.SetOps          (SetOps (union), equivalent,
-                                          isSubsetOf)
-import           PubGrub.Term            (Term (..))
+import           Control.Monad                  (guard)
+import qualified Data.Map.Strict                as Map
+import           Data.Maybe                     (fromMaybe)
+import           Data.Text                      (Text)
+import qualified Data.Text                      as T
+import           Distribution.Types.PackageName (PackageName)
+import           PubGrub.Incompatibility        (IncompatCause (..),
+                                                 Incompatibility (..))
+import           PubGrub.InstanceSet            (InstanceSet, isEveryVersion)
+import           PubGrub.Pretty                 (Pretty (..))
+import           PubGrub.SetOps                 (SetOps (union), equivalent,
+                                                 isSubsetOf)
+import           PubGrub.Term                   (Term (..))
 
 -- | The proof under construction: its lines __newest first__, and the next free
 -- line number.
@@ -137,9 +139,41 @@ reportConflict root0 = case incompCause root of
     -- fusion below from ever firing on a real problem.
     root = collapseNoInstances root0
 
-    render ls = T.intercalate "\n" [prefix n <> t | (n, t) <- ls]
+    -- The terminal incompatibility's one positive term names the root package
+    -- (references/pubgrub.md:518). The root is written by name alone, without its
+    -- synthetic version (:1025), and without the NUL byte the bridge prefixes to
+    -- keep that name from colliding with a real package's.
+    rootPkg = case Map.toList (incompTerms root0) of
+        [(p, Positive _)] -> Just p
+        _                 -> Nothing
+
+    -- Every line is a sentence and ends as one. A blank line between two branches
+    -- of a derivation (references/pubgrub.md:632) stays blank.
+    render ls = T.intercalate "\n" [line n t | (n, t) <- ls]
+    line _ "" = ""
+    line n t  = prefix n <> t <> "."
     prefix Nothing  = ""
     prefix (Just n) = T.pack (show n) <> ". "
+
+    -- A package with the set it is constrained to, as words. A set admitting every
+    -- version reads "every version of foo" (references/pubgrub.md:1013) where the
+    -- sentence calls for it — as the subject of "depends on" or "requires" — and
+    -- the bare name where it does not: pub writes "foo is forbidden", not "every
+    -- version of foo is forbidden", and "depends on bar" rather than "depends on
+    -- every version of bar".
+    named :: PackageName -> InstanceSet -> Text
+    named p s
+        | Just p == rootPkg = rootLabel p
+        | isEveryVersion s  = "every version of " <> pretty p
+        | otherwise         = pretty p <> " " <> pretty s
+
+    bare :: PackageName -> InstanceSet -> Text
+    bare p s
+        | Just p == rootPkg = rootLabel p
+        | isEveryVersion s  = pretty p
+        | otherwise         = pretty p <> " " <> pretty s
+
+    rootLabel = T.filter (/= '\0') . pretty
 
     -- Explain one derived incompatibility, ending with the line that concludes it.
     -- @final@ marks the last line of the whole proof, which reads "So, …".
@@ -158,6 +192,8 @@ reportConflict root0 = case incompCause root of
             -- derivation branches, and this is the only place a line number is
             -- wanted. Explain the first branch, number the line it ends on, then
             -- explain the second and close by referring back.
+            -- The blank line between the two branches is the spec's (:632): it
+            -- marks that a new line of derivation starts.
             (True, True) ->
                 let (n, out') = numberLast (derived False c1 out)
                  in emit
@@ -168,7 +204,7 @@ reportConflict root0 = case incompCause root of
                             <> "), "
                             <> says final inc
                         )
-                        (derived False c2 out')
+                        (derived False c2 (emit "" out'))
         -- Not reached: 'derived' is only ever called on a derived node.
         _ -> emit (leaf inc) out
 
@@ -310,21 +346,15 @@ reportConflict root0 = case incompCause root of
             | q1 == p2, r1 `isSubsetOf` s2 -> chain p1 s1 q1 r1 q2 r2
             | q2 == p1, r2 `isSubsetOf` s1 -> chain p2 s2 q2 r2 q1 r1
             | p1 == p2, s1 `equivalent` s2 ->
-                pretty p1
-                    <> " "
-                    <> pretty s1
+                named p1 s1
                     <> " depends on both "
-                    <> pretty q1
-                    <> " "
-                    <> pretty r1
+                    <> bare q1 r1
                     <> " and "
-                    <> pretty q2
-                    <> " "
-                    <> pretty r2
+                    <> bare q2 r2
         _ -> leaf c1 <> " and " <> leaf c2
 
     chain p s q r q' r' =
-        dep p s q r <> " which depends on " <> pretty q' <> " " <> pretty r'
+        dep p s q r <> " which depends on " <> bare q' r'
 
     -- A dependency fact whose dependee term survived. 'fromDependency' drops that
     -- term when the dependency is unsatisfiable, and then there is no "depends on"
@@ -343,7 +373,7 @@ reportConflict root0 = case incompCause root of
     leaf c = case incompCause c of
         CauseNoInstances p s -> "no version for " <> pretty p <> " in " <> pretty s
         CauseOnlyInstalled p -> pretty p <> " cannot be built from source"
-        CauseUnbuildable p s -> pretty p <> " " <> pretty s <> " cannot be built here"
+        CauseUnbuildable p s -> named p s <> " cannot be built here"
         _ -> case asDependency c of
             Just (p, s, q, r) -> dep p s q r
             Nothing           -> summary c
@@ -357,25 +387,38 @@ reportConflict root0 = case incompCause root of
             _                 -> summary c
         | otherwise = summary c
 
+    -- What an incompatibility says, in pub's own forms (the spec leaves the
+    -- wording to the implementation, references/pubgrub.md:677; these are pub's,
+    -- in cabal's range syntax). A negative term is never written as "not …": it
+    -- says the package /must/ be in that set, and the sentence carries the
+    -- negation — "foo requires bar >=2", "if foo and bar then baz <3", "either
+    -- foo <2 or bar <3".
     summary c = case Map.toList (incompTerms c) of
         [] -> "version solving failed"
-        [(p, Positive r)] -> pretty p <> " " <> pretty r <> " is forbidden"
-        [(p, Negative r)] -> pretty p <> " " <> pretty r <> " is required"
+        [(p, Positive r)] -> bare p r <> " is forbidden"
+        [(p, Negative r)] -> bare p r <> " is required"
         [(p1, Positive r1), (p2, Negative r2)] -> requires p1 r1 p2 r2
         [(p2, Negative r2), (p1, Positive r1)] -> requires p1 r1 p2 r2
-        terms -> T.intercalate " and " [showTerm p t | (p, t) <- terms] <> " are incompatible"
+        [(p1, Positive r1), (p2, Positive r2)] -> bare p1 r1 <> " is incompatible with " <> bare p2 r2
+        [(p1, Negative r1), (p2, Negative r2)] -> "either " <> bare p1 r1 <> " or " <> bare p2 r2
+        terms ->
+            let positives = [(p, r) | (p, Positive r) <- terms]
+                negatives = [bare p r | (p, Negative r) <- terms]
+                anyOf = T.intercalate " or "
+             in case (positives, negatives) of
+                    ([(p, r)], _ : _) -> named p r <> " requires " <> anyOf negatives
+                    (_ : _, _ : _) ->
+                        "if " <> T.intercalate " and " (map (uncurry bare) positives)
+                            <> " then " <> anyOf negatives
+                    (_, []) -> "one of " <> anyOf (map (uncurry bare) positives) <> " must be false"
+                    ([], _) -> "one of " <> anyOf negatives <> " must be true"
 
     -- Keep the depender's range so distinct derivation steps stay distinct
     -- ("assoc ==1.0.2 depends on …" vs "assoc >=1.0.2 && <1.1 depends on …").
-    dep p1 r1 p2 r2 =
-        pretty p1 <> " " <> pretty r1 <> " depends on " <> pretty p2 <> " " <> pretty r2
+    dep p1 r1 p2 r2 = named p1 r1 <> " depends on " <> bare p2 r2
 
     -- A /derived/ two-term incompatibility. The spec says "requires" here and
     -- keeps "depends on" for the external fact (references/pubgrub.md:1005,
     -- both in one line): a dependency is declared in a @.cabal@ file, a
     -- requirement is what the solver worked out from one.
-    requires p1 r1 p2 r2 =
-        pretty p1 <> " " <> pretty r1 <> " requires " <> pretty p2 <> " " <> pretty r2
-
-    showTerm p (Positive r) = pretty p <> " " <> pretty r
-    showTerm p (Negative r) = pretty p <> " not " <> pretty r
+    requires p1 r1 p2 r2 = named p1 r1 <> " requires " <> bare p2 r2

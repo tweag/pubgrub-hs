@@ -75,7 +75,7 @@ Lean build. One line per gate, non-zero exit on any regression.
 It holds five numeric baselines. Only the problem count is exact. The other four are
 floors or ceilings rather than targets, and beating one prints `IMPROVED` and still
 exits 0. **Move a baseline in the change that earns it.** The two proof ceilings are
-currently tight — 62 sentences and 1 no-version line — so a reporting change has to
+currently tight — 61 sentences and 0 no-version lines — so a reporting change has to
 earn its way past them.
 
 **[`docs/benchmarking.md`](docs/benchmarking.md) is the reference for measuring
@@ -285,7 +285,11 @@ source.
 
 `Bridge.Provider.withSlots` gives each release the half-open range up to the next
 release present in the index. Adjacent slots **touch**, so unions coalesce and
-`difference` stops manufacturing empty holes between published releases.
+`difference` stops manufacturing empty holes between published releases. The
+**first** release's slot has no lower bound (`references/pubgrub.md:467`), and so
+does a walk that reaches it: `slotRange` decides, for both. Nothing is published
+below the first release, so the range is the same; its complement has no `<first`
+hole to discover and print.
 
 ### The synthetic root's name carries a NUL byte
 
@@ -340,9 +344,12 @@ run, and `docs/STATUS.md` §4.9 states each one with its soundness argument:
 4. Empty-range leaves are absorbed into the sibling they were resolved against
    (`collapseNoInstances`).
 
-**Only the cosmetics are open.** Terminal periods on non-final lines. The synthetic
-root's version. "every version of foo" where the spec writes that rather than
-`foo >=0`. The blank line the spec puts between branches.
+**The wording is pub's, in cabal's range syntax**, including every special case the
+spec lists at `references/pubgrub.md:1010`–`:1030`: "every version of foo", the root
+by name alone, "So," on the last line, a period per line, the blank line between
+branches. A negative term is never printed as "not …"; the sentence carries the
+negation ("P requires N1 or N2", "if P1 and P2 then N1 or N2", "either X or Y").
+Installed units print by version, never by unit id.
 
 **Do not chase byte-parity with pub's output.** `^1.0.0` is Dart syntax and cabal
 writes `>=1.0.0 && <2`. The target is the same sentences and information, in cabal's

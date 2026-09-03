@@ -87,11 +87,11 @@ is true but not a cause, so a proof carrying one is explaining less than it coul
 | `haskoin-store-data ==1.6.0` | pkg-config `libsecp256k1` | **5** | 13 | 0 |
 | `hjsonschema ==1.10.0` | aeson / bytestring chain | **5** | 13 | 0 |
 | `language-puppet ==1.5.1` | `ghc-prim` via aeson | **5** | 11 | 0 |
-| `futhark ==0.27.1` | regex / time chain | **8** | 10 | 1 |
+| `futhark ==0.27.1` | regex / time chain | **7** | 10 | 0 |
 | `matterhorn ==90000.1.1` | hashable / bytestring chain | **8** | 17 | 0 |
 
-**Shorter on all 17: 62 proof sentences against cabal's 166**, and one `no version`
-line left in the whole set. The margin is narrowest on `futhark` (8 against 10) and
+**Shorter on all 17: 61 proof sentences against cabal's 166**, and no `no version`
+line left in the whole set. The margin is narrowest on `futhark` (7 against 10) and
 widest on `cabal-install` (2 against 12). `matterhorn` is our longest at 8, against
 cabal's longest message at 17.
 

@@ -37,8 +37,8 @@ cd "$(dirname "$0")/.." || exit 1
 : "${MIN_AGREEMENT:=23}"    # problems where both solvers return the same verdict
 : "${EXPECT_PROBLEMS:=23}"  # problems in the union set. A drop means a lost case
 : "${EXPECT_CORPUS:=17}"    # reproducible failure cases
-: "${MAX_PROOF:=62}"        # total proof sentences over the corpus (ceiling)
-: "${MAX_NOVER:=1}"         # total "no version for" lines over the corpus (ceiling)
+: "${MAX_PROOF:=61}"        # total proof sentences over the corpus (ceiling)
+: "${MAX_NOVER:=0}"         # total "no version for" lines over the corpus (ceiling)
 
 OUT=${OUT:-$(mktemp -d)}
 TIMEOUT=${TIMEOUT:-300}

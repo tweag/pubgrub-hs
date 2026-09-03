@@ -80,25 +80,25 @@ the better of the two.
 
 | problem | verdict | ours | cabal | our world / solve | cabal world / index / solve | our residency | cabal residency | our allocation | cabal allocation | our proof | cabal's message |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `vector` | both sat | **0.61** | 0.83 | 0.58 / 0.02 | 0.53 / 0.06 / 0.23 | **22.8** | 51.2 MB | **0.41** | 0.86 GB | — | — |
-| `pandoc` | both sat | **0.96** | 1.21 | 0.57 / 0.38 | 0.52 / 0.05 / 0.62 | **33.1** | 80.3 MB | **1.50** | 1.80 GB | — | — |
-| `conduit <1.3` | both UNSAT | **0.60** | 0.92 | 0.58 / 0.01 | 0.55 / 0.06 / 0.27 | **22.8** | 51.2 MB | **0.39** | 1.33 GB | **10** | 12 |
-| `lens <4` | both UNSAT | **0.63** | 1.13 | 0.57 / 0.05 | 0.50 / 0.06 / 0.48 | **22.9** | 76.4 MB | **0.49** | 1.89 GB | **8** | 18 |
-| `aeson <2` | both UNSAT | **0.75** | 1.98 | 0.58 / 0.12 | 0.55 / 0.08 / 1.33 | **22.8** | 81.2 MB | **0.77** | 5.43 GB | 64 | **26** |
-| `yesod` | both sat | 1.82 | **1.36** | 0.59 / 1.20 | 0.63 / 0.06 / 0.64 | **50.4** | 80.4 MB | 4.38 | **1.93** GB | — | — |
+| `vector` | both sat | **0.74** | 1.04 | 0.71 / 0.02 | 0.66 / 0.09 / 0.28 | **22.8** | 51.2 MB | **0.41** | 0.86 GB | — | — |
+| `pandoc` | both sat | **1.15** | 1.41 | 0.64 / 0.50 | 0.58 / 0.06 / 0.74 | **33.0** | 80.6 MB | **1.49** | 1.79 GB | — | — |
+| `conduit <1.3` | both UNSAT | **0.59** | 0.85 | 0.57 / 0.01 | 0.52 / 0.05 / 0.32 | **22.8** | 51.2 MB | **0.39** | 1.33 GB | **10** | 12 |
+| `lens <4` | both UNSAT | **0.61** | 1.08 | 0.56 / 0.04 | 0.54 / 0.05 / 0.43 | **22.8** | 76.7 MB | **0.50** | 1.89 GB | **7** | 18 |
+| `aeson <2` | both UNSAT | **0.80** | 1.71 | 0.65 / 0.14 | 0.55 / 0.05 / 1.09 | **22.8** | 81.2 MB | **1.01** | 5.43 GB | 62 | **26** |
+| `yesod` | both sat | 1.56 | **1.28** | 0.55 / 0.99 | 0.55 / 0.06 / 0.63 | **50.4** | 80.4 MB | 4.35 | **1.93** GB | — | — |
 
 All six verdicts agree. We use **1.6–3.6× less peak memory on all six**. We are faster
 on five of six and allocate less on five of six.
 
 **The phases say where our time goes, and it is not the solve.** Opening the world
-(the index, the installed database and the pkg-config database) costs about 0.58 s on
-every run, on both sides. Our solve is under 0.13 s on five of the six problems. Only
+(the index, the installed database and the pkg-config database) costs 0.55–0.71 s on
+every run, on both sides. Our solve is under 0.15 s on five of the six problems. Only
 `yesod` has a solve phase that matters. cabal's `index` phase is small because the
 work it names is lazy and lands in its `solve`
 ([§3.3](#33-what-these-numbers-do-not-establish)).
 
 **`yesod` is where we lose, and it is the most useful row in the table.** cabal is
-1.3× faster on it and allocates 2.3× less. It is the only *satisfiable* problem in the
+1.2× faster on it and allocates 2.3× less. It is the only *satisfiable* problem in the
 set with real search in it: `vector` and `pandoc` resolve almost straight through.
 Every other row is either a walk-through or an unsatisfiable proof, so until `yesod`
 was enabled the set could not report this at all.
@@ -113,17 +113,19 @@ Our search counts on the same run:
 | --- | --- | --- | --- | --- | --- |
 | `vector` | 39 | 0 | 0 | 114 | 0 |
 | `pandoc` | 270 | 1 | 0 | 2882 | 0 |
-| `conduit <1.3` | 16 | 9 | 3 | 174 | 0 |
-| `lens <4` | 60 | 24 | 3 | 268 | 0 |
-| `aeson <2` | 309 | 58 | 1 | 393 | 0 |
+| `conduit <1.3` | 19 | 9 | 2 | 182 | 0 |
+| `lens <4` | 65 | 23 | 2 | 268 | 0 |
+| `aeson <2` | 400 | 68 | 0 | 389 | 0 |
 | `yesod` | 827 | 11 | 1 | 3411 | 0 |
 
 Every parse count is zero because the derived index answers every read
 ([§4.6](#46-the-derived-index-makes-a-read-a-decode)). That holds only while the
 store is newer than the index: after the weekly refresh, releases published since are
 parsed until `pubgrub-index` is re-run, and a non-zero `parses` is the tell. The
-search counts have not moved between the 2026-08-20 and 2026-09-03 index snapshots;
-the decode counts rose by a few, which is the walk reading releases published since.
+index refresh of 2026-09-03 moved no search count; the decode counts rose by a few,
+which is the walk reading releases published since. What did move the three
+unsatisfiable rows is the first-release slot rule
+([§4.4](#44-a-release-owns-a-slot-not-a-point)), and its cost is recorded there.
 
 **The plan diff finds two known gaps and nothing else.** On the three satisfiable
 problems the two plans agree on every package they share: 38, 190 and 180. cabal's
@@ -150,14 +152,13 @@ helps only one kind is not a change that helps.
 [failure-cases.md](failure-cases.md) has the method, the six failure kinds, and the
 per-problem table.
 
-**We are shorter than cabal on all 17: 62 proof sentences against cabal's 166.** One
-`no version for …` line is left in the whole corpus, in `futhark`.
-`scripts/gate.sh` holds both totals as ceilings. Measured on 2026-09-03. cabal's
-total moves with the index (it was 162 on the 2026-08-20 snapshot, and two of its
-messages grew), ours did not.
+**We are shorter than cabal on all 17: 61 proof sentences against cabal's 166.** No
+`no version for …` line is left anywhere in the corpus. `scripts/gate.sh` holds both
+totals as ceilings. Measured on 2026-09-03. cabal's total moves with the index (it
+was 162 on the 2026-08-20 snapshot, and two of its messages grew), ours did not.
 
 `cabal-install ==3.18.1.0` is the widest margin at 2 sentences against 12. `futhark`
-is the narrowest at 8 against 10.
+is the narrowest at 7 against 10.
 
 ### 3.3 What these numbers do not establish
 
@@ -275,6 +276,32 @@ exactly one real release, so the fact asserts nothing about a release nobody rea
 
 The point is that adjacent slots **touch**. `unionVersionSet` coalesces them, so
 `difference` stops manufacturing empty holes between published releases.
+
+**The first release's slot has no lower bound.** `references/pubgrub.md:467` omits
+the lower bound when the first published version has the dependency, and
+`Bridge.Provider.slotRange` does the same for the first release's slot and for a
+walk that reaches it. Nothing is published below it, so the range holds the same
+releases. What changes is the complement: banning `lens <2.4` leaves nothing, where
+banning `lens >=0.1 && <2.4` left `lens <0.1` for the solver to discover empty and
+print as `no version for lens in <0.1`.
+
+**Measured over all 23 problems, same binary either side of the rule.** Twenty are
+unchanged in every count. It removed the last `no version for` line in the corpus and
+shortened `lens <4` and `futhark` by a sentence each. It is a search change too, and
+the trade is not one-sided:
+
+| | decisions | conflicts | allocation |
+| --- | --- | --- | --- |
+| `futhark ==0.27.1` | 807 → **624** | 8 → **6** | 4.02 → **3.14 GB** |
+| `atelier-testing ==0.2.0.0` | 9 → **6** | 2 → 2 | 0.39 → 0.38 GB |
+| `conduit <1.3` | 16 → 19 | 9 → 9 | 0.39 → 0.39 GB |
+| `lens <4` | 60 → 65 | 24 → **23** | 0.50 → 0.50 GB |
+| `aeson <2` | 309 → 400 | 58 → 68 | 0.79 → 1.03 GB |
+
+`aeson <2` pays 30% more allocation for a proof two sentences shorter. A wider
+depender term changes which conflict the search meets first, and on that problem the
+new order is worse. The rule is the spec's and it is kept; the row is here so the
+cost is not rediscovered as a regression.
 
 ### 4.5 Dependency facts collapse in two places
 
@@ -467,10 +494,20 @@ Three cases are left alone on purpose: two holes as both causes, a wholly empty
 dependee range, and a *derived* sibling. Dropping a derived sibling's hole would print
 a conclusion wider than the two named causes justify.
 
-**What is still open is cosmetic**, and it is the only reporting gap left. Terminal
-periods on non-final lines. The synthetic root's version. "every version of foo" where
-the spec writes that rather than `foo >=0`. The blank line the spec puts between
-branches.
+**The wording is pub's, in cabal's range syntax.** The spec leaves the sentences to
+the implementation (`:677`) and lists pub's special cases (`:1010`–`:1030`), and
+every one of them is in: "every version of foo" for a set that admits every version,
+the root by name alone, "So," on the last line, "version solving failed" instead of
+"root is forbidden", a period on every line, and the blank line between two branches
+(`:632`). A negative term is never printed as "not …": the sentence carries the
+negation, as pub's do. Two positive terms read "X is incompatible with Y", two
+negative ones "either X or Y", and a clause with several terms reads "P requires N1
+or N2" or "if P1 and P2 then N1 or N2". An installed unit is written by version,
+`base 4.21.0.0 (installed)`, never by unit id, and not at all when a source range
+in the same set already admits its version.
+
+The linear example matches `:1005` sentence for sentence. The branching one differs
+from `:1150` only in which facts the derivation happened to pair.
 
 > **One trap for tooling.** The synthetic root's name carries a real NUL byte, so GNU
 > `grep` treats a proof as binary and reports no matches without `-a`.
@@ -827,7 +864,7 @@ the reason for reverting does not apply to it. See
 
 | deliverable | state |
 | --- | --- |
-| **Explanation showcase** — real failing problems, pubgrub-hs against cabal, side by side | **the problem set exists and we win on all of it.** 17 real failures, six failure kinds, five positive controls. Shorter than cabal on 17 of 17: 62 proof sentences against 166. Shorter on two of the three benchmark unsat problems. Both of the spec's published examples are golden tests, and the linear one matches sentence for sentence. Every reporting gap but the cosmetics is closed. `pubgrub-harness` renders the two explanations as adjacent blocks for the 13 comparable problems, and the 2026-09-03 run is [reports/showcase.md](reports/showcase.md): shorter on 13 of 13, 44 sentences against 123 lines |
+| **Explanation showcase** — real failing problems, pubgrub-hs against cabal, side by side | **the problem set exists and we win on all of it.** 17 real failures, six failure kinds, five positive controls. Shorter than cabal on 17 of 17: 61 proof sentences against 166. Shorter on two of the three benchmark unsat problems. Both of the spec's published examples are golden tests, and the linear one matches sentence for sentence. Every reporting gap but the cosmetics is closed. `pubgrub-harness` renders the two explanations as adjacent blocks for the 13 comparable problems, and the 2026-09-03 run is [reports/showcase.md](reports/showcase.md): shorter on 13 of 13, 44 sentences against 123 lines |
 | **Benchmark report** — time and peak residency on real problems | **current numbers exist** for six problems, three sat and three unsat, both solvers. We use less peak memory on all six, and are faster and leaner in allocation on five of six. `yesod` is the exception on both. The 2026-09-03 run is [reports/benchmark.md](reports/benchmark.md). Its caveats: timings are medians of three runs against ±25% noise, cabal's lazy per-release parsing lands in its `solve` phase and cannot be separated without changing the work, and the 22 MB memory floor is unexplained |
 
 The baseline and the shared index are done. `cabal-install-solver` drives cabal's

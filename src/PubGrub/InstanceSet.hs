@@ -162,8 +162,31 @@ memberFlagAssignment pins fa = all satisfied (Map.toList pins)
     satisfied (f, PinnedTo b)  = Map.lookup f assigned == Just b
     satisfied (f, NotDeclared) = Map.notMember f assigned
 
+-- | Does the set admit every source instance of its package? True of the root's
+-- term and of a depender that spans the whole version list. The report writes
+-- such a set as "every version of foo".
+--
+-- One-sided, like 'isEmpty': a set can admit everything without any single cell
+-- saying so, and this answers 'False' then. For a renderer that is the safe
+-- direction, because it then prints the range instead of the phrase.
+isEveryVersion :: InstanceSet -> Bool
+isEveryVersion is =
+    any (\c -> Map.null (scFlags c) && scVersionSet c == VersionSet.fullVersionSet) (isSource is)
+
 instance Pretty InstanceSet where
-    pretty is =
-        T.intercalate (T.pack " or ")
-            ( map (pretty . pipUnitId) (Set.toList (isInstalled is)) <> map pretty (isSource is)
-            )
+    pretty is = T.intercalate (T.pack " or ") (installed <> map pretty (isSource is))
+      where
+        -- An installed unit whose version a flag-free source cell admits is one of
+        -- that cell's versions, and naming it separately tells a reader nothing:
+        -- "deepseq 1.5.1.0 (installed) or >=1.4.3.0 && <1.6" is the same set as
+        -- "deepseq >=1.4.3.0 && <1.6". The unit id is never shown. It is a hash,
+        -- and the version is what a reader can act on.
+        covered pip =
+            any
+                (\c -> Map.null (scFlags c) && VersionSet.contains (scVersionSet c) (pipVersion pip))
+                (isSource is)
+        installed =
+            [ pretty (pipVersion pip) <> T.pack " (installed)"
+            | pip <- Set.toList (isInstalled is)
+            , not (covered pip)
+            ]

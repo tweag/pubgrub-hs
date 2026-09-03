@@ -18,6 +18,7 @@ module PubGrub.VersionSet (
     fullVersionSet,
     singletonVersionSet,
     halfOpenVersionSet,
+    belowVersionSet,
     snapToVersions,
     fromVersionRange,
     toVersionRange,
@@ -40,8 +41,9 @@ import           Distribution.Types.VersionInterval (Bound (..),
                                                      fromVersionIntervals,
                                                      mkVersionIntervals)
 import           Distribution.Version               (Version, VersionRange,
-                                                     anyVersion, noVersion,
-                                                     thisVersion, version0)
+                                                     anyVersion, earlierVersion,
+                                                     noVersion, thisVersion,
+                                                     version0)
 import           PubGrub.SetOps                     (SetOps (..))
 
 
@@ -163,6 +165,15 @@ singletonVersionSet = fromVersionRange . thisVersion
 -- term such as @>=1.0 && <1.3@, and each hole in a range is refuted on its own.
 halfOpenVersionSet :: Version -> Maybe Version -> VersionSet
 halfOpenVersionSet lo hi = fromCuts [(Cut lo Before, maybe Unbounded (`Cut` Before) hi)]
+
+-- | Everything below @hi@, or everything when there is no @hi@: the slot of a
+-- package's __first__ release, which takes no lower bound. Nothing is published
+-- below the first release, so the set denotes the same instances as the
+-- half-open slot would — but its complement is @>=hi@ and not @<lo || >=hi@, and
+-- the @<lo@ piece is a hole the solver would otherwise have to learn is empty,
+-- one @no version for@ at a time.
+belowVersionSet :: Maybe Version -> VersionSet
+belowVersionSet = maybe fullVersionSet (fromVersionRange . earlierVersion)
 
 -- | Narrow every interval to the versions in @universe@ that it actually
 -- contains: each becomes the closed range from its lowest such version to its

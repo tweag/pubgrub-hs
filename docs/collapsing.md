@@ -281,8 +281,9 @@ A proof line now reads `base cannot be built from source`.
   `>=0.2.2` against an index whose oldest matching release is `0.2.2.0` leaves a window
   with nothing in it. This is the one conflict that narrowing removed when it was tried
   and reverted twice. **No instance of this kind is left in the failure corpus.**
-- **The bottom of a version list.** Not a defect: a downward search ends by
-  establishing that nothing below the oldest release exists. The single `no version`
-  line left in the whole corpus is this kind, in `futhark`:
-  `no version for regex in <0.0.0.1`, where `regex`'s oldest published release is
-  `0.0.0.1`.
+- **The bottom of a version list.** A downward search used to end by establishing
+  that nothing below the oldest release exists, and the last `no version` line in
+  the corpus was this kind, in `futhark`: `no version for regex in <0.0.0.1`. It is
+  gone since the first release's slot lost its lower bound
+  ([STATUS.md](STATUS.md) §4.4, `references/pubgrub.md:467`): a depender term that
+  starts at the first release now has no `<first` complement to discover empty.

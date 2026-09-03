@@ -1,6 +1,7 @@
-Because a >=1.0.0 depends on b >=2.0.0 && <3 and foo >=1.0.0 && <1.1.0 depends on b >=1.0.0 && <2, a >=1.0.0 and foo >=1.0.0 && <1.1.0 are incompatible
-1. And because foo >=1.0.0 && <1.1.0 depends on a >=1.0.0 && <2, foo >=1.0.0 && <1.1.0 is forbidden
-Because x >=1.0.0 depends on y >=2.0.0 && <3 and foo >=1.1.0 depends on y >=1.0.0 && <2, foo >=1.1.0 and x >=1.0.0 are incompatible
-And because foo >=1.1.0 depends on x >=1.0.0 && <2, foo >=1.1.0 is forbidden
-And because foo >=1.0.0 && <1.1.0 is forbidden (1), foo >=1.0.0 is forbidden
-So, because root >=1.0.0 depends on foo >=1.0.0 && <2, version solving failed
+Because every version of a depends on b >=2.0.0 && <3 and foo <1.1.0 depends on b >=1.0.0 && <2, a is incompatible with foo <1.1.0.
+1. And because foo <1.1.0 depends on a >=1.0.0 && <2, foo <1.1.0 is forbidden.
+
+Because every version of x depends on y >=2.0.0 && <3 and foo >=1.1.0 depends on y >=1.0.0 && <2, foo >=1.1.0 is incompatible with x.
+And because foo >=1.1.0 depends on x >=1.0.0 && <2, foo >=1.1.0 is forbidden.
+And because foo <1.1.0 is forbidden (1), foo is forbidden.
+So, because root depends on foo >=1.0.0 && <2, version solving failed.

@@ -76,7 +76,6 @@ import           Distribution.System                          (Platform,
                                                                buildPlatform)
 import           Distribution.Types.Flag                      (FlagAssignment,
                                                                FlagName,
-                                                               PackageFlag (..),
                                                                mkFlagAssignment,
                                                                unFlagAssignment)
 import           Distribution.Types.PackageName               (PackageName,
@@ -103,7 +102,6 @@ import           PubGrub.InstanceSet.SourceCell               (SourceCell (..),
 
 import           Distribution.Types.Dependency                (depPkgName,
                                                                depVerRange)
-import           Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
 import           PubGrub.Provider                             (Provider (..))
 import           PubGrub.VersionSet                           (VersionSet,
                                                                contains)
@@ -678,7 +676,7 @@ mkExpand installedDb source root = expand'
         pure $ case (lo, hi) of
             -- Neither neighbour carries it: just the release's own slot.
             (l, h) | l == v && h == v -> slot
-            (l, h) -> spanSlot (VersionSet.halfOpenVersionSet l (Set.lookupGT h releases))
+            (l, h) -> spanSlot (slotRange releases l (Set.lookupGT h releases))
       where
         releases = rsVersionsOf source pn
 
@@ -738,9 +736,22 @@ mkExpand installedDb source root = expand'
 -- release's dependencies to it.
 withSlots :: Set Version -> [(Version, Slot)]
 withSlots releases =
-    [ (v, Slot (VersionSet.halfOpenVersionSet v (Set.lookupGT v releases)))
+    [ (v, Slot (slotRange releases v (Set.lookupGT v releases)))
     | v <- Set.toDescList releases
     ]
+
+-- | The range from release @lo@ up to, and not including, the next release @hi@
+-- — except that the package's __first__ release has no lower bound at all
+-- (@references\/pubgrub.md:464@–@:469@: "if the first published version of the
+-- package has the dependency, the lower bound is omitted"). Nothing is published
+-- below it, so the two ranges hold the same releases; what differs is the
+-- complement. Banning @>=0.1 && <2.4@ leaves @<0.1@ for the solver to discover
+-- empty and to print as @no version for lens in <0.1@. Banning @<2.4@ leaves
+-- nothing, and the proof reads @lens <2.4@ where the spec writes @foo <1.1.0@.
+slotRange :: Set Version -> Version -> Maybe Version -> VersionSet
+slotRange releases lo hi
+    | Set.lookupMin releases == Just lo = VersionSet.belowVersionSet hi
+    | otherwise = VersionSet.halfOpenVersionSet lo hi
 
 -- | One release's slot, as a type of its own.
 --

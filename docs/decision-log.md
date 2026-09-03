@@ -788,6 +788,35 @@ made a solve pay for releases it never touched, so the phase would have measured
 the solve does not do. The `world` phase is separated on both sides, and cabal's
 per-release parsing stays in `solve` by design.
 
+### The proofs read as sentences — HELD
+
+*Sep 3.* Reading the corpus proofs rather than counting them found three things the
+counts had hidden: installed units printed as unit ids (`base base-4.21.0.0-5b43 or
+>=0`), negative terms printed raw (`hashable not >=1.4.0.0 && <1.4.0.2 || …`), and the
+cosmetics that had sat open since July — the root's synthetic version, `foo >=0` for
+"every version of foo", no terminal periods, no blank line between branches.
+
+`PubGrub.Report` took pub's wording (`references/pubgrub.md:677` leaves it to the
+implementation; `:1010`–`:1030` lists pub's special cases): a negative term is never
+written as "not …", the sentence carries the negation — "P requires N1 or N2", "if P1
+and P2 then N1 or N2", "either X or Y", "X is incompatible with Y". `Pretty
+InstanceSet` dropped the unit id, printed an installed unit by version, and omitted it
+where a source range in the same set already admitted that version. The linear golden
+came out matching `:1005` sentence for sentence. Pure rendering: every count was
+identical either side.
+
+Then one rule that is not rendering. `:467` omits a depender's lower bound when the
+first published version has the dependency. `Bridge.Provider.slotRange` did that for
+the first release's slot and for a walk that reaches it. Nothing is published below
+the first release, so the range denotes the same instances; its complement no longer
+has a `<first` piece for the solver to discover empty. That removed the last `no
+version for` line in the corpus (`futhark`, `regex <0.0.0.1`) and one sentence from
+`lens <4`. The gate's ceilings moved to 61 sentences and 0 no-version lines.
+
+**The lesson.** "Shorter than cabal on 17 of 17" had been true for weeks while five
+of the proofs were unreadable, because a count of sentences cannot see what is in
+them. The fixes were a day's work once someone read the output.
+
 ---
 
 ## What is open now
