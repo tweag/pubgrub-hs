@@ -543,6 +543,14 @@ harness counts as a sentence. The harness keeps the proof as the driver printed 
 continuation lines and the blank line between two branches included; the showcase
 had been dropping that blank line, the one visual device the spec has.
 
+**Colour is a terminal-only layer.** `styleProof` dims every range token, so the
+package names stand out by contrast and a reader can skim the names and skip the
+bounds; bolds the connective that opens a sentence, so sentences can be told from
+their continuation lines; and bolds the headline and the `So,` line throughout.
+Stripping the escapes gives the input back. The driver applies it only when stdout
+is a terminal, `NO_COLOR` is unset and `TERM` is not `dumb`, so the gate, the
+harness and every log read plain text. There is no `--color` flag.
+
 **A declared range is quoted as written.** The dependee term of a dependency fact is
 the declared range with its spelling attached (§4.2), and the store merge keeps that
 term intact, so the proof quotes `base ^>=4.13.0.0 || ^>=4.14.0.0 || … ||

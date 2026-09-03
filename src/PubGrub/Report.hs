@@ -38,6 +38,8 @@ module PubGrub.Report
     ( reportConflict
     , reportHeadline
     , wrapProof
+    , styleProof
+    , rangeToken
     , collapseNoInstances
     ) where
 
@@ -177,13 +179,64 @@ wrapLine width line
         _ -> (a, Nothing)
 
     atoms [] = []
-    atoms (t : ts) = let (stuck, rest) = span sticky ts in T.unwords (t : stuck) : atoms rest
+    atoms (t : ts) = let (stuck, rest) = span rangeToken ts in T.unwords (t : stuck) : atoms rest
 
-    sticky u =
-        any (`T.isPrefixOf` u) [">=", ">", "<", "==", "^>=", "&&", "||", "(installed)"]
-            || isVersion u
-    -- A bare version, possibly ending the sentence: @4.21.0.0@ or @4.21.0.0.@
-    isVersion u = let v = T.dropWhileEnd (== '.') u in not (T.null v) && T.all (\c -> isDigit c || c == '.') v
+-- | A token of a rendered sentence that belongs to a range rather than to the
+-- prose: a comparison, @&&@, @||@, @(installed)@, or a bare version (possibly
+-- ending the sentence: @4.21.0.0@ or @4.21.0.0.@). 'wrapProof' keeps such a token
+-- on the line of the token before it; 'styleProof' dims it.
+rangeToken :: Text -> Bool
+rangeToken u =
+    any (`T.isPrefixOf` u) [">=", ">", "<", "==", "^>=", "&&", "||", "(installed)"]
+        || isVersion u
+  where
+    isVersion t = let v = T.dropWhileEnd (== '.') t in not (T.null v) && T.all (\c -> isDigit c || c == '.') v
+
+-- | Colour a wrapped proof for a terminal: ranges dim, so the package names stand
+-- out by contrast and a reader can skim the names and skip the bounds; the
+-- connective that opens a sentence bold, so the sentences can be told apart from
+-- their continuation lines; and the conclusion — the \"So,\" line — and the
+-- headline bold throughout. Nothing is coloured that is not already there:
+-- stripping the escapes gives the input back.
+--
+-- Whether to apply it is the caller's decision, not this module's. Apply it only
+-- on a terminal with @NO_COLOR@ unset and @TERM@ not @dumb@; anything that reads
+-- the proof as text expects it plain.
+styleProof :: Text -> Text
+styleProof = T.intercalate "\n" . go False . T.lines
+  where
+    -- @wholeBold@: the line before was a headline or the conclusion, so a
+    -- continuation of it is bold throughout as well.
+    go _ [] = []
+    go wholeBold (l : ls)
+        | T.null l = l : go False ls
+        | "    " `T.isPrefixOf` l = (if wholeBold then bold l else tokens 0 l) : go wholeBold ls
+        | "No solution" `T.isPrefixOf` l || "So, because" `T.isPrefixOf` l = bold l : go True ls
+        | otherwise = tokens (openerOf (T.words l)) l : go False ls
+
+    tokens opener l =
+        let (lead, body) = T.span (== ' ') l
+            (op, rest) = splitAt opener (T.words body)
+         in lead <> T.unwords (map bold op ++ dimRuns rest)
+
+    -- A run of range tokens is one dimmed span.
+    dimRuns [] = []
+    dimRuns ws = case span rangeToken ws of
+        ([], w : rest) -> w : dimRuns rest
+        (run, rest)    -> dim (T.unwords run) : dimRuns rest
+
+    -- How many leading tokens make up the connective: "Because", "And because",
+    -- and "1. And because"; a continuation line has none.
+    openerOf ws = case ws of
+        (n : "And" : "because" : _) | isNumber n -> 3
+        ("And" : "because" : _) -> 2
+        ("Because" : _) -> 1
+        _ -> 0
+    isNumber n = case T.unsnoc n of
+        Just (ds, '.') -> not (T.null ds) && T.all isDigit ds
+        _              -> False
+    bold t = "\ESC[1m" <> t <> "\ESC[0m"
+    dim t = "\ESC[2m" <> t <> "\ESC[0m"
 
 -- | Render an incompatibility and its derivation as a human-readable proof.
 reportConflict :: Incompatibility -> Text

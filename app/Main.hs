@@ -79,7 +79,7 @@ import           PubGrub.Pretty                            (Pretty (pretty))
 import           PubGrub.Provider                          (Provider (..))
 import           PubGrub.Report                            (reportConflict,
                                                             reportHeadline,
-                                                            wrapProof)
+                                                            styleProof, wrapProof)
 import           PubGrub.Solver                            (SolveError (..),
                                                             SolverMsg (..),
                                                             solve)
@@ -502,9 +502,10 @@ runBaseline opts t0 world = do
 report :: PlanShape -> Provider App -> Either SolveError (Map PackageName Instance) -> App ()
 report _ _ (Left (NoSolution incompat)) = do
     width <- liftIO proofWidth
-    logMsg (wrapProof width (reportHeadline incompat))
+    style <- liftIO proofStyle
+    logMsg (style (wrapProof width (reportHeadline incompat)))
     logMsg T.empty
-    logMsg (wrapProof width (reportConflict incompat))
+    logMsg (style (wrapProof width (reportConflict incompat)))
 report _ _ (Left (NoSatisfier p _)) =
     logMsg (T.pack ("internal error: no satisfier for " ++ prettyShow p))
 report shape provider (Right solution) = do
@@ -526,6 +527,16 @@ proofWidth = do
     pure $ case (tty, cols >>= readMaybe) of
         (True, Just n) | n >= 40 -> n
         _                        -> 80
+
+-- | Colour for the proof on a terminal, and none anywhere else: stdout a terminal,
+-- @NO_COLOR@ unset (<https://no-color.org>), @TERM@ not @dumb@. The gate, the
+-- harness and every log read the plain text.
+proofStyle :: IO (Text -> Text)
+proofStyle = do
+    tty <- hIsTerminalDevice stdout
+    noColor <- lookupEnv "NO_COLOR"
+    term <- lookupEnv "TERM"
+    pure $ if tty && noColor == Nothing && term /= Just "dumb" then styleProof else id
 
 -- | One resolved package per line, sorted by name — the 'Map' already is. The
 -- synthetic root is the solver's, not the plan's, so it is left out.

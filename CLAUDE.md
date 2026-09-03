@@ -364,6 +364,11 @@ breaks inside a range (before a `||` only when the range alone overflows the lin
 `reportConflict` stays one sentence per line for the golden proofs, and a
 continuation line starts with the indent, so the gate and the harness never count it.
 
+**Colour is a terminal-only layer.** `styleProof` dims ranges and bolds the
+connectives, the headline and the `So,` line; stripping the escapes gives the input
+back. The driver applies it only on a terminal with `NO_COLOR` unset and `TERM` not
+`dumb`. Every log, the gate and the harness read plain text.
+
 **Do not chase byte-parity with pub's output.** `^1.0.0` is Dart syntax and cabal
 writes `>=1.0.0 && <2`. The target is the same sentences and information, in cabal's
 range syntax.

@@ -919,8 +919,24 @@ where it was.
 Tree lines for the proof were considered and declined: the spec's algorithm
 linearises the derivation on purpose and skips every other step, and a tree would
 put back what the four rules removed. A dependency path from the root to the wall,
-cargo's "required by" shape, was left as a possible companion. Colour was left for
-a terminal-only layer in the driver.
+cargo's "required by" shape, was left as a possible companion.
+
+### Colour is a terminal-only layer — HELD
+
+*Sep 3.* The last item of the reading, and the one placed last: a proof sentence was
+a dense mixture of names, ranges and connective prose, and once wrapped, what a
+reader still could not do was skim the names and skip the bounds.
+
+**What was built.** `styleProof` in the core, a pure function over the wrapped text:
+every range token dimmed — the same predicate `wrapProof` used to keep a range
+whole — so the package names stood out by contrast; the connective opening a
+sentence bold, so a sentence could be told from its continuation lines; the headline
+and the `So,` line bold throughout. Stripping the escapes gave the input back, and a
+test said so. The driver applied it only when stdout was a terminal, `NO_COLOR` was
+unset and `TERM` was not `dumb`; there was no flag. The gate, the harness and every
+log went on reading plain text, and no counter moved. Package names were not
+coloured on their own: the rendered text carries no structure that names them, and a
+heuristic that guessed would colour "depends" one day. Contrast did the job.
 
 ---
 

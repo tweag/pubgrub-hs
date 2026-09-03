@@ -25,7 +25,8 @@ import           PubGrub.InstanceSet             (InstanceSet (..))
 import           PubGrub.InstanceSet.SourceCell  (SourceCell (..))
 import           PubGrub.Report                  (collapseNoInstances,
                                                   reportConflict,
-                                                  reportHeadline, wrapProof)
+                                                  reportHeadline, styleProof,
+                                                  wrapProof)
 import           PubGrub.SetOps                  (equivalent)
 import           PubGrub.Term                    (Term (..))
 import qualified Data.Text                       as T
@@ -91,6 +92,7 @@ tests =
         , testGroup "the boot-package leaf" bootLeaf
         , testGroup "the headline" headline
         , testGroup "wrapping" wrapping
+        , testGroup "styling" styling
         ]
 
 -- --------------------------------------------------------------------------
@@ -262,6 +264,36 @@ wrapping =
     short = "So, because root depends on foo, version solving failed."
     long = "Because aeson >=1.1.0.0 && <1.2.2.0 depends on base >=4.5 && <4.13 and bytestring >=0.10.0.1 && <0.10.6.0 || >=0.10.8.1 && <0.10.9.0 depends on base 4.21.0.0 (installed), aeson >=0.8.1.0 && <1.4.7.0 requires base >=4.2 && <4.15."
     seven = "base ^>=4.13.0.0 || ^>=4.14.0.0 || ^>=4.15.0.0 || ^>=4.16.0.0 || ^>=4.17.0.0 || ^>=4.18.0.0 || ^>=4.19.0.0."
+
+-- | 'styleProof': escapes around what is there, and nothing else.
+styling :: [TestTree]
+styling =
+    [ testCase "stripping the escapes gives the input back" $ do
+        let inp = T.pack (unlines' [headline', "", sentence, continuation, conclusion])
+        stripEscapes (styleProof inp) @?= inp
+    , testCase "a range is dimmed and a package name is not" $ do
+        let out = T.unpack (styleProof (T.pack sentence))
+        assertBool out ("\ESC[2m>=1.0 && <2\ESC[0m" `isInfixOf` out)
+        assertBool out (not ("\ESC[2mfoo" `isInfixOf` out) && not ("\ESC[1mfoo" `isInfixOf` out))
+    , testCase "the connective is bold and a continuation line has none" $ do
+        assertBool "opener" ("\ESC[1mAnd\ESC[0m \ESC[1mbecause\ESC[0m" `isInfixOf` T.unpack (styleProof (T.pack sentence)))
+        assertBool "numbered" ("\ESC[1m1.\ESC[0m" `isInfixOf` T.unpack (styleProof (T.pack ("1. " ++ sentence))))
+        assertBool "continuation" (not ("\ESC[1m" `isInfixOf` T.unpack (styleProof (T.pack continuation))))
+    , testCase "the headline and the conclusion are bold throughout" $ do
+        T.unpack (styleProof (T.pack conclusion)) @?= "\ESC[1m" ++ conclusion ++ "\ESC[0m"
+        T.unpack (styleProof (T.pack headline')) @?= "\ESC[1m" ++ headline' ++ "\ESC[0m"
+    , -- A wrapped conclusion is still one bold line to the eye.
+      testCase "a continuation of the conclusion is bold too" $ do
+        let out = T.unpack (styleProof (T.pack (conclusion ++ "\n" ++ continuation)))
+        assertBool out (("\n\ESC[1m" ++ continuation ++ "\ESC[0m") `isInfixOf` out)
+    ]
+  where
+    headline' = "No solution for foo >=1.0: bar is pinned to 2 (installed)."
+    sentence = "And because foo >=1.0 && <2 depends on bar >=1.0, foo >=1.0 && <2 is forbidden"
+    continuation = "    bar >=1.0 && <2 which depends on baz"
+    conclusion = "So, because root depends on foo >=1.0, version solving failed."
+    unlines' = foldr1 (\a b -> a ++ "\n" ++ b)
+    stripEscapes = T.replace (T.pack "\ESC[1m") T.empty . T.replace (T.pack "\ESC[2m") T.empty . T.replace (T.pack "\ESC[0m") T.empty
 
 untouched :: [TestTree]
 untouched =
