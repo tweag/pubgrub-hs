@@ -358,6 +358,12 @@ proof names it, and the world-fact leaves verbatim — "No solution for matterho
 The gate and the harness count by connective, so it is never counted, on the same
 footing as cabal's "Could not resolve dependencies:" line.
 
+**The driver wraps; the reporter does not.** `wrapProof` wraps at the terminal's
+width, or 80 columns off a terminal, with a four-space hanging indent, and never
+breaks inside a range (before a `||` only when the range alone overflows the line).
+`reportConflict` stays one sentence per line for the golden proofs, and a
+continuation line starts with the indent, so the gate and the harness never count it.
+
 **Do not chase byte-parity with pub's output.** `^1.0.0` is Dart syntax and cabal
 writes `>=1.0.0 && <2`. The target is the same sentences and information, in cabal's
 range syntax.

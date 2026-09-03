@@ -895,6 +895,33 @@ which counted by connective, never saw it — the footing of cabal's own `Could 
 resolve dependencies:` line, left out of its count too. Every gate counter stayed
 where it was.
 
+### The driver wraps, the reporter does not — HELD
+
+*Sep 3.* The formatting half of the same reading. The showcase counted sentences,
+and a sentence ran to 286 characters on `matterhorn` and about 400 on
+`hjsonschema`; in an 80-column terminal one such sentence wrapped to five lines with
+breaks inside ranges, `>=0.10.8.1 &&` at one end and `<0.10.9.0 ||` at the other.
+Compared line for line, "5 sentences against 13" was closer to 20 against 13.
+
+**What was built.** `wrapProof` in the core, applied by the driver: the terminal's
+width from `COLUMNS` when stdout was one, 80 columns otherwise, a four-space hanging
+indent, and a range kept whole. A token opening with a comparison, `&&`, `||`,
+`(installed)` or a bare version stuck to the token before it, so a break fell only
+between such atoms; an atom too long for a line of its own broke before a `||`, the
+one seam a range had, and one with no seam overflowed rather than break inside.
+`reportConflict` was left unwrapped, so the golden proofs stayed the spec's
+sentences one per line, and a continuation line started with the indent, which
+neither the gate nor the harness counted. The harness stopped filtering the proof
+down to its sentences and kept it as printed, which also restored the blank line
+between two branches that the showcase had been dropping. Every gate counter stayed
+where it was.
+
+Tree lines for the proof were considered and declined: the spec's algorithm
+linearises the derivation on purpose and skips every other step, and a tree would
+put back what the four rules removed. A dependency path from the root to the wall,
+cargo's "required by" shape, was left as a possible companion. Colour was left for
+a terminal-only layer in the driver.
+
 ---
 
 ## What is open now

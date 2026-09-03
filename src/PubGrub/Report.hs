@@ -37,10 +37,12 @@
 module PubGrub.Report
     ( reportConflict
     , reportHeadline
+    , wrapProof
     , collapseNoInstances
     ) where
 
 import           Control.Monad                  (guard)
+import           Data.Char                      (isDigit)
 import           Data.List                      (nub)
 import qualified Data.Map.Strict                as Map
 import           Data.Maybe                     (fromMaybe)
@@ -128,6 +130,60 @@ collapseNoInstances inc = case incompCause inc of
     positive _            = Nothing
     negative (Negative s) = Just s
     negative _            = Nothing
+
+-- | Wrap every line of a rendered proof (or headline) at @width@ columns, with a
+-- four-space hanging indent on continuation lines, and never inside a range.
+--
+-- A proof sentence is a mixture of prose and ranges, and a range broken across
+-- lines — @>=0.10.8.1 &&@ at one end and @<0.10.9.0 ||@ at the other — is the
+-- worst place a terminal can wrap it. So a range is an atom here: a token that
+-- opens with a comparison, @&&@, @||@, @(installed)@ or a bare version sticks to
+-- the token before it, and a break falls only between atoms. An atom too long for
+-- a line of its own is broken before a @||@, the one seam a range has, and an atom
+-- with no seam overflows rather than break inside.
+--
+-- 'reportConflict' does not wrap: it writes one sentence per line, so a reader
+-- that counts sentences by the start of a line can tell a continuation line here
+-- by its indent.
+wrapProof :: Int -> Text -> Text
+wrapProof width = T.intercalate "\n" . concatMap (wrapLine width) . T.lines
+
+wrapLine :: Int -> Text -> [Text]
+wrapLine width line
+    | T.length line <= width = [line]
+    | otherwise = zipWith (<>) ("" : repeat indent) (build True [] (atoms (T.words line)))
+  where
+    indent = T.replicate 4 " "
+    room first = if first then width else width - T.length indent
+
+    -- Greedy: an atom that fits joins the line, one that does not starts the next,
+    -- and one that fits no line is split at a seam.
+    build _ cur [] = [T.unwords cur | not (null cur)]
+    build first cur (a : as)
+        | T.length (T.unwords (cur ++ [a])) <= room first = build first (cur ++ [a]) as
+        | not (null cur) = T.unwords cur : build False [] (a : as)
+        | otherwise = case splitSeam (room first) a of
+            (h, Just rest) -> h : build False [] (rest : as)
+            (h, Nothing)   -> h : build False [] as
+
+    -- The longest prefix of the atom's @||@-separated pieces that fits, and what is
+    -- left; the whole atom when it has no seam that helps.
+    splitSeam n a = case T.splitOn " || " a of
+        pieces@(_ : _ : _) ->
+            let prefixes = [(k, T.intercalate " || " (take k pieces)) | k <- [length pieces, length pieces - 1 .. 1]]
+             in case [(k, t) | (k, t) <- prefixes, T.length t <= n] of
+                    (k, t) : _ | k < length pieces -> (t, Just ("|| " <> T.intercalate " || " (drop k pieces)))
+                    _ -> (a, Nothing)
+        _ -> (a, Nothing)
+
+    atoms [] = []
+    atoms (t : ts) = let (stuck, rest) = span sticky ts in T.unwords (t : stuck) : atoms rest
+
+    sticky u =
+        any (`T.isPrefixOf` u) [">=", ">", "<", "==", "^>=", "&&", "||", "(installed)"]
+            || isVersion u
+    -- A bare version, possibly ending the sentence: @4.21.0.0@ or @4.21.0.0.@
+    isVersion u = let v = T.dropWhileEnd (== '.') u in not (T.null v) && T.all (\c -> isDigit c || c == '.') v
 
 -- | Render an incompatibility and its derivation as a human-readable proof.
 reportConflict :: Incompatibility -> Text

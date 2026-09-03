@@ -530,6 +530,19 @@ not a proof sentence: the gate counts by connective and the harness keeps it apa
 which is the footing of cabal's own `Could not resolve dependencies:` line, left out
 of its count too. The golden proofs are the spec's and carry no headline.
 
+**The driver wraps, the reporter does not.** A proof sentence runs to 400
+characters on `hjsonschema`, and a terminal that wraps it by itself breaks inside a
+range. `wrapProof` wraps every line at the terminal's width, or 80 columns off a
+terminal, with a four-space hanging indent and a range kept whole: a token that
+opens with a comparison, `&&`, `||`, `(installed)` or a bare version sticks to the
+token before it, and a break falls only between such atoms. An atom too long for a
+line of its own breaks before a `||`, the one seam a range has. `reportConflict`
+itself is unwrapped, so the golden proofs stay the spec's sentences one per line,
+and a continuation line starts with the indent, which neither the gate nor the
+harness counts as a sentence. The harness keeps the proof as the driver printed it,
+continuation lines and the blank line between two branches included; the showcase
+had been dropping that blank line, the one visual device the spec has.
+
 **A declared range is quoted as written.** The dependee term of a dependency fact is
 the declared range with its spelling attached (§4.2), and the store merge keeps that
 term intact, so the proof quotes `base ^>=4.13.0.0 || ^>=4.14.0.0 || … ||

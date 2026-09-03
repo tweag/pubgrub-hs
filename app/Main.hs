@@ -78,12 +78,16 @@ import           PubGrub.InstanceSet                       (HasVersion (version)
 import           PubGrub.Pretty                            (Pretty (pretty))
 import           PubGrub.Provider                          (Provider (..))
 import           PubGrub.Report                            (reportConflict,
-                                                            reportHeadline)
+                                                            reportHeadline,
+                                                            wrapProof)
 import           PubGrub.Solver                            (SolveError (..),
                                                             SolverMsg (..),
                                                             solve)
 import           PubGrub.VersionSet                        (fromVersionRange)
+import           System.Environment                        (lookupEnv)
+import           System.IO                                 (hIsTerminalDevice, stdout)
 import           Text.Printf                               (printf)
+import           Text.Read                                 (readMaybe)
 import           UnliftIO                                  (MonadIO (liftIO),
                                                             MonadUnliftIO,
                                                             evaluate)
@@ -497,9 +501,10 @@ runBaseline opts t0 world = do
 
 report :: PlanShape -> Provider App -> Either SolveError (Map PackageName Instance) -> App ()
 report _ _ (Left (NoSolution incompat)) = do
-    logMsg (reportHeadline incompat)
+    width <- liftIO proofWidth
+    logMsg (wrapProof width (reportHeadline incompat))
     logMsg T.empty
-    logMsg (reportConflict incompat)
+    logMsg (wrapProof width (reportConflict incompat))
 report _ _ (Left (NoSatisfier p _)) =
     logMsg (T.pack ("internal error: no satisfier for " ++ prettyShow p))
 report shape provider (Right solution) = do
@@ -509,6 +514,18 @@ report shape provider (Right solution) = do
             children <- dependencyMap provider solution
             mapM_ logMsg (renderTree solution children)
         Lines -> mapM_ logMsg (planLines solution)
+
+-- | The width a proof is wrapped to. The terminal's own, from @COLUMNS@, when
+-- stdout is one; 80 otherwise, so a proof in a log or in the showcase is wrapped
+-- the same way on every machine. (@COLUMNS@ is a shell variable that most shells
+-- do not export, so on a terminal the answer is usually 80 too.)
+proofWidth :: IO Int
+proofWidth = do
+    tty <- hIsTerminalDevice stdout
+    cols <- lookupEnv "COLUMNS"
+    pure $ case (tty, cols >>= readMaybe) of
+        (True, Just n) | n >= 40 -> n
+        _                        -> 80
 
 -- | One resolved package per line, sorted by name — the 'Map' already is. The
 -- synthetic root is the solver's, not the plan's, so it is left out.

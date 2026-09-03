@@ -25,7 +25,7 @@ import           PubGrub.InstanceSet             (InstanceSet (..))
 import           PubGrub.InstanceSet.SourceCell  (SourceCell (..))
 import           PubGrub.Report                  (collapseNoInstances,
                                                   reportConflict,
-                                                  reportHeadline)
+                                                  reportHeadline, wrapProof)
 import           PubGrub.SetOps                  (equivalent)
 import           PubGrub.Term                    (Term (..))
 import qualified Data.Text                       as T
@@ -90,6 +90,7 @@ tests =
         , testGroup "a run of same-pair steps is one sentence" sameePairRun
         , testGroup "the boot-package leaf" bootLeaf
         , testGroup "the headline" headline
+        , testGroup "wrapping" wrapping
         ]
 
 -- --------------------------------------------------------------------------
@@ -224,6 +225,43 @@ headline =
   where
     root = mkPackageName "root"
     rootDependsOn = fromDependency root (sourceOnly (VersionSet.fromVersionRange (thisVersion (v 0))))
+
+-- | 'wrapProof': a hanging indent, and never a break inside a range.
+wrapping :: [TestTree]
+wrapping =
+    [ testCase "a short line is left alone" $
+        wrapped 80 short @?= [short]
+    , testCase "a blank line stays blank" $
+        T.unpack (wrapProof 80 (T.pack "a\n\nb")) @?= "a\n\nb"
+    , testCase "continuation lines carry the indent and fit the width" $ do
+        let ls = wrapped 60 long
+        assertBool (show ls) (length ls > 1)
+        mapM_ (\l -> assertBool ("too long: " ++ l) (length l <= 60)) ls
+        mapM_ (\l -> assertBool ("no indent: " ++ l) (take 4 l == "    ")) (drop 1 ls)
+    , testCase "a range is never split" $ do
+        let ls = wrapped 60 long
+        mapM_
+            (\l -> assertBool ("starts inside a range: " ++ l)
+                (not (any (`isPrefixOf'` dropWhile (== ' ') l) [">=", "<", "&&", "(installed)"])))
+            ls
+    , testCase "the words survive, in order" $
+        words (unwords (wrapped 60 long)) @?= words long
+    , -- The haddock bound is a hundred characters of one range. It has to break
+      -- somewhere, and the only honest place is before a "||".
+      testCase "an atom too long for a line breaks before ||" $ do
+        let ls = wrapped 60 seven
+        assertBool (show ls) (length ls > 1)
+        mapM_ (\l -> assertBool ("too long: " ++ l) (length l <= 60)) ls
+        mapM_
+            (\l -> assertBool ("bad break: " ++ l) ("|| " `isPrefixOf'` dropWhile (== ' ') l))
+            (drop 1 ls)
+    ]
+  where
+    wrapped n = map T.unpack . T.lines . wrapProof n . T.pack
+    isPrefixOf' p s = take (length p) s == p
+    short = "So, because root depends on foo, version solving failed."
+    long = "Because aeson >=1.1.0.0 && <1.2.2.0 depends on base >=4.5 && <4.13 and bytestring >=0.10.0.1 && <0.10.6.0 || >=0.10.8.1 && <0.10.9.0 depends on base 4.21.0.0 (installed), aeson >=0.8.1.0 && <1.4.7.0 requires base >=4.2 && <4.15."
+    seven = "base ^>=4.13.0.0 || ^>=4.14.0.0 || ^>=4.15.0.0 || ^>=4.16.0.0 || ^>=4.17.0.0 || ^>=4.18.0.0 || ^>=4.19.0.0."
 
 untouched :: [TestTree]
 untouched =
