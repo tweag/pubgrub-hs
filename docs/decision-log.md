@@ -501,7 +501,7 @@ sentence, and **skipping every other derived step**, which the spec offers in as
 words ("you can skip every other derived incompatibility without losing clarity",
 `:528`). Proofs: `lens <4` 6 → 4 lines, `conduit <1.3` 12 → 7, `aeson <2` 83 → 57,
 against cabal's 22, 16 and 30. Line numbers are now minted only where the derivation
-branches, as `:596` asks.
+branches, as `:673` asks.
 
 The transferable part is what pinning the spec's two published examples as tests then
 revealed. **The `no version for …` clutter is not clutter — it is load-bearing in the

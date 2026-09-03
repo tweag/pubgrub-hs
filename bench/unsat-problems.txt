@@ -28,7 +28,7 @@
 # The most common kind among popular packages, and the one that exercises
 # references/pubgrub.md:474 — every release in range is unbuildable, so the proof
 # has to say so rather than call the range empty.
-hpqtypes-extras ==1.20.0.0      # libpq. 2 lines against cabal's 8
+hpqtypes-extras ==1.20.0.0      # libpq. 2 lines against cabal's 7
 haskoin-store-data ==1.6.0      # libsecp256k1, two hops down through haskoin-core
 
 # --- the installed base, and other boot packages -------------------------------
@@ -43,8 +43,8 @@ calamity ==0.12.1.0             # base, via aeson-optics
 hjsonschema ==1.10.0            # base and bytestring, via aeson
 
 # --- dead range: a declared bound naming a version never published -------------
-# `widen` puts the declared range into the term verbatim, so the dead space
-# survives into the proof.
+# `widen` puts the declared range into the term verbatim, so the dead space survives
+# into the proof. Narrowing it was measured and rejected twice (docs/STATUS.md §8).
 atelier-testing ==0.2.0.0       # atelier-core >=0.3 && <0.3.0.0, and two more
 cpsa ==4.4.9                    # deepseq >=1.4.8 && <1.4.8.0; base >=4.13 && <4.13.0
 happstack-hsp ==7.3.7.8         # template-haskell history
@@ -54,11 +54,11 @@ hadolint ==2.15.1               # time, against language-docker. The cleanest sp
 cabal-install ==3.18.1.0        # Cabal / hackage-security
 futhark ==0.27.1                # regex / time chain
 
-# --- the two long ones, kept because they are where we still lose --------------
-# Both walk a dependency's bound history release by release, one sentence per
-# adjacent pair — the shape aeson '<2' has. Fix that and these are the measure.
-scion-browser ==0.5.0           # 16 lines against cabal's 12: the only loss
-matterhorn ==90000.1.1          # 16 against 18, and 11 no-version lines
+# --- the two long chains -------------------------------------------------------
+# Both walk a dependency's bound history release by release. PubGrub.Report states
+# such a run once (docs/STATUS.md §4.9, rule 3); these two are the measure of it.
+scion-browser ==0.5.0           # 4 sentences against cabal's 11; was 16 against 12
+matterhorn ==90000.1.1          # 8 against 17; was 16 against 18 with 11 no-version lines
 
 # --- positive controls: these RESOLVE here --------------------------------------
 # Each failed on Hackage's builder and succeeds here, which is the point: a

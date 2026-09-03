@@ -61,6 +61,9 @@ Kinds 1–5 all reproduce. Kind 6 does not, and is recorded so nobody hunts it t
 ghc-9.12.2, base-4.21.0.0, and this machine's pkg-config database. Absent there:
 `libpq`, `libzmq`, `blas`, `lapack`. Present: `cairo`, `pango`, `gtk+-2.0`, `gtk+-3.0`,
 `gtk4`, `gio-2.0`, `zlib`, `libsodium`, `libgit2`. Every problem runs in under 3 s.
+Measured on 2026-09-03, on the Hackage index refreshed that day. cabal's message
+lengths move with the index: `haskoin-store-data` and `atelier-testing` each grew by
+two lines between the 2026-08-20 and 2026-09-03 snapshots. Ours did not move.
 
 `ours` counts proof sentences. `cabal` counts the non-blank lines of its
 `Could not resolve dependencies:` block — its actual explanation, not the whole log.
@@ -76,20 +79,20 @@ is true but not a cause, so a proof carrying one is explaining less than it coul
 | `liquidhaskell ==0.9.14.1.1` | installed `ghc` | **2** | 7 | 0 |
 | `purescript ==0.15.15` | base bound | **2** | 7 | 0 |
 | `stackctl ==1.7.3.7` | base via amazonka | **2** | 7 | 0 |
-| `atelier-testing ==0.2.0.0` | dead range | **3** | 6 | 0 |
+| `atelier-testing ==0.2.0.0` | dead range | **3** | 8 | 0 |
 | `calamity ==0.12.1.0` | base via aeson-optics | **3** | 10 | 0 |
 | `cpsa ==4.4.9` | installed `deepseq` | **3** | 9 | 0 |
 | `happstack-hsp ==7.3.7.8` | `template-haskell` history | **4** | 8 | 0 |
 | `scion-browser ==0.5.0` | haskeline / tar chain | **4** | 11 | 0 |
-| `haskoin-store-data ==1.6.0` | pkg-config `libsecp256k1` | **5** | 11 | 0 |
+| `haskoin-store-data ==1.6.0` | pkg-config `libsecp256k1` | **5** | 13 | 0 |
 | `hjsonschema ==1.10.0` | aeson / bytestring chain | **5** | 13 | 0 |
 | `language-puppet ==1.5.1` | `ghc-prim` via aeson | **5** | 11 | 0 |
 | `futhark ==0.27.1` | regex / time chain | **8** | 10 | 1 |
 | `matterhorn ==90000.1.1` | hashable / bytestring chain | **8** | 17 | 0 |
 
-**Shorter on all 17: 62 proof sentences against cabal's 162**, and one `no version`
+**Shorter on all 17: 62 proof sentences against cabal's 166**, and one `no version`
 line left in the whole set. The margin is narrowest on `futhark` (8 against 10) and
-widest on `scion-browser` (4 against 11). `matterhorn` is our longest at 8, against
+widest on `cabal-install` (2 against 12). `matterhorn` is our longest at 8, against
 cabal's longest message at 17.
 
 [`scripts/gate.sh`](../scripts/gate.sh) re-runs every row and holds both totals as

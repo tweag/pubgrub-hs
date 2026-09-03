@@ -126,7 +126,7 @@ instead of one at a time:
 
 | | walk off | walk on |
 | --- | --- | --- |
-| `futhark ==0.27.1` decisions | 4287 | **805** |
+| `futhark ==0.27.1` decisions | 4287 | **807** |
 | `futhark` conflicts | 53 | **8** |
 | `futhark` elapsed | 6.62 s | **2.19 s** |
 | `futhark` allocation | 23.1 GB | **3.99 GB** |

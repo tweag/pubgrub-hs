@@ -44,8 +44,9 @@ you change anything, read it.
 
 **Two citation rules, and both have been broken.**
 
-- **Cite `references/pubgrub.md` by line.** Check the line first. Several citations
-  land on blank lines: `:596`, `:601`, `:640`, `:643` and `:670` are all empty.
+- **Cite `references/pubgrub.md` by line.** Check the line first. `:596`, `:601`,
+  `:640`, `:643` and `:670` are blank, and each has been cited before. As of
+  2026-09-03 no citation in the tree lands on a blank line.
 - **Cite the Rust reference by function name, not by line.** `references/pubgrub` and
   `references/pubgrub-guide` are nested git repos, so cloning this repository does not
   get them, and their line numbers move with upstream. Write `merge_dependents`, not
@@ -220,6 +221,11 @@ those nodes are the proof lines this exists to remove.
 `openStore` answers `Nothing` for a missing, unreadable or stale-format store, and
 every miss parses instead. Removing `_cache/derived-index.*` costs speed and never
 correctness.
+
+**It does not follow the index.** The Hackage index refreshes itself at most weekly,
+and the store checks only its format version, so every release published since it was
+built is a miss that parses. Re-run `cabal run pubgrub-index` after a refresh, or
+`parses` stops being zero.
 
 **Raise `storeFormatVersion` on any encoding change.** A generic CBOR encoding is
 positional, so reordering a constructor silently changes meaning.

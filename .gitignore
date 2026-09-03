@@ -30,3 +30,6 @@ cabal.project.local~
 
 # The local Hackage index
 _cache/
+
+# Benchmark output; a run meant to be quoted is copied into docs/
+bench/output/

@@ -144,11 +144,16 @@ It reports three separate read counters, and they mean different things:
 
 | counter | meaning |
 | --- | --- |
-| `parses` | releases whose `.cabal` was parsed. **Zero** once the derived index is built |
+| `parses` | releases whose `.cabal` was parsed. **Zero** once the derived index is built, until the index next refreshes: releases published since the store was built parse on demand |
 | `decoded` | releases decoded out of the derived index |
 | `reused` | repeat lookups served from the in-memory cache |
 
 The lookup figures STATUS.md quotes (167 against 2873 on `pandoc`) are `decoded`.
+
+The decision figures STATUS.md quotes are `deciding`: every time the solver asked the
+provider for a decision. `chose` is the subset that produced an instance, and the two
+differ by the `noversion` events. On `futhark ==0.27.1` that is 807 against 805, and
+both numbers have been quoted as "decisions". Quote `deciding`.
 
 > **A warning that cost this project real numbers.** `summarise.awk` used to read those
 > counters by field position. The provider's log line gained a clause, so `parses` and
@@ -200,6 +205,12 @@ with `-v`, so its elapsed times are upper bounds. If timing is the point, run wi
 index and rebuilds the version cache. `bench/compare.sh` does one throwaway run for
 this. A `cacheFormatVersion` bump also forces one rebuild.
 
+**A refresh leaves the derived index behind.** The store checks only its format
+version, so every release published since it was built parses on demand. Re-run
+`cabal run pubgrub-index` after a refresh, or the `parses` column stops being zero.
+A refresh also moves the problem: cabal's message on a corpus problem can change
+length while our proof does not, which is what happened on 2026-09-03.
+
 ## Comparing against cabal
 
 `--cabal` runs cabal's own modular solver (`cabal-install-solver`, no `cabal-install`
@@ -228,7 +239,7 @@ Four things to keep in mind when reading a comparison.
 
 For the explanation deliverable the comparable quantity is **length**: our proof
 against cabal's message. `bench/compare.sh` prints both (`proof=` and
-`cabal-log-lines=`). Over the 17-case corpus cabal's message runs 6 to 17 lines. Ours
+`cabal-log-lines=`). Over the 17-case corpus cabal's message runs 7 to 17 lines. Ours
 has no bound on length yet.
 
 **`proof=` counts by connective, not by line number.** The reporter numbers only the

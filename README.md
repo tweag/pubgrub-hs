@@ -36,7 +36,10 @@ cabal run pubgrub-index      # optional but recommended, ~200 s, once
 
 `pubgrub-index` parses every release on Hackage into a derived index, after which
 reading a release is a CBOR decode rather than a `.cabal` parse. It is a cache:
-without it the solver parses on demand and gets the same answers, more slowly.
+without it the solver parses on demand and gets the same answers, more slowly. It
+does not follow the weekly index refresh, so releases published since it was built
+are parsed on demand until it is run again. A non-zero `read N .cabal files` on the
+last line of a solve is the tell.
 
 ## Run
 
@@ -90,7 +93,7 @@ So, because root ==0 depends on lens <4, version solving failed
 ```
 
 That is 8 sentences where cabal prints 22 lines for the same problem. Across a corpus
-of 17 real Hackage failures we are shorter on all 17: 62 sentences against cabal's 162.
+of 17 real Hackage failures we are shorter on all 17: 62 sentences against cabal's 166.
 
 ## Test
 

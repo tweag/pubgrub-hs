@@ -10,8 +10,9 @@
 > **History is not here.** [decision-log.md](decision-log.md) records how the project
 > got here, in order. [attic/](attic/) holds the directions we dropped.
 >
-> **Checked against the tree on 2026-08-23.** 165 tests pass and
-> [`scripts/gate.sh`](../scripts/gate.sh) passes.
+> **Checked against the tree on 2026-09-03.** 165 tests pass and
+> [`scripts/gate.sh`](../scripts/gate.sh) passes, on the Hackage index refreshed that
+> day.
 
 ---
 
@@ -106,7 +107,9 @@ Our search counts on the same run:
 | `yesod` | 827 | 11 | 1 | 3405 | 0 |
 
 Every parse count is zero because the derived index answers every read
-([§4.6](#46-the-derived-index-makes-a-read-a-decode)).
+([§4.6](#46-the-derived-index-makes-a-read-a-decode)). That holds only while the
+store is newer than the index: after the weekly refresh, releases published since are
+parsed until `pubgrub-index` is re-run, and a non-zero `parses` is the tell.
 
 **The three kinds of problem are not interchangeable.** `vector` and `pandoc` measure
 index throughput, and `pandoc` has one conflict, so neither can show a search
@@ -120,9 +123,11 @@ helps only one kind is not a change that helps.
 [failure-cases.md](failure-cases.md) has the method, the six failure kinds, and the
 per-problem table.
 
-**We are shorter than cabal on all 17: 62 proof sentences against cabal's 162.** One
+**We are shorter than cabal on all 17: 62 proof sentences against cabal's 166.** One
 `no version for …` line is left in the whole corpus, in `futhark`.
-`scripts/gate.sh` holds both totals as ceilings.
+`scripts/gate.sh` holds both totals as ceilings. Measured on 2026-09-03. cabal's
+total moves with the index (it was 162 on the 2026-08-20 snapshot, and two of its
+messages grew), ours did not.
 
 `cabal-install ==3.18.1.0` is the widest margin at 2 sentences against 12. `futhark`
 is the narrowest at 8 against 10.
@@ -309,6 +314,10 @@ Four properties to know before you touch
   `_cache/derived-index.*` costs speed and never correctness. Raise
   `storeFormatVersion` on any encoding change, because a generic CBOR encoding is
   positional.
+- **It does not follow the index.** `openStore` checks the format version and
+  nothing else. The Hackage index refreshes itself at most weekly, and every release
+  published since the store was built is then a miss that parses. The answers stay
+  right, and `parses` stops being zero until `cabal run pubgrub-index` runs again.
 - **What is stored is the pre-environment form.** `Flatten.envConfVar` resolves
   `os`, `arch` and `impl` against this machine, and buildability additionally
   resolves `pkgconfig-depends` against its `pkg-config` database. A flattened store
@@ -681,11 +690,11 @@ Two rules follow, and both have been broken.
 that checkout, and its line numbers move with upstream. `merge_dependents` and
 `collapse_no_versions` survive a rebase. `:173` does not.
 
-**Check a `pubgrub.md` line before you cite it.** Several citations added after the
-first audit land on blank lines. `:596`, `:601`, `:640`, `:643` and `:670` are all
-empty. The real anchors are `:595` (reporting case 1), `:651` (case 2.ii), `:668` and
-`:671` (case 3), and `:673`–`:675` (the numbering rule). Those wrong citations are in
-`src/PubGrub/Report.hs` and `scripts/gate.sh`.
+**Check a `pubgrub.md` line before you cite it.** Citations have landed on blank
+lines before: `:596`, `:601`, `:640`, `:643` and `:670` are all empty. The real
+anchors are `:595` (reporting case 1), `:651` (case 2.ii), `:668` and `:671` (case
+3), and `:673`–`:675` (the numbering rule). Every citation in the tree was checked on
+2026-09-03, and none lands on a blank line.
 
 Still owed: vendor the Rust checkout properly, or extract the cited functions into a
 note.
@@ -778,7 +787,7 @@ the reason for reverting does not apply to it. See
 
 | deliverable | state |
 | --- | --- |
-| **Explanation showcase** — real failing problems, pubgrub-hs against cabal, side by side | **the problem set exists and we win on all of it.** 17 real failures, six failure kinds, five positive controls. Shorter than cabal on 17 of 17: 62 proof sentences against 162. Shorter on two of the three benchmark unsat problems. Both of the spec's published examples are golden tests, and the linear one matches sentence for sentence. Every reporting gap but the cosmetics is closed. Missing: **the harness** and side-by-side rendering |
+| **Explanation showcase** — real failing problems, pubgrub-hs against cabal, side by side | **the problem set exists and we win on all of it.** 17 real failures, six failure kinds, five positive controls. Shorter than cabal on 17 of 17: 62 proof sentences against 166. Shorter on two of the three benchmark unsat problems. Both of the spec's published examples are golden tests, and the linear one matches sentence for sentence. Every reporting gap but the cosmetics is closed. Missing: **the harness** and side-by-side rendering |
 | **Benchmark report** — time and peak residency on real problems | **current numbers exist** for six problems, three sat and three unsat, both solvers. We use less peak memory on all six, and are faster and leaner in allocation on five of six. `yesod` is the exception on both. Not a report: index build is not separated from solve, timings are single runs against ±25% noise, and the 22 MB memory floor is unexplained |
 
 The baseline and the shared index are done. `cabal-install-solver` drives cabal's
