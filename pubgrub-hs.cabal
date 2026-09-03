@@ -164,6 +164,28 @@ executable pubgrub-index
     default-language:   GHC2021
     default-extensions: ImportQualifiedPost
 
+-- The harness: the one command that produces both deliverables. It drives the
+-- pubgrub executable as a child process, once per solver, per problem, per
+-- repetition, because peak memory is a per-process number, and writes
+-- bench/output/benchmark.md and bench/output/showcase.md. See app/Harness.hs and
+-- docs/harness-plan.md. It measures; scripts/gate.sh decides.
+executable pubgrub-harness
+    import:             warnings
+    hs-source-dirs:     app
+    main-is:            Harness.hs
+    build-depends:
+        , base
+        , bytestring
+        , containers
+        , directory
+        , filepath
+        , optparse-applicative
+        , process
+        , text
+        , time
+    default-language:   GHC2021
+    default-extensions: ImportQualifiedPost
+
 -- A throwaway measurement, not part of the solver: prototype/IndexBench.hs
 -- prices the derived pre-environment index (bytes per entry under binary and
 -- serialise, and the parse:flatten split).

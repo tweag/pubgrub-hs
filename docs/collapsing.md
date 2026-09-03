@@ -226,7 +226,7 @@ ever becomes a problem again, this is where to look.**
 
 The store change was priced in isolation before anything was built on it, because all
 three candidate store shapes added an indirection to the hot loop. Three steps, each a
-full `bench/compare.sh`:
+full run of the benchmark set through both solvers:
 
 | step | what changed | result |
 | --- | --- | --- |

@@ -36,8 +36,10 @@ on 17 of the 17 harvested failures.
 Two rows go the other way, and both are worth knowing. cabal is faster on `yesod` and
 allocates less there. cabal's message on `aeson <2` is shorter than our proof.
 
-The harness is missing. One process must run both solvers, diff the plans, repeat the
-runs, and print the two explanations side by side.
+The harness exists. `pubgrub-harness` runs both solvers over both problem sets as
+child processes, repeats the runs, diffs the plans, and writes the benchmark report
+and the explanation showcase. The two reports it generated on 2026-09-03 are in
+[reports/](reports/), and they are the deliverables in their current form.
 
 ---
 
@@ -54,39 +56,49 @@ runs, and print the two explanations side by side.
 | Explanations | `PubGrub.Report` prints a numbered proof that follows the spec's own reporting algorithm |
 | cabal baseline | `pubgrub --cabal <target>` runs cabal's modular solver over the same index |
 | Regression gate | `scripts/gate.sh` runs 23 problems through both solvers and fails on any regression |
+| Harness | `pubgrub-harness` measures both solvers over both sets, three runs each, and writes `bench/output/benchmark.md` and `showcase.md`. It measures; the gate decides |
 
-Not built: setup and build-tool dependencies (rung 4), public sublibraries (rung 5),
-and the benchmark harness.
+Not built: setup and build-tool dependencies (rung 4) and public sublibraries
+(rung 5).
 
 ---
 
 ## 3. The numbers
 
-Measured on 2026-08-23, one desktop, warm index cache. Our solver runs with the trace
-on (`-v`), so our elapsed times are upper bounds. Read
+Measured on 2026-09-03 by `pubgrub-harness`: one desktop, the derived index rebuilt
+on the Hackage index refreshed that day, medians of three runs, no trace. The two
+reports as generated are in [reports/](reports/). Read
 [benchmarking.md](benchmarking.md) before you quote any figure below. The short version:
 counts are deterministic, elapsed time moves by ±25% between runs, and total
 allocation is the stable stand-in for time.
 
 ### 3.1 Against cabal, on the benchmark set
 
-`bench/compare.sh` over [`bench/problems.txt`](../bench/problems.txt). Residency is
-`maximum residency` from `+RTS -s`. Bold marks the better of the two.
+`pubgrub-harness` over [`bench/problems.txt`](../bench/problems.txt). Residency is
+`maximum residency` from `+RTS -s`. Times are seconds, medians of three. Bold marks
+the better of the two.
 
-| problem | verdict | ours | cabal | our residency | cabal residency | our allocation | cabal allocation | our proof | cabal's message |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `vector` | both sat | **0.72** | 1.03 s | **22.7** | 51.2 MB | **0.41** | 0.86 GB | — | 55 |
-| `pandoc` | both sat | **1.36** | 1.79 s | **33.0** | 80.6 MB | **1.54** | 1.80 GB | — | 385 |
-| `conduit <1.3` | both UNSAT | **0.74** | 1.21 s | **22.7** | 51.2 MB | **0.39** | 1.33 GB | **10** | 16 |
-| `lens <4` | both UNSAT | **0.83** | 1.50 s | **22.7** | 76.7 MB | **0.50** | 1.88 GB | **8** | 22 |
-| `aeson <2` | both UNSAT | **0.89** | 2.50 s | **22.7** | 81.1 MB | **0.79** | 5.43 GB | 64 | **30** |
-| `yesod` | both sat | 2.49 | **1.72** s | **50.4** | 80.0 MB | 4.44 | **1.94** GB | — | 347 |
+| problem | verdict | ours | cabal | our world / solve | cabal world / index / solve | our residency | cabal residency | our allocation | cabal allocation | our proof | cabal's message |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `vector` | both sat | **0.61** | 0.83 | 0.58 / 0.02 | 0.53 / 0.06 / 0.23 | **22.8** | 51.2 MB | **0.41** | 0.86 GB | — | — |
+| `pandoc` | both sat | **0.96** | 1.21 | 0.57 / 0.38 | 0.52 / 0.05 / 0.62 | **33.1** | 80.3 MB | **1.50** | 1.80 GB | — | — |
+| `conduit <1.3` | both UNSAT | **0.60** | 0.92 | 0.58 / 0.01 | 0.55 / 0.06 / 0.27 | **22.8** | 51.2 MB | **0.39** | 1.33 GB | **10** | 12 |
+| `lens <4` | both UNSAT | **0.63** | 1.13 | 0.57 / 0.05 | 0.50 / 0.06 / 0.48 | **22.9** | 76.4 MB | **0.49** | 1.89 GB | **8** | 18 |
+| `aeson <2` | both UNSAT | **0.75** | 1.98 | 0.58 / 0.12 | 0.55 / 0.08 / 1.33 | **22.8** | 81.2 MB | **0.77** | 5.43 GB | 64 | **26** |
+| `yesod` | both sat | 1.82 | **1.36** | 0.59 / 1.20 | 0.63 / 0.06 / 0.64 | **50.4** | 80.4 MB | 4.38 | **1.93** GB | — | — |
 
 All six verdicts agree. We use **1.6–3.6× less peak memory on all six**. We are faster
 on five of six and allocate less on five of six.
 
+**The phases say where our time goes, and it is not the solve.** Opening the world
+(the index, the installed database and the pkg-config database) costs about 0.58 s on
+every run, on both sides. Our solve is under 0.13 s on five of the six problems. Only
+`yesod` has a solve phase that matters. cabal's `index` phase is small because the
+work it names is lazy and lands in its `solve`
+([§3.3](#33-what-these-numbers-do-not-establish)).
+
 **`yesod` is where we lose, and it is the most useful row in the table.** cabal is
-1.4× faster on it and allocates 2.3× less. It is the only *satisfiable* problem in the
+1.3× faster on it and allocates 2.3× less. It is the only *satisfiable* problem in the
 set with real search in it: `vector` and `pandoc` resolve almost straight through.
 Every other row is either a walk-through or an unsatisfiable proof, so until `yesod`
 was enabled the set could not report this at all.
@@ -100,16 +112,31 @@ Our search counts on the same run:
 | problem | decisions | conflicts | no-version events | releases decoded | `.cabal` parses |
 | --- | --- | --- | --- | --- | --- |
 | `vector` | 39 | 0 | 0 | 114 | 0 |
-| `pandoc` | 270 | 1 | 0 | 2873 | 0 |
+| `pandoc` | 270 | 1 | 0 | 2882 | 0 |
 | `conduit <1.3` | 16 | 9 | 3 | 174 | 0 |
 | `lens <4` | 60 | 24 | 3 | 268 | 0 |
-| `aeson <2` | 309 | 58 | 1 | 392 | 0 |
-| `yesod` | 827 | 11 | 1 | 3405 | 0 |
+| `aeson <2` | 309 | 58 | 1 | 393 | 0 |
+| `yesod` | 827 | 11 | 1 | 3411 | 0 |
 
 Every parse count is zero because the derived index answers every read
 ([§4.6](#46-the-derived-index-makes-a-read-a-decode)). That holds only while the
 store is newer than the index: after the weekly refresh, releases published since are
-parsed until `pubgrub-index` is re-run, and a non-zero `parses` is the tell.
+parsed until `pubgrub-index` is re-run, and a non-zero `parses` is the tell. The
+search counts have not moved between the 2026-08-20 and 2026-09-03 index snapshots;
+the decode counts rose by a few, which is the walk reading releases published since.
+
+**The plan diff finds two known gaps and nothing else.** On the three satisfiable
+problems the two plans agree on every package they share: 38, 190 and 180. cabal's
+plans additionally carry `Cabal`, `Cabal-syntax` and `hsc2hs`, and for `pandoc` also
+`alex`, `happy`, `happy-lib` and `cabal-doctest`. Those are setup and build-tool
+dependencies, rung 4. Ours additionally carry packages cabal's do not: on `pandoc`,
+`network-bsd`, `network-run` and `time-manager`. Each traces to an executable stanza
+of a dependency that is marked `buildable: False` (`tls-server`, `tls-client`,
+`crypton-socks-example`). `Bridge.Cabal.Flatten.componentDeps` merges every
+executable's dependencies into the package's and reads `buildable:` for the library
+only, where cabal plans only the library of a dependency
+([§5.3](#53-setup-and-build-tool-dependencies)). `yesod`'s five extra packages have
+not each been traced.
 
 **The three kinds of problem are not interchangeable.** `vector` and `pandoc` measure
 index throughput, and `pandoc` has one conflict, so neither can show a search
@@ -143,11 +170,16 @@ is the narrowest at 8 against 10.
   What sits *above* the floor is understood: the memoised reduced forms, so residency
   tracks how many releases a solve read. That is why `pandoc` is at 33.0 MB and `yesod`
   at 50.4 MB.
-- **Index build is not separated from solve.** Both figures include index loading,
-  and the two solvers do not do the same index work. Ours decodes a release when it
-  expands a package. cabal's resolver wants a record for all 152,987 releases before
-  it starts.
-- **The times are single runs.** ±25% noise on this machine.
+- **cabal's index work is not separated from its solve, and cannot be.** The `world`
+  phase — index open, installed database, pkg-config database — is separated on both
+  sides. The two solvers then do different index work: ours decodes a release when it
+  expands a package; cabal's resolver wants a record for all 152,987 releases before
+  it starts, and its `index` phase is only the eager allocation of those records. The
+  `PackageIndex` and every `.cabal` parse are lazy and land in cabal's `solve` phase.
+  Forcing them earlier would make a solve pay for releases it never touches, which
+  changes what is measured.
+- **The times are medians of three runs**, against ±25% noise on this machine. Three
+  is enough for a median and not for a spread, and the report quotes none.
 - **Both solvers run with every flag pinned to its declared default.** That is a
   restriction of the problem, not a property of either solver. See
   [§5.1](#51-flags-are-fixed-at-their-declared-defaults).
@@ -442,8 +474,8 @@ branches.
 
 > **One trap for tooling.** The synthetic root's name carries a real NUL byte, so GNU
 > `grep` treats a proof as binary and reports no matches without `-a`.
-> `bench/compare.sh` passes `-a` everywhere. New tooling that greps a proof will read
-> zero and look like it passed.
+> `scripts/gate.sh` passes `-a` everywhere, and the harness reads every child log as
+> bytes. New tooling that greps a proof will read zero and look like it passed.
 
 ### 4.10 Memoise the reduced form, never the parse tree
 
@@ -604,6 +636,11 @@ Rung 4, not started. `Bridge.Cabal.Flatten.componentDeps` merges library, sublib
 and executables into one `GuardedDeps` and discards which component each occurrence
 came from. It reads neither `setup-depends` nor `build-tool-depends`.
 
+The merge shows in the plans. cabal plans only the library of a dependency, so an
+executable stanza's dependencies never enter its plan, and `buildable: False` on that
+stanza is read only for the library here. That is why our `pandoc` plan carries
+`network-run` and cabal's does not ([§3.1](#31-against-cabal-on-the-benchmark-set)).
+
 Recovering the component label is the bulk of the work, and it touches no solver code.
 
 ### 5.4 Public sublibraries
@@ -624,7 +661,6 @@ exists in the code.**
 | **`buildable:` as a condition** | [flags-semantics.md](flags-semantics.md) §1.5 | half built. `buildableCondition` returns the condition and `buildableAtDefaults` evaluates it. Satisfying it rather than evaluating it is the flag-axis half |
 | **User flag constraints** (`--flag`) | [flags-semantics.md](flags-semantics.md) §1.6 | do not exist. While every flag is manual, they are the only thing that can move one |
 | **The verdict oracle** (test) | [flags-semantics.md](flags-semantics.md) §6 | owed. It blocks condition decisions, and it is what would discharge O4's whole-loop claim |
-| **The benchmark harness** | — | nothing exists. It is the larger of the two deliverables |
 | **`preferred-versions`** | — | the index reader does not read it |
 
 ---
@@ -644,6 +680,8 @@ specifications mostly do not overlap.
 | [collapsing.md](collapsing.md) | **depender collapsing**: what runs, what it costs, and the five ways to make it cheaper | current |
 | [benchmarking.md](benchmarking.md) | **how to run the tests and benchmarks**, and which numbers to trust | current |
 | [failure-cases.md](failure-cases.md) | **the failure corpus**: where it came from and what is in it | current |
+| [harness-plan.md](harness-plan.md) | **the harness**: why it is shaped that way, and where the build differed | current |
+| [reports/](reports/) | the two reports **as generated** by `pubgrub-harness` on 2026-09-03 | generated. Regenerate with `cabal run pubgrub-harness` and copy; do not edit |
 | [cabal-build-model.md](cabal-build-model.md) | Cabal's **build model** — components, qualifiers, Backpack | reference for rungs 4 and 5. Nothing implemented |
 | [pubgrub-intro.md](pubgrub-intro.md) | a tutorial introduction to PubGrub | current |
 | [related-work.md](related-work.md) | external literature mapped onto our problems | a reading map. Authoritative on nothing |
@@ -719,11 +757,8 @@ note.
 5. **How far can the walk go?** It is unbounded today, so widening reads the whole
    version list in the worst case. A cap stays sound, because flags-semantics.md §4.2
    makes maximality policy rather than a requirement. Nothing has chosen one.
-6. **A quiet run cannot also be a counted run.** Every count is derived by counting
-   trace lines, so timing and the search columns are different runs. A `--stats` mode
-   that consumed `SolverMsg` into counters would fix it. It does not exist.
 
-Two questions once open here are now **answered**.
+Three questions once open here are now **answered**.
 
 **What does the walk do at an unparseable neighbour?** It stops
 (`Bridge.Provider.spanningOccurrence`). Spanning it would claim a fact about a release
@@ -733,6 +768,11 @@ nobody could read.
 decisions, every conflict at depth 0. It now resolves in **2.49 s** with 827 decisions
 and 11 conflicts, and it is in the benchmark set. It is also the one problem where
 cabal beats us — see [§3.1](#31-against-cabal-on-the-benchmark-set).
+
+**Can a quiet run also be a counted run?** Yes. `pubgrub --stats` folds each
+`SolverMsg` into counters in-process and prints one `stats:` line after the answer,
+with the phase timings on a `phases:` line. `scripts/check-stats.sh` holds it to
+`bench/summarise.awk`, number for number, on all 23 problems.
 
 ### Settled — please stop re-litigating
 
@@ -787,17 +827,17 @@ the reason for reverting does not apply to it. See
 
 | deliverable | state |
 | --- | --- |
-| **Explanation showcase** — real failing problems, pubgrub-hs against cabal, side by side | **the problem set exists and we win on all of it.** 17 real failures, six failure kinds, five positive controls. Shorter than cabal on 17 of 17: 62 proof sentences against 166. Shorter on two of the three benchmark unsat problems. Both of the spec's published examples are golden tests, and the linear one matches sentence for sentence. Every reporting gap but the cosmetics is closed. Missing: **the harness** and side-by-side rendering |
-| **Benchmark report** — time and peak residency on real problems | **current numbers exist** for six problems, three sat and three unsat, both solvers. We use less peak memory on all six, and are faster and leaner in allocation on five of six. `yesod` is the exception on both. Not a report: index build is not separated from solve, timings are single runs against ±25% noise, and the 22 MB memory floor is unexplained |
+| **Explanation showcase** — real failing problems, pubgrub-hs against cabal, side by side | **the problem set exists and we win on all of it.** 17 real failures, six failure kinds, five positive controls. Shorter than cabal on 17 of 17: 62 proof sentences against 166. Shorter on two of the three benchmark unsat problems. Both of the spec's published examples are golden tests, and the linear one matches sentence for sentence. Every reporting gap but the cosmetics is closed. `pubgrub-harness` renders the two explanations as adjacent blocks for the 13 comparable problems, and the 2026-09-03 run is [reports/showcase.md](reports/showcase.md): shorter on 13 of 13, 44 sentences against 123 lines |
+| **Benchmark report** — time and peak residency on real problems | **current numbers exist** for six problems, three sat and three unsat, both solvers. We use less peak memory on all six, and are faster and leaner in allocation on five of six. `yesod` is the exception on both. The 2026-09-03 run is [reports/benchmark.md](reports/benchmark.md). Its caveats: timings are medians of three runs against ±25% noise, cabal's lazy per-release parsing lands in its `solve` phase and cannot be separated without changing the work, and the 22 MB memory floor is unexplained |
 
 The baseline and the shared index are done. `cabal-install-solver` drives cabal's
 resolver from the same `withWorld`, which is what makes the comparison
 apples-to-apples rather than arranged.
 
-`scripts/gate.sh` does the regression half of the harness. It runs both solvers over
-all 23 problems and fails on any regression in verdict agreement or proof length. It
-is not the harness: it does not diff plans, separate index build from solve, or repeat
-runs.
+The gate decides and the harness measures, and neither replaces the other.
+`scripts/gate.sh` runs both solvers over all 23 problems once and fails on any
+regression in verdict agreement or proof length. `pubgrub-harness` runs them three
+times, diffs the plans, separates the phases, and writes the two reports.
 
 **One thing both deliverables must state outright.** Both solvers run with every flag
 pinned to its declared default. That makes the comparison fair, because neither side

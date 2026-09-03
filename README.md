@@ -44,13 +44,14 @@ last line of a solve is the tell.
 ## Run
 
 ```sh
-cabal run pubgrub -- [-v|--verbose] <package> [version-range]
+cabal run pubgrub -- [-v|--verbose] [--stats] [--plan tree|lines] <package> [version-range]
 ```
 
 ```sh
 cabal run pubgrub -- hashable          # any version
 cabal run pubgrub -- aeson '>=2'       # constrained (quote ranges for the shell)
 cabal run pubgrub -- -v aeson '<2'     # ... plus the solver's search trace
+cabal run pubgrub -- --stats aeson     # ... plus search counts and phase timings, no trace
 cabal run pubgrub -- --cabal aeson     # cabal's own solver, over the same index
 ```
 
@@ -92,21 +93,24 @@ And because no version for lens in <0.1, lens <2.4 is forbidden
 So, because root ==0 depends on lens <4, version solving failed
 ```
 
-That is 8 sentences where cabal prints 22 lines for the same problem. Across a corpus
+That is 8 sentences where cabal prints 18 lines for the same problem. Across a corpus
 of 17 real Hackage failures we are shorter on all 17: 62 sentences against cabal's 166.
 
 ## Test
 
 ```sh
-cabal test        # 165 tests
-scripts/gate.sh   # every check that must not regress, over 23 real problems
+cabal test                  # 165 tests
+scripts/gate.sh             # every check that must not regress, over 23 real problems
+cabal run pubgrub-harness   # both solvers over both problem sets; writes bench/output/
 ```
 
 The suite covers the `VersionSet` laws, the instance-set algebra against an extensional
 model, small end-to-end solves, and all six worked examples from the PubGrub spec. The
 two error-reporting examples assert the printed proof against a golden file.
 
-`scripts/gate.sh` is what decides whether a change is kept. See
+`scripts/gate.sh` is what decides whether a change is kept. `pubgrub-harness`
+measures: it runs the `pubgrub` executable as a child process, three times per solver
+per problem, and writes the benchmark report and the explanation showcase. See
 [`docs/benchmarking.md`](docs/benchmarking.md).
 
 ## Layout
@@ -119,7 +123,7 @@ bridge/Bridge/      the Cabal bridge (private library): reads the Hackage index,
                     resolves the compiler and installed packages, builds the
                     Provider the core consumes, and drives cabal's own solver
                     over the same index as the baseline.
-app/                the `pubgrub` and `pubgrub-index` executables.
+app/                the `pubgrub`, `pubgrub-index` and `pubgrub-harness` executables.
 test/               the test suite, plus test/golden/.
 docs/               STATUS.md first. See docs/STATUS.md §7 for what each file decides.
 specification/      a Lean model of the kernel. A draft, authoritative on nothing.
@@ -145,6 +149,10 @@ index.
 **Not modelled:** setup and build-tool dependencies, public sublibraries,
 `preferred-versions`, and user flag constraints.
 
-**Missing:** the harness. `scripts/gate.sh` catches regressions, but nothing yet runs
-both solvers, diffs the plans, repeats the timings and renders the two explanations
-side by side. That is what turns the current numbers into the two deliverables.
+**Reports:** `cabal run pubgrub-harness` writes `bench/output/benchmark.md` (both
+solvers over `bench/problems.txt`: medians of three runs, phases, residency,
+allocation, search counts and a plan diff) and `bench/output/showcase.md` (both
+explanations for every comparable corpus problem, as adjacent blocks, with the
+counts). Every header states the environment and the restrictions. `bench/output/` is
+git-ignored; a run meant to be quoted is copied into `docs/` on purpose. The run of
+2026-09-03 is in [`docs/reports/`](docs/reports/).

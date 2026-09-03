@@ -130,17 +130,24 @@ failures in it are real rather than an artefact of the environment.
 - **cabal solves setup and build-tool depends and we do not.** On a package with a
   custom `Setup.hs` the two are answering different questions. None of the 17 has one.
 - **Four of them fail for different reasons on the two sides** (`atelier-testing`,
-  `cabal-install`, `futhark`, `haskoin-store-data`) — both correctly unsat, but a
-  side-by-side slide must either pick reason-matching cases or say so out loud.
+  `cabal-install`, `futhark`, `haskoin-store-data`) — both correctly unsat, but the
+  two explanations are about different facts, so their lengths do not compare. They
+  are excluded from the showcase: each carries `showcase:exclude` in its comment in
+  `bench/unsat-problems.txt`, and stays in the corpus and the gate.
 
-## What is still missing
+## How this is rendered
 
-The harness. `scripts/gate.sh` does the regression half: it runs both solvers over
-every row and fails on any regression in verdict agreement or proof length. It does not
-render the two explanations side by side, and side-by-side rendering is what turns this
-table into the deliverable. See [STATUS.md](STATUS.md) §9.
+`cabal run pubgrub-harness -- --set corpus` runs both solvers over every row and
+writes `bench/output/showcase.md`: the environment and the three restrictions, the
+excluded problems and why, a summary table, then per problem our proof and cabal's
+`Could not resolve dependencies:` block as adjacent fenced blocks, with the counts.
+The four reason-mismatched problems are run and measured and not rendered, so the
+headline it prints is "shorter on 13 of 13 comparable problems". `scripts/gate.sh`
+does the deciding half: it fails on any regression in verdict agreement or proof
+length. See [STATUS.md](STATUS.md) §9 and [harness-plan.md](harness-plan.md).
 
-One trap for whoever writes it: **our proofs contain a NUL byte** (the synthetic root's
-name), so GNU `grep` treats them as binary and silently reports no matches without
-`-a`. `bench/compare.sh` passes `-a` everywhere. New tooling must too, or the
-proof-line count will read zero and look like a passing measurement.
+One trap for any tool over this corpus: **our proofs contain a NUL byte** (the
+synthetic root's name), so GNU `grep` treats them as binary and silently reports no
+matches without `-a`. The harness reads every child log as bytes and decodes it
+leniently; `scripts/gate.sh` passes `-a` everywhere. New tooling must do one or the
+other, or the proof-line count will read zero and look like a passing measurement.

@@ -58,10 +58,12 @@ you change anything, read it.
 cabal build
 cabal test                           # 165 tests, ~0.3 s
 cabal run pubgrub -- aeson           # the driver; add -v for the search trace
+cabal run pubgrub -- --stats aeson   # + search counts and phase timings, no trace
 cabal run pubgrub -- --cabal aeson   # cabal's solver, same index (the baseline)
 cabal run pubgrub-index              # build the derived index (~200 s, once)
 scripts/gate.sh                      # every check that must not regress
-bench/compare.sh                     # both solvers over bench/problems.txt
+cabal run pubgrub-harness            # both solvers, both sets; writes bench/output/{benchmark,showcase}.md
+scripts/check-stats.sh               # --stats against bench/summarise.awk, every problem
 ```
 
 **`scripts/gate.sh` decides whether a change is kept.** Nine gates over one pass of
@@ -78,9 +80,9 @@ earn its way past them.
 
 **[`docs/benchmarking.md`](docs/benchmarking.md) is the reference for measuring
 anything.** The short version: counts are deterministic, times are not (±25% on this
-desktop), total allocation from `+RTS -s` is the stable stand-in for time, and a run
-cannot be both quiet and counted, because every count is derived by counting trace
-lines.
+desktop), total allocation from `+RTS -s` is the stable stand-in for time, and
+`--stats` counts the search in-process, so a quiet run is also a counted one.
+`scripts/check-stats.sh` holds it to `bench/summarise.awk`, number for number.
 
 ## Architecture
 
@@ -100,12 +102,14 @@ bridge (private library) ──── cabal-install-solver, Cabal, Cabal-syntax,
     ├─ cabal's modularResolver, via Bridge.Cabal.Baseline   (the baseline)
     └─ our own Provider
         ▲
-app/Main.hs — the `pubgrub` driver: --cabal picks the baseline
+app/Main.hs — the `pubgrub` driver: --cabal picks the baseline,
+              --stats prints counts and phases, --plan lines prints a diffable plan
         ▲
-harness — NOT BUILT. One run doing both, diffing plans, repeating for timing
+app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solver,
+                 problem and repetition; writes bench/output/benchmark.md and showcase.md
 ```
 
-**Six cabal components:**
+**Seven cabal components:**
 
 | component | what it is |
 | --- | --- |
@@ -113,6 +117,7 @@ harness — NOT BUILT. One run doing both, diffing plans, repeating for timing
 | library `bridge` | `bridge/` — `Bridge/{Hackage,Installed,Provider}.hs`, `Bridge/Hackage/{HttpClient,Store,Unlifted}.hs`, `Bridge/Cabal/{Baseline,Flatten,InstalledPkg}.hs` |
 | executable `pubgrub` | `app/Main.hs` — the CLI driver |
 | executable `pubgrub-index` | `app/BuildIndex.hs` — builds the derived index |
+| executable `pubgrub-harness` | `app/Harness.hs` — the harness. Depends on neither library: it drives the `pubgrub` executable as a child, parses its `stats:`, `phases:` and `plan:` lines, and writes the two reports |
 | test-suite | `test/` — 11 spec modules plus `test/golden/` |
 | executable `index-bench` | `prototype/IndexBench.hs`, **throwaway**. It priced the derived index. Once nothing needs re-pricing, remove it and its stanza |
 
@@ -285,8 +290,9 @@ release present in the index. Adjacent slots **touch**, so unions coalesce and
 ### The synthetic root's name carries a NUL byte
 
 `rootName = mkPackageName "\0root"`. GNU `grep` therefore treats every proof as binary
-and reports no matches without `-a`. `bench/compare.sh` passes `-a` everywhere. New
-tooling that greps a proof will read zero and look like it passed.
+and reports no matches without `-a`. `scripts/gate.sh` and `scripts/check-stats.sh`
+pass `-a` everywhere; the harness reads every child log as bytes. New tooling that
+greps a proof will read zero and look like it passed.
 
 ## Current scope limits
 

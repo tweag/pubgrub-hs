@@ -754,6 +754,42 @@ exactly why the solver had to derive along them.
 
 ---
 
+## Era 12 — The harness (Sep 3)
+
+### One command produces both deliverables — HELD
+
+*Sep 3.* [harness-plan.md](harness-plan.md) was written in the morning and built in
+the afternoon. `pubgrub --stats` counted the search in-process and printed the phase
+timings; `--plan lines` printed a plan one package per line; `app/Harness.hs` became
+`pubgrub-harness`, which ran the driver over both problem sets, three times per solver
+per problem, took medians, asserted that every deterministic value agreed across the
+repetitions, and wrote `bench/output/benchmark.md` and `showcase.md` with the
+environment and the three restrictions in their headers. `scripts/check-stats.sh` held
+`--stats` to `bench/summarise.awk` on all 23 problems, and `bench/compare.sh` was
+deleted.
+
+**The one constraint that shaped it.** STATUS.md had said one process must run both
+solvers. Peak residency and peak RSS are per-process numbers, so that could not be
+literal. What the sentence protected — both solvers see one world — was already
+guaranteed by `withWorld`, so the harness drove the `pubgrub` executable as a child
+process and read what it printed.
+
+**Three places the build differed from the plan.** cabal's plan lines carried no
+`lib`/`setup` qualifier, because a `ResolverPackage` has none by then; a package
+planned twice was reported as qualified goals showing through. The read counters
+stayed on the provider's own closing line instead of joining `stats:`. And the
+snapshot date became the mtime of `_cache/01-index.tar`, not `timestamp.json`.
+
+**The lesson worth the entry.** The plan expected the `index` phase to discharge
+"index build is not separated from solve". It could not. cabal's `sourcePackageIndex`
+build is only the eager allocation of ~153k records; the `PackageIndex` and every
+`.cabal` parse are lazy and happen inside the solve. Forcing them earlier would have
+made a solve pay for releases it never touched, so the phase would have measured work
+the solve does not do. The `world` phase is separated on both sides, and cabal's
+per-release parsing stays in `solve` by design.
+
+---
+
 ## What is open now
 
 **Not here.** Read [STATUS.md](STATUS.md) §8. This file used to carry its own list, and

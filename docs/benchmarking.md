@@ -5,7 +5,8 @@ How to reproduce every number in [STATUS.md](STATUS.md), and what each one is wo
 ```sh
 cabal test                    # 165 unit, property and golden tests, ~0.3 s
 scripts/gate.sh               # the nine gates that decide whether a change is kept
-bench/compare.sh              # both solvers over bench/problems.txt
+cabal run pubgrub-harness     # both solvers over both problem sets; writes the two reports
+scripts/check-stats.sh        # --stats against bench/summarise.awk, on every problem
 ```
 
 **STATUS.md §3 holds the current numbers.** This file holds the method.
@@ -103,15 +104,48 @@ change that earns it.**
 ## Benchmarks
 
 ```sh
-bench/compare.sh                  # the whole set, both solvers
-bench/compare.sh aeson '<2'       # one problem
-OUT=/tmp/bench bench/compare.sh   # keep the logs
-TIMEOUT=60 bench/compare.sh       # give up sooner (default 300 s)
+cabal run pubgrub-harness                             # both sets, three runs each
+cabal run pubgrub-harness -- --set bench              # bench/problems.txt only
+cabal run pubgrub-harness -- --set corpus --reps 1    # the failure corpus, once
+cabal run pubgrub-harness -- 'aeson <2'               # one problem, as one argument
+cabal run pubgrub-harness -- --output "$TMPDIR/bench" # somewhere other than bench/output
 ```
 
-It prints, per problem and per solver: verdict, elapsed, peak RSS, GC max residency,
-total allocation, and — for our solver — the trace-derived counts and proof length.
-Logs, RTS stats and timings are left in `$OUT`.
+`pubgrub-harness` drives the `pubgrub` executable as a child process, once per solver,
+per problem, per repetition. A child, because peak memory is a per-process number and
+one process running both solvers could not report two. Each run goes under
+`/usr/bin/time -f '%e %M'` for wall-clock and peak RSS and `+RTS -s` for allocation
+and maximum residency, with `--stats --plan lines` so the child prints its counts,
+phases and plan. The first run of the session is a throwaway against the index
+refresh. Per-run logs are left in `<output>/runs/`.
+
+It writes two markdown files into `bench/output/`, which is git-ignored. A run meant
+to be quoted is copied into `docs/` on purpose.
+
+- **`benchmark.md`**, from `bench/problems.txt`: the STATUS.md §3.1 table with the
+  phases split out, the search-count table, and a plan diff per satisfiable problem
+  over the library domain. A package cabal plans at two versions is reported as its
+  qualified goals showing through, not as a disagreement.
+- **`showcase.md`**, from `bench/unsat-problems.txt`: the environment, the problems
+  excluded from the showcase and why, a summary table, then per problem our proof and
+  cabal's `Could not resolve dependencies:` block as adjacent fenced blocks. A problem
+  whose comment carries `showcase:exclude` is run and measured and not rendered.
+
+Wall-clock, phases, RSS, residency and allocation are medians over the repetitions.
+Everything deterministic — verdict, counts, read counters, plan, proof, cabal's
+message — is asserted identical across repetitions, and the harness exits non-zero if
+any of it varied. Both headers state the date, the index snapshot (the mtime of
+`_cache/01-index.tar`), GHC, which pkg-config packages are present and absent, the
+repetition count and the three restrictions. They carry a warning when any run parsed
+a `.cabal` file, when the driver predates `--stats` and `--plan` (the harness probes
+`--help`), and when anything varied.
+
+Options: `--exe PATH` (default `$PUBGRUB_EXE`, else `cabal list-bin pubgrub`),
+`--reps N` (3), `--output DIR` (`bench/output`), `--timeout SECONDS` (300),
+`--set bench|corpus|both`, and positional problems.
+
+It measures; it does not decide. `scripts/gate.sh` decides, and neither replaces the
+other. [harness-plan.md](harness-plan.md) has why it is shaped this way.
 
 **There are two problem sets, and they answer different questions.**
 
@@ -123,20 +157,37 @@ Logs, RTS stats and timings are left in `$OUT`.
   all three.
 - [`bench/unsat-problems.txt`](../bench/unsat-problems.txt) — 17 real failures for
   *explanations*, plus five positive controls. See
-  [failure-cases.md](failure-cases.md). `scripts/gate.sh` runs these. `compare.sh` does
-  not.
+  [failure-cases.md](failure-cases.md). `scripts/gate.sh` and the harness both run
+  these; the harness renders them.
 
 ### Reading a run by hand
 
 ```sh
 pubgrub aeson '<2'                     # quiet: the answer and the read counts
+pubgrub --stats aeson '<2'             # + the search counts and phase timings, still quiet
 pubgrub -v aeson '<2'                  # + the solver's search trace
 pubgrub --cabal aeson '<2'             # cabal's solver over the same index
 pubgrub -v aeson '<2' | awk -f bench/summarise.awk
 ```
 
-`bench/summarise.awk` turns a trace into event counts plus the **resolution-depth
-histogram**. The histogram counts the `Resolving` events between a `Conflict` and its
+`--stats` counts the search in-process and prints two lines after the answer, before
+the provider's `read N .cabal files …` line:
+
+```
+stats: deciding=309 chose=308 conflicts=58 learned=57 resolving=104 backtracked=57 noversion=1 depth=0:40,1:9,...
+phases: world=0.412 index=0.000 solve=0.331 render=0.008
+```
+
+`depth=K:C,…` is the resolution-depth histogram. `phases:` is the child's own clock,
+in seconds: `world` opens the index, the installed database and the pkg-config
+database; `index` is cabal's `sourcePackageIndex` build, zero for ours; `solve` is
+the search; `render` is printing the answer. Under `--cabal` the stats line is
+`stats: steps=N`, cabal's log-step count. `-v` and `--stats` compose.
+`scripts/check-stats.sh` holds `--stats` to the awk, number for number, on all 23
+problems.
+
+`bench/summarise.awk` turns a `-v` trace into the same event counts plus the
+**resolution-depth histogram**. The histogram counts the `Resolving` events between a `Conflict` and its
 `Learned`. A depth-16 entry is one clause learned over sixteen iterations. That
 histogram is what makes collapsing work visible.
 
@@ -196,14 +247,15 @@ account for is not evidence, however reproducible it is.
 The same measurement gave about 21 KB per release when a read meant a `.cabal` parse.
 Record residency on every run, not only when it looks interesting.
 
-**A timed run and a counted run are different runs.** With `-v` the trace prints to
-stdout, and `aeson <2` prints thousands of lines. `bench/compare.sh` deliberately runs
-with `-v`, so its elapsed times are upper bounds. If timing is the point, run without
-`-v`.
+**A timed run can be a counted run.** `--stats` counts in-process and prints one
+line, so the harness times quiet runs. `-v` is different: the trace prints to stdout,
+`aeson <2` prints thousands of lines, and an elapsed time taken with `-v` is an upper
+bound.
 
 **Warm the index.** The first run after a week bootstraps or refreshes the Hackage
-index and rebuilds the version cache. `bench/compare.sh` does one throwaway run for
-this. A `cacheFormatVersion` bump also forces one rebuild.
+index and rebuilds the version cache. The harness and the gate each do one throwaway
+run (`vector`, not recorded) for this. A `cacheFormatVersion` bump also forces one
+rebuild.
 
 **A refresh leaves the derived index behind.** The store checks only its format
 version, so every release published since it was built parses on demand. Re-run
@@ -223,7 +275,11 @@ Four things to keep in mind when reading a comparison.
 1. **The index work is not the same work.** We decode a release when we expand a
    package. cabal's resolver wants a `SourcePackage` record for all ~153k releases
    before it starts, and it parses each one it inspects. That is most of its memory and
-   some of its floor time, and it is not separated from the solve yet.
+   some of its floor time. The `world` phase (index open, installed db, pkg-config db)
+   is separated on both sides. cabal's `index` phase is only the eager allocation of
+   those records; the `PackageIndex` and every `.cabal` parse are lazy and land in its
+   `solve` phase, and forcing them earlier would make a solve pay for releases it never
+   touches, which changes what is measured.
 2. **cabal solves setup and build-tool dependencies and we do not** (`solveExecutables
    = True` against rung 4 unbuilt). On a package with a custom setup the two are not
    solving the same problem.
@@ -238,22 +294,22 @@ Four things to keep in mind when reading a comparison.
    influence dependencies.
 
 For the explanation deliverable the comparable quantity is **length**: our proof
-against cabal's message. `bench/compare.sh` prints both (`proof=` and
-`cabal-log-lines=`). Over the 17-case corpus cabal's message runs 7 to 17 lines. Ours
-has no bound on length yet.
+against cabal's message. The harness's `showcase.md` prints both per problem, and
+`scripts/gate.sh` holds the corpus totals as ceilings. Over the 17-case corpus cabal's
+message runs 7 to 17 lines. Ours has no bound on length yet.
 
-**`proof=` counts by connective, not by line number.** The reporter numbers only the
-conclusions it refers back to (`references/pubgrub.md:673`). In a linear derivation that
-is none of them. So `summarise.awk` matches the opening words instead: `Because`,
-`And because`, `So, because`, `Thus,`. The older pattern `^[0-9]+\. ` scored a 57-line
-`aeson <2` proof as 9 lines.
+**A proof is counted by connective, not by line number.** The reporter numbers only
+the conclusions it refers back to (`references/pubgrub.md:673`). In a linear
+derivation that is none of them. So `summarise.awk`, the gate and the harness match
+the opening words instead: `Because`, `And because`, `So, because`, `Thus,`. The older
+pattern `^[0-9]+\. ` scored a 57-line `aeson <2` proof as 9 lines.
 
-## The one thing that is missing
+## Quiet and counted
 
-Every count above is derived by **counting trace lines**, so you can have a clean
-timing or the search columns, not both. A `--stats` mode that consumed `SolverMsg` into
-counters and printed one summary line would fix it, and would let `bench/compare.sh`
-stop running with `-v`. It does not exist.
+A quiet run is also a counted run: `--stats` folds the solver's messages into counters
+in-process and prints one line after the answer, so timing and the search columns come
+from the same run. `scripts/check-stats.sh` holds those counters to
+`bench/summarise.awk`, number for number, on all 23 problems.
 
 [tasty]: https://hackage.haskell.org/package/tasty
 [tasty-golden]: https://hackage.haskell.org/package/tasty-golden

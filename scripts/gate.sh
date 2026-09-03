@@ -76,9 +76,9 @@ ALL=("${BENCH[@]}" "${CORPUS[@]}")
 #
 # The exit code says nothing — the driver returns 0 whether it found a plan or
 # proved there is none — so the verdict comes from the text, exactly as
-# bench/compare.sh reads it. `grep -a` is not optional: a proof carries a real
-# NUL byte from the synthetic root's name, so GNU grep treats it as binary and
-# silently reports no match without it.
+# `parseRun` in app/Harness.hs reads it. `grep -a` is not optional: a proof
+# carries a real NUL byte from the synthetic root's name, so GNU grep treats it
+# as binary and silently reports no match without it.
 solve_one() {
     local tag=$1 base=$2
     shift 2

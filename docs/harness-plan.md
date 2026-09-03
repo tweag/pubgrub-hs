@@ -1,12 +1,13 @@
 # The harness: a plan
 
-> **What this is.** A plan for the one artifact both deliverables still lack: the
-> harness that runs both solvers over a problem set, repeats the timings, diffs the
-> plans, and renders the two explanations side by side. Written 2026-09-03 against the
-> tree as it stands ([STATUS.md](STATUS.md) §9).
+> **What this is.** The plan for the harness: the command that runs both solvers over
+> a problem set, repeats the timings, diffs the plans, and renders the two explanations
+> side by side. Written 2026-09-03 against the tree as it stood then
+> ([STATUS.md](STATUS.md) §9), and built the same day.
 >
 > **What this is not.** Not a specification. §6 records the choices Andrea made on
-> 2026-09-03 and the one still open. Nothing here is built.
+> 2026-09-03. §3 is the plan as written; §7 records what was built and where it
+> differs.
 
 ---
 
@@ -227,3 +228,34 @@ All decided 2026-09-03.
    rather than 17 of 17. Step 5 has the mechanism.
 5. **Order as written.** Steps 1 and 2 are small and independently useful. Steps 3
    and 4 are the bulk. Step 5 is where the deliverables appear.
+
+## 7. What was built, and where it differs from the plan
+
+Built 2026-09-03. [`app/Harness.hs`](../app/Harness.hs) is the executable
+`pubgrub-harness`. `--stats`, the `phases:` line and `--plan lines` landed in
+`app/Main.hs`; `-v` and `--stats` compose. [`scripts/check-stats.sh`](../scripts/check-stats.sh)
+is Step 1's acceptance test, and it passed on all 23 problems. `bench/compare.sh` was
+deleted and `bench/summarise.awk` stayed. The four excluded corpus problems carry
+`showcase:exclude` in their comment in `bench/unsat-problems.txt`; they are run and
+measured and not rendered, and the showcase headline reads "shorter on 13 of 13
+comparable problems".
+
+Where the build differed from §3:
+
+- **No `lib`/`setup` qualifier on cabal's plan lines** (Step 3). A `ResolverPackage`
+  carries none by the time the driver sees it, so cabal's lines have the same shape as
+  ours, and a package that appears twice is reported by the diff as qualified goals
+  showing through rather than as a disagreement.
+- **The read counters stayed on the provider's `read N .cabal files …` line** (Step 1)
+  instead of joining `stats:`. That line is printed with or without `--stats`, and the
+  harness reads it by name.
+- **The snapshot date is the mtime of `_cache/01-index.tar`**, not `timestamp.json`
+  (§5).
+- **The harness probes the driver** (`--help`) for `--stats` and `--plan`, and runs
+  without them against an older build, saying so in the report's warnings.
+- **Step 2's `index` phase separates less than the plan said.** cabal's
+  `sourcePackageIndex` build is only the eager allocation of ~153k `SourcePackage`
+  records. The `PackageIndex` itself and every `.cabal` parse are lazy and land in
+  `solve`, and forcing them into `index` would make a solve pay for releases it never
+  touches, which changes what is measured. So `world` is separated on both sides, and
+  cabal's per-release parsing is not.

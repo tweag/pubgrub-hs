@@ -2,8 +2,11 @@
 # problem per line, "<package> [version-range]". Blank lines and #-comments are
 # ignored. Quote nothing — the range is the rest of the line.
 #
-#   OUT=/tmp/unsat bench/compare.sh   # (reads bench/problems.txt, not this file)
+#   cabal run pubgrub-harness -- --set corpus   # both solvers; writes bench/output/showcase.md
 #   while read -r p; do pubgrub $p; done < bench/unsat-problems.txt
+#
+# A comment carrying the word "showcase:exclude" keeps its problem in the corpus
+# and the gate, run and measured by the harness, but out of the rendered showcase.
 #
 # Why a second file. bench/problems.txt measures the SEARCH — index throughput and
 # conflict work — and its three unsat entries were found incidentally. These were
@@ -29,7 +32,7 @@
 # references/pubgrub.md:474 — every release in range is unbuildable, so the proof
 # has to say so rather than call the range empty.
 hpqtypes-extras ==1.20.0.0      # libpq. 2 lines against cabal's 7
-haskoin-store-data ==1.6.0      # libsecp256k1, two hops down through haskoin-core
+haskoin-store-data ==1.6.0      # libsecp256k1, two hops down through haskoin-core showcase:exclude (fails for a different reason than cabal)
 
 # --- the installed base, and other boot packages -------------------------------
 # A bound that excludes the base the compiler provides. Nothing can move it, so
@@ -45,14 +48,14 @@ hjsonschema ==1.10.0            # base and bytestring, via aeson
 # --- dead range: a declared bound naming a version never published -------------
 # `widen` puts the declared range into the term verbatim, so the dead space survives
 # into the proof. Narrowing it was measured and rejected twice (docs/STATUS.md §8).
-atelier-testing ==0.2.0.0       # atelier-core >=0.3 && <0.3.0.0, and two more
+atelier-testing ==0.2.0.0       # atelier-core >=0.3 && <0.3.0.0, and two more showcase:exclude (fails for a different reason than cabal)
 cpsa ==4.4.9                    # deepseq >=1.4.8 && <1.4.8.0; base >=4.13 && <4.13.0
 happstack-hsp ==7.3.7.8         # template-haskell history
 
 # --- plain dependency conflict, no boot package involved -----------------------
 hadolint ==2.15.1               # time, against language-docker. The cleanest specimen
-cabal-install ==3.18.1.0        # Cabal / hackage-security
-futhark ==0.27.1                # regex / time chain
+cabal-install ==3.18.1.0        # Cabal / hackage-security showcase:exclude (fails for a different reason than cabal)
+futhark ==0.27.1                # regex / time chain showcase:exclude (fails for a different reason than cabal)
 
 # --- the two long chains -------------------------------------------------------
 # Both walk a dependency's bound history release by release. PubGrub.Report states
