@@ -19,6 +19,7 @@ module PubGrub.Incompatibility
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Distribution.Types.PackageName
+import           Distribution.Types.Version      (Version)
 import           PubGrub.InstanceSet            (Instance, InstanceSet,
                                                  emptyInstanceSet,
                                                  memberInstance,
@@ -86,7 +87,7 @@ data Incompatibility = Incompatibility
 data IncompatCause
     = CauseRoot PackageName Instance                              -- notRoot
     | CauseNoInstances PackageName InstanceSet                    -- noInstances
-    | CauseOnlyInstalled PackageName                              -- onlyInstalled
+    | CauseOnlyInstalled PackageName [Version]                    -- onlyInstalled
     | CauseUnbuildable PackageName InstanceSet                    -- unbuildable
     | CauseDependency PackageName InstanceSet (PackageName, InstanceSet)  -- fromDependency
     | CauseDerivedFrom Incompatibility Incompatibility            -- priorCause
@@ -117,11 +118,18 @@ noInstances p s = Incompatibility (Map.singleton p (Positive s)) (CauseNoInstanc
 -- >=0\", which is both false-sounding and unhelpful: there are plenty of versions of
 -- @base@, and the reason none may be used is that the compiler provides it.
 --
+-- The installed versions ride along for the proof's sake only. The clause's term
+-- says nothing about them — it bans the source side, and the installed units are
+-- whatever the assignment's other clauses admit — but a reader of \"@base@ cannot be
+-- built from source\" still has to know which @base@ /is/ installed to see why a
+-- bound on it fails. An empty list is a boot package with no installed unit at
+-- all, which the proof says instead.
+--
 -- Which packages it applies to is the provider's decision (for cabal, the
 -- non-reinstallable boot packages). The core only needs to know the shape.
-onlyInstalled :: PackageName -> InstanceSet -> Incompatibility
-onlyInstalled p anySource =
-    Incompatibility (Map.singleton p (Positive anySource)) (CauseOnlyInstalled p)
+onlyInstalled :: PackageName -> [Version] -> InstanceSet -> Incompatibility
+onlyInstalled p installed anySource =
+    Incompatibility (Map.singleton p (Positive anySource)) (CauseOnlyInstalled p installed)
 
 -- | Instances that cannot be built in this environment at all, and so must never
 -- be selected. The provider states this /instead of/ a release's dependencies:

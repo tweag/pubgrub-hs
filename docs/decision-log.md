@@ -853,6 +853,28 @@ cabal's own message quoted, and derived terms went on printing canonically. Ever
 search counter was identical. `fillGaps` landed tested and unused, in reserve for
 derived terms; a filled set has no author's spelling to keep.
 
+### The boot-package fact names the installed version — HELD
+
+*Sep 3.* Andrea asked for a critical reading of how the proofs communicated, wording
+and layout both, and whether tree lines or colour would help. The reading found two
+content gaps ahead of any formatting: 11 of the 13 showcase proofs turned on a
+boot package, and none of them said which version of it was installed. "Because base
+cannot be built from source and purescript >=0.15.3 depends on base >=4.16.2.0 &&
+<4.17" left the reader to know that the machine had 4.21, while cabal's own line
+named it, `base-4.21.0.0/installed-5b43`. The two proofs that did name `base
+4.21.0.0 (installed)` did so only because ghc-prim had dragged the unit in.
+
+**What was built.** `CauseOnlyInstalled` gained the installed versions, supplied by
+the provider from the installed database at the point it minted the fact, newest
+first and one per version. The clause's term was untouched: it still banned the
+source side and nothing else, and the versions were for the proof alone. The leaf
+then read "base is pinned to 4.21.0.0 (installed)", or "is not installed and cannot
+be built from source" for a boot package with no unit. Sentence counts did not move,
+so the proof ceiling stayed at 61. The rest of the reading — a headline above the
+proof, wrapping with a hanging indent that never breaks inside a range, the branch
+blank line the harness dropped, and colour as a TTY-only layer in the driver — was
+left for later, in that order.
+
 ---
 
 ## What is open now

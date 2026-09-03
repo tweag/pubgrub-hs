@@ -512,7 +512,10 @@ the root by name alone, "So," on the last line, "version solving failed" instead
 (`:632`). A negative term is never printed as "not …": the sentence carries the
 negation, as pub's do. Two positive terms read "X is incompatible with Y", two
 negative ones "either X or Y", and a clause with several terms reads "P requires N1
-or N2" or "if P1 and P2 then N1 or N2". An installed unit is written by version,
+or N2" or "if P1 and P2 then N1 or N2". A boot package's fact names the version it
+is pinned to, `base is pinned to 4.21.0.0 (installed)`: the bound that failed is only
+legible against that version, and nothing else in the proof states it — 11 of the
+13 showcase proofs turn on it. An installed unit is written by version,
 `base 4.21.0.0 (installed)`, never by unit id, and not at all when a source range
 in the same set already admits its version.
 

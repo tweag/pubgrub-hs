@@ -86,6 +86,7 @@ tests =
         , testGroup "what is left alone" untouched
         , testGroup "the property that makes it sound" soundness
         , testGroup "a run of same-pair steps is one sentence" sameePairRun
+        , testGroup "the boot-package leaf" bootLeaf
         ]
 
 -- --------------------------------------------------------------------------
@@ -182,6 +183,21 @@ sameePairRun =
 -- What is left alone
 -- --------------------------------------------------------------------------
 
+-- | The boot-package leaf. The bound that failed is only legible against the
+-- installed version, and nothing else in a proof states it.
+bootLeaf :: [TestTree]
+bootLeaf =
+    [ testCase "a boot package's fact names the installed version" $ do
+        let proof = unlines (proofLines (onlyInstalled pkgA [v 3] (from 1)))
+        assertBool proof ("a is pinned to 3 (installed)" `isInfixOf` proof)
+    , testCase "two installed versions are both named" $ do
+        let proof = unlines (proofLines (onlyInstalled pkgA [v 3, v 2] (from 1)))
+        assertBool proof ("a is pinned to 3 or 2 (installed)" `isInfixOf` proof)
+    , testCase "a boot package with no installed unit says so" $ do
+        let proof = unlines (proofLines (onlyInstalled pkgA [] (from 1)))
+        assertBool proof ("a is not installed and cannot be built from source" `isInfixOf` proof)
+    ]
+
 untouched :: [TestTree]
 untouched =
     [ -- Two empty ranges do not make a sentence, and there is no dependency to
@@ -207,7 +223,7 @@ untouched =
       -- built from source" would have to widen *that* claim, which would say the
       -- empty range cannot be built from source — a different and false statement.
       testCase "a hole is not absorbed into a boot-package fact" $ do
-        let step = priorCause (onlyInstalled pkgA (from 1)) (hole pkgA (range 1 2)) pkgA
+        let step = priorCause (onlyInstalled pkgA [v 3] (from 1)) (hole pkgA (range 1 2)) pkgA
         case causeOf (collapseNoInstances step) of
             CauseDerivedFrom _ _ -> pure ()
             c -> assertFailure ("expected the step to survive, got " ++ describe c)

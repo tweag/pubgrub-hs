@@ -554,8 +554,14 @@ mkExpand installedDb source root = expand'
     -- /first/ query is already source-only still pays once: @conduit \'<1.3\'@ and
     -- @lens \'<4\'@ each keep one such event.
     onlyInstalledFact pn
-        | isNonReinstallable pn = [onlyInstalled pn anySourceRelease]
+        | isNonReinstallable pn = [onlyInstalled pn (installedVersionsOf pn) anySourceRelease]
         | otherwise = []
+
+    -- Newest first, one entry per version: two units of one version (a profiling
+    -- way, say) are one version to the reader.
+    installedVersionsOf pn =
+        Set.toDescList
+            (Set.fromList [pipVersion (toPreInstalled u) | u <- Map.findWithDefault [] pn (idbByName installedDb)])
 
     -- | The fact that a release cannot be built in this environment: a unit clause
     -- banning every instance of its version __slot__ (@references\/pubgrub.md:476@).

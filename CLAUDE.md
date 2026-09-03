@@ -349,7 +349,8 @@ spec lists at `references/pubgrub.md:1010`–`:1030`: "every version of foo", th
 by name alone, "So," on the last line, a period per line, the blank line between
 branches. A negative term is never printed as "not …"; the sentence carries the
 negation ("P requires N1 or N2", "if P1 and P2 then N1 or N2", "either X or Y").
-Installed units print by version, never by unit id.
+Installed units print by version, never by unit id, and a boot package's fact names
+the version it is pinned to: "base is pinned to 4.21.0.0 (installed)".
 
 **Do not chase byte-parity with pub's output.** `^1.0.0` is Dart syntax and cabal
 writes `>=1.0.0 && <2`. The target is the same sentences and information, in cabal's

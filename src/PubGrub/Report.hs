@@ -369,12 +369,16 @@ reportConflict root0 = case incompCause root of
     -- External facts at the leaves of the proof. Rendered from the cause rather
     -- than from the bare terms so that each explains itself: an empty range is the
     -- range being unsatisfiable rather than a conflict with anything else, a
-    -- package that is only installed says it cannot be built from source, and a
-    -- release that cannot be built here says /that/ rather than looking absent
+    -- compiler-provided package names the version it is pinned to instead of
+    -- reading "no version" — the bound that failed is only legible against that
+    -- version, and nothing else in the proof states it — and a release that cannot
+    -- be built here says /that/ rather than looking absent
     -- (references/pubgrub.md:475).
     leaf c = case incompCause c of
         CauseNoInstances p s -> "no version for " <> pretty p <> " in " <> pretty s
-        CauseOnlyInstalled p -> pretty p <> " cannot be built from source"
+        CauseOnlyInstalled p [] -> pretty p <> " is not installed and cannot be built from source"
+        CauseOnlyInstalled p vs ->
+            pretty p <> " is pinned to " <> T.intercalate " or " (map pretty vs) <> " (installed)"
         CauseUnbuildable p s -> named p s <> " cannot be built here"
         _ -> case asDependency c of
             Just (p, s, q, r) -> dep p s q r

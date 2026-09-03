@@ -324,12 +324,12 @@ bootPackageStatesItself =
         "non-reinstallable packages"
         [ testCase "deciding one also states that it cannot be built from source" $ do
             incs <- runTestM (expandInstalled "base")
-            case [p | CauseOnlyInstalled p <- map incompCause incs] of
+            case [p | CauseOnlyInstalled p _ <- map incompCause incs] of
                 [p] -> p @?= mkPackageName "base"
                 ps -> assertFailure ("expected one such fact, got " ++ show (length ps))
         , testCase "an ordinary installed package states no such thing" $ do
             incs <- runTestM (expandInstalled "ordinary")
-            [() | CauseOnlyInstalled _ <- map incompCause incs] @?= []
+            [() | CauseOnlyInstalled _ _ <- map incompCause incs] @?= []
         , -- The case with no decision to hang the fact on. The offered range holds
           -- The case with no decision to hang the fact on. The offered range holds
           -- no installed unit, so the rule has nothing to return; without a
@@ -340,7 +340,7 @@ bootPackageStatesItself =
           testCase "a source-only range of one still says why" $ do
             (chosen, incs) <- runTestM (expandIn "base" sourceOnly)
             chosen @?= Nothing
-            [p | CauseOnlyInstalled p <- map incompCause incs] @?= [mkPackageName "base"]
+            [p | CauseOnlyInstalled p _ <- map incompCause incs] @?= [mkPackageName "base"]
         , testCase "an ordinary package in the same position says nothing" $ do
             (chosen, incs) <- runTestM (expandIn "ordinary" sourceOnly)
             chosen @?= Nothing
