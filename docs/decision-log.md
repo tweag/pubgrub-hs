@@ -1122,6 +1122,81 @@ held at 61 and 0, and the suite went from 214 tests to 222.
 
 ---
 
+## Era 16 — More than one target, and what it exposed (Sep 10)
+
+### The driver takes several targets — HELD
+
+*Sep 10.* Andrea judged the failure corpus unrepresentative: it had been harvested by
+running old packages against GHC 9.12, so eleven of its seventeen entries bottomed out
+in a boot package, and asked for the driver to solve for more than one package at a
+time. Everything below the CLI already did. `Bridge.Provider.withProvider` took a list
+of root targets, `Bridge.Cabal.Baseline.solveWithCabal` took a list and derived
+`targetNames` from it, and `PubGrub.Report`'s headline already joined several root
+requests with "and"; only `Options` and two log lines were single-target.
+
+Andrea chose one constraint per argument, cabal's own `PackageVersionConstraint`
+syntax — `pubgrub 'aeson <2' dhall` — over a comma-joined argv that would have kept
+`pubgrub aeson '<2'` working. That broke the two-word form deliberately, so
+`scripts/gate.sh`, `scripts/check-stats.sh` and `app/Harness.hs` stopped word-splitting
+a problem line and split it on commas instead, one argument per target. All 23 problem
+lines were unchanged, none having a comma, and the gate held every baseline: 23
+problems, 17/17, 23/23, 61 sentences, 0 no-version lines.
+
+### The first multi-target sweep inverted the record — MEASURED
+
+*Sep 10.* The harvesting method was to require every target to resolve *alone* and
+then solve them together: if each resolves alone the boot-package wall cannot be the
+sole cause, so a failure of the group is a conflict between the targets. Unconstrained
+pairs were worthless — 153 pairs of popular packages, 153 resolutions — so one target
+had to be pinned back. 18 apps against 83 pins that resolved alone gave 1411 runs and
+23 failures, in about three distinct shapes, 19 of them `optparse-applicative` pins.
+
+We lost 21 of the 23, at 28–113 sentences against cabal's 10–26, against 17/17 wins on
+the single-target corpus. The one clean win was `aeson ==2.3.x` alongside `dhall`, four
+sentences against cabal's sixteen with no boot package in it at all. The cause of the
+losses looked structural rather than reparable: an *unconstrained* target obliges a
+complete proof to show that every one of its releases fails, so it walks the whole
+version history, where cabal's message is a search trace and may stop at the first wall
+it hit. Every target in the old corpus is pinned to one version, which is why the walk
+had never appeared.
+
+### A component that is not buildable contributes no dependencies — HELD
+
+*Sep 10.* Two of the 23 were verdict disagreements rather than long proofs:
+`optparse-applicative ==0.15.1.0` alongside `warp`, where cabal found a plan and we did
+not. `Bridge.Cabal.Flatten.componentDepsWith` walked `condLibrary`, `condSubLibraries`
+and `condExecutables` and read each tree's `condTreeConstraints` while ignoring its
+node's `buildable:`, so `http2 ==5.4.4` pulled `aeson` and `aeson-pretty` in through
+`hpack-encode`, a stanza that ends `if flag(devel) … else buildable: False` and that
+cabal therefore never sees. STATUS.md §3.1 and §5.3 had recorded the effect since
+Sep 3, but only as extra packages in a *satisfiable* plan — `network-run` under
+`pandoc` — which read as cosmetic. It was not: it rejected plans cabal accepts.
+
+Andrea first gave the rule as executables of requested targets always included and
+dependencies bringing in libraries only, and that was built and measured before being
+rejected on its own evidence. It fixed `warp` and broke `futhark ==0.27.1`, which
+began resolving here while cabal still failed it: `lsp-types-2.4.0.0`'s `generator`
+executable is genuinely buildable and its `regex` dependency is a real constraint, so
+the gate fell to 16/17 on the corpus and 22/23 on agreement. `solveExecutables` was
+not the knob either — set to `False` it dropped `alex`, `happy`, `happy-lib` and
+`hsc2hs` from cabal's plans and left `futhark` failing exactly as before, because it
+governs `build-tool-depends` and nothing else.
+
+Andrea pointed at cabal-install's own planning code, and
+`Distribution.Solver.Modular.IndexConversion.convGPD` settled it: library,
+sub-libraries, foreign libraries and executables are all included unconditionally,
+with only test-suites and benchmarks gated by stanza, and every one of them is piped
+through Cabal-syntax's `addBuildableCondition` first. So the rule was not about which
+components but about which are built. `componentDeps` began applying that same
+function to sub-libraries and executables, `toStored` applied it before writing so
+both paths agree by construction, and `storeFormatVersion` went to 3 because a store
+written before it holds ungated trees. The library stayed ungated on purpose:
+`unbuildableAtDefaults` already carries its buildability with the reason attached,
+which is what lets a proof name the missing `pkg-config` module. Foreign libraries
+stayed excluded, untested rather than decided. The suite went from 223 tests to 226.
+
+---
+
 ## What is open now
 
 **Not here.** Read [STATUS.md](STATUS.md) §8. This file used to carry its own list, and

@@ -3,10 +3,15 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 
--- | A minimal end-to-end driver: resolve a Hackage package's dependency
--- closure with the native PubGrub solver, over a real (lazily read) index.
+-- | A minimal end-to-end driver: resolve the dependency closure of one or more
+-- Hackage packages with the native PubGrub solver, over a real (lazily read)
+-- index.
 --
--- @cabal run pubgrub -- aeson@  (optionally a version range: @... aeson '>=2'@)
+-- @cabal run pubgrub -- aeson@ (each target may carry a version range, quoted as
+-- one argument: @... 'aeson >=2'@), and several targets are solved together:
+-- @... 'aeson <2' 'lens >=5'@, which is what a real @cabal build@ asks for and
+-- the only way to reach a conflict between two packages rather than between one
+-- package and the compiler.
 --
 -- Everything runs in one 'App' monad whose environment carries two co-log
 -- channels — @Text@ (the bridge's own messages and the provider's warnings)
@@ -55,13 +60,15 @@ import           Distribution.Solver.Types.SolverPackage   (SolverPackage (..))
 import           Distribution.Types.Flag                   (showFlagAssignment)
 import           Distribution.Types.PackageId              (pkgName, pkgVersion)
 import           Distribution.Types.PackageName            (PackageName)
+import           Distribution.Types.PackageVersionConstraint (PackageVersionConstraint (..))
 import           Distribution.Types.VersionRange           (VersionRange,
-                                                            anyVersion)
+                                                            isAnyVersion)
 import           GHC.Clock                                 (getMonotonicTime)
 import           Hackage.Security.Util.Path                (fromFilePath,
                                                             makeAbsolute)
 import           Network.HTTP.Client                       (defaultManagerSettings,
                                                             newManager)
+import           Control.Applicative                       (some)
 import           Options.Applicative                       (Parser, argument,
                                                             eitherReader,
                                                             execParser, flag,
@@ -307,17 +314,39 @@ data Options = Options
     -- ^ which moment of the index both solvers see; 'IndexHead' unless
     -- @--index-state@ says otherwise. It is the one thing that makes a run
     -- repeatable across the weekly refresh.
-    , optTarget    :: PackageName
-    , optRange     :: VersionRange
-    -- ^ the same constraint unconverted: cabal's solver takes a 'VersionRange',
-    -- ours a 'VersionSet', and both must come from the one argument
+    , optTargets   :: [(PackageName, VersionRange)]
+    -- ^ what to solve for: one or more packages, each with the range it is
+    -- constrained to. Ranges stay 'VersionRange' because cabal's solver takes
+    -- them that way and ours converts them to a 'VersionSet', and both must come
+    -- from the same arguments.
     }
 
-parseTarget :: String -> Either String PackageName
-parseTarget = eitherParsec
+-- | One target, in cabal's own constraint syntax: @aeson@, @aeson <2@,
+-- @aeson ==1.5.6.0@, @aeson-1.5.6.0@. Each target is one argument, so a range
+-- containing a space has to be quoted at the shell — @'aeson >=1 && <2'@.
+--
+-- The whole-argument form is why there is no ambiguity with several targets:
+-- @pubgrub \'aeson <2\' \'lens >=5\'@ needs no lookahead to know where one
+-- target ends.
+parseTarget :: String -> Either String (PackageName, VersionRange)
+parseTarget s = case eitherParsec s of
+    Right (PackageVersionConstraint pn vr) -> Right (pn, vr)
+    Left err ->
+        Left (err ++ "\nexpected a package with an optional version range, as one argument: 'aeson' or 'aeson <2'")
 
-parseRange :: String -> Either String VersionRange
-parseRange = eitherParsec
+-- | The targets as one line, in the syntax they were given in: @aeson <2 and
+-- lens >=5@. An unconstrained target is its bare name — 'PackageVersionConstraint'
+-- would print @aeson -any@, which is not what anybody typed.
+--
+-- The proof's own headline names the request separately and does not go through
+-- here: it lists the root dependencies the /proof/ reached, which is a smaller
+-- set when a target resolved fine (see 'PubGrub.Report.reportHeadline').
+renderTargets :: [(PackageName, VersionRange)] -> String
+renderTargets = intercalate " and " . map one
+  where
+    one (pn, vr)
+        | isAnyVersion vr = prettyShow pn
+        | otherwise = prettyShow (PackageVersionConstraint pn vr)
 
 parsePlan :: String -> Either String PlanShape
 parsePlan "tree"  = Right Tree
@@ -332,8 +361,7 @@ optionsParser =
         <*> option (eitherReader parsePlan) (long "plan" <> metavar "tree|lines" <> value Tree <> help "Render a plan as a dependency tree (default) or as one 'plan:' line per package")
         <*> flag Ours Cabal (long "cabal" <> help "Run cabal's solver instead of the native solver")
         <*> option (eitherReader parseIndexState) (long "index-state" <> metavar "TIMESTAMP" <> value IndexHead <> help "Solve against the index as it was at this time, e.g. 2016-09-24T17:47:48Z, as cabal's --index-state does (default: everything the local index holds, refreshed at most weekly)")
-        <*> argument (eitherReader parseTarget) (metavar "PACKAGE")
-        <*> argument (eitherReader parseRange) (value anyVersion <> metavar "VERSION-RANGE")
+        <*> some (argument (eitherReader parseTarget) (metavar "TARGET..." <> help "A package to solve for, with an optional version range, as one argument: 'aeson' or 'aeson <2'. Repeat for more than one."))
 
 -- --------------------------------------------------------------------------
 -- Driver
@@ -344,13 +372,12 @@ main = do
     handle tooNew $ work =<< execParser (info (helper <*> optionsParser) infoMod)
     where
         infoMod = fullDesc <>
-                  progDesc "Resolve a Hackage package's dependency closure" <>
+                  progDesc "Resolve the dependency closure of one or more Hackage packages" <>
                   header "pubgrub - a Hackage dependency resolver"
         -- An index-state the local index cannot honour: say why on stderr and
         -- fail, without a backtrace.
         tooNew (IndexStateTooNew msg) = hPutStrLn stderr msg >> exitFailure
         work opts = do
-            let target = optTarget opts
             cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
             manager <- newManager defaultManagerSettings
             counters <-
@@ -365,7 +392,7 @@ main = do
                 -- expand the root like any other package, but has no index entry
                 -- to look its dependencies up in.
                 Ours ->
-                    withProvider cache manager (optIndexState opts) [(target, fromVersionRange (optRange opts))] $ \provider ->
+                    withProvider cache manager (optIndexState opts) [(pn, fromVersionRange vr) | (pn, vr) <- optTargets opts] $ \provider ->
                         runOurs opts t0 counters provider
                 Cabal ->
                     withWorld cache manager (optIndexState opts) $ \world ->
@@ -378,7 +405,7 @@ main = do
 runOurs :: Options -> Double -> Maybe (IORef Stats) -> Provider App -> App ()
 runOurs opts t0 counters provider = do
     t1 <- liftIO getMonotonicTime
-    logMsg (T.pack ("Solving for " ++ prettyShow (optTarget opts)))
+    logMsg (T.pack ("Solving for " ++ renderTargets (optTargets opts)))
     tSolve <- liftIO getMonotonicTime
     -- 'evaluate' pins the end of the solve phase to the verdict, so the boundary
     -- does not depend on how lazily 'solve' builds its result.
@@ -425,7 +452,7 @@ runOurs opts t0 counters provider = do
 runBaseline :: Options -> Double -> World -> App ()
 runBaseline opts t0 world = do
     t1 <- liftIO getMonotonicTime
-    logMsg (T.pack ("Solving for " ++ prettyShow (optTarget opts) ++ " (cabal's solver)"))
+    logMsg (T.pack ("Solving for " ++ renderTargets (optTargets opts) ++ " (cabal's solver)"))
     tIndex <- liftIO getMonotonicTime
     sourceIdx <- liftIO (sourcePackageIndex (wIndex world))
     tSolve <- liftIO getMonotonicTime
@@ -437,7 +464,7 @@ runBaseline opts t0 world = do
                 (wInstalled world)
                 (wPkgConfig world)
                 sourceIdx
-                [(optTarget opts, optRange opts)]
+                (optTargets opts)
         (steps, lazyResult) = outcome progress
     -- Forcing the 'Either' walks the whole 'Progress': that is the solve. The
     -- step count is a chain of increments left behind by the same walk, so it

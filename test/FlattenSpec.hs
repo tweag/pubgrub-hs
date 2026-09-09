@@ -198,9 +198,10 @@ buildableTests =
                     , "  buildable: False"
                     ]
         unbuildableAtDefaults (Just testPkgConfigDb) testPlatform testCompiler gpd @?= [NotBuildable]
-    , -- Deliberately narrower than 'componentDeps', which does collect an
-      -- executable's dependencies. A dependency needs the library; an unbuildable
-      -- executable does not make the package unusable as one.
+    , -- Narrower than 'componentDeps' on purpose. A dependency needs the library;
+      -- an unbuildable executable does not make the package unusable as one, and
+      -- 'componentDeps' drops that executable's dependencies rather than the
+      -- release.
       testCase "buildable: False in an executable does not condemn the package" $ do
         gpd <-
             gpdOf . pkg $
@@ -264,6 +265,60 @@ componentTests =
                     , "  build-depends: from-exe"
                     ]
         names @?= ["from-exe", "from-lib", "from-sublib"]
+    , -- cabal pipes every component through Cabal-syntax's 'addBuildableCondition'
+      -- before converting it (IndexConversion.convGPD), so a stanza that is not
+      -- built contributes no constraint. Without that, http2-5.4.4's
+      -- `hpack-encode`, which is `buildable: False` unless `devel` is on,
+      -- contributes `aeson` and makes `optparse-applicative ==0.15.1.0` alongside
+      -- `warp` unsolvable where cabal solves it.
+      testCase "an unbuildable executable contributes no dependencies" $ do
+        names <-
+            namesAt (assign []) . pkg $
+                unlines
+                    [ "library"
+                    , "  build-depends: from-lib"
+                    , ""
+                    , "executable demo"
+                    , "  main-is: Main.hs"
+                    , "  build-depends: from-exe"
+                    , "  buildable: False"
+                    ]
+        names @?= ["from-lib"]
+    , -- http2's own shape: the stanza is buildable only under a flag that is off
+      -- by default, so the condition survives into the guard and evaluates away.
+      testCase "an executable buildable only under an off flag contributes nothing" $ do
+        let src =
+                flag "devel" False
+                    ++ unlines
+                        [ "library"
+                        , "  build-depends: from-lib"
+                        , ""
+                        , "executable demo"
+                        , "  main-is: Main.hs"
+                        , "  build-depends: from-exe"
+                        , "  if flag(devel)"
+                        , "  else"
+                        , "    buildable: False"
+                        ]
+        atDefault <- namesAt (assign []) (pkg src)
+        atDefault @?= ["from-lib"]
+        -- and it comes back when the flag is on, so this gates rather than deletes
+        withFlag <- namesAt (assign [("devel", True)]) (pkg src)
+        withFlag @?= ["from-exe", "from-lib"]
+    , -- an unbuildable SUB-library is gated the same way: cabal applies the same
+      -- function to ComponentSubLib.
+      testCase "an unbuildable sub-library contributes no dependencies" $ do
+        names <-
+            namesAt (assign []) . pkg $
+                unlines
+                    [ "library"
+                    , "  build-depends: from-lib"
+                    , ""
+                    , "library internal"
+                    , "  build-depends: from-sublib"
+                    , "  buildable: False"
+                    ]
+        names @?= ["from-lib"]
     , -- componentDeps documents test-suites, benchmarks and foreign libraries as
       -- intentionally excluded: a solve for a build plan should not drag in a
       -- package's own test dependencies.

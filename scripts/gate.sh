@@ -73,9 +73,21 @@ gate() {
 }
 
 # --- the problem set --------------------------------------------------------
-# Everything not a comment and not blank. The range is the rest of the line and
-# is deliberately left unquoted at the call site.
+# Everything not a comment and not blank. A problem is a comma-separated list of
+# targets, each a package with an optional version range:
+#
+#     aeson <2                 one target
+#     hlint, hadolint ==2.15.1 two targets, solved together
+#
+# `targets_of` splits a line back into one argument per target, because the driver
+# takes each target as a WHOLE argument (a range holds spaces). Nothing here may
+# rely on word-splitting.
 problems_in() { sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$1" | grep -v '^$'; }
+
+targets_of() {
+    printf '%s\n' "$1" | tr ',' '\n' |
+        sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^$'
+}
 
 mapfile -t CORPUS < <(problems_in bench/unsat-problems.txt)
 mapfile -t BENCH < <(problems_in bench/problems.txt)
@@ -126,10 +138,9 @@ corpus_bad=()
 
 for problem in "${ALL[@]}"; do
     base=$(echo "$problem" | tr -c 'A-Za-z0-9' '-')
-    # shellcheck disable=SC2086 # deliberate: the range is a separate argument
-    ours=$(solve_one ours "$base" $problem)
-    # shellcheck disable=SC2086
-    theirs=$(solve_one cabal "$base" $problem)
+    mapfile -t targets < <(targets_of "$problem")
+    ours=$(solve_one ours "$base" "${targets[@]}")
+    theirs=$(solve_one cabal "$base" "${targets[@]}")
 
     if [ "$ours" = "$theirs" ]; then
         agree=$((agree + 1))

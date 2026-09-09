@@ -56,16 +56,25 @@ you change anything, read it.
 
 ```sh
 cabal build
-cabal test                           # 222 tests, ~0.3 s
-cabal run pubgrub -- aeson           # the driver; add -v for the search trace
-cabal run pubgrub -- --stats aeson   # + search counts and phase timings, no trace
-cabal run pubgrub -- --cabal aeson   # cabal's solver, same index (the baseline)
+cabal test                           # 223 tests, ~0.3 s
+cabal run pubgrub -- aeson              # the driver; add -v for the search trace
+cabal run pubgrub -- 'aeson <2'         # a target is ONE argument: package and range
+cabal run pubgrub -- hlint 'aeson <2'   # several targets, solved together
+cabal run pubgrub -- --stats aeson      # + search counts and phase timings, no trace
+cabal run pubgrub -- --cabal aeson      # cabal's solver, same index (the baseline)
 cabal run pubgrub -- --index-state 2026-09-03T00:00:00Z aeson   # the index as it was then, either solver
 cabal run pubgrub-index              # build the derived index (~120 s, once per refresh)
 scripts/gate.sh                      # every check that must not regress
 cabal run pubgrub-harness            # both solvers, both sets; writes bench/output/{benchmark,showcase}.md
 scripts/check-stats.sh               # --stats against bench/summarise.awk, every problem
 ```
+
+**A target is one argument.** `pubgrub 'aeson <2'`, not `pubgrub aeson '<2'` — the
+range holds spaces, and several targets are several arguments. Both problem files
+spell a multi-target problem with commas (`hlint, hadolint ==2.15.1`) and the
+readers split on commas, never on whitespace. Solving for more than one package is
+the only way to reach a conflict *between* two packages rather than between one
+package and the compiler.
 
 **`scripts/gate.sh` decides whether a change is kept.** Nine gates over one pass of
 the problem set: problem count, the 17-case failure corpus, verdict agreement over all
@@ -139,7 +148,8 @@ app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solv
 - `Bridge.Cabal.Flatten` — reads two things off one walk of a conditional tree
   (`flattenWith`): the `build-depends`, and the `BuildInfo` that decides buildability
   (`buildable:` plus `pkgconfig-depends` against the machine's `PkgConfigDb`, library
-  only).
+  only). Sub-libraries and executables have their dependencies gated on their own
+  `buildable:` first, through Cabal-syntax's `addBuildableCondition`.
 - `Bridge.Cabal.Baseline` — drives `Distribution.Solver.Modular.modularResolver` over
   our index. It builds a `PackageIndex (SourcePackage ())`. `modularResolver` runs
   `convPIs` itself.
@@ -290,6 +300,32 @@ Two changes are needed and **both** are load-bearing:
 The second alone makes the clause honest, and an honest clause correctly *bans* the
 release, which is still the wrong answer. Tests: `StoreSpec` and `FlagSolveSpec`,
 "self-dependencies", each verified to fail without its own half.
+
+### An unbuildable component contributes no dependencies
+
+`Bridge.Cabal.Flatten.componentDeps` puts each sub-library's and each executable's
+dependencies under the condition that the component is buildable, via Cabal-syntax's
+own `addBuildableCondition` — the function
+`Distribution.Solver.Modular.IndexConversion.convGPD` pipes every component through.
+Do not paraphrase it; a paraphrase is a second implementation to keep in step.
+
+Without it we **reject plans cabal accepts**. `http2-5.4.4`'s `hpack-encode` declares
+`aeson >=2` and ends `if flag(devel) … else buildable: False`; with `devel` off cabal
+drops the stanza and we did not, which made `optparse-applicative ==0.15.1.0`
+alongside `warp` unsolvable here. The same fault put `network-bsd`, `network-run` and
+`time-manager` in our `pandoc` plan. `docs/STATUS.md` §4.14.
+
+Two things are load-bearing:
+
+- **The library is not gated here.** An unbuildable library makes the release
+  unusable, not merely dependency-free, and `unbuildableAtDefaults` already carries
+  that with the reason attached — which is what lets a proof name the missing
+  `pkg-config` module.
+- **There is no target/dependency distinction.** cabal includes every package's
+  library, sub-libraries, foreign libraries and executables unconditionally; only
+  test-suites and benchmarks are gated, by stanza. Making executables target-only was
+  tried and rejected: it fixed `warp` but made `futhark ==0.27.1` resolve here while
+  cabal failed it, since `lsp-types`' `generator` executable is genuinely buildable.
 
 ### Boot packages are installed-only
 

@@ -40,9 +40,15 @@ if [ -z "${EXE:-}" ] || [ ! -x "$EXE" ]; then
 fi
 
 # The problem set, exactly as scripts/gate.sh reads it: everything not a comment
-# and not blank. The range is the rest of the line and is deliberately left
-# unquoted at the call site.
+# and not blank. A problem is a comma-separated list of targets, and `targets_of`
+# splits it into one argument per target — the driver takes each target whole,
+# because a range holds spaces.
 problems_in() { sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$1" | grep -v '^$'; }
+
+targets_of() {
+    printf '%s\n' "$1" | tr ',' '\n' |
+        sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^$'
+}
 
 mapfile -t BENCH < <(problems_in bench/problems.txt)
 mapfile -t CORPUS < <(problems_in bench/unsat-problems.txt)
@@ -83,10 +89,9 @@ from_stats() {
 failed=0
 for problem in "${ALL[@]}"; do
     base=$(echo "$problem" | tr -c 'A-Za-z0-9' '-')
-    # shellcheck disable=SC2086 # deliberate: the range is a separate argument
-    timeout "$TIMEOUT" "$EXE" "${INDEX_STATE[@]}" --stats $problem >"$OUT/$base.stats.log" 2>&1
-    # shellcheck disable=SC2086
-    timeout "$TIMEOUT" "$EXE" "${INDEX_STATE[@]}" -v $problem 2>&1 | awk -f bench/summarise.awk >"$OUT/$base.awk.log"
+    mapfile -t targets < <(targets_of "$problem")
+    timeout "$TIMEOUT" "$EXE" "${INDEX_STATE[@]}" --stats "${targets[@]}" >"$OUT/$base.stats.log" 2>&1
+    timeout "$TIMEOUT" "$EXE" "${INDEX_STATE[@]}" -v "${targets[@]}" 2>&1 | awk -f bench/summarise.awk >"$OUT/$base.awk.log"
 
     from_stats "$OUT/$base.stats.log" >"$OUT/$base.stats.norm"
     from_awk "$OUT/$base.awk.log" >"$OUT/$base.awk.norm"

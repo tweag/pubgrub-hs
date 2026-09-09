@@ -136,18 +136,16 @@ version order of [§4.13](#413-versions-compare-with-trailing-zeros-insignifican
 then moved `conduit <1.3`, `aeson <2` and `yesod` again, to the counts above; the
 before-and-after is recorded there.
 
-**The plan diff finds two known gaps and nothing else.** On the three satisfiable
-problems the two plans agree on every package they share: 38, 190 and 180. cabal's
-plans additionally carry `Cabal`, `Cabal-syntax` and `hsc2hs`, and for `pandoc` also
-`alex`, `happy`, `happy-lib` and `cabal-doctest`. Those are setup and build-tool
-dependencies, rung 4. Ours additionally carry packages cabal's do not: on `pandoc`,
-`network-bsd`, `network-run` and `time-manager`. Each traces to an executable stanza
-of a dependency that is marked `buildable: False` (`tls-server`, `tls-client`,
-`crypton-socks-example`). `Bridge.Cabal.Flatten.componentDeps` merges every
-executable's dependencies into the package's and reads `buildable:` for the library
-only, where cabal plans only the library of a dependency
-([§5.3](#53-setup-and-build-tool-dependencies)). `yesod`'s five extra packages have
-not each been traced.
+**The plan diff finds one known gap and nothing else.** On the three satisfiable
+problems our plan is a *subset* of cabal's, and the two agree on every package they
+share: 38, 190 and 180. cabal's plans additionally carry `Cabal`, `Cabal-syntax` and
+`hsc2hs`, and for `pandoc` also `alex`, `cabal-doctest`, `happy` and `happy-lib`.
+Every one is a setup or build-tool dependency, rung 4.
+
+**We carry nothing cabal's plans do not** — until 2026-09-10 `pandoc` carried
+`network-bsd`, `network-run` and `time-manager` and `yesod` five more, every one of
+them out of an executable stanza marked `buildable: False`
+([§4.14](#414-a-component-that-is-not-buildable-contributes-no-dependencies)).
 
 **The three kinds of problem are not interchangeable.** `vector` and `pandoc` measure
 index throughput, and `pandoc` has one conflict, so neither can show a search
@@ -833,6 +831,61 @@ it is the only row that got worse. The proofs kept their 61 sentences.
 `scion-browser` lost its phantom interval, and `hjsonschema`'s proof took a different
 route through `aeson` at the same length.
 
+### 4.14 A component that is not buildable contributes no dependencies
+
+`Bridge.Cabal.Flatten.componentDeps` puts each sub-library's and each executable's
+dependencies under the condition that the component is buildable, using
+Cabal-syntax's own `addBuildableCondition`. That is the function
+`Distribution.Solver.Modular.IndexConversion.convGPD` pipes **every** component
+through before converting it, so taking it rather than restating it is the same rule
+the `pkg-config` predicate follows: a paraphrase is a second implementation to keep
+in step.
+
+It rewrites a tree to `if <buildable> then <tree>`, to the empty tree where
+`buildable:` is statically `False`, and leaves it untouched where it is statically
+`True`. So the condition simply joins the guards already being accumulated, and
+costs nothing where nothing is conditional.
+
+**Not applying it rejected plans cabal accepts.** `http2-5.4.4`'s `hpack-encode`
+executable declares `aeson >=2, aeson-pretty` and closes with
+
+```
+    if flag(devel)
+
+    else
+        buildable: False
+```
+
+`devel` defaults to `False`, so cabal drops the stanza and never sees `aeson`; we
+read `condTreeConstraints` and ignored the node's `buildable:`, so we did. That alone
+made `optparse-applicative ==0.15.1.0` alongside `warp` unsolvable here and solvable
+for cabal. The same fault put `network-bsd`, `network-run` and `time-manager` in our
+`pandoc` plan and five extra packages in our `yesod` plan, through the
+`buildable: False` stanzas of `tls-server`, `tls-client` and `crypton-socks-example`
+([§3.1](#31-against-cabal-on-the-benchmark-set)).
+
+**The library's buildability is deliberately not gated here.** It is a stronger fact
+— an unbuildable library makes the whole release unusable, not merely
+dependency-free — and `unbuildableAtDefaults` already carries it to the solver with
+the reason attached, which is what lets a proof name the missing `pkg-config` module
+([§4.9](#49-the-report-follows-the-specs-reporting-algorithm)).
+
+**There is no target/dependency distinction, and there must not be.** cabal's solver
+includes every package's library, sub-libraries, foreign libraries and executables
+unconditionally (`convGPD`, the four `concatMap` lines); only test-suites and
+benchmarks are gated, by stanza. A target-only rule was tried on 2026-09-10 and
+rejected on the evidence: it fixed `warp` but made `futhark ==0.27.1` resolve here
+while cabal still failed it, because `lsp-types-2.4.0.0`'s `generator` executable is
+genuinely buildable and its `regex` dependency is a real constraint. `solveExecutables`
+is not the knob either — it governs `build-tool-depends`, and setting it `False`
+changed cabal's plans but left `futhark` failing exactly as before.
+
+Foreign libraries remain excluded here where cabal includes them. No corpus problem
+has one; it is untested rather than decided.
+
+`storeFormatVersion` is 3: the stored trees are gated before they are written, so a
+store from before this change serves ungated ones.
+
 ## 5. What is deliberately out of scope
 
 ### 5.1 Flags are fixed at their declared defaults
@@ -902,14 +955,13 @@ Qualified goals were designed and then shelved. The design is in
 
 ### 5.3 Setup and build-tool dependencies
 
-Rung 4, not started. `Bridge.Cabal.Flatten.componentDeps` merges library, sublibraries
-and executables into one `GuardedDeps` and discards which component each occurrence
-came from. It reads neither `setup-depends` nor `build-tool-depends`.
+Rung 4, not started. `Bridge.Cabal.Flatten.componentDeps` merges library,
+sublibraries and executables into one `GuardedDeps` and discards which component each
+occurrence came from. It reads neither `setup-depends` nor `build-tool-depends`.
 
-The merge shows in the plans. cabal plans only the library of a dependency, so an
-executable stanza's dependencies never enter its plan, and `buildable: False` on that
-stanza is read only for the library here. That is why our `pandoc` plan carries
-`network-run` and cabal's does not ([§3.1](#31-against-cabal-on-the-benchmark-set)).
+Each component is now gated on its own buildability first, which is what removed the
+plan divergence the merge used to cause
+([§4.14](#414-a-component-that-is-not-buildable-contributes-no-dependencies)).
 
 Recovering the component label is the bulk of the work, and it touches no solver code.
 

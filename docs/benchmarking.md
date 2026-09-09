@@ -163,11 +163,11 @@ other. [harness-plan.md](harness-plan.md) has why it is shaped this way.
 ### Reading a run by hand
 
 ```sh
-pubgrub aeson '<2'                     # quiet: the answer and the read counts
-pubgrub --stats aeson '<2'             # + the search counts and phase timings, still quiet
-pubgrub -v aeson '<2'                  # + the solver's search trace
-pubgrub --cabal aeson '<2'             # cabal's solver over the same index
-pubgrub -v aeson '<2' | awk -f bench/summarise.awk
+pubgrub 'aeson <2'                     # quiet: the answer and the read counts
+pubgrub --stats 'aeson <2'             # + the search counts and phase timings, still quiet
+pubgrub -v 'aeson <2'                  # + the solver's search trace
+pubgrub --cabal 'aeson <2'             # cabal's solver over the same index
+pubgrub -v 'aeson <2' | awk -f bench/summarise.awk
 ```
 
 `--stats` counts the search in-process and prints two lines after the answer, before
@@ -214,7 +214,7 @@ both numbers have been quoted as "decisions". Quote `deciding`.
 `+RTS -s` works on any run (the executable is built with `-rtsopts`):
 
 ```sh
-pubgrub aeson '<2' +RTS -s             # allocation, max residency, GC time
+pubgrub 'aeson <2' +RTS -s             # allocation, max residency, GC time
 ```
 
 ## Which numbers to trust

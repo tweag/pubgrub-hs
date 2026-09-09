@@ -137,6 +137,8 @@ import           Distribution.Types.Condition                 (Condition (..),
                                                                simplifyCondition)
 import           Distribution.Solver.Types.PkgConfigDb        (PkgConfigDb,
                                                                pkgConfigPkgIsPresent)
+import           Distribution.PackageDescription.Configuration (addBuildableCondition)
+import           Distribution.Types.Executable                (Executable (buildInfo))
 import           Distribution.Types.BuildInfo                 (BuildInfo (..))
 import           Distribution.Types.CondTree                  (CondBranch (..),
                                                                CondTree (..))
@@ -234,6 +236,26 @@ flattenComponent env = flattenWith env condTreeConstraints
 -- trees to flag-guarded groups, resolving OS\/arch\/compiler conditions against
 -- the given platform and compiler. Test-suites, benchmarks and foreign
 -- libraries are intentionally excluded.
+--
+-- __A component that is not buildable contributes nothing__, and the gate is
+-- Cabal-syntax's own 'addBuildableCondition' — the very function
+-- @Distribution.Solver.Modular.IndexConversion.convGPD@ pipes every component
+-- through before converting it. It rewrites a tree to @if <buildable> then
+-- <tree>@, to the empty tree where @buildable:@ is statically @False@, and leaves
+-- it alone where it is statically @True@; so the condition joins the guards
+-- already being accumulated and costs nothing where nothing is conditional.
+--
+-- Without the gate, a dependency is read out of a stanza that is never built.
+-- @http2-5.4.4@'s @hpack-encode@ declares @aeson >=2@ and closes with
+-- @if flag(devel) … else buildable: False@; with @devel@ off cabal drops the
+-- stanza, and keeping it is enough to make @optparse-applicative ==0.15.1.0@
+-- alongside @warp@ unsolvable here and solvable for cabal.
+--
+-- The /library's/ buildability is deliberately not gated here. It is a stronger
+-- fact — an unbuildable library makes the whole release unusable, not merely
+-- dependency-free — and 'unbuildableAtDefaults' already carries it to the solver
+-- with the reason attached, which is what lets a proof name the missing
+-- @pkg-config@ module.
 componentDeps :: Platform -> CompilerInfo -> GenericPackageDescription -> GuardedDeps
 componentDeps = componentDepsWith Left
 
@@ -279,10 +301,22 @@ componentDepsWith
 componentDepsWith flagEnv platform compiler gpd =
     concat $
         [flattenComponent env t | t <- maybeToList (condLibrary gpd)]
-            ++ [flattenComponent env t | (_, t) <- condSubLibraries gpd]
-            ++ [flattenComponent env t | (_, t) <- condExecutables gpd]
+            ++ [flattenComponent env (gateOnBuildable libBuildInfo t) | (_, t) <- condSubLibraries gpd]
+            ++ [flattenComponent env (gateOnBuildable buildInfo t) | (_, t) <- condExecutables gpd]
   where
     env = envConfVar flagEnv platform compiler
+
+-- | Cabal-syntax's 'addBuildableCondition', named for what it does here: put a
+-- component's dependencies under the condition that the component is buildable.
+-- Taking the function from Cabal-syntax rather than restating it is the same rule
+-- the @pkg-config@ predicate follows — a paraphrase is a second implementation to
+-- keep in step.
+gateOnBuildable
+    :: Monoid a
+    => (a -> BuildInfo)
+    -> CondTree ConfVar [Dependency] a
+    -> CondTree ConfVar [Dependency] a
+gateOnBuildable = addBuildableCondition
 
 -- | Evaluate the guards at a concrete flag assignment and merge the resulting
 -- dependency ranges (intersecting duplicate constraints on the same package).
@@ -518,8 +552,8 @@ toStored gpd =
         { srFlags = [(flagName f, flagDefault f) | f <- genPackageFlags gpd]
         , srLibrary = fmap (fmap libNode) (condLibrary gpd)
         , srOthers =
-            [void t | (_, t) <- condSubLibraries gpd]
-                ++ [void t | (_, t) <- condExecutables gpd]
+            [void (gateOnBuildable libBuildInfo t) | (_, t) <- condSubLibraries gpd]
+                ++ [void (gateOnBuildable buildInfo t) | (_, t) <- condExecutables gpd]
         }
   where
     libNode lib =

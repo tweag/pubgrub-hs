@@ -44,15 +44,19 @@ last line of a solve is the tell.
 ## Run
 
 ```sh
-cabal run pubgrub -- [-v|--verbose] [--stats] [--plan tree|lines] <package> [version-range]
+cabal run pubgrub -- [-v|--verbose] [--stats] [--plan tree|lines] TARGET...
 ```
 
+A **target** is a package with an optional version range, as *one* argument — the
+same syntax `cabal build` takes. Give more than one to solve for them together.
+
 ```sh
-cabal run pubgrub -- hashable          # any version
-cabal run pubgrub -- aeson '>=2'       # constrained (quote ranges for the shell)
-cabal run pubgrub -- -v aeson '<2'     # ... plus the solver's search trace
-cabal run pubgrub -- --stats aeson     # ... plus search counts and phase timings, no trace
-cabal run pubgrub -- --cabal aeson     # cabal's own solver, over the same index
+cabal run pubgrub -- hashable            # any version
+cabal run pubgrub -- 'aeson >=2'         # constrained (one argument: quote it)
+cabal run pubgrub -- hlint 'aeson <2'    # two targets, solved together
+cabal run pubgrub -- -v 'aeson <2'       # ... plus the solver's search trace
+cabal run pubgrub -- --stats aeson       # ... plus search counts and phase timings, no trace
+cabal run pubgrub -- --cabal aeson       # cabal's own solver, over the same index
 ```
 
 `--cabal` runs cabal-install's modular solver instead of ours, fed from **the same

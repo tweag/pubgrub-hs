@@ -85,7 +85,7 @@ optionsParser =
         <*> option (eitherReader parseSet) (long "set" <> metavar "bench|corpus|both"
                 <> value SetBoth <> help "Which problem set(s) to run (default: both)")
         <*> many (strArgument (metavar "PROBLEM"
-                <> help "A problem, '<package> [range]' as one string; given, the sets are not read"))
+                <> help "A problem as one string: comma-separated targets, each '<package> [range]', e.g. 'hlint, hadolint ==2.15.1'. Given, the sets are not read"))
   where
     parseSet "bench"  = Right SetBench
     parseSet "corpus" = Right SetCorpus
@@ -114,8 +114,9 @@ data ProblemSet = Bench | Corpus
 
 data Problem = Problem
     { probArgs     :: [String]
-      -- ^ the package, then the range if the line has one. Word-split, exactly as
-      -- the shell scripts pass @$problem@ unquoted.
+      -- ^ one argument per target, exactly as the driver takes them: a target is a
+      -- package with an optional version range, and the range holds spaces, so the
+      -- line is split on commas and never on whitespace.
     , probNote     :: Text
       -- ^ the line's comment, after the @#@
     , probExcluded :: Bool
@@ -123,15 +124,21 @@ data Problem = Problem
     , probSets     :: [ProblemSet]
     }
 
+-- | The problem as its file line spells it, and as a reader must retype it:
+-- targets separated by commas.
 probText :: Problem -> Text
-probText = T.pack . unwords . probArgs
+probText = T.intercalate ", " . map T.pack . probArgs
 
 -- | The log basename: every non-alphanumeric character becomes @-@.
 probBase :: Problem -> FilePath
-probBase p = map (\c -> if isAlphaNum c then c else '-') (unwords (probArgs p))
+probBase p = map (\c -> if isAlphaNum c then c else '-') (T.unpack (probText p))
 
--- | One problem-file line. Strip the comment, trim, drop blanks; the range is the
--- rest of the line. The comment is kept as the note.
+-- | One problem-file line. Strip the comment, trim, drop blanks; what is left is
+-- a comma-separated list of targets, each a package with an optional version
+-- range. The comment is kept as the note.
+--
+-- Splitting on commas rather than whitespace is what makes @hlint, hadolint
+-- ==2.15.1@ two targets and @hadolint ==2.15.1@ one.
 parseProblemLine :: ProblemSet -> Text -> Maybe Problem
 parseProblemLine set line
     | null args = Nothing
@@ -144,7 +151,7 @@ parseProblemLine set line
   where
     (body, rest) = T.breakOn "#" line
     note = T.strip (T.drop 1 rest)
-    args = words (T.unpack body)
+    args = [ T.unpack t | t <- map T.strip (T.splitOn "," body), not (T.null t) ]
 
 readProblems :: ProblemSet -> FilePath -> IO [Problem]
 readProblems set path = mapMaybe (parseProblemLine set) . T.lines <$> readTextFile path
@@ -915,7 +922,9 @@ probeDriver exe = do
 selectProblems :: Options -> IO [Problem]
 selectProblems opts
     | not (null (optProblems opts)) =
-        pure [ Problem (words s) "" False [Bench, Corpus] | s <- optProblems opts ]
+        pure [ p { probSets = [Bench, Corpus] }
+             | s <- optProblems opts
+             , Just p <- [parseProblemLine Bench (T.pack s)] ]
     | otherwise = do
         bench <- if optSet opts /= SetCorpus then readProblems Bench "bench/problems.txt" else pure []
         corpus <- if optSet opts /= SetBench then readProblems Corpus "bench/unsat-problems.txt" else pure []

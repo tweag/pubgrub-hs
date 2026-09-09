@@ -123,7 +123,7 @@ import           System.IO                               (IOMode (..), hClose,
 -- 'Bridge.Hackage.readVersionCache' does: a generic encoding is positional, so
 -- reordering a constructor silently changes its meaning.
 storeFormatVersion :: Int
-storeFormatVersion = 2
+storeFormatVersion = 3
 
 -- These are orphans. They belong here rather than in Cabal-syntax, and wrapping
 -- every type in a newtype to avoid the orphan would cost more clarity than it

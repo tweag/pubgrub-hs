@@ -1,6 +1,12 @@
-# The benchmark problem set: one problem per line, "<package> [version-range]".
-# Blank lines and #-comments are ignored. Quote nothing — the range is the rest of
-# the line.
+# The benchmark problem set: one problem per line. A problem is a comma-separated
+# list of TARGETS, each "<package> [version-range]" — what the driver takes as one
+# argument apiece:
+#
+#     aeson <2                    one target
+#     hlint, hadolint ==2.15.1    two targets, solved together
+#
+# Blank lines and #-comments are ignored. Quote nothing here: the reader splits on
+# commas, never on whitespace, so a range may hold spaces.
 #
 # Why these. Constraining a package to an OLDER release is what forces conflicts:
 # the old bounds have to be reconciled against everything else. Unconstrained

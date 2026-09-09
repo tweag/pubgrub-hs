@@ -2,7 +2,7 @@
 #
 # Reduce a `pubgrub -v` trace to event counts and the resolution-depth histogram.
 #
-#   pubgrub -v aeson '<2' | awk -f bench/summarise.awk
+#   pubgrub -v 'aeson <2' | awk -f bench/summarise.awk
 #
 # Every number here is a count of trace lines, which is why a run cannot be both
 # quiet and counted (see docs/benchmarking.md, "The one thing that is missing").

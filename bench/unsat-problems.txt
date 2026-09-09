@@ -1,9 +1,11 @@
 # The UNSAT problem set: real Hackage packages that fail to resolve here, one
-# problem per line, "<package> [version-range]". Blank lines and #-comments are
-# ignored. Quote nothing — the range is the rest of the line.
+# problem per line. A problem is a comma-separated list of TARGETS, each
+# "<package> [version-range]", solved together — see bench/problems.txt for the
+# shape. Blank lines and #-comments are ignored; the reader splits on commas,
+# never on whitespace, so nothing is quoted here.
 #
 #   cabal run pubgrub-harness -- --set corpus   # both solvers; writes bench/output/showcase.md
-#   while read -r p; do pubgrub $p; done < bench/unsat-problems.txt
+#   scripts/gate.sh                             # every problem, both solvers
 #
 # A comment carrying the word "showcase:exclude" keeps its problem in the corpus
 # and the gate, run and measured by the harness, but out of the rendered showcase.
