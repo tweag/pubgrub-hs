@@ -15,6 +15,7 @@ module PubGrub.Incompatibility
     , incompRelation
     , isTerminal
     , priorCause
+    , priorCauseTerms
     ) where
 
 import           Data.List.NonEmpty             (NonEmpty)
@@ -270,7 +271,26 @@ priorCause
     -- ^ shared (pivot) package
     -> Incompatibility
 priorCause current@(Incompatibility cur _) satCause@(Incompatibility sat _) package =
-    Incompatibility finalTerms (CauseDerivedFrom current satCause)
+    Incompatibility (priorCauseTerms package cur sat) (CauseDerivedFrom current satCause)
+
+-- | The terms a 'priorCause' arrives at, without the derivation node: the pivot's
+-- two terms unioned, every other package's intersected, and the pivot dropped
+-- where the union says nothing.
+--
+-- Split out so that a caller can replay a step rather than describe one: a
+-- reporter that collapses a run of steps into one line can check that this
+-- function, run once over the run's merged fact, lands exactly on the terms the
+-- run arrived at — so the check is the operation itself, not a second account
+-- of it.
+priorCauseTerms
+    :: PackageName
+    -- ^ shared (pivot) package
+    -> Map PackageName (Term InstanceSet)
+    -- ^ terms of the current incompatibility
+    -> Map PackageName (Term InstanceSet)
+    -- ^ terms of the satisfier's cause
+    -> Map PackageName (Term InstanceSet)
+priorCauseTerms package cur sat = finalTerms
   where
     merged =
         Map.unionWith
