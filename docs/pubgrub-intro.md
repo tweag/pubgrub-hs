@@ -362,7 +362,7 @@ The printer walks the DAG:
 
 > **Deduplication.** The derivation structure is a DAG, not a tree, so the same incompatibility can be a parent of several nodes. A printer that recurses naively repeats large subtrees. Give a line number to any incompatibility referenced more than once, and replace repeated expansions with a back-reference.
 
-**The real reporter does more than this.** It follows the spec's own reporting algorithm (`references/pubgrub.md:504`), which fuses chains, skips every other derived step, and absorbs empty-range leaves. That is what takes a proof from hundreds of lines to a handful. See [STATUS.md](STATUS.md) §4.9.
+**The real reporter does more than this.** It follows the spec's own reporting algorithm (`references/pubgrub.md:504`), which fuses chains, skips every other derived step, states a run of steps once, and absorbs empty-range leaves. That is what takes a proof from hundreds of lines to a handful. See [STATUS.md](STATUS.md) §4.9.
 
 *Lives in: [`src/PubGrub/Report.hs`](../src/PubGrub/Report.hs)*
 

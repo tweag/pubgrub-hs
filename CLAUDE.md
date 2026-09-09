@@ -56,7 +56,7 @@ you change anything, read it.
 
 ```sh
 cabal build
-cabal test                           # 223 tests, ~0.3 s
+cabal test                           # 232 tests, ~0.3 s
 cabal run pubgrub -- aeson              # the driver; add -v for the search trace
 cabal run pubgrub -- 'aeson <2'         # a target is ONE argument: package and range
 cabal run pubgrub -- hlint 'aeson <2'   # several targets, solved together
@@ -411,13 +411,20 @@ self-dependency, so the cycle forces a different setup script.
 ## Reporting
 
 `PubGrub.Report.reportConflict` walks the cause tree and prints a numbered proof
-following the spec's own reporting algorithm (`references/pubgrub.md:504`). Four rules
+following the spec's own reporting algorithm (`references/pubgrub.md:504`). Five rules
 run, and `docs/STATUS.md` §4.9 states each one with its soundness argument:
 
 1. A chain of two external facts is one sentence.
 2. Every other derived step is skipped.
 3. A run of steps about the same `(depender, dependee)` pair is one sentence.
-4. Empty-range leaves are absorbed into the sibling they were resolved against
+4. A run of three or more steps sharing only a **depender** is one sentence, stated as
+   `p ⋃S requires q₁ ⋃R₁ or … or qₙ ⋃Rₙ`. Its guard is the operation itself:
+   `priorCauseTerms` is applied once to the merged fact and must land term for term on
+   the conclusion the line is attached to, so the rule asserts no step the proof did
+   not already take. It is what a problem with an **unconstrained** target needs —
+   refuting one walks the target's whole version history, and consecutive releases
+   rarely fail over the same dependee, so rule 3 never fires there.
+5. Empty-range leaves are absorbed into the sibling they were resolved against
    (`collapseNoInstances`).
 
 **The wording is pub's, in cabal's range syntax**, including every special case the

@@ -24,6 +24,10 @@
 --    and both external facts are named in one line. Since most derivation graphs
 --    are linear chains, this halves them.
 --
+-- Three more rules shorten it further — two run collapses in @oneDerived@, and
+-- 'collapseNoInstances' — and each carries its soundness argument where it is
+-- defined.
+--
 -- == Line numbers are for joins only
 --
 -- Only an incompatibility that a later line refers back to is numbered, and in
@@ -56,7 +60,8 @@ import           Distribution.Pretty            (prettyShow)
 import           Distribution.Types.PackageName (PackageName)
 import           PubGrub.Incompatibility        (IncompatCause (..),
                                                  Incompatibility (..),
-                                                 UnbuildableReason (..))
+                                                 UnbuildableReason (..),
+                                                 priorCauseTerms)
 import           PubGrub.InstanceSet            (InstanceSet, isEveryVersion)
 import           PubGrub.Pretty                 (Pretty (..))
 import           PubGrub.SetOps                 (SetOps (union), equivalent,
@@ -377,15 +382,58 @@ renderReport root0 = (headline, proof)
     -- Case 2, with @d@ the derived cause and @e@ the external fact.
     --
     -- Before the ordinary every-other-step skip, look for a __run__ of steps that
-    -- all say the same kind of thing: this range of @p@ depends on @q@, and so does
-    -- the next range, and the next. That is one fact about @p@ as a whole, and
-    -- printed a range at a time it walks one bound's history an adjacent pair of
-    -- releases at a time (four of @matterhorn@'s ten lines did this to @hashable@).
+    -- all say the same kind of thing, and state the run once. There are two kinds,
+    -- tried widest first.
     --
-    -- It is /not/ the same thing as references/pubgrub.md:456's collapsing, which
-    -- merges facts with an __identical__ dependee range. Here the dependee ranges
-    -- differ — that is why the solver had to derive its way along them — and what is
-    -- printed is their union.
+    -- __The same-pair run__ (the second equation): this range of @p@ depends on
+    -- @q@, and so does the next range, and the next. That is one fact about @p@ as
+    -- a whole, and printed a range at a time it walks one bound's history an
+    -- adjacent pair of releases at a time (four of @matterhorn@'s ten lines did
+    -- this to @hashable@). It is /not/ the same thing as references/pubgrub.md:456's
+    -- collapsing, which merges facts with an __identical__ dependee range. Here the
+    -- dependee ranges differ — that is why the solver had to derive its way along
+    -- them — and what is printed is their union.
+    --
+    -- __The widening run__ (the first equation). The same-pair run needs every fact
+    -- in the run to name the same dependee, and needs the step's conclusion to be
+    -- the two-term "p requires q". Neither holds on a problem with an
+    -- /unconstrained/ target: refuting one takes a walk along the target's whole
+    -- version history, and consecutive releases rarely fail over the same dependee.
+    -- @aeson@ against @optparse-applicative ==0.15.1.0@ spent thirteen lines on
+    -- that walk, folding in one @aeson@ dependency each time while every other term
+    -- stood still.
+    --
+    -- So collect the run by __depender alone__ and state it once. Each fact says
+    -- @p ∈ Sᵢ@ requires @qᵢ ∈ Rᵢ@, so their union says @p ∈ ⋃S@ requires
+    -- @q₁ ∈ ⋃R₁@ or … or @qₙ ∈ ⋃Rₙ@: if @p@ is in the union it is in some @Sᵢ@, and
+    -- that fact's own dependee is one of the disjuncts. Nothing else about @p@ is
+    -- claimed, which is why 'mergeFacts' refuses a run where some package is a
+    -- depender in one fact and a dependee in another — the argument is about one
+    -- depender and holds for nothing else.
+    --
+    -- __The guard is the operation, not a description of it.__ A line that stands
+    -- for a run has to arrive where the run arrived, and the only way to know that
+    -- is to go there: 'PubGrub.Incompatibility.priorCauseTerms' — the term algebra
+    -- 'PubGrub.Incompatibility.priorCause' itself runs, pivoting on the depender —
+    -- is applied once to the merged fact, and the collapse is taken only if the
+    -- result is term for term the conclusion this line is attached to. So the rule
+    -- needs no subset side-condition of its own, and it needs no case analysis over
+    -- what the run did: whether the depender __accumulated__ (@aeson@ climbing from
+    -- @\<0.8.0.1@ to @\<2.2.5.0@) or was __eliminated__ (@directory@ losing one slot
+    -- per fact until nothing was left), one step over the union lands where @n@
+    -- steps over the members landed, or the collapse does not happen.
+    oneDerived final d e inc out
+        | Just (p, _, _, _) <- asDependency e
+        , -- Three facts at least. Two of them fit one line as they are, where the
+          -- ordinary skip already puts them, and naming both says strictly more
+          -- than naming their union — so the union has to buy a line to be worth
+          -- taking. The same-pair run still takes two facts whose dependee agrees.
+          (rest', extra@(_ : _ : _)) <- dependerRun p d
+        , Just merged <- mergeFacts (e : extra)
+        , sameTerms (priorCauseTerms p (incompTerms rest') merged) (incompTerms inc) =
+            emit
+                (opening final "And because " <> runFact p merged <> ", " <> says final inc)
+                (derived False rest' out)
     oneDerived final d e inc out
         | Just (p, s, q, r) <- asDependency e
         , (rest', extra@(_ : _)) <- depRun p q d
@@ -418,6 +466,59 @@ renderReport root0 = (headline, proof)
             emit
                 (opening final "And because " <> leaf e <> ", " <> says final inc)
                 (derived False d out)
+
+    -- The merged fact of a widening run, as its sentence. With one dependee it is
+    -- the shape the same-pair run prints, word for word, so a run that both could
+    -- take reads the same either way; with several it is a requirement with
+    -- alternatives, and "requires" rather than "depends on" because a union of
+    -- declared dependencies is something the solver worked out, not something an
+    -- author wrote (references/pubgrub.md:1005).
+    runFact p terms = case Map.toList (Map.delete p terms) of
+        [(q, Negative r)] | Just (Positive sp) <- Map.lookup p terms -> dep p sp q r
+        _ -> summaryTerms terms
+
+    -- Walk down the derived spine collecting external dependency facts with the
+    -- given depender, whatever they depend /on/. Answers where the run bottoms out
+    -- and what it collected.
+    dependerRun p = go []
+      where
+        go acc node = case chainStep node of
+            Just (pd, pe)
+                | Just (p', _, _, _) <- asDependency pe
+                , p' == p ->
+                    go (pe : acc) pd
+            _ -> (node, acc)
+
+    -- The facts of a run as one term map: every set unioned, polarity kept. A
+    -- package that is a depender in one fact and a dependee in another has no
+    -- merged term, and refusing to merge those is what keeps the union argument
+    -- above honest — it holds for a run with /one/ depender and nothing else.
+    mergeFacts = foldr step (Just Map.empty)
+      where
+        step f acc = acc >>= combineWith sameWay (incompTerms f)
+        sameWay (Positive x) (Positive y) = Just (Positive (x `union` y))
+        sameWay (Negative x) (Negative y) = Just (Negative (x `union` y))
+        sameWay _ _                       = Nothing
+
+    -- Combine two term maps package by package, keeping the terms only one of
+    -- them names and failing the whole map where @f@ fails on a shared one.
+    combineWith f a b = sequenceA (Map.unionWith comb (Just <$> a) (Just <$> b))
+      where
+        comb mx my = do
+            x <- mx
+            y <- my
+            f x y
+
+    -- Two term maps naming the same packages, each with the same polarity and an
+    -- equivalent set. 'equivalent' is the semantic test: 'InstanceSet' is
+    -- non-canonical, so two maps that mean the same thing rarely look the same.
+    sameTerms a b =
+        Map.keys a == Map.keys b
+            && and [same x y | (x, y) <- zip (Map.elems a) (Map.elems b)]
+      where
+        same (Positive x) (Positive y) = x `equivalent` y
+        same (Negative x) (Negative y) = x `equivalent` y
+        same _ _                       = False
 
     -- Walk down the derived spine collecting external dependency facts that are all
     -- about the same @(depender, dependee)@ package pair. Answers where the run
@@ -587,7 +688,9 @@ renderReport root0 = (headline, proof)
     -- says the package /must/ be in that set, and the sentence carries the
     -- negation — "foo requires bar >=2", "if foo and bar then baz <3", "either
     -- foo <2 or bar <3".
-    summary c = case Map.toList (incompTerms c) of
+    summary c = summaryTerms (incompTerms c)
+
+    summaryTerms ts = case Map.toList ts of
         [] -> "version solving failed"
         [(p, Positive r)] -> bare p r <> " is forbidden"
         [(p, Negative r)] -> bare p r <> " is required"

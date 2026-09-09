@@ -101,6 +101,7 @@ tests =
         , testGroup "what is left alone" untouched
         , testGroup "the property that makes it sound" soundness
         , testGroup "a run of same-pair steps is one sentence" sameePairRun
+        , testGroup "a run collected by depender alone is one sentence" widenedRun
         , testGroup "the boot-package leaf" bootLeaf
         , testGroup "the unbuildable leaf" unbuildableLeaf
         , testGroup "the headline" headline
@@ -187,15 +188,104 @@ sameePairRun =
         assertBool
             ("the widest dependee bound should appear:\n" ++ proof)
             ("<8" `isInfixOf` proof)
-    , -- The rule keys on the (depender, dependee) pair. A step about a different
-      -- dependee is a different kind of thing and must stop the run, or the
-      -- sentence would merge two unrelated claims.
-      testCase "a step about a different dependee stops the run" $ do
+    , -- Rule 3 keys on the (depender, dependee) pair, and rule 5 takes over where
+      -- the dependee changes. Either way no dependee may be dropped: a sentence
+      -- that stood for a fact about @r@ and did not mention @r@ would be claiming
+      -- something the facts do not say.
+      testCase "a step about a different dependee keeps that dependee named" $ do
         let other = fromDependency pkgA (range 3 4) (mkPackageName "r") (range 1 9)
             base = priorCause (aDependsOn (range 1 2) (range 1 5)) (aDependsOn (range 2 3) (range 1 6)) pkgA
             inc = priorCause base other pkgA
             proof = unlines (proofLines inc)
         assertBool ("r should still be named:\n" ++ proof) ("r " `isInfixOf` proof)
+    ]
+
+-- --------------------------------------------------------------------------
+-- Rule 5: a run collected by depender alone is one sentence
+-- --------------------------------------------------------------------------
+
+-- | @a@ over @dependers@ depends on @dependee@ over @dependees@ — like
+-- 'aDependsOn', but the dependee is the caller's, which is the whole point of
+-- rule 5.
+aRequires :: InstanceSet -> String -> InstanceSet -> Incompatibility
+aRequires dependers dependee dependees =
+    fromDependency pkgA dependers (mkPackageName dependee) dependees
+
+-- | A chain of steps that all name @a@ as the depender and nothing else in
+-- common: the shape a proof takes when it walks a target's whole version
+-- history, one release and one unrelated dependency at a time.
+mixedChainOf :: [(InstanceSet, String, InstanceSet)] -> Incompatibility
+mixedChainOf [] = error "mixedChainOf: needs at least two facts"
+mixedChainOf ((s0, q0, r0) : rest) = foldl step (aRequires s0 q0 r0) rest
+  where
+    step acc (s, q, r) = priorCause acc (aRequires s q r) pkgA
+
+widenedRun :: [TestTree]
+widenedRun =
+    [ -- Four facts about @a@ and four different dependees. Rule 3 cannot touch
+      -- this — no two facts share a dependee — so without rule 5 it costs a line
+      -- for every two facts.
+      testCase "four steps with four dependees collapse below one line each" $ do
+        let inc =
+                mixedChainOf
+                    [ (range 1 2, "q", range 1 5)
+                    , (range 2 3, "r", range 1 6)
+                    , (range 3 4, "s", range 1 7)
+                    , (range 4 5, "t", range 1 8)
+                    ]
+            ls = proofLines inc
+        assertBool
+            ("expected fewer lines than facts, got:\n" ++ unlines ls)
+            (length ls < 4)
+    , -- The collapsed sentence stands in for every fact in the run, so every
+      -- dependee it collected has to appear in it. Dropping one would be claiming
+      -- that a range of @a@ requires less than it does.
+      testCase "every dependee of the run is named" $ do
+        let inc =
+                mixedChainOf
+                    [ (range 1 2, "q", range 1 5)
+                    , (range 2 3, "r", range 1 6)
+                    , (range 3 4, "s", range 1 7)
+                    , (range 4 5, "t", range 1 8)
+                    ]
+            proof = unlines (proofLines inc)
+        mapM_
+            (\d -> assertBool (d ++ " should be named:\n" ++ proof) (d `isInfixOf` proof))
+            ["q ", "r ", "s ", "t "]
+    , -- The depender's range is the union of the run's, and it may be neither
+      -- wider nor narrower: wider claims facts the run does not have, narrower
+      -- drops one it does.
+      testCase "the depender is the union of the run's ranges" $ do
+        let inc =
+                mixedChainOf
+                    [ (range 1 2, "q", range 1 5)
+                    , (range 2 3, "r", range 1 6)
+                    , (range 3 4, "s", range 1 7)
+                    ]
+            proof = unlines (proofLines inc)
+        assertBool
+            ("a should span 1..4 in one sentence:\n" ++ proof)
+            (">=1 && <4" `isInfixOf` proof)
+    , -- Two facts already fit one line with both of them named, and naming both
+      -- says strictly more than naming their union. The union has to buy a line
+      -- to be worth taking, so a two-fact run is left to the ordinary skip.
+      testCase "two facts are named, not merged" $ do
+        let inc = mixedChainOf [(range 1 2, "q", range 1 5), (range 2 3, "r", range 1 6)]
+            proof = unlines (proofLines inc)
+        assertBool
+            ("both declared bounds should survive:\n" ++ proof)
+            ("<5" `isInfixOf` proof && "<6" `isInfixOf` proof)
+    , -- The union argument is about one depender. Where a package is a depender
+      -- in one fact and a dependee in another the run has two subjects, no union
+      -- fact stands for it, and the steps must stay separate.
+      testCase "a second depender stops the run" $ do
+        let inc =
+                priorCause
+                    (mixedChainOf [(range 1 2, "q", range 1 5), (range 2 3, "r", range 1 6)])
+                    (fromDependency pkgQ (range 1 5) pkgA (range 3 4))
+                    pkgA
+            proof = unlines (proofLines inc)
+        assertBool ("q should be named as a depender:\n" ++ proof) ("q " `isInfixOf` proof)
     ]
 
 -- --------------------------------------------------------------------------

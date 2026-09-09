@@ -476,7 +476,7 @@ There are no setup dependencies yet, so there is no edge to keep.
 
 `PubGrub.Report.reportConflict` walks the cause tree and prints a numbered proof. It
 follows `references/pubgrub.md:504` rather than replaying the derivation tree one node
-per line. Four rules do the work.
+per line. Five rules do the work.
 
 1. **A chain of two external facts is one sentence** (`:1018`): "foo depends on bar
    ^2.0.0 *which depends on* baz ^3.0.0". Its sibling form is "depends on *both* X and
@@ -490,22 +490,46 @@ per line. Four rules do the work.
    chain steps about the same `(depender, dependee)` pair and states them once, as
    their union. This is sound because each fact says `p ∈ Sᵢ` requires `q ∈ Rᵢ`, so
    `p ∈ ⋃S` requires `q ∈ ⋃R`.
-4. **Empty-range leaves are absorbed** (`collapseNoInstances`). Intensional ranges
+4. **A run collected by depender alone is one sentence.** Rule 3 needs one dependee
+   for the whole run; on a problem with an *unconstrained* target there is no such
+   run, because refuting one walks the target's version history and consecutive
+   releases rarely fail over the same dependee. So `oneDerived` also finds the
+   maximal run of chain steps sharing a *depender*, whatever they depend on, and
+   states it as `p ∈ ⋃S requires q₁ ∈ ⋃R₁ or … or qₙ ∈ ⋃Rₙ`. Sound for the same
+   reason as rule 3: if `p` is in the union it is in some `Sᵢ`, and that fact's own
+   dependee is one of the disjuncts.
+5. **Empty-range leaves are absorbed** (`collapseNoInstances`). Intensional ranges
    mean the solver separately learns that a range's holes are empty, and
    `no version for bar in >2.0.0 && <3` used to clutter the proof. pubgrub-rs runs the
    same post-pass as `DerivationTree::collapse_no_versions`.
 
-Every fusion is guarded by a subset test, so a fused sentence cannot claim more than
-the two facts do. One-sided `isEmpty` means a guard can only decline to fuse. It can
-never fuse wrongly.
+Every fusion is guarded, so a fused sentence cannot claim more than the facts do.
+Rules 1 to 3 use a subset test, and one-sided `isEmpty` means such a guard can only
+decline to fuse — never fuse wrongly.
 
-**Rule 4 looks cosmetic and is not.** The `no version for …` siblings were what
+**Rule 4's guard is the operation itself.** A line standing for a run has to arrive
+where the run arrived, so `PubGrub.Incompatibility.priorCauseTerms` — the term algebra
+`priorCause` runs, split out for this — is applied once to the run's merged fact,
+pivoting on the depender, and the collapse is taken only when the result is term for
+term the conclusion the line is attached to. That is why the rule needs no subset
+side-condition and no case analysis over what the run did. It covers both shapes a
+single proof walks: a depender that **accumulates**, `aeson` climbing from `<0.8.0.1`
+to `<2.2.5.0` one dependency at a time, and one that is **eliminated**, `directory`
+losing a slot per fact until nothing is left. `mergeFacts` refuses a run where some
+package is a depender in one fact and a dependee in another, because the union
+argument is about one depender and holds for nothing else.
+
+Rule 4 needs three facts. Two already fit one line with both named, and naming both
+says strictly more than naming their union, so the union has to buy a line to be worth
+taking.
+
+**Rule 5 looks cosmetic and is not.** The `no version for …` siblings were what
 *stopped* rule 1 from firing.
 Each dependency fact was paired with a hole-is-empty fact instead of with the next
 dependency fact. Once the siblings were absorbed, rule 1 appeared in **14 of the 17**
 harvested problems. It had only ever been seen in the spec's own worked example.
 
-**Rule 4 recomputes nothing, and that is its soundness argument.** Resolving a unit
+**Rule 5 recomputes nothing, and that is its soundness argument.** Resolving a unit
 clause `{p ∈ r}` against a dependency fact on the pivot `p` unions the two terms about
 `p` and leaves the other side alone. The step's conclusion already *is* that
 dependency with `p`'s term adjusted, so the node keeps its terms and is re-labelled.
@@ -771,7 +795,7 @@ search had to discover empty and `scion-browser` printed. And
 two components and `4.14` sits below `4.14.0.0`. Measured on 2026-09-09 over the 23
 gate problems, before the change: 24 no-version incompatibilities were minted, and 8
 of them were such holes, of the form `[a, a.0)`. Each cost a decision, a conflict and
-a learned clause, and then rule 4 of the reporter
+a learned clause, and then rule 5 of the reporter
 ([§4.9](#49-the-report-follows-the-specs-reporting-algorithm)) absorbed it.
 
 **What it deviates from, measured.** The whole index at head on 2026-09-09, 153,495

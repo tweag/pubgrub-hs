@@ -918,7 +918,7 @@ where it was.
 
 Tree lines for the proof were considered and declined: the spec's algorithm
 linearises the derivation on purpose and skips every other step, and a tree would
-put back what the four rules removed. A dependency path from the root to the wall,
+put back what the reporter’s rules removed. A dependency path from the root to the wall,
 cargo's "required by" shape, was left as a possible companion.
 
 ### Colour is a terminal-only layer — HELD
@@ -1206,6 +1206,57 @@ the two that stay out are the two cabal itself puts behind a `Stanza` a plain
 moved, so `test/FlattenSpec.hs` is the only thing holding it: one case asserting the
 dependency arrives and its `buildable: False` twin asserting it does not. The suite
 went to 227.
+
+---
+
+## Era 17 — A run collected by depender alone (Sep 10)
+
+### Rule 4 of the reporter: the widening run — HELD
+
+*Sep 10.* The multi-target sweep left us losing on proof length to cabal on 21 of 23
+problems, and Andrea asked what to do about it. Two things were true at once.
+
+The comparison was measuring different objects. On `optparse-applicative ==0.15.1.0,
+criterion` cabal prints 26 lines of which 20 are `trying:` — a witness path of
+*successful* assignments — two carry the whole reason, and the last is an apology
+naming 26 goals it "had most trouble fulfilling"; it explains `criterion-1.6.5.0` and
+never says why 1.6.4 and below fail. Four of the 23 end at `Backjump limit reached`,
+so cabal reports a resource limit where we report a refutation. Counting its lines
+against our sentences only looks fair because every problem in the old corpus pins
+its targets.
+
+But the proofs were also too long, and the shape was specific. Dumping the derivation
+tree for `optparse-applicative ==0.15.1.0, aeson` showed thirteen consecutive steps
+folding in one `aeson` dependency each — `base`, `deepseq`, `template-haskell`,
+`ghc-prim` six times, `semialign` — with every other term standing still, and
+fourteen more striking `directory`'s slots off one at a time. Rule 3 could not touch
+either: it collects by `(depender, dependee)` and these runs change dependee at almost
+every step. Collecting by **depender alone** and stating the run as
+`p ⋃S requires q₁ ⋃R₁ or … or qₙ ⋃Rₙ` is sound for rule 3's own reason — if `p` is in
+the union it is in some `Sᵢ`, whose dependee is one of the disjuncts.
+
+**The guard is the operation.** The first attempt described the step instead of taking
+it: a hand-written term algebra that unioned matching polarities. It collapsed the
+`aeson` walk and refused the `directory` one, because there the depender is *negative*
+in the conclusion — the solver is eliminating it slot by slot, not accumulating it.
+Rather than add cases, `priorCauseTerms` was split out of `priorCause` and is now
+applied once to the run's merged fact; the collapse is taken only when it lands term
+for term on the conclusion the line is attached to. That covers both shapes without
+naming either, and it cannot drift from the solver, since it *is* the solver's
+arithmetic. Doing it that way also found a third case the paraphrase had refused.
+
+Three facts minimum. Two already fit one line with both named, and naming both says
+strictly more than naming their union.
+
+Corpus 61 → 60 sentences with the golden proofs unchanged, and on the multi-target
+problems 46 → 34, 65 → 54, 63 → 46, 33 → 30. `mergeFacts` refuses a run where some
+package is a depender in one fact and a dependee in another, which is what stopped the
+remaining `process`/`directory` interleaving — correctly: the union argument is about
+one depender. The suite went to 232.
+
+**We still lose to cabal on an unconstrained target**, and the residue is not a run:
+the remaining sentences each name a different depender. What is left is a genuinely
+broad refutation against a message that reports one path.
 
 ---
 

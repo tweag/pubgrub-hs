@@ -103,7 +103,7 @@ Two things this table is evidence for beyond length:
 - **The chain fusion fires in the wild.** `depends on X which depends on Y` appears in
   14 of the 17. It had only ever been seen in the spec's own worked example, so it
   looked like a rule that never fires on real input. That is also what made the empty-range
-  clutter look cosmetic ([STATUS.md](STATUS.md) §4.9, rule 4): those holes were what
+  clutter look cosmetic ([STATUS.md](STATUS.md) §4.9, rule 5): those holes were what
   kept the fusion from pairing.
 - **`references/pubgrub.md:476` pays.** `hpqtypes-extras` says
   `hpqtypes >=1.10.0.2 needs pkg-config package libpq, which is not found` where

@@ -61,7 +61,7 @@ Three groups repay knowing about.
   one matches sentence for sentence. Its provider mints release **slots**, as
   `Bridge.Provider` does. A harness that emits per-version dependers is not following
   `:456`, and the divergence shows up as an extra proof line that looks like ours.
-- **`PubGrub.Report`** — the reporter's four rules, on trees built by hand. The case
+- **`PubGrub.Report`** — the reporter's five rules, on trees built by hand. The case
   that matters asserts that `collapseNoInstances` leaves a node's *terms* untouched. The
   pass re-labels a derivation step rather than recomputing it, and a printed proof
   cannot show that.
