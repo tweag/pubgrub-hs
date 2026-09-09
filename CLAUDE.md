@@ -56,11 +56,12 @@ you change anything, read it.
 
 ```sh
 cabal build
-cabal test                           # 177 tests, ~0.3 s
+cabal test                           # 205 tests, ~0.3 s
 cabal run pubgrub -- aeson           # the driver; add -v for the search trace
 cabal run pubgrub -- --stats aeson   # + search counts and phase timings, no trace
 cabal run pubgrub -- --cabal aeson   # cabal's solver, same index (the baseline)
-cabal run pubgrub-index              # build the derived index (~200 s, once)
+cabal run pubgrub -- --index-state 2026-09-03T00:00:00Z aeson   # the index as it was then, either solver
+cabal run pubgrub-index              # build the derived index (~120 s, once per refresh)
 scripts/gate.sh                      # every check that must not regress
 cabal run pubgrub-harness            # both solvers, both sets; writes bench/output/{benchmark,showcase}.md
 scripts/check-stats.sh               # --stats against bench/summarise.awk, every problem
@@ -71,6 +72,11 @@ the problem set: problem count, the 17-case failure corpus, verdict agreement ov
 23 problems, proof length against cabal's own message, the proof and no-version
 totals, the golden proofs, the pkg-config modelling tests, the whole suite, and the
 Lean build. One line per gate, non-zero exit on any regression.
+
+Every run in it, and every harness run, is pinned to the index-state in
+`bench/index-state`, so the numbers stop moving with the weekly index refresh.
+`PUBGRUB_INDEX_STATE=head` (or `pubgrub-harness --index-state head`) runs against
+everything the local index holds. **Move the pin in the change that re-measures.**
 
 It holds five numeric baselines. Only the problem count is exact. The other four are
 floors or ceilings rather than targets, and beating one prints `IMPROVED` and still
@@ -103,7 +109,8 @@ bridge (private library) ──── cabal-install-solver, Cabal, Cabal-syntax,
     └─ our own Provider
         ▲
 app/Main.hs — the `pubgrub` driver: --cabal picks the baseline,
-              --stats prints counts and phases, --plan lines prints a diffable plan
+              --stats prints counts and phases, --plan lines prints a diffable plan,
+              --index-state pins the index to a moment, for both solvers
         ▲
 app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solver,
                  problem and repetition; writes bench/output/benchmark.md and showcase.md
@@ -162,9 +169,12 @@ version-only `PackageVersionConstraint`. So we define our own constraint type.
 
 **Still to handle: `preferred-versions`.** Neither solver reads it.
 
-**`.cabal` revisions need no work.** The index `hackage-security` hands us carries
-only the last revision of each release: 152,987 entries, 152,987 distinct, across
-19,419 packages.
+**`.cabal` revisions are decided by the index-state.** The version cache
+(`Bridge.Hackage`) records every `.cabal` entry in the tar, revisions included, with
+its time and block, and a run at `--index-state T` reads each release's last entry at
+or before `T` by block. `hackage-security`'s own lookup by name answers with the last
+revision in the whole tar, which is right only at the head, so nothing reads through
+it any more.
 
 ## Invariants you can break by accident
 
@@ -227,13 +237,17 @@ those nodes are the proof lines this exists to remove.
 every miss parses instead. Removing `_cache/derived-index.*` costs speed and never
 correctness.
 
-**It does not follow the index.** The Hackage index refreshes itself at most weekly,
-and the store checks only its format version, so every release published since it was
-built is a miss that parses. Re-run `cabal run pubgrub-index` after a refresh, or
-`parses` stops being zero.
+**It follows the index by block.** Each stored release carries the tar block it was
+parsed from, and `srLookup` serves it only when that is the block of the revision in
+force at the run's index-state. A release published or revised since the store was
+built, or read at an index-state before its latest revision, is a miss that parses.
+Re-run `cabal run pubgrub-index` after a refresh, or `parses` stops being zero.
 
 **Raise `storeFormatVersion` on any encoding change.** A generic CBOR encoding is
-positional, so reordering a constructor silently changes meaning.
+positional, so reordering a constructor silently changes meaning. The version cache
+has the same rule under `cacheFormatVersion`, and one more: a `Revision` occupies
+`revisionBytes` on disk and the reader skips by that arithmetic, so a change to its
+encoding must change both.
 
 **What is stored is the pre-environment form, not the flattened one.** `envConfVar`
 resolves `os`, `arch` and `impl` against this machine, and buildability resolves

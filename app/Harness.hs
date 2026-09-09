@@ -27,7 +27,7 @@ import Control.Exception (IOException, try)
 import Control.Monad (forM, forM_, unless, when)
 import Data.ByteString qualified as BS
 import Data.Char (isAlphaNum, isDigit)
-import Data.List (dropWhileEnd, sort)
+import Data.List (dropWhileEnd, nub, sort)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isNothing, listToMaybe, mapMaybe)
@@ -60,12 +60,13 @@ data SetChoice = SetBench | SetCorpus | SetBoth
     deriving (Eq, Show)
 
 data Options = Options
-    { optExe      :: Maybe FilePath
-    , optReps     :: Int
-    , optOutput   :: FilePath
-    , optTimeout  :: Int
-    , optSet      :: SetChoice
-    , optProblems :: [String]
+    { optExe        :: Maybe FilePath
+    , optReps       :: Int
+    , optOutput     :: FilePath
+    , optTimeout    :: Int
+    , optIndexState :: Maybe String
+    , optSet        :: SetChoice
+    , optProblems   :: [String]
     }
 
 optionsParser :: Parser Options
@@ -79,6 +80,8 @@ optionsParser =
                 <> help "Where the per-run logs and the two reports go")
         <*> option auto (long "timeout" <> metavar "SECONDS" <> value 300 <> showDefault
                 <> help "Per-run timeout")
+        <*> optional (strOption (long "index-state" <> metavar "TIMESTAMP"
+                <> help "Passed to every run as --index-state, so both reports are made against the index as it was then (default: the state pinned in bench/index-state; 'head' for everything the local index holds)"))
         <*> option (eitherReader parseSet) (long "set" <> metavar "bench|corpus|both"
                 <> value SetBoth <> help "Which problem set(s) to run (default: both)")
         <*> many (strArgument (metavar "PROBLEM"
@@ -91,11 +94,13 @@ optionsParser =
 
 -- | Everything a run needs, resolved once.
 data Config = Config
-    { cfgExe      :: FilePath
-    , cfgReps     :: Int
-    , cfgOutput   :: FilePath
-    , cfgTimeout  :: Int
-    , cfgNewLines :: Bool
+    { cfgExe        :: FilePath
+    , cfgReps       :: Int
+    , cfgOutput     :: FilePath
+    , cfgTimeout    :: Int
+    , cfgIndexState :: Maybe String
+      -- ^ the @--index-state@ every run is given, if one was
+    , cfgNewLines   :: Bool
       -- ^ whether the driver accepts @--stats@ and @--plan@. A driver from before
       -- those landed rejects them outright, so they are probed for once and omitted
       -- when absent; the report then says its counters, phases and plans are missing.
@@ -192,6 +197,7 @@ data Run = Run
     , runStats     :: Maybe [(Text, Text)]  -- ^ the @stats:@ line, as key=value pairs
     , runPhases    :: Maybe [(Text, Double)]
     , runReads     :: Maybe Reads
+    , runIndexState :: Maybe Text           -- ^ the child's @index-state:@ line: the state the run was really at
     , runPlan      :: Maybe [PlanLine]      -- ^ 'Nothing' when no @plan:@ line was printed
     , runHeadline  :: Maybe Text            -- ^ the line above our proof: the request and the walls
     , runProof     :: [Text]                -- ^ our proof as printed: sentences, their continuation lines, and the blank line between branches
@@ -210,6 +216,7 @@ parseRun code logText timeText rtsText = Run
     , runStats     = keyValues <$> firstWithPrefix "stats:"
     , runPhases    = firstWithPrefix "phases:" >>= traverse readPhase . keyValues
     , runReads     = firstJust (map parseReads ls)
+    , runIndexState = T.strip <$> firstWithPrefix "index-state:"
     , runPlan      = case mapMaybe parsePlanLine ls of
                         [] -> Nothing
                         ps -> Just ps
@@ -309,7 +316,7 @@ cabalBlock ls = case dropWhile (not . T.isInfixOf "Could not resolve dependencie
     []         -> []
     (_ : rest) -> filter keep rest
   where
-    keep l = not (T.null l) && not (any (`T.isPrefixOf` l) ["stats:", "phases:", "plan:"])
+    keep l = not (T.null l) && not (any (`T.isPrefixOf` l) ["stats:", "phases:", "plan:", "index-state:"])
 
 -- --------------------------------------------------------------------------
 -- Running
@@ -342,6 +349,7 @@ runChild cfg prob solver rep = do
             ["-f", "%e %M", "-o", timePath, "timeout", show (cfgTimeout cfg), cfgExe cfg]
                 ++ ["--cabal" | solver == Cabal]
                 ++ (if cfgNewLines cfg then ["--stats", "--plan", "lines"] else [])
+                ++ maybe [] (\st -> ["--index-state", st]) (cfgIndexState cfg)
                 ++ probArgs prob
                 ++ ["+RTS", "-s" ++ rtsPath, "-RTS"]
     code <- captureTo logPath "/usr/bin/time" args
@@ -359,6 +367,7 @@ data Measured = Measured
     , mPhases    :: Maybe [(Text, Double)]  -- ^ median per phase
     , mStats     :: Maybe [(Text, Text)]
     , mReads     :: Maybe Reads
+    , mIndexState :: Maybe Text            -- ^ the state the runs were really at, as the driver said
     , mPlan      :: Maybe [PlanLine]
     , mHeadline  :: Maybe Text
     , mProof     :: [Text]
@@ -390,6 +399,7 @@ summarise solver r0 rest = Measured
     , mPhases    = phaseMedians <$> runPhases r0
     , mStats     = runStats r0
     , mReads     = runReads r0
+    , mIndexState = runIndexState r0
     , mPlan      = runPlan r0
     , mHeadline  = runHeadline r0
     , mProof     = runProof r0
@@ -484,6 +494,7 @@ headerLines cfg env results =
     [ "## Environment"
     , ""
     , "- generated: " <> envDate env
+    , "- index-state: " <> indexStateLine
     , "- Hackage index snapshot: " <> envIndex env <> " (mtime of `_cache/01-index.tar`)"
     , "- GHC: " <> envGhc env
     , "- pkg-config present: " <> names True <> "; absent: " <> names False
@@ -523,6 +534,16 @@ headerLines cfg env results =
         ns -> T.intercalate ", " ns
     tshow :: Show a => a -> Text
     tshow = T.pack . show
+    -- What every run said it was at. One value is the reproducible case; more
+    -- than one means the index moved under the harness, which a pinned
+    -- `--index-state` prevents.
+    indexStateLine = case nub [st | (_, ours, cabal) <- results, m <- [ours, cabal], Just st <- [mIndexState m]] of
+        []   -> "unknown (the driver printed no `index-state:` line)" <> requested
+        [st] -> "`" <> st <> "`" <> requested
+        sts  -> "**varied across runs**: " <> T.intercalate "; " (map (\st -> "`" <> st <> "`") sts) <> requested
+    requested = case cfgIndexState cfg of
+        Nothing -> " (not pinned: everything the local index held; pass `--index-state` to reproduce)"
+        Just r  -> " (pinned with `--index-state " <> T.pack r <> "`)"
 
 warningLines :: Config -> [Result] -> [Text]
 warningLines cfg results
@@ -803,15 +824,17 @@ main = do
         exitFailure
 
     exe <- resolveExe (optExe opts)
+    indexState <- resolveIndexState (optIndexState opts)
     newLines <- probeDriver exe
     unless newLines $
         hPutStrLn stderr ("note: " ++ exe ++ " does not accept --stats/--plan; counters, phases and plans will be absent")
     let cfg = Config
-            { cfgExe      = exe
-            , cfgReps     = optReps opts
-            , cfgOutput   = optOutput opts
-            , cfgTimeout  = optTimeout opts
-            , cfgNewLines = newLines
+            { cfgExe        = exe
+            , cfgReps       = optReps opts
+            , cfgOutput     = optOutput opts
+            , cfgTimeout    = optTimeout opts
+            , cfgIndexState = indexState
+            , cfgNewLines   = newLines
             }
 
     problems <- selectProblems opts
@@ -849,6 +872,19 @@ main = do
     infoMod = fullDesc
         <> progDesc "Run both solvers over the problem sets and write the benchmark report and the explanation showcase"
         <> header "pubgrub-harness - the measuring half of the deliverables"
+
+-- | @--index-state@, else the state pinned in @bench/index-state@, else none.
+-- @head@ means none: everything the local index holds, refreshed weekly.
+-- The pin is what makes two harness runs comparable across a refresh, and the
+-- gate reads the same file.
+resolveIndexState :: Maybe String -> IO (Maybe String)
+resolveIndexState (Just "head") = pure Nothing
+resolveIndexState (Just st)     = pure (Just st)
+resolveIndexState Nothing = do
+    pinned <- T.lines <$> readTextFile "bench/index-state"
+    pure $ case [ v | l <- pinned, let v = T.unpack (T.strip (fst (T.breakOn "#" l))), not (null v) ] of
+        (v : _) -> Just v
+        []      -> Nothing
 
 -- | @--exe@, else @$PUBGRUB_EXE@, else what cabal built.
 resolveExe :: Maybe FilePath -> IO FilePath

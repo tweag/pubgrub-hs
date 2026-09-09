@@ -45,6 +45,16 @@ TIMEOUT=${TIMEOUT:-300}
 mkdir -p "$OUT"
 
 EXE=${EXE:-$(cabal list-bin pubgrub 2>/dev/null)}
+# Every run is pinned to the index-state in bench/index-state, so the numbers
+# below stop moving with the weekly refresh. PUBGRUB_INDEX_STATE=<timestamp>
+# overrides it; PUBGRUB_INDEX_STATE=head runs against everything the local index
+# holds. Move the file's value in the change that re-measures.
+PINNED=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' bench/index-state 2>/dev/null | grep -v '^$' | head -1)
+PUBGRUB_INDEX_STATE=${PUBGRUB_INDEX_STATE:-$PINNED}
+INDEX_STATE=()
+if [ -n "$PUBGRUB_INDEX_STATE" ] && [ "$PUBGRUB_INDEX_STATE" != head ]; then
+    INDEX_STATE=(--index-state "$PUBGRUB_INDEX_STATE")
+fi
 if [ -z "${EXE:-}" ] || [ ! -x "$EXE" ]; then
     echo "cannot locate the pubgrub executable; run 'cabal build' first" >&2
     exit 1
@@ -82,8 +92,8 @@ ALL=("${BENCH[@]}" "${CORPUS[@]}")
 solve_one() {
     local tag=$1 base=$2
     shift 2
-    local flags=()
-    [ "$tag" = cabal ] && flags=(--cabal)
+    local flags=("${INDEX_STATE[@]}")
+    [ "$tag" = cabal ] && flags+=(--cabal)
 
     timeout "$TIMEOUT" "$EXE" "${flags[@]}" "$@" \
         >"$OUT/$base.$tag.log" 2>&1
@@ -107,7 +117,7 @@ echo "running ${#ALL[@]} problems through both solvers (logs in $OUT)" >&2
 
 # Warm the index once, outside the gate: the first run of the day may bootstrap
 # or refresh it, and that is not what any of these numbers are about.
-"$EXE" vector >/dev/null 2>&1 || true
+"$EXE" "${INDEX_STATE[@]}" vector >/dev/null 2>&1 || true
 
 agree=0
 disagree=()

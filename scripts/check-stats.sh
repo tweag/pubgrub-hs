@@ -24,6 +24,16 @@ TIMEOUT=${TIMEOUT:-300}
 mkdir -p "$OUT"
 
 EXE=${EXE:-$(cabal list-bin pubgrub 2>/dev/null)}
+# Every run is pinned to the index-state in bench/index-state, so the numbers
+# below stop moving with the weekly refresh. PUBGRUB_INDEX_STATE=<timestamp>
+# overrides it; PUBGRUB_INDEX_STATE=head runs against everything the local index
+# holds. Move the file's value in the change that re-measures.
+PINNED=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' bench/index-state 2>/dev/null | grep -v '^$' | head -1)
+PUBGRUB_INDEX_STATE=${PUBGRUB_INDEX_STATE:-$PINNED}
+INDEX_STATE=()
+if [ -n "$PUBGRUB_INDEX_STATE" ] && [ "$PUBGRUB_INDEX_STATE" != head ]; then
+    INDEX_STATE=(--index-state "$PUBGRUB_INDEX_STATE")
+fi
 if [ -z "${EXE:-}" ] || [ ! -x "$EXE" ]; then
     echo "cannot locate the pubgrub executable; run 'cabal build' first" >&2
     exit 1
@@ -40,7 +50,7 @@ ALL=("${BENCH[@]}" "${CORPUS[@]}")
 
 # Warm the index once, outside the comparison: the first run of the day may
 # bootstrap or refresh it.
-"$EXE" vector >/dev/null 2>&1 || true
+"$EXE" "${INDEX_STATE[@]}" vector >/dev/null 2>&1 || true
 
 # `grep -a` is not optional anywhere below: a proof carries a real NUL byte from
 # the synthetic root's name, so GNU grep treats the output as binary and silently
@@ -74,9 +84,9 @@ failed=0
 for problem in "${ALL[@]}"; do
     base=$(echo "$problem" | tr -c 'A-Za-z0-9' '-')
     # shellcheck disable=SC2086 # deliberate: the range is a separate argument
-    timeout "$TIMEOUT" "$EXE" --stats $problem >"$OUT/$base.stats.log" 2>&1
+    timeout "$TIMEOUT" "$EXE" "${INDEX_STATE[@]}" --stats $problem >"$OUT/$base.stats.log" 2>&1
     # shellcheck disable=SC2086
-    timeout "$TIMEOUT" "$EXE" -v $problem 2>&1 | awk -f bench/summarise.awk >"$OUT/$base.awk.log"
+    timeout "$TIMEOUT" "$EXE" "${INDEX_STATE[@]}" -v $problem 2>&1 | awk -f bench/summarise.awk >"$OUT/$base.awk.log"
 
     from_stats "$OUT/$base.stats.log" >"$OUT/$base.stats.norm"
     from_awk "$OUT/$base.awk.log" >"$OUT/$base.awk.norm"

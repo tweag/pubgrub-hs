@@ -58,6 +58,7 @@ library bridge
         Bridge.Installed
         Bridge.Provider
     build-depends:
+        , array
         , base
         , binary
         , bytestring
@@ -114,6 +115,7 @@ test-suite pubgrub-hs-test
     other-modules:
         FlagSolveSpec
         FlattenSpec
+        IndexStateSpec
         InstalledSpec
         InstanceSetSpec
         PaperSpec
@@ -127,6 +129,7 @@ test-suite pubgrub-hs-test
         , pubgrub-hs
         , pubgrub-hs:bridge
         , base
+        , binary
         , bytestring
         , cabal-install-solver
         , Cabal-syntax

@@ -48,7 +48,8 @@ and the explanation showcase. The two reports it generated on 2026-09-03 are in
 | area | state |
 | --- | --- |
 | Hackage index | our own reader over the cached `01-index.tar`, through `hackage-security`. No `cabal-install` dependency |
-| Derived index | every release parsed once into `_cache/derived-index.cbor`. A read is a CBOR decode |
+| Index-state | `--index-state T` gives both solvers the index as it was at `T`, revisions included, with cabal's semantics. A run prints the state it is really at |
+| Derived index | every release parsed once into `_cache/derived-index.cbor`. A read is a CBOR decode, served only for the revision in force |
 | Version ranges | full. The solver resolves real packages end to end |
 | Flags | applied, not searched. Every flag takes its declared default on both sides |
 | Boot packages | the installed database becomes instances. A boot package offers installed units or nothing |
@@ -120,8 +121,12 @@ Our search counts on the same run:
 
 Every parse count is zero because the derived index answers every read
 ([§4.6](#46-the-derived-index-makes-a-read-a-decode)). That holds only while the
-store is newer than the index: after the weekly refresh, releases published since are
-parsed until `pubgrub-index` is re-run, and a non-zero `parses` is the tell. The
+store is newer than the index: after the weekly refresh, releases published or revised
+since are parsed until `pubgrub-index` is re-run, and a non-zero `parses` is the tell.
+The table was measured before the index was read at an index-state; that costs the
+world phase about 0.16 GB of allocation and 2 MB of residency on every run
+([§4.12](#412-the-index-is-read-at-an-index-state)), which is visible on the smallest
+rows and nowhere else. Re-measure with `pubgrub-harness --index-state`. The
 index refresh of 2026-09-03 moved no search count; the decode counts rose by a few,
 which is the walk reading releases published since. What did move the three
 unsatisfiable rows is the first-release slot rule
@@ -383,10 +388,13 @@ Four properties to know before you touch
   `_cache/derived-index.*` costs speed and never correctness. Raise
   `storeFormatVersion` on any encoding change, because a generic CBOR encoding is
   positional.
-- **It does not follow the index.** `openStore` checks the format version and
-  nothing else. The Hackage index refreshes itself at most weekly, and every release
-  published since the store was built is then a miss that parses. The answers stay
-  right, and `parses` stops being zero until `cabal run pubgrub-index` runs again.
+- **It follows the index by block.** Each stored release carries the tar block of
+  the `.cabal` it was parsed from, and `srLookup` serves it only when that is the
+  block of the revision in force at the run's index-state
+  ([§4.12](#412-the-index-is-read-at-an-index-state)). The Hackage index refreshes
+  itself at most weekly, and every release published or revised since the store was
+  built is then a miss that parses. The answers stay right, and `parses` stops being
+  zero until `cabal run pubgrub-index` runs again.
 - **What is stored is the pre-environment form.** `Flatten.envConfVar` resolves
   `os`, `arch` and `impl` against this machine, and buildability additionally
   resolves `pkgconfig-depends` against its `pkg-config` database. A flattened store
@@ -657,6 +665,77 @@ decisions to 807.
 (a read is 0.073 ms), the number of conflicts (11 is small), and proof rendering
 (`yesod` is satisfiable and prints no proof).
 
+### 4.12 The index is read at an index-state
+
+`pubgrub --index-state 2016-09-24T17:47:48Z <target>` gives both solvers the index as
+it was at that moment, with cabal's semantics, and every run prints the state it is
+really at on an `index-state:` line. It is what makes a number reproducible: the
+Hackage index refreshes itself at most weekly, and each refresh moves the set of
+releases and, through revisions, their bounds. On 2026-09-03 the refresh grew two of
+cabal's corpus messages while our proofs stood still. A pinned state holds the whole
+problem fixed. The gate, `check-stats.sh` and the harness are all pinned to the
+state in [`bench/index-state`](../bench/index-state), currently
+`2026-09-09T02:42:09Z`, the head of the index on the day the pin was set; the
+harness records the state in its environment header. `PUBGRUB_INDEX_STATE` and
+`pubgrub-harness --index-state` override the pin, and `head` means everything the
+local index holds. A pin newer than the local index refreshes it, and a pin newer
+than Hackage itself is an error, so the pin is always a state that exists.
+
+**What an index-state means.** The index tar is append-only, and every entry
+carries the time it was added. A release exists at `T` if its first entry is at or
+before `T`, and the `.cabal` it has there is its __last__ entry at or before `T`.
+That second half is revisions, and it is the half that decides verdicts: a revision
+mostly tightens a bound to record breakage. `aeson ==2.2.3.0` is the demonstration.
+At `2024-07-01` its original `ghc-prim <0.12` is in force and both solvers reject it
+under GHC 9.12; at `2025-07-01` its fourth revision is in force and both plan it.
+
+**How it is done, and it is cabal's design.** cabal keeps a flat cache with one
+entry per tar entry, filters it by time (`filterCache`), and folds the survivors
+last-writer-wins by package id (`packageListFromCache`), so the revision in force
+falls out of the two composing. Our version cache is the same flat list in our shape:
+per package, per release, every revision's time and tar block. It is index-state
+agnostic and is rebuilt only when the index is; the filter runs on every read. Three
+choices on top of that:
+
+- **`.cabal` files are read by block, never by name.** `hackage-security`'s lookup
+  by name answers with the last revision in the whole tar, which is the right
+  answer only at the head. `ihLookupGPD` reads the block the filter chose, for the
+  baseline and for our provider alike, from one `IndexHandle`.
+- **The derived index is keyed on the block too.** Each stored release carries the
+  block it was parsed from, and is served only on a match. This also closed a hole
+  that predates index-states: a release revised in the weekly refresh was served in
+  its pre-revision form until the next `pubgrub-index`.
+- **The refresh rule is cabal's.** With no state requested the index is refreshed
+  when it is a week old, as before. With one requested it is refreshed only if the
+  request is newer than the latest entry held locally, and if it still is after
+  that, the run stops with an error rather than solving in a silently smaller
+  universe. A request that falls between two entries is answered with the previous
+  one, and the line says so.
+
+**What it costs, measured on `vector` without the derived index**, against the
+committed tree on the same index. Per run the cache is decoded and filtered one
+package at a time, into a map of version sets plus one unboxed array of blocks, four
+bytes per release. The sets are lazy over their ascending lists, deliberately: a solve
+asks about a few hundred of ~19k packages, and a list is 24 bytes a release where a
+set node is 40. Peak residency under the default nursery was 22.9 MB and is 23.0 MB.
+Under a 256 KB nursery, which samples the heap often enough to catch the read's
+transient, it was 22.5 MB and is 26.0 MB. Allocation went from 819 MB to 971 MB, all
+of it in the world phase, whose elapsed time did not move: decoding through
+`Data.Binary`'s `Get` allocates about 0.2 GB for the 5.8 MB file. On `pandoc` the same
+cost is under 1%. A hand-rolled fixed-layout decoder would remove most of it; it is
+not written.
+
+**cabal's residency column moved more, and not because cabal changed.** The baseline
+builds ~150k lazy descriptions before it solves, and each now carries the block of
+its revision in force so that none of them keeps the version map alive. Under the
+default nursery cabal's peak on `vector` reads 50.7 MB on the committed tree and 65.8
+MB here; under the 256 KB nursery it reads 64.3 MB and 66.0 MB. The first pair is the
+sampling moving, not the heap: `maximum residency` is the largest heap at any major
+collection, and with a 4 MB nursery there are six of them in a short run. The
+2026-09-03 table therefore under-reports cabal's peak by about 14 MB on the small
+problems, and the next harness run will show cabal's column rise for that reason.
+[benchmarking.md](benchmarking.md) records the check.
+
 ---
 
 ## 5. What is deliberately out of scope
@@ -757,7 +836,7 @@ exists in the code.**
 | **`buildable:` as a condition** | [flags-semantics.md](flags-semantics.md) §1.5 | half built. `buildableCondition` returns the condition and `buildableAtDefaults` evaluates it. Satisfying it rather than evaluating it is the flag-axis half |
 | **User flag constraints** (`--flag`) | [flags-semantics.md](flags-semantics.md) §1.6 | do not exist. While every flag is manual, they are the only thing that can move one |
 | **The verdict oracle** (test) | [flags-semantics.md](flags-semantics.md) §6 | owed. It blocks condition decisions, and it is what would discharge O4's whole-loop claim |
-| **`preferred-versions`** | — | the index reader does not read it |
+| **`preferred-versions`** | — | the index reader does not read it. Its entries are in the tar with timestamps, so an index-state would apply to it unchanged |
 
 ---
 

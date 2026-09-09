@@ -19,8 +19,11 @@
 module Main (main) where
 
 import           Bridge.Cabal.Flatten       (toStored)
-import           Bridge.Hackage             (IndexHandle (..), cacheDirOf,
-                                             mkCache, withHackageIndex)
+import           Bridge.Hackage             (IndexHandle (..),
+                                             IndexState (..),
+                                             IndexStateInfo (..), cacheDirOf,
+                                             mkCache, showIndexState,
+                                             withHackageIndex)
 import           Bridge.Hackage.Store       (buildStore, storePaths,
                                              StorePaths (..))
 import           Colog                      (HasLog (..), LogAction (..),
@@ -52,7 +55,7 @@ main = do
     cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
     manager <- newManager defaultManagerSettings
     runReaderT
-        (unApp (withHackageIndex cache manager (build (cacheDirOf cache))))
+        (unApp (withHackageIndex cache manager IndexHead (build (cacheDirOf cache))))
         (Env (LogAction (liftIO . TIO.putStrLn)))
 
 build :: FilePath -> IndexHandle -> App ()
@@ -61,7 +64,11 @@ build dir handle = do
         packages = Map.size versions
         releases = sum (map Set.size (Map.elems versions))
     logMsg . T.pack $
-        printf "parsing %d releases across %d packages" releases packages
+        printf
+            "parsing %d releases across %d packages, at index-state %s"
+            releases
+            packages
+            (maybe "none" showIndexState (isiEffective (ihState handle)))
     start <- liftIO getMonotonicTime
     liftIO $
         buildStore
@@ -71,7 +78,13 @@ build dir handle = do
             -- absence means "fall back to parsing" — which will fail there too,
             -- identically. So a broken .cabal costs one wasted parse per solve
             -- that reaches it, and never a wrong answer.
-            (\pn v -> either (const Nothing) (Just . toStored) <$> ihLookupGPD handle pn v)
+            --
+            -- Each entry is tagged with the tar block it was parsed from, so a
+            -- later run at any index-state can tell whether the store holds
+            -- the revision it wants.
+            (\pn v -> case ihBlockOf handle pn v of
+                Nothing  -> pure Nothing
+                Just blk -> either (const Nothing) (\gpd -> Just (blk, toStored gpd)) <$> ihLookupGPD handle pn v)
             (\done total -> printf "\r  %d/%d packages" done total)
     done <- liftIO getMonotonicTime
     let StorePaths{spBlob, spIndex} = storePaths dir

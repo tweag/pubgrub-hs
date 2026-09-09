@@ -960,6 +960,84 @@ counting sentences.
 
 ---
 
+## Era 13 — The index at an index-state (Sep 9)
+
+### A run is pinned to a moment of the index — HELD
+
+*Sep 9.* The weekly refresh had moved cabal's message lengths on 2026-09-03 while
+our proofs stood still, and the reports recorded only the tarball's mtime, so no
+number in the tree could be reproduced after the next refresh. Andrea proposed
+cabal's `--index-state`: a timestamp on the command line, a refresh only when none
+was given or the request was newer than the local index, an error when the request
+was still newer after that, and only entries at or before the request reaching the
+solvers. The mechanism was checked against `cabal-install`'s `IndexUtils.hs` before
+anything was written, because neither of us could remember which function filtered
+the `.cabal` files by time. The answer was that none did: `filterCache` dropped cache
+entries by timestamp and `packageListFromCache` folded the survivors last-writer-wins
+by package id, and the revision in force was what the two composed to.
+
+**Revisions were the half the proposal had not covered.** The version cache had been
+built from `hackage-security`'s `directoryEntries`, which listed each path once at
+its last occurrence, and every `.cabal` was read by name, which answered with the
+last revision in the whole tar. Filtering versions by that timestamp would have made
+a 2019 release revised in 2025 vanish before 2025, and reading by name would have
+solved a 2020 problem with 2025 bounds. So the cache was rebuilt from the full entry
+stream, revisions included, each with its time and tar block, and every `.cabal`
+read went by block. `aeson ==2.2.3.0` was the demonstration: at `2024-07-01` its
+original `ghc-prim <0.12` was in force and both solvers rejected it under GHC 9.12,
+and at `2025-07-01` its fourth revision was in force and both planned it.
+
+**The derived index was found to be serving stale revisions.** It had been keyed on
+name and version only, so a release revised in a refresh was served in its
+pre-revision form until the next `pubgrub-index`. Each stored release gained the
+block it was parsed from, and `srLookup` served an entry only on a match. The
+store's format went to 2 and the cache's to 6.
+
+**Memory was designed for, then measured, then designed again.** Per run, the
+filtered view was one map of version sets plus one unboxed array of blocks, four bytes
+per release, with a package holding an offset into it; the cache was decoded and
+filtered one package at a time so nothing bigger than a package was ever live, and its
+revisions were kept newest first so that the revision in force was the first at or
+before the cutoff and the rest were skipped by arithmetic. The first measurement, on
+`vector` without the derived index against the committed tree on the same index, put
+peak residency at 24.4 MB against 22.3, and a heap profile by closure type found the
+2 MB: every version set was now built, where the old cache had left them as lists
+behind `Data.Binary`'s lazy `Set` decoder, and a set node is 40 bytes to a list
+cell's 24. The sets were made lazy over their lists on purpose, and the number came
+back to 23.0 MB against 22.9. Allocation went from 819 MB to 971 MB, all of it in the
+world phase and none of it in its elapsed time; an instrumented run put 231 MB of it
+in `Get` alone, for a 5.8 MB file, guarding the zero-length `skip` that most releases
+hit took 21 MB back, and the rest was left as the price of not writing a decoder by
+hand. A first attempt that decoded whole records into lists before filtering was
+measured at 1022 MB and dropped.
+
+**cabal's column moved, and the reason was the sampler.** The baseline's ~150k lazy
+descriptions had each closed over the index handle, and through the new handle that
+was the whole version map for the length of cabal's solve; each was given the block
+of its revision in force instead. cabal's peak on `vector` still read 65.8 MB against
+50.7 under the default nursery, and 66.0 against 64.3 under a 256 KB one. The
+default-nursery pair was the major collections landing elsewhere, not the heap, and
+benchmarking.md gained the check. The 2026-09-03 table had under-reported cabal's peak
+by about 14 MB on the small problems.
+
+**What else moved.** The driver gained `--index-state` and an `index-state:` line
+naming the state a run was really at, with cabal's fallback to the previous entry
+when the request fell between two; the harness gained the same flag and an
+`index-state` line in the environment header, with a warning if the state varied
+across runs; the gate and `check-stats.sh` read `PUBGRUB_INDEX_STATE`. A request
+newer than the local index after a refresh ended the run with one line on stderr.
+Andrea then asked for the gate and the harness to be pinned at about that moment,
+`2026-09-09T06:43:29Z`; Hackage's latest entry was `cryptol-3.6.0` at
+`02:42:09Z` and its snapshot was signed a minute later, so the request was one the
+index could not honour and the driver refused it exactly as designed. The pin went
+into `bench/index-state` as `2026-09-09T02:42:09Z`, the same universe, and the gate,
+`check-stats.sh` and the harness all read that file.
+Rebuilding the version cache, which now walked the whole tar, cost 2.5 s from the
+page cache. The gate passed on the refreshed index of 2026-09-09 with the same 61
+sentences, and the test count went from 177 to 205.
+
+---
+
 ## What is open now
 
 **Not here.** Read [STATUS.md](STATUS.md) §8. This file used to carry its own list, and

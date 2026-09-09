@@ -37,7 +37,8 @@
 --   cabal run index-bench -- 2000
 module Main (main) where
 
-import           Bridge.Hackage                 (IndexHandle (..), mkCache,
+import           Bridge.Hackage                 (IndexHandle (..),
+                                                IndexState (..), mkCache,
                                                  withHackageIndex)
 import           Codec.Serialise                (Serialise)
 import qualified Codec.Serialise                as CBOR
@@ -242,7 +243,7 @@ main = do
     cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
     manager <- newManager defaultManagerSettings
     runReaderT
-        (unApp (withHackageIndex cache manager (bench n)))
+        (unApp (withHackageIndex cache manager IndexHead (bench n)))
         (Env (LogAction (liftIO . TIO.putStrLn)))
 
 bench :: Int -> IndexHandle -> App ()

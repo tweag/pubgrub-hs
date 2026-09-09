@@ -40,6 +40,7 @@ import           Bridge.Hackage.Store                         (StoreReader (..),
 import           Bridge.Cabal.InstalledPkg                    (getInstalledPackageIndex,
                                                                reduceIndex)
 import           Bridge.Hackage                               (IndexHandle (..),
+                                                               IndexState,
                                                                ParseError,
                                                                cacheDirOf,
                                                                withHackageIndex)
@@ -118,9 +119,9 @@ import           UnliftIO                                     (MonadUnliftIO,
 -- from.
 withProvider
     :: (MonadUnliftIO m, WithLog env Text m)
-    => Cache -> Manager -> [(PackageName, VersionSet)] -> (Provider m -> m a) -> m a
-withProvider cache manager root act =
-    withWorld cache manager $ \world -> do
+    => Cache -> Manager -> IndexState -> [(PackageName, VersionSet)] -> (Provider m -> m a) -> m a
+withProvider cache manager state root act =
+    withWorld cache manager state $ \world -> do
         let handle = wIndex world
             platform = wPlatform world
             cInfo = wCompiler world
@@ -137,8 +138,7 @@ withProvider cache manager root act =
                     ( mkExpand
                         (mkInstalledDb installed)
                         ReleaseSource
-                            { rsVersionsOf = \pn ->
-                                Map.findWithDefault Set.empty pn (ihVersions handle)
+                            { rsVersionsOf = ihVersionsOf handle
                             , rsReadRelease = \pn v -> liftIO (readRelease pn v)
                             }
                         root
@@ -193,9 +193,9 @@ data World = World
 -- escape.
 withWorld
     :: (MonadUnliftIO m, WithLog env Text m)
-    => Cache -> Manager -> (World -> m a) -> m a
-withWorld cache manager act =
-    withHackageIndex cache manager $ \handle -> do
+    => Cache -> Manager -> IndexState -> (World -> m a) -> m a
+withWorld cache manager state act =
+    withHackageIndex cache manager state $ \handle -> do
         (compiler, mPlatform, programDb) <-
             liftIO $ configure Verbosity.normal Nothing Nothing defaultProgramDb
         installedIndex <- liftIO $ getInstalledPackageIndex Verbosity.normal compiler programDb
@@ -296,9 +296,9 @@ releaseReader platform cInfo pkgConfig handle store = do
         -- @pkg-config@ for buildability — is resolved here either way, against this
         -- machine as it is now rather than as it was when the store was written.
         fromStoreOrParse pn v = do
-            hit <- case store of
-                Nothing -> pure Nothing
-                Just s  -> srLookup s pn v
+            hit <- case (store, ihBlockOf handle pn v) of
+                (Just s, Just blk) -> srLookup s pn v blk
+                _                  -> pure Nothing
             case hit of
                 Just stored -> pure (Right (fromStored stored), True)
                 Nothing     -> do

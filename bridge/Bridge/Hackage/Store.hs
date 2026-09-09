@@ -37,7 +37,7 @@
 -- Two files, and the granularity is the __package__, not the release:
 --
 -- * @derived-index.cbor@ — for each package, one CBOR-encoded slice holding all
---   of its releases;
+--   of its releases, each tagged with the tar block it was parsed from;
 -- * @derived-index.idx@ — @(formatVersion, Map PackageName (offset, length))@,
 --   read whole at startup.
 --
@@ -79,6 +79,7 @@ import           Data.Map.Strict                        (Map)
 import qualified Data.Map.Strict                        as Map
 import           Data.Set                               (Set)
 import qualified Data.Set                               as Set
+import           Data.Word                              (Word32)
 import           Distribution.Compat.NonEmptySet        (NonEmptySet)
 import qualified Distribution.Compat.NonEmptySet        as NES
 import           Distribution.Compiler                  (CompilerFlavor)
@@ -122,7 +123,7 @@ import           System.IO                               (IOMode (..), hClose,
 -- 'Bridge.Hackage.readVersionCache' does: a generic encoding is positional, so
 -- reordering a constructor silently changes its meaning.
 storeFormatVersion :: Int
-storeFormatVersion = 1
+storeFormatVersion = 2
 
 -- These are orphans. They belong here rather than in Cabal-syntax, and wrapping
 -- every type in a newtype to avoid the orphan would cost more clarity than it
@@ -198,10 +199,16 @@ storePaths dir =
 
 -- | What a solve reads the store through.
 data StoreReader = StoreReader
-    { srLookup :: PackageName -> Version -> IO (Maybe StoredRelease)
+    { srLookup :: PackageName -> Version -> Word32 -> IO (Maybe StoredRelease)
     -- ^ 'Nothing' when the store has no entry, which the caller answers by
     -- parsing. Decoding a package's slice is memoised, so the second release of
     -- a package — and every neighbour of it — costs a map lookup.
+    --
+    -- The 'Word32' is the tar block of the revision the caller wants
+    -- ('Bridge.Hackage.ihBlockOf'), and an entry is served only if it was
+    -- parsed from that block. A release revised after the store was built, or
+    -- read at an index-state before its latest revision, is therefore a miss
+    -- and not a wrong answer.
     , srStats  :: IO (Int, Int)
     -- ^ @(slices decoded, entries served)@.
     }
@@ -238,7 +245,7 @@ openStore dir = do
 -- decoded. Interleaving packages costs a re-decode, not a wrong answer.
 mkReader :: FilePath -> Map PackageName (Int64, Int64) -> IO StoreReader
 mkReader blob offsets = do
-    cacheRef <- newIORef (Nothing :: Maybe (PackageName, Map Version StoredRelease))
+    cacheRef <- newIORef (Nothing :: Maybe (PackageName, Map Version (Word32, StoredRelease)))
     statsRef <- newIORef (0 :: Int, 0 :: Int)
     let slice pn = do
             cached <- readIORef cacheRef
@@ -251,15 +258,17 @@ mkReader blob offsets = do
                         case deserialiseOrFail bytes of
                             Left _ -> pure Nothing
                             Right entries -> do
-                                let m = Map.fromList entries
+                                let m = Map.fromList [(v, (blk, sr)) | (v, blk, sr) <- entries]
                                 atomicModifyIORef' cacheRef (const (Just (pn, m), ()))
                                 atomicModifyIORef' statsRef (\(d, s) -> ((d + 1, s), ()))
                                 pure (Just m)
     pure
         StoreReader
-            { srLookup = \pn v -> do
+            { srLookup = \pn v blk -> do
                 found <- slice pn
-                let hit = found >>= Map.lookup v
+                let hit = case found >>= Map.lookup v of
+                        Just (blk', sr) | blk' == blk -> Just sr
+                        _                             -> Nothing
                 case hit of
                     Just _ -> atomicModifyIORef' statsRef (\(d, s) -> ((d, s + 1), ()))
                     Nothing -> pure ()
@@ -276,7 +285,8 @@ readSlice path off len = do
     BL.length bytes `seq` hClose h
     pure bytes
 
--- | Build the store from a reader of parsed releases.
+-- | Build the store from a reader of parsed releases, each with the tar block
+-- it was parsed from, which is what 'srLookup' checks a request against.
 --
 -- Written to temporary names and renamed at the end, so an interrupted build
 -- leaves the previous store intact rather than a half-written one that
@@ -284,7 +294,7 @@ readSlice path off len = do
 buildStore
     :: FilePath
     -> Map PackageName (Set Version)
-    -> (PackageName -> Version -> IO (Maybe StoredRelease))
+    -> (PackageName -> Version -> IO (Maybe (Word32, StoredRelease)))
     -> (Int -> Int -> IO ())
     -- ^ progress: packages done, of how many
     -> IO ()
@@ -302,7 +312,7 @@ buildStore dir versions readOne progress = do
             go !off !acc !done ((pn, vs) : rest) = do
                 entries <-
                     sequence
-                        [ fmap ((,) v) <$> readOne pn v
+                        [ fmap (\(blk, sr) -> (v, blk, sr)) <$> readOne pn v
                         | v <- Set.toList vs
                         ]
                 let kept = [e | Just e <- entries]

@@ -252,16 +252,47 @@ line, so the harness times quiet runs. `-v` is different: the trace prints to st
 `aeson <2` prints thousands of lines, and an elapsed time taken with `-v` is an upper
 bound.
 
-**Warm the index.** The first run after a week bootstraps or refreshes the Hackage
-index and rebuilds the version cache. The harness and the gate each do one throwaway
-run (`vector`, not recorded) for this. A `cacheFormatVersion` bump also forces one
-rebuild.
+**Pin the index-state, or the problem moves.** The Hackage index refreshes itself at
+most weekly, and each refresh changes the set of releases and, through revisions,
+their bounds: on 2026-09-03 two of cabal's corpus messages grew while our proofs did
+not. `pubgrub --index-state 2026-09-03T00:00:00Z <target>` gives both solvers the
+index as it was then, and every run prints the state it is really at on an
+`index-state:` line. The gate, `check-stats.sh` and `pubgrub-harness` all read the
+pin in `bench/index-state` and pass it to every run, and the harness records it in
+the reports' environment header. `PUBGRUB_INDEX_STATE=<timestamp>` and
+`pubgrub-harness --index-state <timestamp>` override the pin; `head` runs against
+everything the local index holds. Move the pin in the change that re-measures, and
+never to a moment the index does not have: a pin newer than Hackage's latest entry
+is an error on every run until Hackage catches up. A number quoted without its
+index-state cannot be reproduced after the next refresh.
 
-**A refresh leaves the derived index behind.** The store checks only its format
-version, so every release published since it was built parses on demand. Re-run
+**Warm the index.** With no index-state, the first run after a week refreshes the
+Hackage index and rebuilds the version cache, which walks the whole tar (about 2.5 s
+from the page cache). With an index-state older than the local index nothing is
+refreshed, and with one newer the index is refreshed and the run then fails if the
+request is still newer. The harness and the gate each do one throwaway run (`vector`,
+not recorded) for the refresh. A `cacheFormatVersion` bump also forces one rebuild.
+
+**A refresh leaves the derived index behind.** Each stored release carries the tar
+block it was parsed from and is served only for that revision, so after a refresh every
+release published or revised since parses on demand. The answers stay right. Re-run
 `cabal run pubgrub-index` after a refresh, or the `parses` column stops being zero.
-A refresh also moves the problem: cabal's message on a corpus problem can change
-length while our proof does not, which is what happened on 2026-09-03.
+
+**Reading the index at an index-state has a fixed price.** The version cache is
+decoded and filtered on every run, and that allocates about 0.15 GB inside the `world`
+phase, on every problem alike (STATUS.md §4.12). It moves the allocation of the
+smallest rows of the benchmark table and nothing else, and it is why the 2026-09-03
+figures are not comparable with a run on this tree without re-measuring both sides.
+
+**`maximum residency` is a sample, and the sample can move.** It is the largest heap
+seen at any major collection, and a short run under the default 4 MB nursery has about
+six of them. A change that only shifts allocation shifts where they land: on `vector`
+the cabal baseline read 50.7 MB before the index-state work and 65.8 MB after, while
+under `+RTS -A256k`, which collects often enough to see the real peak, it read 64.3 MB
+and 66.0 MB. Before attributing a residency change to the code, re-run both sides
+with `-A256k`; if the two agree there, the default-nursery number moved by sampling.
+The 2026-09-03 table carries the default-nursery numbers, and under-reports cabal's
+peak by about 14 MB on the small problems for this reason.
 
 ## Comparing against cabal
 

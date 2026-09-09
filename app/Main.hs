@@ -20,7 +20,10 @@ import           Bridge.Cabal.Baseline                     (defaultSolverConfig,
                                                             outcome,
                                                             solveWithCabal,
                                                             sourcePackageIndex)
-import           Bridge.Hackage                            (mkCache)
+import           Bridge.Hackage                            (IndexState (..),
+                                                            IndexStateTooNew (..),
+                                                            mkCache,
+                                                            parseIndexState)
 import           Bridge.Provider                           (World (..),
                                                             rootInstance,
                                                             rootName,
@@ -85,10 +88,13 @@ import           PubGrub.Solver                            (SolveError (..),
                                                             solve)
 import           PubGrub.VersionSet                        (fromVersionRange)
 import           System.Environment                        (lookupEnv)
-import           System.IO                                 (hIsTerminalDevice, stdout)
+import           System.Exit                               (exitFailure)
+import           System.IO                                 (hIsTerminalDevice,
+                                                            hPutStrLn, stderr,
+                                                            stdout)
 import           Text.Printf                               (printf)
 import           Text.Read                                 (readMaybe)
-import           UnliftIO                                  (MonadIO (liftIO),
+import           UnliftIO                                  (MonadIO (liftIO), handle,
                                                             MonadUnliftIO,
                                                             evaluate)
 
@@ -293,10 +299,14 @@ data PlanShape = Tree | Lines
     deriving stock (Eq, Show)
 
 data Options = Options
-    { optVerbosity :: Verbosity
-    , optStats     :: Bool
-    , optPlan      :: PlanShape
-    , optWhich     :: Which
+    { optVerbosity  :: Verbosity
+    , optStats      :: Bool
+    , optPlan       :: PlanShape
+    , optWhich      :: Which
+    , optIndexState :: IndexState
+    -- ^ which moment of the index both solvers see; 'IndexHead' unless
+    -- @--index-state@ says otherwise. It is the one thing that makes a run
+    -- repeatable across the weekly refresh.
     , optTarget    :: PackageName
     , optRange     :: VersionRange
     -- ^ the same constraint unconverted: cabal's solver takes a 'VersionRange',
@@ -321,6 +331,7 @@ optionsParser =
         <*> switch (long "stats" <> help "Count the search events in-process and print them, with the phase timings, after the answer")
         <*> option (eitherReader parsePlan) (long "plan" <> metavar "tree|lines" <> value Tree <> help "Render a plan as a dependency tree (default) or as one 'plan:' line per package")
         <*> flag Ours Cabal (long "cabal" <> help "Run cabal's solver instead of the native solver")
+        <*> option (eitherReader parseIndexState) (long "index-state" <> metavar "TIMESTAMP" <> value IndexHead <> help "Solve against the index as it was at this time, e.g. 2016-09-24T17:47:48Z, as cabal's --index-state does (default: everything the local index holds, refreshed at most weekly)")
         <*> argument (eitherReader parseTarget) (metavar "PACKAGE")
         <*> argument (eitherReader parseRange) (value anyVersion <> metavar "VERSION-RANGE")
 
@@ -330,11 +341,14 @@ optionsParser =
 
 main :: IO ()
 main = do
-    work =<< execParser (info (helper <*> optionsParser) infoMod)
+    handle tooNew $ work =<< execParser (info (helper <*> optionsParser) infoMod)
     where
         infoMod = fullDesc <>
                   progDesc "Resolve a Hackage package's dependency closure" <>
                   header "pubgrub - a Hackage dependency resolver"
+        -- An index-state the local index cannot honour: say why on stderr and
+        -- fail, without a backtrace.
+        tooNew (IndexStateTooNew msg) = hPutStrLn stderr msg >> exitFailure
         work opts = do
             let target = optTarget opts
             cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
@@ -351,10 +365,10 @@ main = do
                 -- expand the root like any other package, but has no index entry
                 -- to look its dependencies up in.
                 Ours ->
-                    withProvider cache manager [(target, fromVersionRange (optRange opts))] $ \provider ->
+                    withProvider cache manager (optIndexState opts) [(target, fromVersionRange (optRange opts))] $ \provider ->
                         runOurs opts t0 counters provider
                 Cabal ->
-                    withWorld cache manager $ \world ->
+                    withWorld cache manager (optIndexState opts) $ \world ->
                         runBaseline opts t0 world
 
 -- | Solve with the native solver, render the answer, and — under @--stats@ —

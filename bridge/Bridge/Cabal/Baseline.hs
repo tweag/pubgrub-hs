@@ -39,6 +39,7 @@ module Bridge.Cabal.Baseline
     ) where
 
 import           Bridge.Hackage                   (IndexHandle (..), ParseError)
+import           Data.Word                        (Word32)
 import           Bridge.Installed                 (nonReinstallablePackages)
 import qualified Data.Map.Strict                  as Map
 import           Data.Set                         (Set)
@@ -151,13 +152,19 @@ sourcePackageIndex :: IndexHandle -> IO (PackageIndex (SourcePackage ()))
 sourcePackageIndex handle =
     SolverIndex.fromList
         <$> sequence
-            [ sourcePackage pn v
+            [ sourcePackage pn v blk
             | (pn, versions) <- Map.toList (ihVersions handle)
             , v <- Set.toList versions
+            , Just blk <- [ihBlockOf handle pn v]
             ]
   where
-    sourcePackage pn v = do
-        description <- unsafeInterleaveIO (parsed pn v)
+    -- The block is looked up now and the deferred read is given it, so the
+    -- deferred read closes over nothing but the open index. Deferring the
+    -- lookup instead kept the whole version map alive through every one of
+    -- these ~150k thunks for the length of cabal's solve: 22 MB of cabal's
+    -- peak residency on @vector@, charged to the wrong solver.
+    sourcePackage pn v blk = do
+        description <- unsafeInterleaveIO (parsed pn v blk)
         pure
             SourcePackage
                 { srcpkgPackageId = PackageIdentifier pn v
@@ -166,8 +173,12 @@ sourcePackageIndex handle =
                 , srcpkgDescrOverride = Nothing
                 }
 
-    parsed :: PackageName -> Version -> IO GenericPackageDescription
-    parsed pn v = either (fail . unparseable pn v) pure =<< ihLookupGPD handle pn v
+    -- Selected once, here, so that the thunks capture the reader and not the
+    -- handle it came from; capturing the handle is capturing the map.
+    readBlock = ihReadBlock handle
+
+    parsed :: PackageName -> Version -> Word32 -> IO GenericPackageDescription
+    parsed pn v blk = either (fail . unparseable pn v) pure =<< readBlock pn v blk
 
     unparseable :: PackageName -> Version -> ParseError -> String
     unparseable pn v err =
