@@ -148,8 +148,9 @@ app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solv
 - `Bridge.Cabal.Flatten` — reads two things off one walk of a conditional tree
   (`flattenWith`): the `build-depends`, and the `BuildInfo` that decides buildability
   (`buildable:` plus `pkgconfig-depends` against the machine's `PkgConfigDb`, library
-  only). Sub-libraries and executables have their dependencies gated on their own
-  `buildable:` first, through Cabal-syntax's `addBuildableCondition`.
+  only). Dependencies come from the four components cabal includes unconditionally —
+  library, sublibraries, foreign libraries, executables — and the last three are gated
+  on their own `buildable:` through Cabal-syntax's `addBuildableCondition`.
 - `Bridge.Cabal.Baseline` — drives `Distribution.Solver.Modular.modularResolver` over
   our index. It builds a `PackageIndex (SourcePackage ())`. `modularResolver` runs
   `convPIs` itself.
@@ -303,9 +304,9 @@ release, which is still the wrong answer. Tests: `StoreSpec` and `FlagSolveSpec`
 
 ### An unbuildable component contributes no dependencies
 
-`Bridge.Cabal.Flatten.componentDeps` puts each sub-library's and each executable's
-dependencies under the condition that the component is buildable, via Cabal-syntax's
-own `addBuildableCondition` — the function
+`Bridge.Cabal.Flatten.componentDeps` puts each sub-library's, each foreign library's
+and each executable's dependencies under the condition that the component is
+buildable, via Cabal-syntax's own `addBuildableCondition` — the function
 `Distribution.Solver.Modular.IndexConversion.convGPD` pipes every component through.
 Do not paraphrase it; a paraphrase is a second implementation to keep in step.
 
@@ -326,6 +327,8 @@ Two things are load-bearing:
   test-suites and benchmarks are gated, by stanza. Making executables target-only was
   tried and rejected: it fixed `warp` but made `futhark ==0.27.1` resolve here while
   cabal failed it, since `lsp-types`' `generator` executable is genuinely buildable.
+  All four are covered; no corpus problem has a foreign library, so
+  `test/FlattenSpec.hs` is the only thing holding that one.
 
 ### Boot packages are installed-only
 

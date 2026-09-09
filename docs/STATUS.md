@@ -833,9 +833,9 @@ route through `aeson` at the same length.
 
 ### 4.14 A component that is not buildable contributes no dependencies
 
-`Bridge.Cabal.Flatten.componentDeps` puts each sub-library's and each executable's
-dependencies under the condition that the component is buildable, using
-Cabal-syntax's own `addBuildableCondition`. That is the function
+`Bridge.Cabal.Flatten.componentDeps` puts each sub-library's, each foreign
+library's and each executable's dependencies under the condition that the component
+is buildable, using Cabal-syntax's own `addBuildableCondition`. That is the function
 `Distribution.Solver.Modular.IndexConversion.convGPD` pipes **every** component
 through before converting it, so taking it rather than restating it is the same rule
 the `pkg-config` predicate follows: a paraphrase is a second implementation to keep
@@ -880,11 +880,16 @@ genuinely buildable and its `regex` dependency is a real constraint. `solveExecu
 is not the knob either — it governs `build-tool-depends`, and setting it `False`
 changed cabal's plans but left `futhark` failing exactly as before.
 
-Foreign libraries remain excluded here where cabal includes them. No corpus problem
-has one; it is untested rather than decided.
+**All four unconditional components are covered**: library, sub-libraries, foreign
+libraries and executables, the last three gated. Foreign libraries were the last one
+in, added on 2026-09-10 for completeness rather than to fix anything — no corpus
+problem has one, so `test/FlattenSpec.hs` is the only thing holding them. The two
+that stay out, test-suites and benchmarks, are the two cabal itself puts behind a
+`Stanza` that a plain `cabal build` never enables.
 
-`storeFormatVersion` is 3: the stored trees are gated before they are written, so a
-store from before this change serves ungated ones.
+`storeFormatVersion` is 4: the stored trees are gated before they are written, so a
+store from before this serves ungated ones — and one from before the foreign
+libraries went in is missing a component outright.
 
 ## 5. What is deliberately out of scope
 

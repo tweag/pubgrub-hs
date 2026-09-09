@@ -1192,8 +1192,20 @@ function to sub-libraries and executables, `toStored` applied it before writing 
 both paths agree by construction, and `storeFormatVersion` went to 3 because a store
 written before it holds ungated trees. The library stayed ungated on purpose:
 `unbuildableAtDefaults` already carries its buildability with the reason attached,
-which is what lets a proof name the missing `pkg-config` module. Foreign libraries
-stayed excluded, untested rather than decided. The suite went from 223 tests to 226.
+which is what lets a proof name the missing `pkg-config` module. The suite went from
+223 tests to 226.
+
+### Foreign libraries are read too — HELD
+
+*Sep 10.* Andrea asked for foreign libraries as well, to have all the simple cases
+covered rather than to fix anything. They are the third of `convGPD`'s four
+unconditional `concatMap` lines and the one component we had left out; they went in
+gated exactly like sub-libraries and executables, `storeFormatVersion` went to 4, and
+the two that stay out are the two cabal itself puts behind a `Stanza` a plain
+`cabal build` never enables. No corpus problem has a foreign library and no number
+moved, so `test/FlattenSpec.hs` is the only thing holding it: one case asserting the
+dependency arrives and its `buildable: False` twin asserting it does not. The suite
+went to 227.
 
 ---
 

@@ -319,9 +319,27 @@ componentTests =
                     , "  buildable: False"
                     ]
         names @?= ["from-lib"]
-    , -- componentDeps documents test-suites, benchmarks and foreign libraries as
-      -- intentionally excluded: a solve for a build plan should not drag in a
-      -- package's own test dependencies.
+    , -- The fourth component convGPD includes unconditionally, and gated like the
+      -- rest. No corpus problem has one, so this test is the only thing holding it.
+      testCase "a foreign library contributes, and not when unbuildable" $ do
+        let src buildable' =
+                unlines
+                    [ "library"
+                    , "  build-depends: from-lib"
+                    , ""
+                    , "foreign-library flib"
+                    , "  type: native-shared"
+                    , "  other-modules: F"
+                    , "  build-depends: from-flib"
+                    ]
+                    ++ (if buildable' then "" else "  buildable: False\n")
+        yes <- namesAt (assign []) (pkg (src True))
+        no <- namesAt (assign []) (pkg (src False))
+        yes @?= ["from-flib", "from-lib"]
+        no @?= ["from-lib"]
+    , -- Test-suites and benchmarks are the two convGPD puts behind a Stanza that a
+      -- plain `cabal build` never enables: a solve for a build plan should not drag
+      -- in a package's own test dependencies.
       testCase "test-suites and benchmarks do not contribute" $ do
         names <-
             namesAt (assign []) . pkg $

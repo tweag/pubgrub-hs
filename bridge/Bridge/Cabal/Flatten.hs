@@ -139,6 +139,7 @@ import           Distribution.Solver.Types.PkgConfigDb        (PkgConfigDb,
                                                                pkgConfigPkgIsPresent)
 import           Distribution.PackageDescription.Configuration (addBuildableCondition)
 import           Distribution.Types.Executable                (Executable (buildInfo))
+import           Distribution.Types.ForeignLib                (ForeignLib (foreignLibBuildInfo))
 import           Distribution.Types.BuildInfo                 (BuildInfo (..))
 import           Distribution.Types.CondTree                  (CondBranch (..),
                                                                CondTree (..))
@@ -232,10 +233,15 @@ flattenComponent
     -> GuardedDeps
 flattenComponent env = flattenWith env condTreeConstraints
 
--- | Flatten the library, sub-library and executable conditional dependency
--- trees to flag-guarded groups, resolving OS\/arch\/compiler conditions against
--- the given platform and compiler. Test-suites, benchmarks and foreign
--- libraries are intentionally excluded.
+-- | Flatten the library, sub-library, foreign-library and executable conditional
+-- dependency trees to flag-guarded groups, resolving OS\/arch\/compiler conditions
+-- against the given platform and compiler.
+--
+-- Those four are exactly the components
+-- @Distribution.Solver.Modular.IndexConversion.convGPD@ includes unconditionally.
+-- Test-suites and benchmarks are excluded, as they are there: cabal puts them behind
+-- a @Stanza@ that a plain @cabal build@ never enables, so a solve for a build plan
+-- does not drag in a package's own test dependencies.
 --
 -- __A component that is not buildable contributes nothing__, and the gate is
 -- Cabal-syntax's own 'addBuildableCondition' — the very function
@@ -302,6 +308,7 @@ componentDepsWith flagEnv platform compiler gpd =
     concat $
         [flattenComponent env t | t <- maybeToList (condLibrary gpd)]
             ++ [flattenComponent env (gateOnBuildable libBuildInfo t) | (_, t) <- condSubLibraries gpd]
+            ++ [flattenComponent env (gateOnBuildable foreignLibBuildInfo t) | (_, t) <- condForeignLibs gpd]
             ++ [flattenComponent env (gateOnBuildable buildInfo t) | (_, t) <- condExecutables gpd]
   where
     env = envConfVar flagEnv platform compiler
@@ -553,6 +560,7 @@ toStored gpd =
         , srLibrary = fmap (fmap libNode) (condLibrary gpd)
         , srOthers =
             [void (gateOnBuildable libBuildInfo t) | (_, t) <- condSubLibraries gpd]
+                ++ [void (gateOnBuildable foreignLibBuildInfo t) | (_, t) <- condForeignLibs gpd]
                 ++ [void (gateOnBuildable buildInfo t) | (_, t) <- condExecutables gpd]
         }
   where
