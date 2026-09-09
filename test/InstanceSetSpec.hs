@@ -33,8 +33,8 @@ import qualified Data.Text                    as T
 import           Distribution.Types.Flag      (FlagAssignment, FlagName,
                                                mkFlagAssignment, mkFlagName)
 import           Distribution.Types.UnitId    (mkUnitId)
-import           Distribution.Version         (Version, earlierVersion,
-                                               mkVersion, orLaterVersion)
+import           Distribution.Version         (earlierVersion,
+                                               orLaterVersion)
 import           PubGrub.Index.PreInstalled   (PreInstalledPackage (..))
 import           PubGrub.InstanceSet          (Instance (..), InstanceSet (..),
                                                emptyInstanceSet, memberInstance,
@@ -44,6 +44,8 @@ import           PubGrub.Pretty               (Pretty (..))
 import           PubGrub.Relation             (Relation (..), relation)
 import           PubGrub.SetOps               (SetOps (..), equivalent,
                                                isDisjoint, isSubsetOf)
+import           PubGrub.Version              (Version, mkVersion,
+                                               toCabalVersion)
 import           PubGrub.Term                 (Term (..), intersectTerm,
                                                isBottomTerm, isTopTerm,
                                                negateTerm, unionTerm)
@@ -179,8 +181,8 @@ genRawVersionSet =
         [ pure emptyVersionSet
         , pure fullVersionSet
         , singletonVersionSet <$> elements versions
-        , fromVersionRange . orLaterVersion <$> elements versions
-        , fromVersionRange . earlierVersion <$> elements versions
+        , fromVersionRange . orLaterVersion . toCabalVersion <$> elements versions
+        , fromVersionRange . earlierVersion . toCabalVersion <$> elements versions
         , unionVersionSet
             <$> (singletonVersionSet <$> elements versions)
             <*> (singletonVersionSet <$> elements versions)

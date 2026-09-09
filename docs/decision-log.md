@@ -1038,6 +1038,62 @@ sentences, and the test count went from 177 to 205.
 
 ---
 
+## Era 14 — The version order is ours (Sep 9)
+
+### Trailing zeros are insignificant — HELD
+
+*Sep 9.* Andrea recalled that a simplification had been declined because Cabal
+treated `1.2` and `1.2.0.0` as distinct versions, called that a bug in the semantics,
+and asked how many packages on Hackage actually published both spellings. The count
+over the index tarball was 44 of 19,458 packages, 81 pairs, 15 of the packages one
+author's hoodle and xournal family from 2011 to 2016, the newest pair `gf 3.12` and
+`3.12.0` from 2025 with identical `.cabal` files, and `Win32 2.1` and `2.1.0.0` on the
+boot list. Asked whether the PVP could improve the output instead, the reading was
+that it could not: the spec never mentioned semantic versioning, pubgrub-rs shipped
+`SemanticVersion` as a convenience, pub's one semver-aware report step,
+`reformat_ranges`, tidied pre-release bounds, and dependencies changed within a PVP
+major, so a major could not merge depender slots. The `^>=` sugar was already parsed
+by Cabal on the way in and quoted verbatim on the way out.
+
+**The bound side was measured before deciding.** A throwaway program over the
+derived index compared, for every dependency range in every release, the published
+versions it admitted under Cabal's order with those under trailing-zero
+normalisation: 15,725 of 2,252,290 mentions differed, 1,404 of them in a depender's
+latest release, 19 flipping the dependee's newest release. The shapes were all Cabal
+footguns in the author's disfavour: `time >=1.8.0` against the release `time 1.8`,
+`lens <5.0` against `lens 5`, `base <=4.21` against `4.21.0.0`, `mtl >2` against
+`2.0.0.0`. Three latest releases flipped their verdict on this machine's base
+4.21.0.0, none of them in the problem set.
+
+**The search side decided it.** Over the 23 gate problems at the pinned index-state,
+24 no-version incompatibilities were minted and 8 were holes of the form `[a, a.0)`:
+`tar >=0.3 && <0.3.0.0`, `hashable >=1.4 && <1.4.0.0`, `aeson >=2.0 && <2.0.0.0`,
+one each in conduit, yesod, language-puppet, cpsa, cabal-install and matterhorn and
+two in scion-browser. The scion-browser proof printed one. Andrea chose to deviate,
+and asked for our own version type rather than a wrapper over Cabal's.
+
+**What was built.** `PubGrub.Version`, spelled as the release was named and compared
+on the normal form. `VersionSet` moved its representation onto its own cut pairs,
+built a declared range with Cabal's `foldVersionRange` and its own union and
+intersection so that every bound comparison was made in our order, kept the shorter
+spelling where two equal cuts met, and rendered back to a `VersionRange` from the
+cuts. Cabal's type stopped at the bridge:
+`Bridge.Hackage` gained a lazy per-package `pkgSolverVersions`, keeping the later tar
+entry where two spellings named one version, and the provider converted back on each
+read. The property suite's oracle, Cabal's own range algebra, was no longer one, and
+the membership properties were named as the semantic oracle instead; seven
+trailing-zero properties and two tie-break cases were added, 205 tests to 214. The
+measurement program was deleted once its numbers were in `STATUS.md` §4.13.
+
+**What it did.** Nine of the 23 problems moved, same machine and same index-state
+either side: the eight phantom no-version events were gone, `aeson <2` went 400 to
+320 decisions and 68 to 58 conflicts, `scion-browser` 186 to 169, `conduit <1.3` 19
+to 16, and `yesod` paid 827 to 839 decisions and 11 to 14 conflicts, the one row that
+got worse. The gate passed at 23/23 agreement, 61 sentences and 0 no-version lines,
+and `check-stats.sh` agreed on all 23 problems.
+
+---
+
 ## What is open now
 
 **Not here.** Read [STATUS.md](STATUS.md) §8. This file used to carry its own list, and

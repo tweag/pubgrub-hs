@@ -5,19 +5,20 @@ module VersionSetSpec (tests) where
 
 import           Data.List                         (nub, sort)
 import           Data.Set                          (Set)
+import qualified Data.Text                         as T
 import qualified Data.Set                          as Set
-import           Distribution.Types.VersionInterval (Bound (..),
-                                                    LowerBound (..),
-                                                    UpperBound (..),
-                                                    VersionInterval (..))
 import           Distribution.Pretty   (prettyShow)
-import           Distribution.Version  (Version, VersionRange, anyVersion,
+import qualified Distribution.Types.Version as Cabal
+import           Distribution.Version  (VersionRange, anyVersion,
                                         earlierVersion, intersectVersionRanges,
                                         laterVersion, majorBoundVersion,
-                                        majorUpperBound, mkVersion, noVersion,
+                                        majorUpperBound, noVersion,
                                         orEarlierVersion, orLaterVersion,
                                         thisVersion, unionVersionRanges)
+import           PubGrub.Pretty        (Pretty (pretty))
 import           PubGrub.SetOps        (isSubsetOf)
+import           PubGrub.Version       (Version, mkVersion, toCabalVersion,
+                                        versionNumbers)
 import           PubGrub.VersionSet
 import           Test.Tasty            (TestTree, testGroup)
 import           Test.Tasty.QuickCheck (Arbitrary (..), Gen, choose, elements,
@@ -25,6 +26,8 @@ import           Test.Tasty.QuickCheck (Arbitrary (..), Gen, choose, elements,
                                         testProperty, (.&&.), (===))
 
 -- Small bounded version universe: components drawn from 0..3, length 1..3.
+-- Trailing zeros are allowed on purpose: @1.0@ and @1@ are one version here,
+-- and the properties below have to hold across both spellings.
 genVersion :: Gen Version
 genVersion = do
     n <- choose (1, 3)
@@ -32,6 +35,14 @@ genVersion = do
     pure (mkVersion cs)
   where
     vectorOfRange k g = sequence (replicate k g)
+
+-- | The same version for a Cabal range combinator: what a declared range is
+-- written with.
+asCabal :: Version -> Cabal.Version
+asCabal = toCabalVersion
+
+cv :: [Int] -> Cabal.Version
+cv = Cabal.mkVersion
 
 -- A version set built from a handful of random singletons/ranges, unioned.
 instance Arbitrary VersionSet where
@@ -46,11 +57,11 @@ instance Arbitrary VersionSet where
             let lo = min a b; hi = max a b
             pure $ case kind of
                 0 -> singletonVersionSet a
-                1 -> fromVersionRange (orLaterVersion lo)
+                1 -> fromVersionRange (orLaterVersion (asCabal lo))
                 _ ->
                     intersectionVersionSet
-                        (fromVersionRange (orLaterVersion lo))
-                        (complementVersionSet (fromVersionRange (orLaterVersion hi)))
+                        (fromVersionRange (orLaterVersion (asCabal lo)))
+                        (complementVersionSet (fromVersionRange (orLaterVersion (asCabal hi))))
 
 sampleVersions :: [Version]
 sampleVersions = [mkVersion [a, b] | a <- [0 .. 3], b <- [0 .. 3]]
@@ -106,7 +117,7 @@ tests =
                             (unionVersionSet . uncurry halfOpenVersionSet)
                             emptyVersionSet
                             (zip vs (map Just (drop 1 vs) ++ [Nothing]))
-                            === fromVersionRange (orLaterVersion first)
+                            === fromVersionRange (orLaterVersion (asCabal first))
             , testProperty "empty when the bounds cross or meet" $
                 forAll (twoAscending genVersion) $ \(lo, hi) ->
                     (halfOpenVersionSet hi (Just lo) === emptyVersionSet)
@@ -145,16 +156,16 @@ tests =
             "declared range"
             [ testProperty "is handed back as written" $
                 forAll genVersion $ \v ->
-                    prettyShow (toVersionRange (fromVersionRange (majorBoundVersion v)))
-                        === prettyShow (majorBoundVersion v)
+                    prettyShow (toVersionRange (fromVersionRange (majorBoundVersion (asCabal v))))
+                        === prettyShow (majorBoundVersion (asCabal v))
             , testProperty "is invisible to Eq and Ord" $
                 forAll genVersion $ \v ->
-                    let sugared = fromVersionRange (majorBoundVersion v)
+                    let sugared = fromVersionRange (majorBoundVersion (asCabal v))
                         spelled =
                             fromVersionRange
                                 ( intersectVersionRanges
-                                    (orLaterVersion v)
-                                    (earlierVersion (majorUpperBound v))
+                                    (orLaterVersion (asCabal v))
+                                    (earlierVersion (majorUpperBound (asCabal v)))
                                 )
                      in (sugared === spelled) .&&. (compare sugared spelled === EQ)
             , testProperty "is dropped by every operation" $ \(a :: VersionSet) b ->
@@ -194,26 +205,23 @@ tests =
             , testProperty "leaves the outer bounds where they were" $
                 forAll genUniverse $ \universe (vs :: VersionSet) ->
                     let bounds s = (take 1 (intervals s), take 1 (reverse (intervals s)))
-                        lower (VersionInterval lo _) = lo
-                        upper (VersionInterval _ hi) = hi
+                        lower = fst
+                        upper = snd
                         (los, his) = bounds vs
                         (los', his') = bounds (fillGaps universe vs)
                      in (map lower los === map lower los') .&&. (map upper his === map upper his')
-            , testProperty "fills the holes Cabal's major bounds leave" $
-                let v = mkVersion
-                    declared =
+            , testProperty "fills a gap nobody published into, and only that" $
+                let declared =
                         fromVersionRange
                             ( unionVersionRanges
-                                (majorBoundVersion (v [4, 13, 0, 0]))
-                                (majorBoundVersion (v [4, 14, 0, 0]))
+                                (intersectVersionRanges (orLaterVersion (cv [1, 0])) (earlierVersion (cv [1, 2])))
+                                (intersectVersionRanges (orLaterVersion (cv [1, 3])) (earlierVersion (cv [2])))
                             )
-                    -- @^>=4.13.0.0@ stops at @<4.14@, and @4.14@ and @4.14.0@ sit
-                    -- below @4.14.0.0@ in Cabal's order: a hole no release fills.
-                    published = Set.fromList (map v [[4, 13, 0, 0], [4, 13, 1, 0], [4, 14, 0, 0], [4, 15, 0, 0]])
-                    filled = fromVersionRange (intersectVersionRanges (orLaterVersion (v [4, 13, 0, 0])) (earlierVersion (v [4, 15])))
+                    published = Set.fromList (map mkVersion [[1, 0], [1, 1], [1, 3], [1, 4]])
+                    filled = fromVersionRange (intersectVersionRanges (orLaterVersion (cv [1, 0])) (earlierVersion (cv [2])))
                  in (fillGaps published declared === filled)
-                        -- and leaves the hole alone once something is published in it
-                        .&&. (fillGaps (Set.insert (v [4, 14]) published) declared === declared)
+                        -- and leaves the gap alone once something is published in it
+                        .&&. (fillGaps (Set.insert (mkVersion [1, 2, 5]) published) declared === declared)
             , testProperty "an empty universe fills every hole" $ \(vs :: VersionSet) ->
                 length (intervals (fillGaps Set.empty vs)) <= 1
             , testProperty "the result carries no declared range" $
@@ -221,15 +229,14 @@ tests =
                     declaredRange (fillGaps universe vs) === Nothing
             ]
         , testGroup
-            -- The operations work on the intervals directly. The reference is
-            -- Cabal's combinators on 'VersionRange' syntax followed by Cabal's
-            -- canonicaliser, and the operations must agree with it on the set and
-            -- on the canonical /representation/, since the derived 'Eq' is
-            -- semantic equality only while the form stays canonical.
-            --
-            -- Inputs come from 'genViaRange', which builds sets through Cabal's
-            -- canonicaliser alone, so a bug in our own union cannot hide by
-            -- producing agreeable inputs.
+            -- The operations work on the intervals directly. This pins them
+            -- to the round trip through 'VersionRange' syntax: hand each side
+            -- back as a range, combine with Cabal's combinator, fold the result
+            -- into a set again. Same set, and the same canonical
+            -- /representation/, since 'Eq' is semantic equality only while the
+            -- form stays canonical. Cabal's own canonicaliser is not the
+            -- reference: it orders @1.0@ below @1@, and this module does not.
+            -- The membership properties above are the semantic oracle.
             "agree with the VersionRange reference"
             [ testProperty "union" $
                 forAll genViaRange $ \a -> forAll genViaRange $ \b ->
@@ -244,6 +251,58 @@ tests =
                 forAll genViaRange $ \a -> forAll genViaRange $ \b ->
                     intersectionVersionSet a (complementVersionSet b)
                         === viaRange2 intersectVersionRanges a (refComplement b)
+            ]
+        , testGroup
+            -- The version order is the solver's, not Cabal's: trailing zeros are
+            -- insignificant (see 'PubGrub.Version'). Each case here is a shape
+            -- found in real proofs or in the index.
+            "trailing zeros are insignificant"
+            [ testProperty "two spellings are one version, and sort as one" $
+                (mkVersion [1, 2] === mkVersion [1, 2, 0, 0])
+                    .&&. (compare (mkVersion [1, 2]) (mkVersion [1, 2, 0]) === EQ)
+                    .&&. (mkVersion [1, 2] < mkVersion [1, 2, 0, 1])
+                    .&&. (Set.size (Set.fromList [mkVersion [1, 2], mkVersion [1, 2, 0], mkVersion [1, 2, 0, 0]]) === 1)
+            , testProperty "a version keeps its spelling for display" $
+                (T.unpack (pretty (mkVersion [1, 2, 0, 0])) === "1.2.0.0") .&&. (T.unpack (pretty (mkVersion [1, 2])) === "1.2")
+            , testProperty "a singleton admits every spelling of its version" $
+                contains (singletonVersionSet (mkVersion [1, 2])) (mkVersion [1, 2, 0, 0])
+                    .&&. contains (singletonVersionSet (mkVersion [1, 2, 0, 0])) (mkVersion [1, 2])
+            , testProperty "consecutive major windows are one interval" $
+                -- haddock's @base ^>=4.13.0.0 || ^>=4.14.0.0@: Cabal's @^>=4.13.0.0@
+                -- stops at @<4.14@ and the next window starts at @>=4.14.0.0@.
+                let windows = fromVersionRange (unionVersionRanges (majorBoundVersion (cv [4, 13, 0, 0])) (majorBoundVersion (cv [4, 14, 0, 0])))
+                    spelled = fromVersionRange (intersectVersionRanges (orLaterVersion (cv [4, 13, 0, 0])) (earlierVersion (cv [4, 15])))
+                 in (windows === spelled) .&&. (length (intervals windows) === 1)
+            , testProperty "the space between two spellings is empty" $
+                -- scion-browser's @tar >=0.3 && <0.3.0.0@: a declared @>=0.3@ minus
+                -- the slot of the release @0.3.0.0@ leaves no residue below it.
+                let declared = fromVersionRange (orLaterVersion (cv [0, 3]))
+                    slot = halfOpenVersionSet (mkVersion [0, 3, 0, 0]) (Just (mkVersion [0, 3, 2, 0]))
+                 in (halfOpenVersionSet (mkVersion [0, 3]) (Just (mkVersion [0, 3, 0, 0])) === emptyVersionSet)
+                        .&&. (intersectionVersionSet declared (complementVersionSet slot) === fromVersionRange (orLaterVersion (cv [0, 3, 2, 0])))
+            , testProperty "a bound spelled longer than the release still names it" $
+                -- @time >=1.8.0@ against the release @time 1.8@, and @lens <5.0@
+                -- against @lens 5@: Cabal excludes the first and admits the second.
+                contains (fromVersionRange (orLaterVersion (cv [1, 8, 0]))) (mkVersion [1, 8])
+                    .&&. (contains (fromVersionRange (earlierVersion (cv [5, 0]))) (mkVersion [5]) === False)
+            , testProperty "where two spellings meet at one cut, the shorter is kept, either way round" $
+                -- language-puppet's @aeson >=2.0@ against the slot of @aeson 2.0.0.0@:
+                -- the derived term should read @>=2.0@, as the author wrote it.
+                let declared = fromVersionRange (orLaterVersion (cv [2, 0]))
+                    slot = halfOpenVersionSet (mkVersion [2, 0, 0, 0]) (Just (mkVersion [2, 0, 2, 0]))
+                    lowerSpelling s = [versionNumbers v | (Cut v _, _) <- intervals s]
+                    upperSpelling s = [versionNumbers v | (_, Cut v _) <- intervals s]
+                    below = fromVersionRange (earlierVersion (cv [1, 5]))
+                    belowLong = halfOpenVersionSet (mkVersion [1]) (Just (mkVersion [1, 5, 0, 0]))
+                 in (lowerSpelling (intersectionVersionSet declared slot) === [[2, 0]])
+                        .&&. (lowerSpelling (intersectionVersionSet slot declared) === [[2, 0]])
+                        .&&. (upperSpelling (intersectionVersionSet below belowLong) === [[1, 5]])
+                        .&&. (upperSpelling (intersectionVersionSet belowLong below) === [[1, 5]])
+                        .&&. (upperSpelling (unionVersionSet below belowLong) === [[1, 5]])
+                        .&&. (lowerSpelling (unionVersionSet slot (halfOpenVersionSet (mkVersion [2]) (Just (mkVersion [2, 0, 1])))) === [[2]])
+            , testProperty "two cuts at one version, spelled differently, are one cut" $
+                intersectionVersionSet (fromVersionRange (earlierVersion (cv [1, 5]))) (fromVersionRange (earlierVersion (cv [1, 5, 0, 0])))
+                    === fromVersionRange (earlierVersion (cv [1, 5]))
             ]
         , testGroup
             "Lattice laws"
@@ -268,16 +327,18 @@ refComplement vs =
     fromVersionRange
         (foldr (intersectVersionRanges . complementInterval) anyVersion (intervals vs))
   where
-    complementInterval (VersionInterval lo hi) =
+    complementInterval (lo, hi) =
         unionVersionRanges (belowLower lo) (aboveUpper hi)
-    belowLower (LowerBound v InclusiveBound) = earlierVersion v -- < v
-    belowLower (LowerBound v ExclusiveBound) = orEarlierVersion v -- <= v
-    aboveUpper NoUpperBound                  = noVersion -- nothing above
-    aboveUpper (UpperBound v InclusiveBound) = laterVersion v -- > v
-    aboveUpper (UpperBound v ExclusiveBound) = orLaterVersion v -- >= v
+    belowLower (Cut v Before) = earlierVersion (asCabal v) -- < v
+    belowLower (Cut v After)  = orEarlierVersion (asCabal v) -- <= v
+    belowLower Unbounded      = noVersion -- unreachable: no interval starts there
+    aboveUpper Unbounded      = noVersion -- nothing above
+    aboveUpper (Cut v After)  = laterVersion (asCabal v) -- > v
+    aboveUpper (Cut v Before) = orLaterVersion (asCabal v) -- >= v
 
--- | Sets built only by Cabal's canonicaliser, so they are independent of the
--- implementation under test.
+-- | Sets built from random 'VersionRange' syntax. 'fromVersionRange' folds it
+-- through this module's own union and intersection, so these sets are not
+-- independent of the implementation under test.
 genViaRange :: Gen VersionSet
 genViaRange = fromVersionRange <$> sized (\n -> genRange (min n 4))
   where
@@ -292,11 +353,11 @@ genViaRange = fromVersionRange <$> sized (\n -> genRange (min n 4))
         oneof
             [ pure anyVersion
             , pure noVersion
-            , thisVersion <$> genVersion
-            , orLaterVersion <$> genVersion
-            , laterVersion <$> genVersion
-            , earlierVersion <$> genVersion
-            , orEarlierVersion <$> genVersion
+            , thisVersion . asCabal <$> genVersion
+            , orLaterVersion . asCabal <$> genVersion
+            , laterVersion . asCabal <$> genVersion
+            , earlierVersion . asCabal <$> genVersion
+            , orEarlierVersion . asCabal <$> genVersion
             ]
 
 newtype NonEmptyVer = NonEmptyVer Version deriving Show

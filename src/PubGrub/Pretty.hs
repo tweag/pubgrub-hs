@@ -17,7 +17,7 @@ import           Distribution.Pretty            (prettyShow)
 import           Distribution.Types.Flag        (FlagName, unFlagName)
 import           Distribution.Types.PackageName (PackageName)
 import           Distribution.Types.UnitId      (UnitId)
-import           Distribution.Version           (Version)
+import           PubGrub.Version                (Version, versionNumbers)
 import           PubGrub.VersionSet             (VersionSet)
 import qualified PubGrub.VersionSet             as VS
 
@@ -40,7 +40,7 @@ instance Pretty UnitId where
     pretty = T.pack . prettyShow
 
 instance Pretty Version where
-    pretty = T.pack . prettyShow
+    pretty = T.intercalate (T.pack ".") . map (T.pack . show) . versionNumbers
 
 instance Pretty VersionSet where
     pretty = T.pack . prettyShow . VS.toVersionRange

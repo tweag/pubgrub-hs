@@ -81,8 +81,9 @@ import           Distribution.Types.Flag                      (FlagAssignment,
                                                                unFlagAssignment)
 import           Distribution.Types.PackageName               (PackageName,
                                                                mkPackageName)
-import           Distribution.Types.Version                   (Version,
-                                                               mkVersion)
+import qualified Distribution.Types.Version                   as Cabal
+import qualified PubGrub.Version                              as V
+import           PubGrub.Version                              (Version, mkVersion)
 import qualified Distribution.Verbosity                       as Verbosity
 import           Hackage.Security.Client.Repository.Cache     (Cache)
 import           Network.HTTP.Client                          (Manager)
@@ -91,6 +92,7 @@ import           PubGrub.Incompatibility                      (Incompatibility,
                                                                onlyInstalled,
                                                                unbuildable)
 import           PubGrub.Index.PreInstalled                   (PreInstalledPackage (..))
+import           PubGrub.Pretty                               (Pretty (pretty))
 import           PubGrub.InstanceSet                          (HasVersion (..),
                                                                Instance (..),
                                                                InstanceSet (..),
@@ -138,8 +140,8 @@ withProvider cache manager state root act =
                     ( mkExpand
                         (mkInstalledDb installed)
                         ReleaseSource
-                            { rsVersionsOf = ihVersionsOf handle
-                            , rsReadRelease = \pn v -> liftIO (readRelease pn v)
+                            { rsVersionsOf = ihSolverVersionsOf handle
+                            , rsReadRelease = \pn v -> liftIO (readRelease pn (V.toCabalVersion v))
                             }
                         root
                     )
@@ -263,7 +265,7 @@ releaseReader
     -> Maybe PkgConfigDb
     -> IndexHandle
     -> Maybe StoreReader
-    -> IO (PackageName -> Version -> IO (Either ParseError Release), IO (Int, Int, Int))
+    -> IO (PackageName -> Cabal.Version -> IO (Either ParseError Release), IO (Int, Int, Int))
 releaseReader platform cInfo pkgConfig handle store = do
     -- (entries, parsed, decoded, reused). @parsed@ counts .cabal files actually
     -- put through Cabal-syntax and @decoded@ counts entries served by the derived
@@ -439,7 +441,7 @@ mkExpand installedDb source root = expand'
                                         ( "warning: ignoring "
                                             ++ prettyShow pn
                                             ++ "-"
-                                            ++ prettyShow v
+                                            ++ T.unpack (pretty v)
                                             ++ " (unparseable .cabal: "
                                             ++ show err
                                             ++ ")"

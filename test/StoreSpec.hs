@@ -15,7 +15,9 @@ import qualified Data.Map.Strict                 as Map
 import qualified Data.Set                        as Set
 import           Distribution.Types.Flag         (mkFlagName)
 import           Distribution.Types.PackageName  (PackageName, mkPackageName)
-import           Distribution.Types.Version      (Version, mkVersion)
+import qualified Distribution.Types.Version      as Cabal
+import           PubGrub.Version                 (Version)
+import qualified PubGrub.Version                 as V
 import           Distribution.Types.VersionRange (earlierVersion,
                                                   orLaterVersion)
 import           PubGrub.Incompatibility        (IncompatCause (..),
@@ -43,7 +45,11 @@ pkgB = mkPackageName "b"
 pkgQ = mkPackageName "q"
 
 v :: Int -> Version
-v n = mkVersion [n]
+v n = V.mkVersion [n]
+
+-- | The same, as a Cabal version: what a declared range is written with.
+cv :: Int -> Cabal.Version
+cv n = Cabal.mkVersion [n]
 
 -- | A release's slot, as 'Bridge.Provider.withSlots' mints it: from this release
 -- up to the next one that exists.
@@ -59,8 +65,8 @@ range :: Int -> Int -> InstanceSet
 range lo hi =
     sourceOnly
         ( VersionSet.intersectionVersionSet
-            (VersionSet.fromVersionRange (orLaterVersion (v lo)))
-            (VersionSet.fromVersionRange (earlierVersion (v hi)))
+            (VersionSet.fromVersionRange (orLaterVersion (cv lo)))
+            (VersionSet.fromVersionRange (earlierVersion (cv hi)))
         )
 
 sourceOnly :: VersionSet.VersionSet -> InstanceSet
@@ -102,7 +108,7 @@ mergeTests =
                 do
                     assertBool
                         "1.5 should be inside the merged depender range"
-                        (dependerOf only `denotesVersion` mkVersion [1, 5])
+                        (dependerOf only `denotesVersion` V.mkVersion [1, 5])
                     dependerOf only `shouldDenote` wholeSpan
             cs -> assertFailure ("expected one clause, got " ++ show (length cs))
     , testCase "three slots merge into one, in any arrival order" $ do
@@ -236,7 +242,7 @@ unbuildableTests =
             [only] ->
                 assertBool
                     "1.5 should be inside the merged run"
-                    (bannedBy only `denotesVersion` mkVersion [1, 5])
+                    (bannedBy only `denotesVersion` V.mkVersion [1, 5])
             cs -> assertFailure ("expected one clause, got " ++ show (length cs))
     , testCase "the merged fact stays an unbuildable leaf" $ do
         let store =

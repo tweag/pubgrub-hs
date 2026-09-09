@@ -556,7 +556,7 @@ proofStyle = do
 -- synthetic root is the solver's, not the plan's, so it is left out.
 planLines :: Map PackageName Instance -> [Text]
 planLines solution =
-    [ T.pack (unwords ["plan:", prettyShow pn, prettyShow (version inst), kind inst])
+    [ T.pack (unwords ["plan:", prettyShow pn, T.unpack (pretty (version inst)), kind inst])
     | (pn, inst) <- Map.toList (Map.delete rootName solution)
     ]
   where
@@ -627,5 +627,5 @@ renderTree solution children =
 -- pre-installed unit is shown as such: it is already built, with no flags to
 -- choose.
 renderChoice :: PackageName -> Instance -> Text
-renderChoice p (UsePreInstalled i) = T.pack $ unwords [prettyShow p, prettyShow (version i), "(installed)"]
-renderChoice p (BuildSource v fa) = T.pack $ unwords ([prettyShow p, prettyShow v] ++ [showFlagAssignment fa | not (null (showFlagAssignment fa))])
+renderChoice p (UsePreInstalled i) = T.pack $ unwords [prettyShow p, T.unpack (pretty (version i)), "(installed)"]
+renderChoice p (BuildSource v fa) = T.pack $ unwords ([prettyShow p, T.unpack (pretty v)] ++ [showFlagAssignment fa | not (null (showFlagAssignment fa))])

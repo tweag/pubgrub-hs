@@ -32,6 +32,7 @@ library
         PubGrub.Solver
         PubGrub.Store
         PubGrub.Term
+        PubGrub.Version
         PubGrub.VersionSet
     build-depends:
         , base ^>=4.21.0.0
@@ -215,3 +216,4 @@ executable index-bench
         , unliftio
     default-language:   GHC2021
     default-extensions: ImportQualifiedPost
+

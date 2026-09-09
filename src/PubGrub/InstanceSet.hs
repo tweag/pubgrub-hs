@@ -8,7 +8,7 @@ import qualified Data.Text                      as T
 import           Distribution.Types.Flag        (FlagAssignment, FlagName,
                                                  showFlagAssignment,
                                                  unFlagAssignment)
-import           Distribution.Types.Version     (Version)
+import           PubGrub.Version                (Version)
 import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
 import           PubGrub.InstanceSet.SourceCell (FlagPin (..), SourceCell (..),
                                                  differenceCell, intersectCell,

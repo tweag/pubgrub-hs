@@ -68,11 +68,7 @@ import           Distribution.Types.GenericPackageDescription (GenericPackageDes
 import           Distribution.Types.LibraryName (LibraryName (..))
 import           Distribution.Types.PackageName (PackageName, unPackageName)
 import           Distribution.Types.UnqualComponentName (unUnqualComponentName)
-import           Distribution.Types.Version     (Version, versionNumbers)
-import           Distribution.Types.VersionInterval (Bound (..),
-                                                 LowerBound (..),
-                                                 UpperBound (..),
-                                                 VersionInterval (..))
+import           Distribution.Types.Version     (Version)
 import           Distribution.Types.VersionRange (VersionRange)
 import qualified Distribution.Compat.NonEmptySet as NES
 import           GHC.Clock                      (getMonotonicTime)
@@ -80,6 +76,7 @@ import           GHC.Generics                   (Generic)
 import           Hackage.Security.Util.Path     (fromFilePath, makeAbsolute)
 import           Network.HTTP.Client            (defaultManagerSettings,
                                                  newManager)
+import qualified PubGrub.Version                as V
 import qualified PubGrub.VersionSet             as VS
 import           System.Environment             (getArgs)
 import           Text.Printf                    (printf)
@@ -138,10 +135,11 @@ data RawRelease = RawRelease
 toRange :: VersionRange -> RawRange
 toRange = RawRange . map bounds . VS.intervals . VS.fromVersionRange
   where
-    bounds (VersionInterval lo hi) = (low lo, up hi)
-    low (LowerBound v b) = (versionNumbers v, b == InclusiveBound)
-    up NoUpperBound      = Nothing
-    up (UpperBound v b)  = Just (versionNumbers v, b == InclusiveBound)
+    bounds (lo, hi) = (low lo, up hi)
+    low (VS.Cut v side) = (V.versionNumbers v, side == VS.Before)
+    low VS.Unbounded    = ([], False) -- unreachable: an empty interval is dropped
+    up VS.Unbounded     = Nothing
+    up (VS.Cut v side)  = Just (V.versionNumbers v, side == VS.After)
 
 toDep :: Dependency -> RawDep
 toDep (Dependency pn vr libs) =

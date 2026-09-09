@@ -49,7 +49,7 @@ hjsonschema ==1.10.0            # base and bytestring, via aeson
 # `widen` puts the declared range into the term verbatim, so the dead space survives
 # into the proof. Narrowing it was measured and rejected twice (docs/STATUS.md §8).
 atelier-testing ==0.2.0.0       # atelier-core >=0.3 && <0.3.0.0, and two more showcase:exclude (fails for a different reason than cabal)
-cpsa ==4.4.9                    # deepseq >=1.4.8 && <1.4.8.0; base >=4.13 && <4.13.0
+cpsa ==4.4.9                    # deepseq, two slots against installed base
 happstack-hsp ==7.3.7.8         # template-haskell history
 
 # --- plain dependency conflict, no boot package involved -----------------------

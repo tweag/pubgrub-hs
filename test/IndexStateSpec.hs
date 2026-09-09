@@ -8,13 +8,16 @@ module IndexStateSpec (tests) where
 
 import           Bridge.Hackage                 (EpochTime, IndexState (..),
                                                  getRecordAt, parseIndexState,
+                                                 solverVersionsFrom,
                                                  putRecord, showIndexState,
                                                  toEpoch)
 import           Data.Binary.Get                (runGetOrFail)
 import           Data.Binary.Put                (runPut)
 import           Data.Word                      (Word32)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
+import qualified Data.Set                       as Set
 import           Distribution.Types.Version     (Version, mkVersion)
+import qualified PubGrub.Version                as V
 import           Test.Tasty                     (TestTree, testGroup)
 import           Test.Tasty.HUnit               (assertBool, assertFailure,
                                                  testCase, (@?=))
@@ -51,6 +54,17 @@ tests =
                 other             -> assertFailure ("unexpected: " ++ show other)
         , testCase "parseIndexState rejects what is not a timestamp" $
             assertBool "accepted 'yesterday'" (either (const True) (const False) (parseIndexState "yesterday"))
+        , testGroup
+            -- Cabal's order tells @0.1@ from @0.1.0@; the solver's does not. A
+            -- package that published both offers one release, the later entry.
+            "two spellings of one version"
+            [ testCase "collapse to one release, the later tar entry" $
+                spellings (solverVersionsFrom [mkVersion [0, 1], mkVersion [0, 1, 0], mkVersion [0, 2]] [5, 9, 12])
+                    @?= [[0, 1, 0], [0, 2]]
+            , testCase "keep the shorter spelling when it is the later entry" $
+                spellings (solverVersionsFrom [mkVersion [0, 1], mkVersion [0, 1, 0]] [9, 5])
+                    @?= [[0, 1]]
+            ]
         ]
   where
     name :: PackageName
@@ -58,6 +72,9 @@ tests =
 
     v :: Int -> Version
     v n = mkVersion [n]
+
+    spellings :: Set.Set V.Version -> [[Int]]
+    spellings = map V.versionNumbers . Set.toList
 
     -- v1 uploaded at 100 (block 11), revised at 200 (12) and 300 (13);
     -- v2 uploaded at 150 (block 21), never revised. Revisions are newest first,

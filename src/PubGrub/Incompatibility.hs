@@ -19,7 +19,7 @@ module PubGrub.Incompatibility
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Distribution.Types.PackageName
-import           Distribution.Types.Version      (Version)
+import           PubGrub.Version                 (Version)
 import           PubGrub.InstanceSet            (Instance, InstanceSet,
                                                  emptyInstanceSet,
                                                  memberInstance,

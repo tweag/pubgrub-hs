@@ -19,6 +19,7 @@ import qualified Data.Set                        as Set
 import           Distribution.Types.Flag         (mkFlagAssignment)
 import           Distribution.Types.PackageName  (PackageName, mkPackageName)
 import           Distribution.Types.Version      (mkVersion)
+import qualified PubGrub.Version                 as V
 import           Distribution.Types.VersionRange (earlierVersion,
                                                   orLaterVersion, thisVersion)
 import           PubGrub.Incompatibility         (Incompatibility, anyTerm,
@@ -58,7 +59,7 @@ packages :: [PackageName]
 packages = map mkPackageName ["a", "b", "c", "d"]
 
 instances :: [Instance]
-instances = [BuildSource (mkVersion [k]) (mkFlagAssignment []) | k <- [1 .. 3]]
+instances = [BuildSource (V.mkVersion [k]) (mkFlagAssignment []) | k <- [1 .. 3]]
 
 -- | Range-shaped instance sets, built with the intensional constructor: one
 -- cell carrying a version range, as the provider mints them.

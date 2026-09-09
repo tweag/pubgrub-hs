@@ -1,7 +1,7 @@
 module PubGrub.Index.PreInstalled where
 
 import           Distribution.Types.UnitId  (UnitId)
-import           Distribution.Types.Version (Version)
+import           PubGrub.Version            (Version)
 
   -- | A package already present in the environment: a unit ID, a version, and
 -- dependencies on other pre-installed units. The 'UnitId' distinguishes

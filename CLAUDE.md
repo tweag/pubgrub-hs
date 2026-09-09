@@ -56,7 +56,7 @@ you change anything, read it.
 
 ```sh
 cabal build
-cabal test                           # 205 tests, ~0.3 s
+cabal test                           # 214 tests, ~0.3 s
 cabal run pubgrub -- aeson           # the driver; add -v for the search trace
 cabal run pubgrub -- --stats aeson   # + search counts and phase timings, no trace
 cabal run pubgrub -- --cabal aeson   # cabal's solver, same index (the baseline)
@@ -120,7 +120,7 @@ app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solv
 
 | component | what it is |
 | --- | --- |
-| library `pubgrub-hs` | `src/` — the solver. `PubGrub.hs` plus `PubGrub/{Term,VersionSet,SetOps,Relation,Incompatibility,Solver,Store,Provider,Report,Pretty}.hs`, `PubGrub/Index/PreInstalled.hs`, `PubGrub/InstanceSet{,/SourceCell}.hs` |
+| library `pubgrub-hs` | `src/` — the solver. `PubGrub.hs` plus `PubGrub/{Version,VersionSet,Term,SetOps,Relation,Incompatibility,Solver,Store,Provider,Report,Pretty}.hs`, `PubGrub/Index/PreInstalled.hs`, `PubGrub/InstanceSet{,/SourceCell}.hs` |
 | library `bridge` | `bridge/` — `Bridge/{Hackage,Installed,Provider}.hs`, `Bridge/Hackage/{HttpClient,Store,Unlifted}.hs`, `Bridge/Cabal/{Baseline,Flatten,InstalledPkg}.hs` |
 | executable `pubgrub` | `app/Main.hs` — the CLI driver |
 | executable `pubgrub-index` | `app/BuildIndex.hs` — builds the derived index |
@@ -304,6 +304,26 @@ release present in the index. Adjacent slots **touch**, so unions coalesce and
 does a walk that reaches it: `slotRange` decides, for both. Nothing is published
 below the first release, so the range is the same; its complement has no `<first`
 hole to discover and print.
+
+### Versions compare with trailing zeros insignificant
+
+`PubGrub.Version` is the core's version type: spelled as Hackage names the release,
+and compared with trailing zeros dropped, so `1.2` and `1.2.0.0` are one version where
+Cabal orders `1.2 < 1.2.0 < 1.2.0.0`. `docs/STATUS.md` §4.13 has the measurements.
+
+- **The spelling is display only.** `Eq` and `Ord` see the normal form. A `Set` keeps
+  whichever spelling was inserted, and `pretty` prints it as spelled. Where two
+  spellings meet at one cut, `VersionSet` keeps the shorter. Nothing may normalise
+  on the way out.
+- **Cabal's type stops at the bridge.** The index, the version cache, the derived
+  store and the baseline keep Cabal's `Version`. `Bridge.Hackage.pkgSolverVersions`
+  converts once per package, keeping the later tar entry where two spellings name one
+  version, and `Bridge.Provider` converts back to read a release. The `impl(ghc …)`
+  guard keeps Cabal's `withinRange` on purpose.
+- **This is a documented divergence from cabal.** 44 packages publish two spellings
+  and 1,404 latest-release bounds admit a slightly different set, in the author's
+  favour. Verdict agreement on the 23 problems holds. A new disagreement on a bound
+  shaped like `base <=4.21` is this rule, not a bug.
 
 ### The synthetic root's name carries a NUL byte
 

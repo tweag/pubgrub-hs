@@ -45,11 +45,13 @@ import           Distribution.Types.Condition   (Condition (Lit))
 import           Distribution.Types.Dependency  (mainLibSet, mkDependency)
 import           Distribution.Types.Flag        (mkFlagAssignment)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
-import           Distribution.Version           (Version, VersionRange,
+import           Distribution.Version           (VersionRange,
                                                  earlierVersion,
                                                  intersectVersionRanges,
                                                  mkVersion, orLaterVersion)
 import           PubGrub.InstanceSet            (Instance (BuildSource))
+import           PubGrub.Version                (Version)
+import qualified PubGrub.Version                as V
 import           PubGrub.Provider               (Provider (Provider))
 import           PubGrub.Report                 (reportConflict)
 import           PubGrub.Solver                 (SolveError (..), SolverMsg,
@@ -95,7 +97,7 @@ lt v = earlierVersion (mkVersion v)
 -- stay in the world and the provider looks them up — exactly as the real bridge
 -- reads them from the index.
 releaseInstance :: Release -> Instance
-releaseInstance r = BuildSource (mkVersion (relVersion r)) (mkFlagAssignment [])
+releaseInstance r = BuildSource (V.mkVersion (relVersion r)) (mkFlagAssignment [])
 
 -- | The instance for a specific package version in the world (for asserting
 -- expected solutions). Errors only if the test names a version not in @world@.
@@ -130,7 +132,7 @@ mkProvider world = Provider (BP.mkExpand (mkInstalledDb []) source [])
     source =
         BP.ReleaseSource
             { BP.rsVersionsOf = \p ->
-                Set.fromList [mkVersion (relVersion r) | (q, rs) <- world, q == p, r <- rs]
+                Set.fromList [V.mkVersion (relVersion r) | (q, rs) <- world, q == p, r <- rs]
             , BP.rsReadRelease = \p v -> pure (readRelease p v)
             }
 
@@ -139,7 +141,7 @@ mkProvider world = Provider (BP.mkExpand (mkInstalledDb []) source [])
     releases :: Map (PackageName, Version) BP.Release
     releases =
         Map.fromList
-            [ ( (p, mkVersion (relVersion r))
+            [ ( (p, V.mkVersion (relVersion r))
               , BP.Release
                     { BP.relFlags = []
                     , BP.relGuarded =

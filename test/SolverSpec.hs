@@ -14,7 +14,7 @@ import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Types.Flag        (mkFlagAssignment)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
-import           Distribution.Types.Version     (mkVersion)
+import           PubGrub.Version                (mkVersion)
 import           PubGrub.Incompatibility        (fromDependency)
 import           PubGrub.InstanceSet            (HasVersion (version),
                                                  Instance (..), InstanceSet,

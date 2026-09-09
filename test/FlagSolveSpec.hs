@@ -54,7 +54,7 @@ import           Distribution.Types.Flag        (FlagName, mkFlagAssignment,
                                                  mkFlagName)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.UnitId      (mkUnitId)
-import           Distribution.Types.Version     (Version, mkVersion)
+import           Distribution.Types.Version     (mkVersion)
 import           Distribution.Version           (anyVersion, thisVersion)
 import           PubGrub.Incompatibility        (IncompatCause (..),
                                                  Incompatibility (..))
@@ -63,6 +63,8 @@ import           PubGrub.InstanceSet            (Instance (..),
                                                  InstanceSet (..))
 import           PubGrub.InstanceSet.SourceCell (SourceCell (..))
 import           PubGrub.Provider               (Provider (Provider, expand))
+import           PubGrub.Version                (Version)
+import qualified PubGrub.Version                as V
 import           PubGrub.Report                 (reportConflict)
 import           PubGrub.Solver                 (SolveError (..), SolverMsg,
                                                  solve)
@@ -251,8 +253,8 @@ flg :: String -> FlagName
 flg = mkFlagName
 
 v1, v2 :: Version
-v1 = mkVersion [1, 0, 0]
-v2 = mkVersion [2, 0, 0]
+v1 = V.mkVersion [1, 0, 0]
+v2 = V.mkVersion [2, 0, 0]
 
 -- | An unconstrained dependency on a package's main library. These worlds are
 -- about flags, so no test needs a narrower range than "any version".
@@ -390,7 +392,7 @@ bootPackageStatesItself =
                 Set.singleton
                     PreInstalledPackage
                         { pipUnitId = mkUnitId name
-                        , pipVersion = mkVersion [1, 0]
+                        , pipVersion = V.mkVersion [1, 0]
                         , pipDependencies = []
                         }
             , isSource = [SourceCell VersionSet.fullVersionSet Map.empty]
@@ -792,7 +794,7 @@ selfDependencyDropped =
         , (pkg "q", leaf)
         ]
 
-    depAt p v = mkDependency p (thisVersion v) mainLibSet
+    depAt p v = mkDependency p (thisVersion (V.toCabalVersion v)) mainLibSet
 
     -- The real provider rule, asked to expand @p@ with everything on offer.
     expandSelfDep = do

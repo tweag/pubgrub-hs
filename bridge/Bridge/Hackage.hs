@@ -60,6 +60,7 @@ import           Distribution.Types.LibraryName               (LibraryName (..))
 import           Distribution.Types.PackageId                 (PackageIdentifier (..))
 import           Distribution.Types.PackageName               (PackageName)
 import           Distribution.Types.Version                   (Version)
+import qualified PubGrub.Version                              as V
 
 
 import qualified Bridge.Hackage.Unlifted                      as U
@@ -155,6 +156,11 @@ data Package = Package
     -- lists at 24 bytes a release instead of set nodes at 40. That is 2.4 MB
     -- of a peak residency of about 22 MB.
     , pkgOffset   :: !Int
+    , pkgSolverVersions :: Set V.Version
+    -- ^ the same releases in the solver's order, one per version: where two
+    -- spellings name one version (@0.1@ and @0.1.0@, 44 packages on Hackage),
+    -- the later tar entry is kept. Lazy for the same reason 'pkgVersions' is, and
+    -- built from it on first use.
     }
 
 -- | An open view of the Hackage index at one index-state: the package-to-versions
@@ -164,6 +170,9 @@ data Package = Package
 data IndexHandle = IndexHandle
     { ihVersionsOf :: PackageName -> Set Version
     -- ^ empty for a package the index-state does not have
+    , ihSolverVersionsOf :: PackageName -> Set V.Version
+    -- ^ the same releases in the solver's order ('pkgSolverVersions'), which is
+    -- what our own provider reads; the baseline reads Cabal's
     , ihVersions   :: Map PackageName (Set Version)
     -- ^ the same, whole. It is built when first asked for, and only the baseline
     -- and the index builder ask; our own solver never pays for the second map.
@@ -312,6 +321,7 @@ mkHandle :: Sec.IndexCallbacks -> IndexStateInfo -> Index -> IndexHandle
 mkHandle cbs info Index{ixPackages, ixBlocks} =
     IndexHandle
         { ihVersionsOf = \pn -> maybe Set.empty pkgVersions (Map.lookup pn ixPackages)
+        , ihSolverVersionsOf = \pn -> maybe Set.empty pkgSolverVersions (Map.lookup pn ixPackages)
         , ihVersions = Map.map pkgVersions ixPackages
         , ihBlockOf = blockOf
         , ihLookupGPD = \pn v -> case blockOf pn v of
@@ -327,6 +337,18 @@ mkHandle cbs info Index{ixPackages, ixBlocks} =
         Package{pkgVersions, pkgOffset} <- Map.lookup pn ixPackages
         i <- Set.lookupIndex v pkgVersions
         pure (ixBlocks ! (pkgOffset + i))
+
+-- | A package's releases in the solver's order. Cabal's order tells @0.1@ from
+-- @0.1.0@ and the solver's does not, so where a package published both (the
+-- lists are aligned: the block of each release in force) the release with the
+-- greater block — the later tar entry, which is the later upload — is the one
+-- the solver is offered. Its spelling is kept, so converting back finds it.
+solverVersionsFrom :: [Version] -> [Word32] -> Set V.Version
+solverVersionsFrom vs blks =
+    Set.fromList
+        (map snd (Map.elems (Map.fromListWith later [(sv, (blk, sv)) | (v, blk) <- zip vs blks, let sv = V.fromCabalVersion v])))
+  where
+    later new old = if fst new >= fst old then new else old
 
 -- | Read and parse one release's @.cabal@ from the tar block of the revision in
 -- force at this run's index-state. Valid only while the 'withIndex' bracket that
@@ -465,7 +487,7 @@ readVersionCache state path = do
                         | null vs -> go (k - 1 :: Int) bs' next latest acc
                         | otherwise -> do
                             forM_ (zip [next ..] blks) $ \(i, blk) -> writeArray blocks i blk
-                            let pkg = Package (Set.fromDistinctAscList vs) next
+                            let pkg = Package (Set.fromDistinctAscList vs) next (solverVersionsFrom vs blks)
                             go (k - 1) bs' (next + length vs) (max latest t) (Map.insert pn pkg acc)
             folded <- go (chPackages h) rest 0 Nothing Map.empty
             case folded of

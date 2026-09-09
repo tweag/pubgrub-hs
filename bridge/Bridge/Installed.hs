@@ -26,6 +26,7 @@ import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.UnitId      (UnitId)
 import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
 import           PubGrub.InstanceSet            (Instance (..))
+import           PubGrub.Version                (fromCabalVersion)
 
 data InstalledDb = InstalledDb
     { idbById   :: Map UnitId InstalledPkg
@@ -43,7 +44,7 @@ toPreInstalled :: InstalledPkg -> PreInstalledPackage
 toPreInstalled p =
     PreInstalledPackage
         { pipUnitId = ipUnitId p
-        , pipVersion = ipVersion p
+        , pipVersion = fromCabalVersion (ipVersion p)
         , pipDependencies = ipDepends p
         }
 

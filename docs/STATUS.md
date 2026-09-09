@@ -51,6 +51,7 @@ and the explanation showcase. The two reports it generated on 2026-09-03 are in
 | Index-state | `--index-state T` gives both solvers the index as it was at `T`, revisions included, with cabal's semantics. A run prints the state it is really at |
 | Derived index | every release parsed once into `_cache/derived-index.cbor`. A read is a CBOR decode, served only for the revision in force |
 | Version ranges | full. The solver resolves real packages end to end |
+| Version order | ours, not Cabal's: trailing zeros are insignificant, so `1.2` and `1.2.0.0` are one version. Cabal's type stops at the bridge ([§4.13](#413-versions-compare-with-trailing-zeros-insignificant)) |
 | Flags | applied, not searched. Every flag takes its declared default on both sides |
 | Boot packages | the installed database becomes instances. A boot package offers installed units or nothing |
 | Buildability | a release whose library cannot be built here is not offered, and the solver is told why |
@@ -113,11 +114,11 @@ Our search counts on the same run:
 | problem | decisions | conflicts | no-version events | releases decoded | `.cabal` parses |
 | --- | --- | --- | --- | --- | --- |
 | `vector` | 39 | 0 | 0 | 114 | 0 |
-| `pandoc` | 270 | 1 | 0 | 2882 | 0 |
-| `conduit <1.3` | 19 | 9 | 2 | 182 | 0 |
+| `pandoc` | 270 | 1 | 0 | 2883 | 0 |
+| `conduit <1.3` | 16 | 8 | 1 | 174 | 0 |
 | `lens <4` | 65 | 23 | 2 | 268 | 0 |
-| `aeson <2` | 400 | 68 | 0 | 389 | 0 |
-| `yesod` | 827 | 11 | 1 | 3411 | 0 |
+| `aeson <2` | 320 | 58 | 0 | 367 | 0 |
+| `yesod` | 839 | 14 | 0 | 3386 | 0 |
 
 Every parse count is zero because the derived index answers every read
 ([§4.6](#46-the-derived-index-makes-a-read-a-decode)). That holds only while the
@@ -130,7 +131,10 @@ rows and nowhere else. Re-measure with `pubgrub-harness --index-state`. The
 index refresh of 2026-09-03 moved no search count; the decode counts rose by a few,
 which is the walk reading releases published since. What did move the three
 unsatisfiable rows is the first-release slot rule
-([§4.4](#44-a-release-owns-a-slot-not-a-point)), and its cost is recorded there.
+([§4.4](#44-a-release-owns-a-slot-not-a-point)), and its cost is recorded there. The
+version order of [§4.13](#413-versions-compare-with-trailing-zeros-insignificant)
+then moved `conduit <1.3`, `aeson <2` and `yesod` again, to the counts above; the
+before-and-after is recorded there.
 
 **The plan diff finds two known gaps and nothing else.** On the three satisfiable
 problems the two plans agree on every package they share: 38, 190 and 180. cabal's
@@ -738,6 +742,87 @@ problems, and the next harness run will show cabal's column rise for that reason
 
 ---
 
+### 4.13 Versions compare with trailing zeros insignificant
+
+`PubGrub.Version` is the solver's version type. A version is spelled as Hackage names
+the release, and `Eq` and `Ord` compare the spelling with its trailing zeros dropped,
+so `1.2`, `1.2.0` and `1.2.0.0` are one version. Cabal's `Version` orders them
+`1.2 < 1.2.0 < 1.2.0.0`. The spelling is kept for display only, the way a
+`VersionSet` keeps its declared range ([§4.2](#42-version-sets-are-intensional)): the
+lawful part of the type ignores it.
+Where two spellings of one version meet at one cut, in an intersection or a union,
+the shorter is kept: a declared `aeson >=2.0` against the slot of the release
+`2.0.0.0` derives a term that reads `>=2.0`, as the author wrote it.
+
+**Why.** Cabal's order puts version space between spellings of one version, and
+nothing published occupies it. The set algebra cannot see that it is empty, so it
+carries it. Two shapes reached the proofs. A declared `>=0.3` met the slot of the
+release `0.3.0.0`, and the difference left `>=0.3 && <0.3.0.0`, an interval the
+search had to discover empty and `scion-browser` printed. And
+`^>=4.13.0.0 || ^>=4.14.0.0` stayed two intervals, because `majorUpperBound` keeps
+two components and `4.14` sits below `4.14.0.0`. Measured on 2026-09-09 over the 23
+gate problems, before the change: 24 no-version incompatibilities were minted, and 8
+of them were such holes, of the form `[a, a.0)`. Each cost a decision, a conflict and
+a learned clause, and then rule 4 of the reporter
+([§4.9](#49-the-report-follows-the-specs-reporting-algorithm)) absorbed it.
+
+**What it deviates from, measured.** The whole index at head on 2026-09-09, 153,495
+releases and 2,252,290 dependency mentions, every range compared against the
+published versions it admits under each order:
+
+| | count |
+| --- | --- |
+| packages publishing two spellings of one version | 44 of 19,458 (81 pairs; 15 packages are one author's 2011–2016 family) |
+| dependency mentions admitting a different set of versions | 15,725 (0.7%) |
+| of those, in the depender's latest release | 1,404, in 943 packages |
+| of those, flipping the dependee's newest release | 19 |
+
+Every common shape is one where Cabal's order contradicts the author: `time >=1.8.0`
+against the release `time 1.8`, which Cabal excludes; `lens <5.0` against `lens 5`,
+which Cabal admits; `base <=4.21` against `4.21.0.0`, which Cabal excludes. On this
+machine three latest releases flip their verdict on base 4.21.0.0: `curryer-rpc` and
+`double-x-encoding`, which write `<=4.21`, solve here and fail under cabal;
+`ghc-debugger`, which writes `>4.21`, the reverse. None is in the problem set, so the
+gate's verdict agreement holds at 23/23. **This is the one place the two solvers read
+the same index differently, and it is by decision.** The baseline keeps cabal's
+order, because that is what cabal does.
+
+**Where the boundary is.** The core knows only `PubGrub.Version`. `Bridge.Hackage`
+keeps Cabal's type for the index, the version cache, the derived store and the
+baseline, and converts once, lazily per package, into `pkgSolverVersions`: where two
+spellings name one version, the later tar entry, which is the later upload, is the
+release the solver is offered, and its spelling is kept so the conversion back finds
+its `.cabal`. `Bridge.Provider` reads that set and converts back on every release
+read. The `impl(ghc …)` guard in `Bridge.Cabal.Flatten` keeps Cabal's `withinRange`:
+that is cabal's rule for the compiler guard and the baseline uses the same one.
+
+**What it did to the search, same machine, same index-state, either side of the
+change.**
+
+Nine of the 23 problems moved and fourteen did not. The eight phantom no-version
+incompatibilities are gone, and the sixteen real ones are untouched:
+
+| | decisions | conflicts | no-version events |
+| --- | --- | --- | --- |
+| `conduit <1.3` | 19 → **16** | 9 → **8** | 2 → **1** |
+| `aeson <2` | 400 → **320** | 68 → **58** | 0 → 0 |
+| `yesod` | 827 → 839 | 11 → 14 | 1 → **0** |
+| `language-puppet ==1.5.1` | 10 → **9** | 6 → **5** | 1 → **0** |
+| `cpsa ==4.4.9` | 11 → **9** | 4 → **3** | 2 → **1** |
+| `cabal-install ==3.18.1.0` | 65 → **61** | 5 → 5 | 1 → **0** |
+| `futhark ==0.27.1` | 686 → 688 | 7 → 7 | 0 → 0 |
+| `scion-browser ==0.5.0` | 186 → **169** | 23 → **21** | 3 → **1** |
+| `matterhorn ==90000.1.1` | 584 → **581** | 30 → 30 | 2 → **1** |
+
+`aeson <2` is the same 400 to 320 that narrowing declared ranges to published
+versions produced on 2026-09-03 ([§8](#two-things-that-were-measured-and-rejected)),
+now for free: the user's own `<2` and the slot bound `2.0.0.0` are one cut. `yesod`
+pays twelve decisions and three conflicts, the search-path luck
+[§4.4](#44-a-release-owns-a-slot-not-a-point) records for a wider depender term, and
+it is the only row that got worse. The proofs kept their 61 sentences.
+`scion-browser` lost its phantom interval, and `hjsonschema`'s proof took a different
+route through `aeson` at the same length.
+
 ## 5. What is deliberately out of scope
 
 ### 5.1 Flags are fixed at their declared defaults
@@ -993,7 +1078,7 @@ and unused.
 Its interior half, `PubGrub.VersionSet.fillGaps`, merges the holes between a range's
 intervals that hold no published release and never moves an outer bound. Measured the
 same day: every search counter identical on eight problems, allocation within noise,
-one proof line changed (`haddock`'s seven `^>=` windows into `>=4.13.0.0 && <4.20`).
+one proof line changed (`haddock`'s seven `^>=` windows into `>=4.13.0.0 && <4.20`; since [§4.13](#413-versions-compare-with-trailing-zeros-insignificant) those windows coalesce on construction, and the declared spelling is what prints).
 It is kept in reserve for *derived* terms, which nobody wrote. Applying it to a
 declared range would discard the author's spelling, which §4.2 now keeps.
 

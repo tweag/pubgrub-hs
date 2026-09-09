@@ -13,7 +13,9 @@ import           Data.List                       (isInfixOf)
 import qualified Data.Map.Strict                 as Map
 import qualified Data.Set                        as Set
 import           Distribution.Types.PackageName  (PackageName, mkPackageName)
-import           Distribution.Types.Version      (Version, mkVersion)
+import qualified Distribution.Types.Version      as Cabal
+import           PubGrub.Version                 (Version)
+import qualified PubGrub.Version                 as V
 import           Distribution.Types.VersionRange (earlierVersion,
                                                   orLaterVersion,
                                                   thisVersion)
@@ -44,7 +46,11 @@ pkgA = mkPackageName "a"
 pkgQ = mkPackageName "q"
 
 v :: Int -> Version
-v n = mkVersion [n]
+v n = V.mkVersion [n]
+
+-- | The same, as a Cabal version: what a declared range is written with.
+cv :: Int -> Cabal.Version
+cv n = Cabal.mkVersion [n]
 
 sourceOnly :: VersionSet.VersionSet -> InstanceSet
 sourceOnly vs = InstanceSet{isInstalled = Set.empty, isSource = [SourceCell vs Map.empty]}
@@ -54,12 +60,12 @@ range :: Int -> Int -> InstanceSet
 range lo hi =
     sourceOnly
         ( VersionSet.intersectionVersionSet
-            (VersionSet.fromVersionRange (orLaterVersion (v lo)))
-            (VersionSet.fromVersionRange (earlierVersion (v hi)))
+            (VersionSet.fromVersionRange (orLaterVersion (cv lo)))
+            (VersionSet.fromVersionRange (earlierVersion (cv hi)))
         )
 
 from :: Int -> InstanceSet
-from lo = sourceOnly (VersionSet.fromVersionRange (orLaterVersion (v lo)))
+from lo = sourceOnly (VersionSet.fromVersionRange (orLaterVersion (cv lo)))
 
 -- | @a@ over @dependers@ depends on @q@ in @1..5@.
 dependsOnQ :: InstanceSet -> Incompatibility
@@ -226,7 +232,7 @@ headline =
     ]
   where
     root = mkPackageName "root"
-    rootDependsOn = fromDependency root (sourceOnly (VersionSet.fromVersionRange (thisVersion (v 0))))
+    rootDependsOn = fromDependency root (sourceOnly (VersionSet.fromVersionRange (thisVersion (cv 0))))
 
 -- | 'wrapProof': a hanging indent, and never a break inside a range.
 wrapping :: [TestTree]
