@@ -11,10 +11,15 @@
 -- 'CauseDependency' leaf rather than a derived node).
 module StoreSpec (tests) where
 
+import           Data.List.NonEmpty              (NonEmpty)
+import qualified Data.List.NonEmpty              as NE
 import qualified Data.Map.Strict                 as Map
 import qualified Data.Set                        as Set
 import           Distribution.Types.Flag         (mkFlagName)
 import           Distribution.Types.PackageName  (PackageName, mkPackageName)
+import           Distribution.Types.PkgconfigDependency (PkgconfigDependency (..))
+import           Distribution.Types.PkgconfigName (mkPkgconfigName)
+import           Distribution.Types.PkgconfigVersionRange (anyPkgconfigVersion)
 import qualified Distribution.Types.Version      as Cabal
 import           PubGrub.Version                 (Version)
 import qualified PubGrub.Version                 as V
@@ -22,6 +27,7 @@ import           Distribution.Types.VersionRange (earlierVersion,
                                                   orLaterVersion)
 import           PubGrub.Incompatibility        (IncompatCause (..),
                                                  Incompatibility (..),
+                                                 UnbuildableReason (..),
                                                  fromDependency, noInstances,
                                                  unbuildable)
 import           PubGrub.InstanceSet            (InstanceSet (..))
@@ -75,6 +81,19 @@ sourceOnly vs = InstanceSet{isInstalled = Set.empty, isSource = [SourceCell vs M
 -- | @a@ over some range depends on @q@ in @1..3@.
 dependsOnQ :: InstanceSet -> Incompatibility
 dependsOnQ dependers = fromDependency pkgA dependers pkgQ (range 1 3)
+
+-- | Why a release cannot be built: a @pkg-config@ module this machine lacks.
+missing :: String -> UnbuildableReason
+missing name = MissingPkgConfig (PkgconfigDependency (mkPkgconfigName name) anyPkgconfigVersion)
+
+libpq, zlib :: NonEmpty UnbuildableReason
+libpq = NE.singleton (missing "libpq")
+zlib = NE.singleton (missing "zlib")
+
+-- | A release cannot be built here for want of @libpq@ — the reason every
+-- unbuildable fact below gives unless it says otherwise.
+needsLibpq :: InstanceSet -> Incompatibility
+needsLibpq s = unbuildable pkgA s libpq
 
 tests :: TestTree
 tests =
@@ -226,7 +245,7 @@ unbuildableTests =
     [ testCase "two adjacent unbuildable slots become one fact" $ do
         let store =
                 insertClauses
-                    [unbuildable pkgA (slot 1 2), unbuildable pkgA (slot 2 3)]
+                    [needsLibpq (slot 1 2), needsLibpq (slot 2 3)]
                     emptyStore
         case storeClauses store of
             [only] -> bannedBy only `shouldDenote` sourceOnly (halfOpen 1 3)
@@ -236,7 +255,7 @@ unbuildableTests =
       testCase "the run is contiguous, and covers between the releases" $ do
         let store =
                 insertClauses
-                    [unbuildable pkgA (slot 1 2), unbuildable pkgA (slot 2 3)]
+                    [needsLibpq (slot 1 2), needsLibpq (slot 2 3)]
                     emptyStore
         case storeClauses store of
             [only] ->
@@ -244,26 +263,44 @@ unbuildableTests =
                     "1.5 should be inside the merged run"
                     (bannedBy only `denotesVersion` V.mkVersion [1, 5])
             cs -> assertFailure ("expected one clause, got " ++ show (length cs))
-    , testCase "the merged fact stays an unbuildable leaf" $ do
+    , testCase "the merged fact stays an unbuildable leaf, with its reasons" $ do
         let store =
                 insertClauses
-                    [unbuildable pkgA (slot 1 2), unbuildable pkgA (slot 2 3)]
+                    [needsLibpq (slot 1 2), needsLibpq (slot 2 3)]
                     emptyStore
         case map incompCause (storeClauses store) of
-            [CauseUnbuildable p _] -> p @?= pkgA
+            [CauseUnbuildable p _ why] -> (p, why) @?= (pkgA, libpq)
             _ -> assertFailure "expected a single CauseUnbuildable leaf"
     , testCase "different packages stay separate" $ do
         let store =
                 insertClauses
-                    [unbuildable pkgA (slot 1 2), unbuildable pkgB (slot 2 3)]
+                    [needsLibpq (slot 1 2), unbuildable pkgB (slot 2 3) libpq]
                     emptyStore
         length (storeClauses store) @?= 2
-    , -- Two different facts about the same instances: "cannot be built here" and
+    , -- The reasons are part of the fact. Merging a release that lacks libpq with
+      -- one that lacks zlib would print one module against both ranges, which is
+      -- false of each.
+      testCase "adjacent slots ruled out for different reasons stay separate" $ do
+        let store =
+                insertClauses
+                    [needsLibpq (slot 1 2), unbuildable pkgA (slot 2 3) zlib]
+                    emptyStore
+        length (storeClauses store) @?= 2
+    , -- ...but the same reasons in another order are the same fact: the key is a
+      -- set, so the order the .cabal lists its modules in does not split a run.
+      testCase "the same reasons in a different order still merge" $ do
+        let both = unbuildable pkgA (slot 1 2) (NE.fromList [missing "libpq", missing "zlib"])
+            swapped = unbuildable pkgA (slot 2 3) (NE.fromList [missing "zlib", missing "libpq"])
+            store = insertClauses [both, swapped] emptyStore
+        case storeClauses store of
+            [only] -> bannedBy only `shouldDenote` sourceOnly (halfOpen 1 3)
+            cs     -> assertFailure ("expected one clause, got " ++ show (length cs))
+    , -- Two different facts about the same instances: "cannot be built" and
       -- "has this dependency". Merging them would state one as the other.
       testCase "an unbuildable fact does not merge with a dependency fact" $ do
         let store =
                 insertClauses
-                    [unbuildable pkgA (slot 1 2), dependsOnQ (slot 2 3)]
+                    [needsLibpq (slot 1 2), dependsOnQ (slot 2 3)]
                     emptyStore
         length (storeClauses store) @?= 2
     ]
@@ -275,8 +312,8 @@ unbuildableTests =
 -- | The instance set an unbuildable fact bans, read off its cause.
 bannedBy :: Incompatibility -> InstanceSet
 bannedBy i = case incompCause i of
-    CauseUnbuildable _ s -> s
-    _                    -> error "not an unbuildable clause"
+    CauseUnbuildable _ s _ -> s
+    _                      -> error "not an unbuildable clause"
 
 halfOpen :: Int -> Int -> VersionSet.VersionSet
 halfOpen lo hi = VersionSet.halfOpenVersionSet (v lo) (Just (v hi))

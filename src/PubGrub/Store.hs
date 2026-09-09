@@ -63,11 +63,13 @@ module PubGrub.Store
     , insertClauses
     ) where
 
+import qualified Data.List.NonEmpty             as NE
 import           Data.Set                       (Set)
 import qualified Data.Set                       as Set
 import           Distribution.Types.PackageName (PackageName)
 import           PubGrub.Incompatibility        (IncompatCause (..),
                                                  Incompatibility (..),
+                                                 UnbuildableReason,
                                                  fromDependency, unbuildable)
 import           PubGrub.Index.PreInstalled     (PreInstalledPackage)
 import           PubGrub.InstanceSet            (InstanceSet (..))
@@ -93,10 +95,14 @@ data Store = Store
 -- Two shapes qualify. A dependency fact ('MergeDep') matches on the depender
 -- package, the dependee package, and the __dependee instance set__, which must be
 -- identical rather than merely overlapping. An unbuildable fact
--- ('MergeUnbuildable') matches on the package alone: it is a unit clause, so
--- there is no second term to agree about, and two of them are the same fact about
--- two runs of releases. PubGrub asks for adjacent versions that cannot be
--- selected to be stated as one incompatibility.
+-- ('MergeUnbuildable') matches on the package and the __reasons__: it is a unit
+-- clause, so there is no second term to agree about, and two of them giving the
+-- same reasons are the same fact about two runs of releases. PubGrub asks for
+-- adjacent versions that cannot be selected to be stated as one incompatibility.
+-- Two runs ruled out for different reasons are two facts, and merging them
+-- would put one release's missing module on the other's range in the proof. The
+-- reasons compare as a set, so their order in the @.cabal@ does not keep two
+-- identical facts apart.
 --
 -- On the dependency side, the set is compared /structurally/, via 'setKey'.
 -- 'InstanceSet' deliberately has no 'Eq' — its source side is a non-canonical DNF, so structural equality is
@@ -114,7 +120,7 @@ data Store = Store
 -- at it.
 data MergeKey
     = MergeDep PackageName PackageName SetKey
-    | MergeUnbuildable PackageName
+    | MergeUnbuildable PackageName (Set UnbuildableReason)
     deriving (Eq, Ord)
 
 -- | A structural key for an 'InstanceSet'. Cells are sorted so that two DNFs
@@ -136,7 +142,7 @@ setKey s = (isInstalled s, Set.toAscList (Set.fromList (isSource s)))
 mergeKey :: Incompatibility -> Maybe MergeKey
 mergeKey i = case incompCause i of
     CauseDependency p _ (q, depSet) -> Just (MergeDep p q (setKey depSet))
-    CauseUnbuildable p _            -> Just (MergeUnbuildable p)
+    CauseUnbuildable p _ why        -> Just (MergeUnbuildable p (Set.fromList (NE.toList why)))
     _                               -> Nothing
 
 emptyStore :: Store
@@ -187,8 +193,10 @@ mergeInto k new = go
         -- ¬(p ∈ B) is ¬(p ∈ A∪B), so the union claims nothing new. Slots touch, so
         -- for runs of adjacent unbuildable releases the union is one contiguous
         -- range — which is what @references\/pubgrub.md:476@ asks to be stated.
-        (CauseUnbuildable p aSet, CauseUnbuildable _ bSet) ->
-            unbuildable p (aSet `union` bSet)
+        -- The key made the two reason sets equal, so the existing clause's
+        -- reasons are the merged clause's.
+        (CauseUnbuildable p aSet why, CauseUnbuildable _ bSet _) ->
+            unbuildable p (aSet `union` bSet) why
         -- Unreachable: the two clauses answered 'mergeKey' with the same @Just k@,
         -- and each key shape pins the cause. Were it reached, the newer fact would
         -- be lost, not kept as 'mergeInto' promises for a missing match.

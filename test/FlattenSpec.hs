@@ -12,14 +12,14 @@
 -- 'depsAt' is given an assignment.
 module FlattenSpec (tests) where
 
-import           Bridge.Cabal.Flatten                         (buildableAtDefaults,
-                                                               buildableCondition,
+import           Bridge.Cabal.Flatten                         (buildableCondition,
                                                                componentDeps,
                                                                componentDepsAtDefaults,
                                                                defaultFlags,
                                                                depsAt,
                                                                expandGuard,
-                                                               flattenDeps)
+                                                               flattenDeps,
+                                                               unbuildableAtDefaults)
 import           Distribution.Solver.Types.PkgConfigDb        (pkgConfigDbFromList)
 import           Data.ByteString.Char8                        (pack)
 import           Data.List                                    (isInfixOf)
@@ -40,6 +40,10 @@ import           Distribution.Types.Flag                      (FlagAssignment,
                                                                mkFlagName)
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription)
 import           Distribution.Types.PackageName               (unPackageName)
+import           Distribution.Types.PkgconfigDependency        (PkgconfigDependency (..))
+import           Distribution.Types.PkgconfigName              (mkPkgconfigName)
+import           Distribution.Types.PkgconfigVersionRange      (anyPkgconfigVersion)
+import           PubGrub.Incompatibility                      (UnbuildableReason (..))
 import           Distribution.Version                         (earlierVersion,
                                                                intersectVersionRanges,
                                                                mkVersion,
@@ -126,9 +130,10 @@ tests =
         , testGroup "merging" mergeTests
         ]
 
--- | 'buildableCondition' and 'buildableAtDefaults': resolving the machine's
+-- | 'buildableCondition' and 'unbuildableAtDefaults': resolving the machine's
 -- @pkg-config@ database, a constant of the environment like OS and arch, into a
--- statement about which flag assignments remain.
+-- statement about which flag assignments remain, and at the defaults into the
+-- reasons the release is ruled out, module by module.
 --
 -- The fixtures take zlib's shape: a @pkgconfig-depends@ inside a flag-guarded
 -- block, so whether the library is present decides whether a flag value is
@@ -148,7 +153,7 @@ buildableTests =
         gpd <- gpdOf zlibish
         buildableCondition (Just testPkgConfigDb) testPlatform testCompiler gpd
             @?= Lit True
-        buildableAtDefaults (Just testPkgConfigDb) testPlatform testCompiler gpd @?= True
+        unbuildableAtDefaults (Just testPkgConfigDb) testPlatform testCompiler gpd @?= []
     , -- The whole point of keeping a condition: the missing library does not make
       -- the release unusable, it rules out the flag values that need it.
       testCase "an unsatisfied pkgconfig-depends rules out the guard, not the release" $ do
@@ -157,17 +162,33 @@ buildableTests =
             @?= CNot (Var (mkFlagName "pkg-config"))
     , -- ...and with flags fixed at their defaults, that condition is a verdict:
       -- the flag defaults True, so the ruled-out value is the one we would use.
-      testCase "at the defaults, a needed-but-missing library makes it unbuildable" $ do
+      testCase "at the defaults, a needed-but-missing library makes it unbuildable, and is named" $ do
         gpd <- gpdOf zlibish
-        buildableAtDefaults (Just emptyPkgConfigDb) testPlatform testCompiler gpd @?= False
+        unbuildableAtDefaults (Just emptyPkgConfigDb) testPlatform testCompiler gpd
+            @?= [MissingPkgConfig (pkgconfig "zlib")]
     , testCase "the same release is fine when the flag defaults the other way" $ do
         gpd <- gpdOf (zlibishDefaulting False)
-        buildableAtDefaults (Just emptyPkgConfigDb) testPlatform testCompiler gpd @?= True
+        unbuildableAtDefaults (Just emptyPkgConfigDb) testPlatform testCompiler gpd @?= []
     , -- Mirrors cabal: no pkg-config executable is a statement about the machine,
-      -- not permission to assume the library is there.
+      -- not permission to assume the library is there. The module is still named,
+      -- since it is what the reader has to install either way.
       testCase "no pkg-config db at all rejects, as cabal does" $ do
         gpd <- gpdOf zlibish
-        buildableAtDefaults Nothing testPlatform testCompiler gpd @?= False
+        unbuildableAtDefaults Nothing testPlatform testCompiler gpd
+            @?= [MissingPkgConfig (pkgconfig "zlib")]
+    , -- Every missing module is a reason of its own, in the order the .cabal
+      -- names them: the proof says each, and a reader fixing one should not
+      -- have to run the solver again to learn of the next.
+      testCase "two missing modules are both named" $ do
+        gpd <-
+            gpdOf . pkg $
+                unlines
+                    [ "library"
+                    , "  build-depends: base"
+                    , "  pkgconfig-depends: libpq, zlib"
+                    ]
+        unbuildableAtDefaults (Just emptyPkgConfigDb) testPlatform testCompiler gpd
+            @?= [MissingPkgConfig (pkgconfig "libpq"), MissingPkgConfig (pkgconfig "zlib")]
     , testCase "buildable: False in the library is unconditional" $ do
         gpd <-
             gpdOf . pkg $
@@ -176,7 +197,7 @@ buildableTests =
                     , "  build-depends: base"
                     , "  buildable: False"
                     ]
-        buildableAtDefaults (Just testPkgConfigDb) testPlatform testCompiler gpd @?= False
+        unbuildableAtDefaults (Just testPkgConfigDb) testPlatform testCompiler gpd @?= [NotBuildable]
     , -- Deliberately narrower than 'componentDeps', which does collect an
       -- executable's dependencies. A dependency needs the library; an unbuildable
       -- executable does not make the package unusable as one.
@@ -191,10 +212,13 @@ buildableTests =
                     , "  main-is: Main.hs"
                     , "  buildable: False"
                     ]
-        buildableAtDefaults (Just testPkgConfigDb) testPlatform testCompiler gpd @?= True
+        unbuildableAtDefaults (Just testPkgConfigDb) testPlatform testCompiler gpd @?= []
     ]
   where
     zlibish = zlibishDefaulting True
+
+    -- A @pkgconfig-depends@ on the module at any version, as the fixtures write it.
+    pkgconfig name = PkgconfigDependency (mkPkgconfigName name) anyPkgconfigVersion
 
     -- zlib's shape: a flag choosing between the system library and a bundled copy.
     zlibishDefaulting def =

@@ -54,7 +54,7 @@ and the explanation showcase. The two reports it generated on 2026-09-03 are in
 | Version order | ours, not Cabal's: trailing zeros are insignificant, so `1.2` and `1.2.0.0` are one version. Cabal's type stops at the bridge ([§4.13](#413-versions-compare-with-trailing-zeros-insignificant)) |
 | Flags | applied, not searched. Every flag takes its declared default on both sides |
 | Boot packages | the installed database becomes instances. A boot package offers installed units or nothing |
-| Buildability | a release whose library cannot be built here is not offered, and the solver is told why |
+| Buildability | a release whose library cannot be built here is not offered, and the proof says why: the `pkg-config` module that is missing, by name, or `buildable: False` |
 | Explanations | `PubGrub.Report` prints a numbered proof that follows the spec's own reporting algorithm |
 | cabal baseline | `pubgrub --cabal <target>` runs cabal's modular solver over the same index |
 | Regression gate | `scripts/gate.sh` runs 23 problems through both solvers and fails on any regression |
@@ -336,8 +336,10 @@ dependency set.
 
 **At insert time.** [`PubGrub.Store`](../src/PubGrub/Store.hs) unions the depender
 terms of two facts that agree about the dependee, as they arrive. Unbuildable facts
-about one package merge the same way, which is `references/pubgrub.md:476`'s half of
-the rule.
+about one package that give the same reasons merge the same way, which is
+`references/pubgrub.md:476`'s half of the rule. Two runs ruled out for different
+reasons stay two facts, so a proof never puts one release's missing module on the
+other's range.
 
 Merging is sound because the two clauses `¬(p ∈ A ∧ q ∉ R)` and `¬(p ∈ B ∧ q ∉ R)`
 together give `¬(p ∈ A∪B ∧ q ∉ R)`. Each half was established separately, so the
@@ -529,7 +531,15 @@ is pinned to, `base is pinned to 4.21.0.0 (installed)`: the bound that failed is
 legible against that version, and nothing else in the proof states it — 11 of the
 13 showcase proofs turn on it. An installed unit is written by version,
 `base 4.21.0.0 (installed)`, never by unit id, and not at all when a source range
-in the same set already admits its version.
+in the same set already admits its version. An unbuildable release's fact names what
+rules it out, `hpqtypes >=1.10.0.2 needs pkg-config package libpq, which is not
+found`, where cabal's message reads `pkg-config package libpq-any, not found in the
+pkg-config database`. Several modules share one "needs", `buildable: False` reads
+`is marked buildable: False`, and the two join with "and". It is not "cannot be
+built because …": the chain form puts this leaf after a "Because" of its own. The
+module is spelled as Cabal-syntax prints the `pkgconfig-depends` field, `libpq`
+unbounded and `zlib >=1.2` with its range; cabal's `-any` is its spelling of the
+empty range and is not copied.
 
 **A headline stands above the proof.** The proof is read bottom-up — its first line
 is the deepest fact and the root appears only on the last — so `reportHeadline`
@@ -1096,7 +1106,7 @@ the reason for reverting does not apply to it. See
 
 | deliverable | state |
 | --- | --- |
-| **Explanation showcase** — real failing problems, pubgrub-hs against cabal, side by side | **the problem set exists and we win on all of it.** 17 real failures, six failure kinds, five positive controls. Shorter than cabal on 17 of 17: 61 proof sentences against 166. Shorter on two of the three benchmark unsat problems. Both of the spec's published examples are golden tests, and the linear one matches sentence for sentence. Every reporting gap but the cosmetics is closed. `pubgrub-harness` renders the two explanations as adjacent blocks for the 13 comparable problems, and the 2026-09-03 run is [reports/showcase.md](reports/showcase.md): shorter on 13 of 13, 44 sentences against 123 lines |
+| **Explanation showcase** — real failing problems, pubgrub-hs against cabal, side by side | **the problem set exists and we win on all of it.** 17 real failures, six failure kinds, five positive controls. Shorter than cabal on 17 of 17: 61 proof sentences against 166. Shorter on two of the three benchmark unsat problems. Both of the spec's published examples are golden tests, and the linear one matches sentence for sentence. Every reporting gap but the cosmetics is closed. `pubgrub-harness` renders the two explanations as adjacent blocks for the 13 comparable problems, and the 2026-09-09 run is [reports/showcase.md](reports/showcase.md): shorter on 13 of 13, 44 sentences against 123 lines |
 | **Benchmark report** — time and peak residency on real problems | **current numbers exist** for six problems, three sat and three unsat, both solvers. We use less peak memory on all six, and are faster and leaner in allocation on five of six. `yesod` is the exception on both. The 2026-09-03 run is [reports/benchmark.md](reports/benchmark.md). Its caveats: timings are medians of three runs against ±25% noise, cabal's lazy per-release parsing lands in its `solve` phase and cannot be separated without changing the work, and the 22 MB memory floor is unexplained |
 
 The baseline and the shared index are done. `cabal-install-solver` drives cabal's

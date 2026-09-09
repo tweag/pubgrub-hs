@@ -45,14 +45,18 @@ module PubGrub.Report
 
 import           Control.Monad                  (guard)
 import           Data.Char                      (isDigit)
-import           Data.List                      (nub)
+import           Data.List                      (nub, unsnoc)
 import qualified Data.Map.Strict                as Map
 import           Data.Maybe                     (fromMaybe)
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
+import           Data.List.NonEmpty             (NonEmpty)
+import qualified Data.List.NonEmpty             as NE
+import           Distribution.Pretty            (prettyShow)
 import           Distribution.Types.PackageName (PackageName)
 import           PubGrub.Incompatibility        (IncompatCause (..),
-                                                 Incompatibility (..))
+                                                 Incompatibility (..),
+                                                 UnbuildableReason (..))
 import           PubGrub.InstanceSet            (InstanceSet, isEveryVersion)
 import           PubGrub.Pretty                 (Pretty (..))
 import           PubGrub.SetOps                 (SetOps (union), equivalent,
@@ -532,17 +536,41 @@ renderReport root0 = (headline, proof)
     -- compiler-provided package names the version it is pinned to instead of
     -- reading "no version" — the bound that failed is only legible against that
     -- version, and nothing else in the proof states it — and a release that cannot
-    -- be built here says /that/ rather than looking absent
+    -- be built here says /that/, and why, rather than looking absent
     -- (references/pubgrub.md:475).
     leaf c = case incompCause c of
         CauseNoInstances p s -> "no version for " <> pretty p <> " in " <> pretty s
         CauseOnlyInstalled p [] -> pretty p <> " is not installed and cannot be built from source"
         CauseOnlyInstalled p vs ->
             pretty p <> " is pinned to " <> T.intercalate " or " (map pretty vs) <> " (installed)"
-        CauseUnbuildable p s -> named p s <> " cannot be built here"
+        CauseUnbuildable p s why -> named p s <> " " <> reasons why
         _ -> case asDependency c of
             Just (p, s, q, r) -> dep p s q r
             Nothing           -> summary c
+
+    -- Why a release cannot be built, as the predicate of its sentence: \"needs
+    -- pkg-config package libpq, which is not found\", and \"is marked buildable:
+    -- False\". The two are joined with \"and\" when both hold, and several modules
+    -- share one \"needs\". Not \"cannot be built because …\": the chain form puts
+    -- this leaf after a \"Because\" of its own, and two in one sentence read badly.
+    --
+    -- The module is spelled as Cabal-syntax prints the @pkgconfig-depends@ field:
+    -- @libpq@ unbounded, @zlib >=1.2@ with its range. Cabal's own message reads
+    -- \"pkg-config package libpq-any, not found in the pkg-config database\"; the
+    -- @-any@ is its spelling of the empty range, and is not copied.
+    reasons :: NonEmpty UnbuildableReason -> Text
+    reasons why =
+        T.intercalate " and " $
+            ["is marked buildable: False" | NotBuildable `elem` why] ++ needs
+      where
+        needs = case [T.pack (prettyShow d) | MissingPkgConfig d <- NE.toList why] of
+            []  -> []
+            [m] -> ["needs pkg-config package " <> m <> ", which is not found"]
+            ms  -> ["needs pkg-config packages " <> listing ms <> ", which are not found"]
+        -- "libpq, zlib and openssl"
+        listing ms = case unsnoc ms of
+            Just (front@(_ : _), l) -> T.intercalate ", " front <> " and " <> l
+            _                       -> T.intercalate ", " ms
 
     -- What a line concludes. On the proof's last line a lone positive term is the
     -- root being ruled out at its synthetic version, which reads better as plain

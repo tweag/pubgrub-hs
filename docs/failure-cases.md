@@ -106,10 +106,11 @@ Two things this table is evidence for beyond length:
   clutter look cosmetic ([STATUS.md](STATUS.md) §4.9, rule 4): those holes were what
   kept the fusion from pairing.
 - **`references/pubgrub.md:476` pays.** `hpqtypes-extras` says
-  `hpqtypes >=1.10.0.2 cannot be built here` where cabal says `pkg-config package
-  libpq-any, not found in the pkg-config database`. Both name the cause, and ours takes
-  two lines against eight. Our solver used to say `no version for hpqtypes in >=1.13`,
-  which is the symptom and sounds false.
+  `hpqtypes >=1.10.0.2 needs pkg-config package libpq, which is not found` where
+  cabal says `pkg-config package libpq-any, not found in the pkg-config database`. Both name the module, and ours takes two sentences against eight lines.
+  Our solver used to say `no version for hpqtypes in >=1.13`, which is the symptom
+  and sounds false, and then `cannot be built here`, which is the verdict without
+  the module.
 
 ### The positive controls
 

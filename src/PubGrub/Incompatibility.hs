@@ -3,6 +3,7 @@ module PubGrub.Incompatibility
     ( PackageTerm (..)
     , Incompatibility (..)
     , IncompatCause (..)
+    , UnbuildableReason (..)
     , anyTerm
     , incompGet
     , notRoot
@@ -16,9 +17,11 @@ module PubGrub.Incompatibility
     , priorCause
     ) where
 
+import           Data.List.NonEmpty             (NonEmpty)
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Distribution.Types.PackageName
+import           Distribution.Types.PkgconfigDependency (PkgconfigDependency)
 import           PubGrub.Version                 (Version)
 import           PubGrub.InstanceSet            (Instance, InstanceSet,
                                                  emptyInstanceSet,
@@ -88,9 +91,24 @@ data IncompatCause
     = CauseRoot PackageName Instance                              -- notRoot
     | CauseNoInstances PackageName InstanceSet                    -- noInstances
     | CauseOnlyInstalled PackageName [Version]                    -- onlyInstalled
-    | CauseUnbuildable PackageName InstanceSet                    -- unbuildable
+    | CauseUnbuildable PackageName InstanceSet (NonEmpty UnbuildableReason)  -- unbuildable
     | CauseDependency PackageName InstanceSet (PackageName, InstanceSet)  -- fromDependency
     | CauseDerivedFrom Incompatibility Incompatibility            -- priorCause
+
+-- | Why a release's library cannot be built on this machine: one entry per
+-- thing that rules it out, read off the library's @BuildInfo@ at the flag
+-- assignment in force. A release can carry several — two missing @pkg-config@
+-- modules, say — and the proof names each, which is why the cause holds a
+-- non-empty list rather than one reason.
+--
+-- The @pkg-config@ dependency is kept whole, name and range, so the proof can
+-- spell it as the @.cabal@ did.
+data UnbuildableReason
+    = NotBuildable
+      -- ^ the library declares @buildable: False@
+    | MissingPkgConfig PkgconfigDependency
+      -- ^ a @pkgconfig-depends@ this machine's @pkg-config@ cannot satisfy
+    deriving (Eq, Ord, Show)
 
 -- | The term an incompatibility states about @p@, if any.
 incompGet :: PackageName -> Incompatibility -> Maybe (Term InstanceSet)
@@ -151,9 +169,15 @@ onlyInstalled p installed anySource =
 --
 -- Adjacent unbuildable versions need not be stated together: adjacent slots
 -- touch, so "PubGrub.Store" unions two of these into one contiguous clause as
--- they arrive, exactly as it does for dependency facts.
-unbuildable :: PackageName -> InstanceSet -> Incompatibility
-unbuildable p s = Incompatibility (Map.singleton p (Positive s)) (CauseUnbuildable p s)
+-- they arrive, exactly as it does for dependency facts — when they give the same
+-- reasons. Two runs ruled out for different reasons stay two facts, so that the
+-- proof never attributes one release's missing module to another.
+--
+-- The reasons ride along for the proof's sake only, like the installed versions
+-- of 'onlyInstalled': the clause's term is the ban, and the reasons are what
+-- the sentence says instead of a bare \"cannot be built\".
+unbuildable :: PackageName -> InstanceSet -> NonEmpty UnbuildableReason -> Incompatibility
+unbuildable p s why = Incompatibility (Map.singleton p (Positive s)) (CauseUnbuildable p s why)
 
 -- | Dependency incompatibility: @package@ in @instances@ requires @dep@ in
 -- @depSet@ — encoded @{ package: Positive instances, dep: Negative depSet }@.

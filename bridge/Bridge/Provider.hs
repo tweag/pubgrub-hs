@@ -31,10 +31,10 @@ module Bridge.Provider
     ) where
 
 import           Bridge.Cabal.Flatten                         (GuardedDeps,
-                                                               buildableAtDefaultsStored,
                                                                componentDepsAtDefaultsStored,
                                                                expandGuard,
-                                                               srFlags, toStored)
+                                                               srFlags, toStored,
+                                                               unbuildableAtDefaultsStored)
 import           Bridge.Hackage.Store                         (StoreReader (..),
                                                                openStore)
 import           Bridge.Cabal.InstalledPkg                    (getInstalledPackageIndex,
@@ -88,6 +88,7 @@ import qualified Distribution.Verbosity                       as Verbosity
 import           Hackage.Security.Client.Repository.Cache     (Cache)
 import           Network.HTTP.Client                          (Manager)
 import           PubGrub.Incompatibility                      (Incompatibility,
+                                                               UnbuildableReason,
                                                                fromDependency,
                                                                onlyInstalled,
                                                                unbuildable)
@@ -187,7 +188,8 @@ data World = World
     --
     -- What each solver does with an unsatisfiable @pkgconfig-depends@ still
     -- differs: cabal rules out that branch of the flag tree, while we drop the
-    -- release from the candidate list without stating why (see 'relBuildable').
+    -- release from the candidate list and state which module was missing (see
+    -- 'relUnbuildable').
     }
 
 -- | Open the index and resolve the compiler world, then run @act@. The index
@@ -234,12 +236,12 @@ sourceInstance v = BuildSource v (mkFlagAssignment [])
 data Release = Release
     { relFlags     :: [(FlagName, Bool)]
     , relGuarded   :: GuardedDeps
-    , relBuildable :: Bool
-    -- ^ whether this release's library can be built here at all: @buildable@ and
-    -- @pkgconfig-depends@ resolved against the machine, at the declared flag
-    -- defaults (@Bridge.Cabal.Flatten.buildableAtDefaults@). A 'Bool' because
-    -- flags are fixed at their defaults; searching flags will need the condition
-    -- itself, which 'Bridge.Cabal.Flatten.buildableCondition' returns.
+    , relUnbuildable :: [UnbuildableReason]
+    -- ^ why this release's library cannot be built here, if it cannot: @buildable@
+    -- and @pkgconfig-depends@ resolved against the machine, at the declared flag
+    -- defaults (@Bridge.Cabal.Flatten.unbuildableAtDefaults@). Empty means it can.
+    -- A verdict because flags are fixed at their defaults; searching flags will need
+    -- the condition itself, which 'Bridge.Cabal.Flatten.buildableCondition' returns.
     }
 
 -- | A memoising reader for 'Release', with a @(parsed, decoded, reused)@ count.
@@ -311,7 +313,7 @@ releaseReader platform cInfo pkgConfig handle store = do
             Release
                 { relFlags = srFlags sr
                 , relGuarded = componentDepsAtDefaultsStored platform cInfo sr
-                , relBuildable = buildableAtDefaultsStored pkgConfig platform cInfo sr
+                , relUnbuildable = unbuildableAtDefaultsStored pkgConfig platform cInfo sr
                 }
 
         reduce = fromStored . toStored
@@ -459,10 +461,12 @@ mkExpand installedDb source root = expand'
                             -- Without one the solver learns only that the range it
                             -- narrowed to is empty, and the report reads "no version for
                             -- p in range" when the versions exist and cannot be built
-                            -- here. With it, the proof line gives the reason. The clause
-                            -- covers the release's whole slot: see 'unbuildableFact'.
-                            Right release | not (relBuildable release) ->
-                                scan (unbuildableFact pn slot : stated) rest
+                            -- here. With it, the proof line gives the reason, naming the
+                            -- module @pkg-config@ could not find, as cabal's own message
+                            -- does. The clause covers the release's whole slot: see
+                            -- 'unbuildableFact'.
+                            Right release | Just why <- NE.nonEmpty (relUnbuildable release) ->
+                                scan (unbuildableFact pn slot why : stated) rest
                             Right release ->
                                 -- Each guarded dependency becomes one incompatibility
                                 -- @{pn: D, dep: not T}@. The depender @D@ is every
@@ -576,8 +580,11 @@ mkExpand installedDb source root = expand'
     --
     -- The slot, rather than the single version, lets 'PubGrub.Store' union a run of
     -- unbuildable releases into one clause: adjacent slots touch, so the union has
-    -- no hole between the releases and reads as the range the spec asks for.
-    unbuildableFact pn slot = unbuildable pn (slotInstances slot (NE.singleton Map.empty))
+    -- no hole between the releases and reads as the range the spec asks for. The
+    -- store merges only runs that give the same reasons, so a release missing
+    -- @libpq@ and one declaring @buildable: False@ stay two facts, each with its own
+    -- sentence.
+    unbuildableFact pn slot why = unbuildable pn (slotInstances slot (NE.singleton Map.empty)) why
 
     -- | Every source instance of a package: any version, no flags pinned. The
     -- complement of \"is an installed unit\", on the source side.

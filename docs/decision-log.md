@@ -1092,6 +1092,34 @@ to 16, and `yesod` paid 827 to 839 decisions and 11 to 14 conflicts, the one row
 got worse. The gate passed at 23/23 agreement, 61 sentences and 0 no-version lines,
 and `check-stats.sh` agreed on all 23 problems.
 
+## Era 15 — The unbuildable fact names its reason (Sep 9)
+
+### A missing pkg-config module is named — HELD
+
+*Sep 9.* Andrea noticed that a release ruled out by a missing `pkg-config` module was
+reported only as `cannot be built here`, where cabal's own message named the module.
+The reason had been decided in `Bridge.Cabal.Flatten` and folded to a `Bool` before
+the solver saw it; the comment on `wPkgConfig` had admitted as much, "same verdict,
+weaker explanation". `CauseUnbuildable` gained a non-empty list of reasons, either
+`buildable: False` or a `pkgconfig-depends` the machine's `pkg-config` could not
+satisfy, kept whole as Cabal-syntax parsed it. `unbuildableAtDefaults` and its stored
+twin returned the reasons instead of a verdict, with `null` of the result equal to
+the old boolean by construction, the provider carried them into the fact, and
+`PubGrub.Store` keyed the merge of unbuildable facts on the reasons as a set, so two
+runs ruled out for different reasons stayed two facts rather than one that put one
+release's module on the other's range.
+
+Andrea chose the sentence, twice. First `hpqtypes >=1.10.0.2 cannot be built because
+pkg-config package libpq is not found`, over a parenthetical; then, once the real
+proof showed "Because … cannot be built because …" in one line, `hpqtypes
+>=1.10.0.2 needs pkg-config package libpq, which is not found`, with `is marked
+buildable: False` for the other reason and the two joined with "and". The headline
+carried the leaf verbatim. The module was spelled as Cabal-syntax printed the field, `libpq` rather
+than cabal's `libpq-any`, whose `-any` was its spelling of the empty range. Two
+corpus problems carried the leaf, `hpqtypes-extras` and `haskoin-store-data`, and
+both named their module. The sentence counts did not move, so the gate's ceilings
+held at 61 and 0, and the suite went from 214 tests to 222.
+
 ---
 
 ## What is open now

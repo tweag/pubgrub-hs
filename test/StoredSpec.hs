@@ -14,11 +14,11 @@
 -- than in a solve.
 module StoredSpec (tests) where
 
-import           Bridge.Cabal.Flatten                   (buildableAtDefaults,
-                                                         buildableAtDefaultsStored,
-                                                         componentDepsAtDefaults,
+import           Bridge.Cabal.Flatten                   (componentDepsAtDefaults,
                                                          componentDepsAtDefaultsStored,
-                                                         toStored)
+                                                         toStored,
+                                                         unbuildableAtDefaults,
+                                                         unbuildableAtDefaultsStored)
 import           Bridge.Hackage.Store                   ()
 import           Codec.Serialise                        (deserialise, serialise)
 import           Data.ByteString.Char8                  (pack)
@@ -65,13 +65,13 @@ agrees name src = testCase name $ do
 
     componentDepsAtDefaultsStored testPlatform testCompiler stored
         @?= componentDepsAtDefaults testPlatform testCompiler gpd
-    buildableAtDefaultsStored db testPlatform testCompiler stored
-        @?= buildableAtDefaults db testPlatform testCompiler gpd
+    unbuildableAtDefaultsStored db testPlatform testCompiler stored
+        @?= unbuildableAtDefaults db testPlatform testCompiler gpd
 
     componentDepsAtDefaultsStored testPlatform testCompiler roundTripped
         @?= componentDepsAtDefaults testPlatform testCompiler gpd
-    buildableAtDefaultsStored db testPlatform testCompiler roundTripped
-        @?= buildableAtDefaults db testPlatform testCompiler gpd
+    unbuildableAtDefaultsStored db testPlatform testCompiler roundTripped
+        @?= unbuildableAtDefaults db testPlatform testCompiler gpd
 
 tests :: TestTree
 tests =

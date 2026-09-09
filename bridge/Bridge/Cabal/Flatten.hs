@@ -80,7 +80,7 @@ module Bridge.Cabal.Flatten (
     componentDeps,
     componentDepsAtDefaults,
     buildableCondition,
-    buildableAtDefaults,
+    unbuildableAtDefaults,
     depsAt,
     flattenDeps,
     defaultFlags,
@@ -106,7 +106,7 @@ module Bridge.Cabal.Flatten (
     LibNode (..),
     toStored,
     componentDepsAtDefaultsStored,
-    buildableAtDefaultsStored,
+    unbuildableAtDefaultsStored,
 ) where
 
 import           Control.Applicative                          (Alternative (..))
@@ -156,6 +156,7 @@ import           Distribution.Types.PkgconfigDependency        (PkgconfigDepende
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
 import           Distribution.Types.PackageName               (PackageName)
 import           Distribution.Version                         (withinRange)
+import           PubGrub.Incompatibility                      (UnbuildableReason (..))
 import           PubGrub.VersionSet                           (VersionSet)
 import qualified PubGrub.VersionSet                           as VS
 
@@ -320,10 +321,10 @@ defaultFlags gpd = Map.fromList [(flagName f, flagDefault f) | f <- genPackageFl
 -- >   pkgconfig-depends: zlib-any
 --
 -- With flags fixed at their defaults there is one assignment and
--- 'buildableAtDefaults' collapses this to a boolean. Keeping the condition lets
--- flag search come back without redoing the analysis: a search over flags has to
--- /satisfy/ this condition rather than evaluate it (@docs\/flags-semantics.md@
--- O6).
+-- 'unbuildableAtDefaults' collapses this to a verdict with its reasons. Keeping
+-- the condition lets flag search come back without redoing the analysis: a
+-- search over flags has to /satisfy/ this condition rather than evaluate it
+-- (@docs\/flags-semantics.md@ O6).
 --
 -- == Why the library only
 --
@@ -349,28 +350,72 @@ buildableCondition
 buildableCondition db platform compiler gpd =
     foldr cAnd (Lit True) $
         [ cNot guard
-        | tree <- maybeToList (condLibrary gpd)
-        , (guard, bi) <- flattenWith env (libBuildInfo . condTreeData) tree
-        , not (usable bi)
+        | (guard, isBuildable, pcs) <- libraryNodes platform compiler gpd
+        , not (null (unusable db isBuildable pcs))
         ]
-  where
-    env = envConfVar Left platform compiler
-    usable bi = buildable bi && all present (pkgconfigDepends bi)
-    present (PkgconfigDependency n range) =
-        maybe False (\d -> pkgConfigPkgIsPresent d n range) db
 
--- | 'buildableCondition' evaluated at the release's declared defaults — the
--- question to ask while flags are treated as manual.
-buildableAtDefaults
+-- | Why the release's library cannot be built here at its declared defaults —
+-- the question to ask while flags are treated as manual. Empty means it can.
+--
+-- This is 'buildableCondition' evaluated at the defaults, with the reasons kept
+-- instead of folded away: a node whose guard holds at the defaults contributes
+-- whatever makes it unusable, in tree order. @null@ of the result is exactly the
+-- condition's value at the defaults, since a node is unusable when and only when
+-- it gives a reason.
+unbuildableAtDefaults
     :: Maybe PkgConfigDb
     -> Platform
     -> CompilerInfo
     -> GenericPackageDescription
-    -> Bool
-buildableAtDefaults db platform compiler gpd =
-    evalCond
+    -> [UnbuildableReason]
+unbuildableAtDefaults db platform compiler gpd =
+    unbuildableNodes
+        db
         (mkFlagAssignment (Map.toList (defaultFlags gpd)))
-        (buildableCondition db platform compiler gpd)
+        (libraryNodes platform compiler gpd)
+
+-- | The library's nodes with what decides their buildability: the guard, the
+-- @buildable@ field, and the @pkgconfig-depends@.
+libraryNodes
+    :: Platform
+    -> CompilerInfo
+    -> GenericPackageDescription
+    -> [(Guard, Bool, [PkgconfigDependency])]
+libraryNodes platform compiler gpd =
+    [ (guard, buildable bi, pkgconfigDepends bi)
+    | tree <- maybeToList (condLibrary gpd)
+    , (guard, bi) <- flattenWith env (libBuildInfo . condTreeData) tree
+    ]
+  where
+    env = envConfVar Left platform compiler
+
+-- | The reasons the nodes in force at @flags@ give, in tree order.
+unbuildableNodes
+    :: Maybe PkgConfigDb
+    -> FlagAssignment
+    -> [(Guard, Bool, [PkgconfigDependency])]
+    -> [UnbuildableReason]
+unbuildableNodes db flags nodes =
+    [ reason
+    | (guard, isBuildable, pcs) <- nodes
+    , evalCond flags guard
+    , reason <- unusable db isBuildable pcs
+    ]
+
+-- | What makes one node unusable: @buildable: False@, and each @pkgconfig-depends@
+-- the machine's @pkg-config@ cannot satisfy. Empty when the node is usable.
+--
+-- A 'Nothing' db fails every @pkgconfig-depends@ — no @pkg-config@ executable is
+-- a statement about the machine, not permission to assume the module is there —
+-- and the reason still names the module, which is what the reader has to
+-- install either way.
+unusable :: Maybe PkgConfigDb -> Bool -> [PkgconfigDependency] -> [UnbuildableReason]
+unusable db isBuildable pcs =
+    [NotBuildable | not isBuildable]
+        ++ [MissingPkgConfig d | d <- pcs, not (present d)]
+  where
+    present (PkgconfigDependency n range) =
+        maybe False (\d -> pkgConfigPkgIsPresent d n range) db
 
 -- | Dependencies of a package version at its /default/ flag values, as a
 -- version-set map. (Convenience: 'depsAt' the defaults over 'componentDeps'.)
@@ -491,19 +536,16 @@ componentDepsAtDefaultsStored platform compiler sr =
     defaults = Map.fromList (srFlags sr)
     env = envConfVar (\f -> Right (Map.findWithDefault False f defaults)) platform compiler
 
--- | 'buildableAtDefaults' over a stored release.
-buildableAtDefaultsStored
-    :: Maybe PkgConfigDb -> Platform -> CompilerInfo -> StoredRelease -> Bool
-buildableAtDefaultsStored db platform compiler sr =
-    evalCond (mkFlagAssignment (srFlags sr)) $
-        foldr cAnd (Lit True) $
-            [ cNot guard
-            | tree <- maybeToList (srLibrary sr)
-            , (guard, ln) <- flattenWith env (condTreeData) tree
-            , not (usable ln)
-            ]
+-- | 'unbuildableAtDefaults' over a stored release.
+unbuildableAtDefaultsStored
+    :: Maybe PkgConfigDb -> Platform -> CompilerInfo -> StoredRelease -> [UnbuildableReason]
+unbuildableAtDefaultsStored db platform compiler sr =
+    unbuildableNodes
+        db
+        (mkFlagAssignment (srFlags sr))
+        [ (guard, lnBuildable ln, lnPkgConfig ln)
+        | tree <- maybeToList (srLibrary sr)
+        , (guard, ln) <- flattenWith env condTreeData tree
+        ]
   where
     env = envConfVar Left platform compiler
-    usable ln = lnBuildable ln && all present (lnPkgConfig ln)
-    present (PkgconfigDependency n range) =
-        maybe False (\d -> pkgConfigPkgIsPresent d n range) db

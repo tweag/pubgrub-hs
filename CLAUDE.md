@@ -56,7 +56,7 @@ you change anything, read it.
 
 ```sh
 cabal build
-cabal test                           # 214 tests, ~0.3 s
+cabal test                           # 222 tests, ~0.3 s
 cabal run pubgrub -- aeson           # the driver; add -v for the search trace
 cabal run pubgrub -- --stats aeson   # + search counts and phase timings, no trace
 cabal run pubgrub -- --cabal aeson   # cabal's solver, same index (the baseline)
@@ -221,7 +221,10 @@ data FlagPin    = PinnedTo Bool | NotDeclared
 ### `PubGrub.Store` merges on insert and keeps scan position
 
 Dependency facts about one `(depender, dependee)` pair with an identical dependee term
-merge as they arrive. Unbuildable facts about one package merge the same way.
+merge as they arrive. Unbuildable facts about one package merge the same way, and only
+when their reasons agree as a set: a run missing `libpq` and a run declaring
+`buildable: False` stay two facts, or the proof would name one release's module
+against the other's range.
 
 A merge **replaces the existing clause where it already sits**. Clause position
 dominates propagation cost here, and prepending new knowledge is load-bearing. An
@@ -384,7 +387,11 @@ by name alone, "So," on the last line, a period per line, the blank line between
 branches. A negative term is never printed as "not …"; the sentence carries the
 negation ("P requires N1 or N2", "if P1 and P2 then N1 or N2", "either X or Y").
 Installed units print by version, never by unit id, and a boot package's fact names
-the version it is pinned to: "base is pinned to 4.21.0.0 (installed)".
+the version it is pinned to: "base is pinned to 4.21.0.0 (installed)". An unbuildable
+release's fact names what rules it out: "hpqtypes >=1.10.0.2 needs pkg-config package
+libpq, which is not found", or "is marked buildable: False". Never "cannot be built
+because": the chain form already opens with "Because". The module is spelled as
+Cabal-syntax prints the field (`libpq`, not cabal's `libpq-any`).
 
 **A headline stands above the proof**, from `reportHeadline`: the request as the
 proof names it, and the world-fact leaves verbatim — "No solution for matterhorn

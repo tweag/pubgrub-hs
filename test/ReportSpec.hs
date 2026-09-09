@@ -10,9 +10,13 @@
 module ReportSpec (tests) where
 
 import           Data.List                       (isInfixOf)
+import qualified Data.List.NonEmpty              as NE
 import qualified Data.Map.Strict                 as Map
 import qualified Data.Set                        as Set
 import           Distribution.Types.PackageName  (PackageName, mkPackageName)
+import           Distribution.Types.PkgconfigDependency (PkgconfigDependency (..))
+import           Distribution.Types.PkgconfigName (mkPkgconfigName)
+import           Distribution.Types.PkgconfigVersionRange (anyPkgconfigVersion)
 import qualified Distribution.Types.Version      as Cabal
 import           PubGrub.Version                 (Version)
 import qualified PubGrub.Version                 as V
@@ -21,8 +25,10 @@ import           Distribution.Types.VersionRange (earlierVersion,
                                                   thisVersion)
 import           PubGrub.Incompatibility         (IncompatCause (..),
                                                   Incompatibility (..),
+                                                  UnbuildableReason (..),
                                                   fromDependency, noInstances,
-                                                  onlyInstalled, priorCause)
+                                                  onlyInstalled, priorCause,
+                                                  unbuildable)
 import           PubGrub.InstanceSet             (InstanceSet (..))
 import           PubGrub.InstanceSet.SourceCell  (SourceCell (..))
 import           PubGrub.Report                  (collapseNoInstances,
@@ -96,6 +102,7 @@ tests =
         , testGroup "the property that makes it sound" soundness
         , testGroup "a run of same-pair steps is one sentence" sameePairRun
         , testGroup "the boot-package leaf" bootLeaf
+        , testGroup "the unbuildable leaf" unbuildableLeaf
         , testGroup "the headline" headline
         , testGroup "wrapping" wrapping
         , testGroup "styling" styling
@@ -210,6 +217,31 @@ bootLeaf =
         assertBool proof ("a is not installed and cannot be built from source" `isInfixOf` proof)
     ]
 
+-- | The unbuildable leaf. It names what rules the release out — the module
+-- @pkg-config@ could not find, spelled as Cabal-syntax spells the field — rather
+-- than saying only that it cannot be built. A lone leaf is the whole proof, and
+-- the package is then the root, named bare; the headline test below has the
+-- range.
+unbuildableLeaf :: [TestTree]
+unbuildableLeaf =
+    [ testCase "a missing pkg-config module is named" $ do
+        let proof = unlines (proofLines (unbuildable pkgA (from 1) (NE.singleton (missing "libpq"))))
+        assertBool proof ("a needs pkg-config package libpq, which is not found" `isInfixOf` proof)
+    , testCase "several missing modules share one needs, in order" $ do
+        let proof = unlines (proofLines (unbuildable pkgA (from 1) (NE.fromList [missing "libpq", missing "zlib"])))
+        assertBool proof ("a needs pkg-config packages libpq and zlib, which are not found" `isInfixOf` proof)
+    , testCase "buildable: False says so" $ do
+        let proof = unlines (proofLines (unbuildable pkgA (from 1) (NE.singleton NotBuildable)))
+        assertBool proof ("a is marked buildable: False" `isInfixOf` proof)
+    , testCase "both kinds of reason are joined with and" $ do
+        let proof = unlines (proofLines (unbuildable pkgA (from 1) (NE.fromList [NotBuildable, missing "libpq"])))
+        assertBool proof ("a is marked buildable: False and needs pkg-config package libpq, which is not found" `isInfixOf` proof)
+    ]
+
+-- | A @pkgconfig-depends@ on the module at any version.
+missing :: String -> UnbuildableReason
+missing name = MissingPkgConfig (PkgconfigDependency (mkPkgconfigName name) anyPkgconfigVersion)
+
 -- | The line above the proof: the request as the proof names it, and the
 -- world-fact leaves verbatim.
 headline :: [TestTree]
@@ -217,6 +249,11 @@ headline =
     [ testCase "names the request and the wall" $ do
         let inc = priorCause (rootDependsOn pkgA (range 1 2)) (onlyInstalled pkgA [v 3] (from 1)) pkgA
         T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2: a is pinned to 3 (installed)."
+    , -- The reason is part of the fact, so it is part of the wall.
+      testCase "an unbuildable wall carries its reason" $ do
+        let inc = priorCause (rootDependsOn pkgA (range 1 2)) (unbuildable pkgA (from 1) (NE.singleton (missing "libpq"))) pkgA
+        T.unpack (reportHeadline inc)
+            @?= "No solution for a >=1 && <2: a >=1 needs pkg-config package libpq, which is not found."
     , testCase "a pure version conflict has no wall" $ do
         let inc = priorCause (rootDependsOn pkgA (range 1 2)) (hole pkgA (range 1 2)) pkgA
         T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2."

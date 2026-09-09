@@ -57,7 +57,8 @@ import           Distribution.Types.UnitId      (mkUnitId)
 import           Distribution.Types.Version     (mkVersion)
 import           Distribution.Version           (anyVersion, thisVersion)
 import           PubGrub.Incompatibility        (IncompatCause (..),
-                                                 Incompatibility (..))
+                                                 Incompatibility (..),
+                                                 UnbuildableReason (..))
 import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
 import           PubGrub.InstanceSet            (Instance (..),
                                                  InstanceSet (..))
@@ -125,11 +126,12 @@ worldProvider = worldProviderWith []
 --
 -- Buildability is named beside the world rather than inside 'Release' because in
 -- the bridge it is not part of a release's dependency data either:
--- @Bridge.Provider.relBuildable@ is as much a verdict about this machine
+-- @Bridge.Provider.relUnbuildable@ is as much a verdict about this machine
 -- (@pkgconfig-depends@ against the real @pkg-config@ db) as about the @.cabal@
 -- (@buildable: False@). It is also the one thing these fixtures cannot express by
 -- writing guarded groups, since both inputs are read off a @BuildInfo@ they do not
--- have.
+-- have. The reason given is @buildable: False@; which reason it is does not matter
+-- to the rule under test here, and the wording of each is @ReportSpec@'s.
 worldProviderWith :: [(PackageName, Version)] -> World -> Provider TestM
 worldProviderWith unbuildableHere world =
     Provider (BP.mkExpand (mkInstalledDb []) source [])
@@ -143,7 +145,7 @@ worldProviderWith unbuildableHere world =
 
     -- Every release of every package, in the reduced shape the bridge expects:
     -- the package's declared flags, this release's guarded dependency groups, and
-    -- whether its library can be built here at all.
+    -- why its library cannot be built here, if it cannot.
     releases :: Map (PackageName, Version) BP.Release
     releases =
         Map.fromList
@@ -151,7 +153,7 @@ worldProviderWith unbuildableHere world =
               , BP.Release
                     (pkgFlags pk)
                     (relGuarded r)
-                    ((p, relVersion r) `notElem` unbuildableHere)
+                    [NotBuildable | (p, relVersion r) `elem` unbuildableHere]
               )
             | (p, pk) <- world
             , r <- pkgReleases pk
@@ -423,8 +425,8 @@ unbuildableStatesItself =
                 Right sol -> assertFailure ("expected no solution, got " ++ show (Map.keys sol))
                 Left proof -> do
                     assertBool
-                        ("the proof should say foo cannot be built here:\n" <> T.unpack proof)
-                        (T.pack "cannot be built here" `T.isInfixOf` proof)
+                        ("the proof should say foo is marked buildable: False:\n" <> T.unpack proof)
+                        (T.pack "is marked buildable: False" `T.isInfixOf` proof)
                     -- "No version for foo in <1.0.0" may still be there, and is
                     -- /true/ — nothing is published below the oldest release — but
                     -- the range holding 2.0.0 must not be reported as if it were
@@ -458,8 +460,8 @@ unbuildableStatesItself =
                 Right sol -> assertFailure ("expected no solution, got " ++ show (Map.keys sol))
                 Left proof -> do
                     assertBool
-                        ("the proof should still say foo cannot be built here:\n" <> T.unpack proof)
-                        (T.pack "cannot be built here" `T.isInfixOf` proof)
+                        ("the proof should still say foo is marked buildable: False:\n" <> T.unpack proof)
+                        (T.pack "is marked buildable: False" `T.isInfixOf` proof)
                     assertBool
                         ("and must not call the unbuildable range empty:\n" <> T.unpack proof)
                         (not (T.pack "no version for foo in >=1" `T.isInfixOf` proof))
@@ -472,7 +474,7 @@ unbuildableStatesItself =
             case result of
                 (Just (BuildSource v _), incs) -> do
                     v @?= v1
-                    [p | CauseUnbuildable p _ <- map incompCause incs] @?= [pkg "foo"]
+                    [p | CauseUnbuildable p _ _ <- map incompCause incs] @?= [pkg "foo"]
                 _ -> assertFailure "expected 1.0.0 to be chosen"
         ]
   where
@@ -812,7 +814,7 @@ selfDependencyDropped =
                     }
             reduced =
                 Map.fromList
-                    [ ((p, relVersion r), BP.Release (pkgFlags pk) (relGuarded r) True)
+                    [ ((p, relVersion r), BP.Release (pkgFlags pk) (relGuarded r) [])
                     | (p, pk) <- selfDepWorld
                     , r <- pkgReleases pk
                     ]

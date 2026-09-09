@@ -146,7 +146,7 @@ mkProvider world = Provider (BP.mkExpand (mkInstalledDb []) source [])
                     { BP.relFlags = []
                     , BP.relGuarded =
                         [(Lit True, [mkDependency d vr mainLibSet | (d, vr) <- relDeps r])]
-                    , BP.relBuildable = True
+                    , BP.relUnbuildable = []
                     }
               )
             | (p, rs) <- world

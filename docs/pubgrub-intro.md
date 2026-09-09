@@ -154,7 +154,7 @@ data IncompatCause
   = CauseRoot PackageName Instance
   | CauseNoInstances PackageName InstanceSet
   | CauseOnlyInstalled PackageName
-  | CauseUnbuildable PackageName InstanceSet
+  | CauseUnbuildable PackageName InstanceSet (NonEmpty UnbuildableReason)
   | CauseDependency PackageName InstanceSet (PackageName, InstanceSet)
   | CauseDerivedFrom Incompatibility Incompatibility
 
@@ -325,7 +325,7 @@ The depender term is the release's **slot**, not the single version. That is
 
 > **Lazy loading.** `expand` is called only when a package is actually decided. The solver never loads the full dependency graph up front. This is what makes PubGrub tractable for a registry the size of Hackage.
 >
-> **Facts can arrive without a decision.** The list sits outside the answer, so a provider that skips releases it cannot use can still report why. That is how a proof says `foo >=2.0.0 cannot be built here` instead of `no version for foo in >=2`.
+> **Facts can arrive without a decision.** The list sits outside the answer, so a provider that skips releases it cannot use can still report why. That is how a proof says `foo >=2.0.0 needs pkg-config package libfoo, which is not found` instead of `no version for foo in >=2`.
 
 ### The Main Loop
 
@@ -356,7 +356,7 @@ reportConflict :: Incompatibility -> [Text]
 
 The printer walks the DAG:
 
-- **a leaf** is a fact about the world. `CauseDependency` prints "X depends on Y in range R". `CauseNoInstances` prints "no version for Y in R". `CauseOnlyInstalled` prints "Y cannot be built from source". `CauseUnbuildable` prints "Y cannot be built here".
+- **a leaf** is a fact about the world. `CauseDependency` prints "X depends on Y in range R". `CauseNoInstances` prints "no version for Y in R". `CauseOnlyInstalled` prints "Y cannot be built from source". `CauseUnbuildable` prints "Y needs pkg-config package M, which is not found", or "Y is marked buildable: False".
 - **`CauseRoot`** is the trivial seed, and is usually suppressed.
 - **`CauseDerivedFrom`** prints "Because [cause 1] and [cause 2], [this conclusion]".
 
