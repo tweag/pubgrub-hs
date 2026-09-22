@@ -1,2 +1,2 @@
 Because every version of foo depends on bar >=2.0.0 && <3 which depends on baz >=3.0.0 && <4, every version of foo requires baz >=3.0.0 && <4.
-So, because root depends on both baz >=1.0.0 && <2 and foo >=1.0.0 && <2, version solving failed.
+So, because baz >=1.0.0 && <2 and foo >=1.0.0 && <2 are requested, version solving failed.

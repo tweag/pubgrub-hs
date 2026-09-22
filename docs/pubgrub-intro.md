@@ -151,7 +151,7 @@ In SAT solving this would be called a *clause*. In Answer Set Programming it is 
 
 ```haskell
 data IncompatCause
-  = CauseRoot PackageName Instance
+  = CauseRequest PackageName InstanceSet
   | CauseNoInstances PackageName InstanceSet
   | CauseOnlyInstalled PackageName
   | CauseUnbuildable PackageName InstanceSet (NonEmpty UnbuildableReason)
@@ -166,13 +166,15 @@ data Incompatibility p vs = Incompatibility
 
 ### Three canonical forms
 
-**1. Root seed**
+**1. Request seed**
 
 ```
-{ root: Negative {the root instance} }
+{ foo: Negative (>=1 && <2) }
 ```
 
-Reads: "it is impossible for root to be anything other than *this* instance." This is
+Reads: "it is impossible for foo to be outside `>=1 && <2`", which forces `foo` into
+the plan at a version in that range. One per target; together they are what the
+spec's synthetic root package stands for (`references/pubgrub.md:252`). This is
 the first incompatibility added to every solve. It is immediately a unit clause, so it
 forces the solver to select the root package.
 
@@ -330,14 +332,15 @@ The depender term is the release's **slot**, not the single version. That is
 ### The Main Loop
 
 ```haskell
-solve :: Provider m -> PackageName -> Instance -> m (Either SolveError Solution)
-solve provider rootPkg rootInstance = go (seed rootPkg rootInstance)
+solve :: Provider m -> [Incompatibility] -> m (Either SolveError Solution)
+solve provider seeds = go (insertClauses seeds emptyStore)
   where
-    -- seed = { rootPkg: Negative {rootInstance} }, cause CauseRoot
+    -- each seed is { p: Negative R }, cause CauseRequest: one per target
     go store = do
       -- propagate; conflict resolution runs inside on a conflict
       -- then pick an undecided package and call expand
-      -- until every positive term is decided, or the root fails
+      -- until every positive term is decided, or a conflict rests on the
+      -- seeds alone, which is failure
 ```
 
 *Lives in: [`src/PubGrub/Solver.hs`](../src/PubGrub/Solver.hs)*
@@ -357,7 +360,7 @@ reportConflict :: Incompatibility -> [Text]
 The printer walks the DAG:
 
 - **a leaf** is a fact about the world. `CauseDependency` prints "X depends on Y in range R". `CauseNoInstances` prints "no version for Y in R". `CauseOnlyInstalled` prints "Y cannot be built from source". `CauseUnbuildable` prints "Y needs pkg-config package M, which is not found", or "Y is marked buildable: False".
-- **`CauseRoot`** is the trivial seed, and is usually suppressed.
+- **`CauseRequest`** is a seed, and prints "foo >=1 && <2 is requested". It is the last fact of every proof: a terminal conflict is resolved against the seeds it rests on, so the last line reads "So, because …, version solving failed".
 - **`CauseDerivedFrom`** prints "Because [cause 1] and [cause 2], [this conclusion]".
 
 > **Deduplication.** The derivation structure is a DAG, not a tree, so the same incompatibility can be a parent of several nodes. A printer that recurses naively repeats large subtrees. Give a line number to any incompatibility referenced more than once, and replace repeated expansions with a back-reference.

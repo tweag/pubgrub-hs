@@ -24,9 +24,10 @@ import           Distribution.Types.VersionRange (earlierVersion,
                                                   orLaterVersion, thisVersion)
 import           PubGrub.Incompatibility         (Incompatibility, anyTerm,
                                                   fromDependency, incompGet,
-                                                  noInstances, notRoot)
+                                                  noInstances, request)
 import           PubGrub.InstanceSet             (Instance (..),
-                                                  InstanceSet (..))
+                                                  InstanceSet (..),
+                                                  singletonInstance)
 import           PubGrub.InstanceSet.SourceCell  (SourceCell (..))
 import           PubGrub.SetOps                  (equivalent)
 import           PubGrub.Solver                  (Assignment (..),
@@ -81,7 +82,7 @@ sets =
 -- mention (⊤, the term-absent case) is reachable too.
 incompatibilities :: [Incompatibility]
 incompatibilities =
-    [notRoot p i | p <- packages, i <- instances]
+    [request p (singletonInstance i) | p <- packages, i <- instances]
         ++ [noInstances p s | p <- packages, s <- sets]
         ++ [ fromDependency p s q t
            | (p, q) <- zip packages (drop 1 packages)

@@ -16,15 +16,14 @@ module Bridge.Provider
     ( withProvider
     , withWorld
     , World (..)
-    , rootName
-    , rootInstance
+    , widenTo
 
       -- * The provider rule, independently of where releases come from
       --
       -- | 'mkExpand' is the whole candidate-selection and emission rule, and it
-      -- takes its world as arguments: an installed db, a 'ReleaseSource', and the
-      -- root's targets. So @test\/FlagSolveSpec.hs@ runs the real rule over an
-      -- in-memory world rather than a copy of it.
+      -- takes its world as arguments: an installed db and a 'ReleaseSource'. So
+      -- @test\/FlagSolveSpec.hs@ runs the real rule over an in-memory world
+      -- rather than a copy of it.
     , mkExpand
     , ReleaseSource (..)
     , Release (..)
@@ -77,13 +76,11 @@ import           Distribution.System                          (Platform,
                                                                buildPlatform)
 import           Distribution.Types.Flag                      (FlagAssignment,
                                                                FlagName,
-                                                               mkFlagAssignment,
                                                                unFlagAssignment)
-import           Distribution.Types.PackageName               (PackageName,
-                                                               mkPackageName)
+import           Distribution.Types.PackageName               (PackageName)
 import qualified Distribution.Types.Version                   as Cabal
 import qualified PubGrub.Version                              as V
-import           PubGrub.Version                              (Version, mkVersion)
+import           PubGrub.Version                              (Version)
 import qualified Distribution.Verbosity                       as Verbosity
 import           Hackage.Security.Client.Repository.Cache     (Cache)
 import           Network.HTTP.Client                          (Manager)
@@ -91,6 +88,7 @@ import           PubGrub.Incompatibility                      (Incompatibility,
                                                                UnbuildableReason,
                                                                fromDependency,
                                                                onlyInstalled,
+                                                               request,
                                                                unbuildable)
 import           PubGrub.Index.PreInstalled                   (PreInstalledPackage (..))
 import           PubGrub.Pretty                               (Pretty (pretty))
@@ -98,7 +96,6 @@ import           PubGrub.InstanceSet                          (HasVersion (..),
                                                                Instance (..),
                                                                InstanceSet (..),
                                                                memberInstance,
-                                                               singletonInstance,
                                                                singletonUsePreInstalled)
 import           PubGrub.InstanceSet.SourceCell               (SourceCell (..),
                                                                assignmentFrom,
@@ -114,16 +111,17 @@ import           UnliftIO                                     (MonadUnliftIO,
                                                                liftIO)
 
 -- | Open the Hackage index and the compiler's installed world, build a
--- 'Provider', and run @act@ with it. The whole solve must run inside @act@.
+-- 'Provider' and the solver's seeds, and run @act@ with both. The whole solve
+-- must run inside @act@.
 --
--- It takes the root's target constraints ("solve for these packages in these
--- ranges") because the solver asks the provider to expand the root like any
--- other package, and the root has no index entry to read its dependencies
--- from.
+-- The targets ("solve for these packages in these ranges") become one
+-- 'request' each. They are built here rather than in the driver because
+-- widening a range to instances needs the installed db: a target that names a
+-- boot package has to admit its installed unit.
 withProvider
     :: (MonadUnliftIO m, WithLog env Text m)
-    => Cache -> Manager -> IndexState -> [(PackageName, VersionSet)] -> (Provider m -> m a) -> m a
-withProvider cache manager state root act =
+    => Cache -> Manager -> IndexState -> [(PackageName, VersionSet)] -> (Provider m -> [Incompatibility] -> m a) -> m a
+withProvider cache manager state targets act =
     withWorld cache manager state $ \world -> do
         let handle = wIndex world
             platform = wPlatform world
@@ -136,17 +134,18 @@ withProvider cache manager state root act =
         store <- liftIO (openStore (cacheDirOf cache))
         (readRelease, lookupStats) <-
             liftIO (releaseReader platform cInfo (wPkgConfig world) handle store)
-        let provider =
+        let installedDb = mkInstalledDb installed
+            provider =
                 Provider
                     ( mkExpand
-                        (mkInstalledDb installed)
+                        installedDb
                         ReleaseSource
                             { rsVersionsOf = ihSolverVersionsOf handle
                             , rsReadRelease = \pn v -> liftIO (readRelease pn (V.toCabalVersion v))
                             }
-                        root
                     )
-        result <- act provider
+            seeds = [request pn (widenTo installedDb pn vs) | (pn, vs) <- targets]
+        result <- act provider seeds
         (parsed, decoded, reused) <- liftIO lookupStats
         logMsg
             ( T.pack
@@ -212,20 +211,6 @@ withWorld cache manager state act =
                 , wInstalled = installedIndex
                 , wPkgConfig = pkgConfig
                 }
-
--- | The synthetic root package name, chosen so it cannot collide with a real
--- Hackage package.
-rootName :: PackageName
-rootName = mkPackageName "\0root"
-
--- | The synthetic root's sole instance. Pair it with 'rootName' when calling
--- 'PubGrub.Solver.solve'.
-rootInstance :: Instance
-rootInstance = sourceInstance (mkVersion [0])
-
--- | A source instance: a version under the default (empty) flag assignment.
-sourceInstance :: Version -> Instance
-sourceInstance v = BuildSource v (mkFlagAssignment [])
 
 -- | What the provider needs from a release's description — and all it keeps.
 --
@@ -338,7 +323,7 @@ data ReleaseSource m = ReleaseSource
     }
 
 -- | The provider's @expand@: the whole candidate-selection and emission rule, over
--- an installed world, a source world, and the root's targets.
+-- an installed world and a source world.
 --
 -- It needs a text log channel and __not__ 'MonadIO': reading a release runs in
 -- whatever @m@ the 'ReleaseSource' was built in, so an in-memory world can drive
@@ -348,12 +333,10 @@ mkExpand
      . (WithLog env Text m)
     => InstalledDb
     -> ReleaseSource m
-    -> [(PackageName, VersionSet)]
-    -- ^ the synthetic root's targets, which are not in the index
     -> PackageName
     -> InstanceSet
     -> m (Maybe Instance, [Incompatibility])
-mkExpand installedDb source root = expand'
+mkExpand installedDb source = expand'
   where
     -- An 'InstanceSet' is a symbolic description (version ranges plus flag
     -- pins), not a container: membership is decidable but it cannot be
@@ -362,14 +345,6 @@ mkExpand installedDb source root = expand'
     -- first the offered set admits. A source candidate's @.cabal@ is parsed
     -- only when it is tried.
     expand' :: PackageName -> InstanceSet -> m (Maybe Instance, [Incompatibility])
-    expand' pn range
-            | pn == rootName
-            , memberInstance rootInstance range
-            = pure (Just rootInstance, incs)
-                where
-                    incs = [ fromDependency rootName (singletonInstance rootInstance) depName (widen depName vs)
-                           | (depName, vs) <- root
-                           ]
     expand' pn range = do
         let installedHere = [toPreInstalled u | u <- Map.findWithDefault [] pn (idbByName installedDb)]
             admissible = sortOn (Down . version) (filter (`Set.member` isInstalled range) installedHere)
@@ -546,8 +521,8 @@ mkExpand installedDb source root = expand'
     -- (@Bridge.Cabal.Baseline.nonReinstallableConstraints@), so this closes an
     -- asymmetry rather than adding a rule of our own.
     --
-    -- __Why here and not at the root__, where cabal\'s equivalent goes and where it
-    -- would cover the first query too: stating all eight facts up front shortens
+    -- __Why here and not up front__, where cabal\'s equivalent goes and where it
+    -- would cover the first query too: stating all eight facts there shortens
     -- @lens \'<4\'@\'s proof to two lines, but costs @aeson \'<2\'@ 41% more
     -- allocation and 466 more decisions, because eight extra level-0 derivations
     -- change which satisfier conflict resolution picks. That is search-path luck
@@ -710,28 +685,31 @@ mkExpand installedDb source root = expand'
         carries neighbour =
             any (\(g, ds) -> g == guard && dep `elem` ds) (relGuarded neighbour)
 
-    -- Widen a dependency's version range into an instance set. The installed
-    -- half is extensional: the compiler's database is small and fully known.
-    -- The source half is a single cell carrying the declared range, not one
-    -- entry per version in range. That keeps the cell count per dependency
-    -- constant, which matters because 'difference' multiplies cell counts, and
-    -- it keeps the range in the incompatibility, so a conflict report can say
-    -- @>=1.0 && <2@ instead of listing versions.
-    --
-    -- The cell admits versions the index does not have. That is harmless: the
-    -- set algebra never needs the instance universe, and 'expand'' enumerates
-    -- candidates from the index, so an unsatisfiable dependency surfaces as
-    -- @Nothing@ from 'expand'' rather than as an empty widening.
-    widen d vs =
-        InstanceSet
-            { isInstalled =
-                Set.fromList
-                    [ pip
-                    | UsePreInstalled pip <- installedInstancesOf installedDb d
-                    , contains vs (version pip)
-                    ]
-            , isSource = [SourceCell vs Map.empty]
-            }
+    widen = widenTo installedDb
+
+-- | Widen a version range into an instance set: a dependency's declared range, or
+-- a target's. The installed half is extensional: the compiler's database is small
+-- and fully known. The source half is a single cell carrying the declared range,
+-- not one entry per version in range. That keeps the cell count per dependency
+-- constant, which matters because 'difference' multiplies cell counts, and it
+-- keeps the range in the incompatibility, so a conflict report can say
+-- @>=1.0 && <2@ instead of listing versions.
+--
+-- The cell admits versions the index does not have. That is harmless: the set
+-- algebra never needs the instance universe, and 'mkExpand' enumerates candidates
+-- from the index, so an unsatisfiable dependency surfaces as @Nothing@ from
+-- 'mkExpand' rather than as an empty widening.
+widenTo :: InstalledDb -> PackageName -> VersionSet -> InstanceSet
+widenTo installedDb d vs =
+    InstanceSet
+        { isInstalled =
+            Set.fromList
+                [ pip
+                | UsePreInstalled pip <- installedInstancesOf installedDb d
+                , contains vs (version pip)
+                ]
+        , isSource = [SourceCell vs Map.empty]
+        }
 
 -- | Pair each release with its __version slot__: the half-open range from it up
 -- to the next release that exists, unbounded for the newest. Newest first, the

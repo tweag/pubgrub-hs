@@ -15,7 +15,7 @@ import qualified Data.Text                      as T
 import           Distribution.Types.Flag        (mkFlagAssignment)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           PubGrub.Version                (mkVersion)
-import           PubGrub.Incompatibility        (fromDependency)
+import           PubGrub.Incompatibility        (fromDependency, request)
 import           PubGrub.InstanceSet            (HasVersion (version),
                                                  Instance (..), InstanceSet,
                                                  emptyInstanceSet,
@@ -64,16 +64,16 @@ mkProvider deps = Provider expand'
                         ]
                  in pure (Just chosen, incs)
 
--- | Run the solver purely, discarding the solver's log trace. A failure is kept
--- as its rendered report rather than 'show'n: the derived 'Show' would expand
--- the whole derivation DAG as a tree.
+-- | Run the solver purely, seeded with one package at one instance, discarding
+-- the solver's log trace. A failure is kept as its rendered report rather than
+-- 'show'n: the derived 'Show' would expand the whole derivation DAG as a tree.
 runSolve
     :: Provider (LoggerT SolverMsg Identity)
     -> PackageName
     -> Instance
     -> Either Text (Map.Map PackageName Instance)
 runSolve provider p i =
-    either (Left . renderFailure) Right (runIdentity (usingLoggerT mempty (solve provider p i)))
+    either (Left . renderFailure) Right (runIdentity (usingLoggerT mempty (solve provider [request p (singletonInstance i)])))
 
 renderFailure :: SolveError -> Text
 renderFailure (NoSolution i) = reportConflict i

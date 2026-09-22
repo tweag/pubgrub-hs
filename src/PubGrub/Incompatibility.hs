@@ -6,14 +6,14 @@ module PubGrub.Incompatibility
     , UnbuildableReason (..)
     , anyTerm
     , incompGet
-    , notRoot
+    , request
+    , isRequest
     , noInstances
     , onlyInstalled
     , unbuildable
     , fromDependency
     , IncompatRelation (..)
     , incompRelation
-    , isTerminal
     , priorCause
     , priorCauseTerms
     ) where
@@ -24,10 +24,7 @@ import qualified Data.Map.Strict                as Map
 import           Distribution.Types.PackageName
 import           Distribution.Types.PkgconfigDependency (PkgconfigDependency)
 import           PubGrub.Version                 (Version)
-import           PubGrub.InstanceSet            (Instance, InstanceSet,
-                                                 emptyInstanceSet,
-                                                 memberInstance,
-                                                 singletonInstance)
+import           PubGrub.InstanceSet            (InstanceSet, emptyInstanceSet)
 import           PubGrub.Relation               (Relation (..), relation)
 import           PubGrub.Term                   (Term (..), intersectTerm,
                                                  isTopTerm, unionTerm)
@@ -89,7 +86,7 @@ data Incompatibility = Incompatibility
     }
 
 data IncompatCause
-    = CauseRoot PackageName Instance                              -- notRoot
+    = CauseRequest PackageName InstanceSet                        -- request
     | CauseNoInstances PackageName InstanceSet                    -- noInstances
     | CauseOnlyInstalled PackageName [Version]                    -- onlyInstalled
     | CauseUnbuildable PackageName InstanceSet (NonEmpty UnbuildableReason)  -- unbuildable
@@ -117,10 +114,24 @@ incompGet p (Incompatibility m _ ) = Map.lookup p m
 
 -- Constructors ---------------------------------------------------------------
 
--- | The root seed: it is impossible for the root package to NOT be the
--- requested instance.
-notRoot :: PackageName -> Instance -> Incompatibility
-notRoot p i = Incompatibility (Map.singleton p (Negative (singletonInstance i))) (CauseRoot p i)
+-- | A seed: what the solve is asked for. It is impossible for @p@ to be
+-- /outside/ @s@, which forces @p@ into the plan at an instance in @s@. One per
+-- target, and together they stand for the algorithm's synthetic root package: a
+-- root whose dependencies are the targets is the same set of unit clauses with a
+-- package in front of them, and that package then has to be printed, planned and
+-- filtered out again. Seeds state the request directly.
+--
+-- A seed is a unit clause, so propagation turns it into a derivation at decision
+-- level 0 before anything is decided; "PubGrub.Solver" recognises a conflict that
+-- rests on those derivations alone as the end of the search.
+request :: PackageName -> InstanceSet -> Incompatibility
+request p s = Incompatibility (Map.singleton p (Negative s)) (CauseRequest p s)
+
+-- | Is this a seed?
+isRequest :: Incompatibility -> Bool
+isRequest i = case incompCause i of
+    CauseRequest{} -> True
+    _              -> False
 
 -- | The provider has nothing to offer in this instance set of the package, so
 -- none of it can be selected.
@@ -245,18 +256,6 @@ incompRelation lookupTerm (Incompatibility m _) = go ISatisfied (Map.toList m)
     -- absent or inconclusive term: at most one allowed for AlmostSatisfied
     almost p ISatisfied rest = go (IAlmostSatisfied p) rest
     almost _ _ _             = IInconclusive
-
--- | Does this incompatibility end the solve: is it empty, or does it forbid
--- the root instance?
-isTerminal :: PackageName -> Instance -> Incompatibility -> Bool
-isTerminal rootPkg rootI (Incompatibility m _) =
-    case Map.toList m of
-        []          -> True
-        [(p, term)] -> p == rootPkg && termContains term rootI
-        _           -> False
-  where
-    termContains (Positive s) i = i `memberInstance` s
-    termContains (Negative s) i = not (i `memberInstance` s)
 
 -- | Rule of Resolution. From the current incompatibility and the cause of the
 -- satisfier (sharing @package@), derive their resolvent: union the shared

@@ -30,8 +30,6 @@ import           Bridge.Hackage                            (IndexState (..),
                                                             mkCache,
                                                             parseIndexState)
 import           Bridge.Provider                           (World (..),
-                                                            rootInstance,
-                                                            rootName,
                                                             withProvider,
                                                             withWorld)
 import           Colog                                     (HasLog (..),
@@ -388,12 +386,12 @@ main = do
             -- argument parsing and two allocations.
             t0 <- getMonotonicTime
             runApp (solverLogAction (optVerbosity opts) counters) $ case optWhich opts of
-                -- The provider needs the root's targets up front: it is asked to
-                -- expand the root like any other package, but has no index entry
-                -- to look its dependencies up in.
+                -- The bridge turns the targets into the solver's seeds, because
+                -- widening a range to instances (installed units included) is its
+                -- business, not the driver's.
                 Ours ->
-                    withProvider cache manager (optIndexState opts) [(pn, fromVersionRange vr) | (pn, vr) <- optTargets opts] $ \provider ->
-                        runOurs opts t0 counters provider
+                    withProvider cache manager (optIndexState opts) [(pn, fromVersionRange vr) | (pn, vr) <- optTargets opts] $ \provider seeds ->
+                        runOurs opts t0 counters provider seeds
                 Cabal ->
                     withWorld cache manager (optIndexState opts) $ \world ->
                         runBaseline opts t0 world
@@ -402,16 +400,16 @@ main = do
 -- the counters and the phase timings after it. Those two lines come before the
 -- provider's closing read-counter line, which 'withProvider' prints on the way
 -- out.
-runOurs :: Options -> Double -> Maybe (IORef Stats) -> Provider App -> App ()
-runOurs opts t0 counters provider = do
+runOurs :: Options -> Double -> Maybe (IORef Stats) -> Provider App -> [Incompatibility] -> App ()
+runOurs opts t0 counters provider seeds = do
     t1 <- liftIO getMonotonicTime
     logMsg (T.pack ("Solving for " ++ renderTargets (optTargets opts)))
     tSolve <- liftIO getMonotonicTime
     -- 'evaluate' pins the end of the solve phase to the verdict, so the boundary
     -- does not depend on how lazily 'solve' builds its result.
-    result <- evaluate =<< solve provider rootName rootInstance
+    result <- evaluate =<< solve provider seeds
     tRender <- liftIO getMonotonicTime
-    report (optPlan opts) provider result
+    report (optPlan opts) (map fst (optTargets opts)) provider result
     tEnd <- liftIO getMonotonicTime
     case counters of
         Nothing -> pure ()
@@ -540,21 +538,21 @@ runBaseline opts t0 world = do
     component (CD.ComponentExe n) = "exe:" ++ prettyShow n
     component c                   = show c
 
-report :: PlanShape -> Provider App -> Either SolveError (Map PackageName Instance) -> App ()
-report _ _ (Left (NoSolution incompat)) = do
+report :: PlanShape -> [PackageName] -> Provider App -> Either SolveError (Map PackageName Instance) -> App ()
+report _ _ _ (Left (NoSolution incompat)) = do
     width <- liftIO proofWidth
     style <- liftIO proofStyle
     logMsg (style (wrapProof width (reportHeadline incompat)))
     logMsg T.empty
     logMsg (style (wrapProof width (reportConflict incompat)))
-report _ _ (Left (NoSatisfier p _)) =
+report _ _ _ (Left (NoSatisfier p _)) =
     logMsg (T.pack ("internal error: no satisfier for " ++ prettyShow p))
-report shape provider (Right solution) = do
+report shape targets provider (Right solution) = do
     logMsg (T.pack "Solution:")
     case shape of
         Tree -> do
             children <- dependencyMap provider solution
-            mapM_ logMsg (renderTree solution children)
+            mapM_ logMsg (renderTree targets solution children)
         Lines -> mapM_ logMsg (planLines solution)
 
 -- | The width a proof is wrapped to. The terminal's own, from @COLUMNS@, when
@@ -579,12 +577,11 @@ proofStyle = do
     term <- lookupEnv "TERM"
     pure $ if tty && noColor == Nothing && term /= Just "dumb" then styleProof else id
 
--- | One resolved package per line, sorted by name — the 'Map' already is. The
--- synthetic root is the solver's, not the plan's, so it is left out.
+-- | One resolved package per line, sorted by name — the 'Map' already is.
 planLines :: Map PackageName Instance -> [Text]
 planLines solution =
     [ T.pack (unwords ["plan:", prettyShow pn, T.unpack (pretty (version inst)), kind inst])
-    | (pn, inst) <- Map.toList (Map.delete rootName solution)
+    | (pn, inst) <- Map.toList solution
     ]
   where
     kind (UsePreInstalled _) = "installed"
@@ -614,15 +611,21 @@ dependencyMap provider solution =
                 ]
         pure (pn, deps)
 
--- | Render the solution as a dependency tree from the synthetic root, in the
--- style of @cargo tree@. A dependency graph is a DAG, not a tree: a shared
+-- | Render the solution as a dependency tree under each target, in the style
+-- of @cargo tree@. A dependency graph is a DAG, not a tree: a shared
 -- dependency like @base@ has many parents, and printing its subtree under each
 -- would blow up the output. So a subtree is printed once, and @(*)@ marks every
--- later occurrence of its package.
-renderTree :: Map PackageName Instance -> Map PackageName [PackageName] -> [Text]
-renderTree solution children =
-    label rootName : snd (goChildren (Set.singleton rootName) T.empty (childrenOf rootName))
+-- later occurrence of its package. The targets are the roots, in the order they
+-- were asked for, and @seen@ runs across all of them.
+renderTree :: [PackageName] -> Map PackageName Instance -> Map PackageName [PackageName] -> [Text]
+renderTree targets solution children = goRoots Set.empty targets
   where
+    goRoots _ [] = []
+    goRoots seen (t : ts)
+        | t `Set.member` seen = (label t <> T.pack " (*)") : goRoots seen ts
+        | otherwise =
+            let (seen', ls) = goChildren (Set.insert t seen) T.empty (childrenOf t)
+             in label t : ls ++ goRoots seen' ts
     label pn = maybe (T.pack (prettyShow pn)) (renderChoice pn) (Map.lookup pn solution)
     childrenOf pn = sortOn prettyShow (Map.findWithDefault [] pn children)
 

@@ -262,13 +262,13 @@ reportConflict = snd . renderReport
 -- | One line to put above the proof: what was asked for, and the facts about this
 -- machine the proof rests on.
 --
--- The proof is read bottom-up — its first line is the deepest fact and the root
--- appears only on the last — so a reader of the matterhorn proof meets @hashable@
--- before learning that @base@ is the wall. This line says both first, in the
--- proof's own words: the request is the root's dependency facts as the proof
--- names them, and the walls are its world-fact leaves ('CauseOnlyInstalled',
--- 'CauseUnbuildable'), verbatim. It claims nothing the proof does not: every
--- named fact is a premise of the derivation below it.
+-- The proof is read bottom-up — its first line is the deepest fact and the
+-- request appears only on the last — so a reader of the matterhorn proof meets
+-- @hashable@ before learning that @base@ is the wall. This line says both first,
+-- in the proof's own words: the request is the seeds the proof rests on
+-- ('CauseRequest'), and the walls are its world-fact leaves
+-- ('CauseOnlyInstalled', 'CauseUnbuildable'), verbatim. It claims nothing the
+-- proof does not: every named fact is a premise of the derivation below it.
 --
 --  > No solution for matterhorn ==90000.1.1: base is pinned to 4.21.0.0 (installed).
 reportHeadline :: Incompatibility -> Text
@@ -292,9 +292,9 @@ renderReport root0 = (headline, proof)
         walls = case nub [leaf c | c <- externals root, isWorld c] of
             [] -> ""
             ws -> ": " <> T.intercalate "; " ws
-        -- What the root asked for, as the proof itself names it. A root dependency
-        -- the proof never reaches is not the one that failed.
-        requests = nub [bare p r | c <- externals root, Just (rp, _, p, r) <- [asDependency c], Just rp == rootPkg]
+        -- What was asked for, as the proof itself names it. A seed the proof
+        -- never reaches is not the one that failed.
+        requests = nub [bare p r | c <- externals root, CauseRequest p r <- [incompCause c]]
         isWorld c = case incompCause c of
             CauseOnlyInstalled{} -> True
             CauseUnbuildable{}   -> True
@@ -309,14 +309,6 @@ renderReport root0 = (headline, proof)
     -- empty is not a step worth a line, and leaving them in is what stops the chain
     -- fusion below from ever firing on a real problem.
     root = collapseNoInstances root0
-
-    -- The terminal incompatibility's one positive term names the root package
-    -- (references/pubgrub.md:518). The root is written by name alone, without its
-    -- synthetic version (:1025), and without the NUL byte the bridge prefixes to
-    -- keep that name from colliding with a real package's.
-    rootPkg = case Map.toList (incompTerms root0) of
-        [(p, Positive _)] -> Just p
-        _                 -> Nothing
 
     -- Every line is a sentence and ends as one. A blank line between two branches
     -- of a derivation (references/pubgrub.md:632) stays blank.
@@ -334,17 +326,13 @@ renderReport root0 = (headline, proof)
     -- every version of bar".
     named :: PackageName -> InstanceSet -> Text
     named p s
-        | Just p == rootPkg = rootLabel p
-        | isEveryVersion s  = "every version of " <> pretty p
-        | otherwise         = pretty p <> " " <> pretty s
+        | isEveryVersion s = "every version of " <> pretty p
+        | otherwise        = pretty p <> " " <> pretty s
 
     bare :: PackageName -> InstanceSet -> Text
     bare p s
-        | Just p == rootPkg = rootLabel p
-        | isEveryVersion s  = pretty p
-        | otherwise         = pretty p <> " " <> pretty s
-
-    rootLabel = T.filter (/= '\0') . pretty
+        | isEveryVersion s = pretty p
+        | otherwise        = pretty p <> " " <> pretty s
 
     -- Explain one derived incompatibility, ending with the line that concludes it.
     -- @final@ marks the last line of the whole proof, which reads "So, …".
@@ -586,6 +574,13 @@ renderReport root0 = (headline, proof)
     -- 'PubGrub.SetOps.isEmpty' on an 'InstanceSet' is one-sided — it may fail to
     -- notice that a set is empty — so both guards can only fail to fuse where they
     -- could have. Neither can fuse where it should not.
+    pair c1 c2
+        -- Two seeds close a proof together: "baz >=1 && <2 and foo >=1 && <2 are
+        -- requested", where the spec's root has "depends on both"
+        -- (references/pubgrub.md:1021).
+        | CauseRequest p1 r1 <- incompCause c1
+        , CauseRequest p2 r2 <- incompCause c2 =
+            bare p1 r1 <> " and " <> bare p2 r2 <> " are requested"
     pair c1 c2 = case (emptyRangeFor c1 c2, emptyRangeFor c2 c1) of
         -- A dependency whose dependee range the solver has already found empty.
         -- Naming both facts would print that range /twice/ in one sentence, and
@@ -601,11 +596,15 @@ renderReport root0 = (headline, proof)
         (_, Just one) -> one
         _ -> pairDeps c1 c2
 
-    -- @dep@'s dependee range known empty by @hole@?
-    emptyRangeFor dep' hole = case (asDependency dep', incompCause hole) of
-        (Just (p, s, q, r), CauseNoInstances q' empty)
+    -- @dep@'s dependee range known empty by @hole@? A request whose whole range
+    -- is empty reads the same way.
+    emptyRangeFor dep' hole = case (asDependency dep', incompCause dep', incompCause hole) of
+        (Just (p, s, q, r), _, CauseNoInstances q' empty)
             | q == q', r `isSubsetOf` empty ->
                 Just (dep p s q r <> ", which has no versions")
+        (_, CauseRequest p r, CauseNoInstances p' empty)
+            | p == p', r `isSubsetOf` empty ->
+                Just (bare p r <> " is requested, which has no versions")
         _ -> Nothing
 
     pairDeps c1 c2 = case (asDependency c1, asDependency c2) of
@@ -640,6 +639,7 @@ renderReport root0 = (headline, proof)
     -- be built here says /that/, and why, rather than looking absent
     -- (references/pubgrub.md:475).
     leaf c = case incompCause c of
+        CauseRequest p s -> bare p s <> " is requested"
         CauseNoInstances p s -> "no version for " <> pretty p <> " in " <> pretty s
         CauseOnlyInstalled p [] -> pretty p <> " is not installed and cannot be built from source"
         CauseOnlyInstalled p vs ->
@@ -673,13 +673,11 @@ renderReport root0 = (headline, proof)
             Just (front@(_ : _), l) -> T.intercalate ", " front <> " and " <> l
             _                       -> T.intercalate ", " ms
 
-    -- What a line concludes. On the proof's last line a lone positive term is the
-    -- root being ruled out at its synthetic version, which reads better as plain
-    -- failure.
+    -- What a line concludes. The proof's last line concludes the empty
+    -- incompatibility, which is failure by name (references/pubgrub.md:1030); it
+    -- is stated as such whatever the terms say, because that is what the line is.
     says final c
-        | final = case Map.toList (incompTerms c) of
-            [(_, Positive _)] -> "version solving failed"
-            _                 -> summary c
+        | final = "version solving failed"
         | otherwise = summary c
 
     -- What an incompatibility says, in pub's own forms (the spec leaves the

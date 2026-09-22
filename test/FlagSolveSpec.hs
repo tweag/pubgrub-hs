@@ -56,12 +56,13 @@ import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.UnitId      (mkUnitId)
 import           Distribution.Types.Version     (mkVersion)
 import           Distribution.Version           (anyVersion, thisVersion)
-import           PubGrub.Incompatibility        (IncompatCause (..),
+import           PubGrub.Incompatibility        (IncompatCause (..), request,
                                                  Incompatibility (..),
                                                  UnbuildableReason (..))
 import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
 import           PubGrub.InstanceSet            (Instance (..),
-                                                 InstanceSet (..))
+                                                 InstanceSet (..),
+                                                 singletonInstance)
 import           PubGrub.InstanceSet.SourceCell (SourceCell (..))
 import           PubGrub.Provider               (Provider (Provider, expand))
 import           PubGrub.Version                (Version)
@@ -113,9 +114,8 @@ type World = [(PackageName, Pkg)]
 --
 --  * the 'BP.ReleaseSource' answers from a list rather than from an index, so no
 --    @.cabal@ is ever parsed.
---  * the world's root is an ordinary release rather than 'BP.rootName', so the
---    synthetic-root shortcut never fires and the root is resolved through the same
---    path as every other package. Hence the empty target list.
+--  * the world's root is an ordinary release, seeded as the one request, so it
+--    is resolved through the same path as every other package.
 --
 -- The installed db is empty: these worlds have no pre-installed units, so every
 -- 'PubGrub.InstanceSet.InstanceSet' has an empty installed side.
@@ -134,7 +134,7 @@ worldProvider = worldProviderWith []
 -- to the rule under test here, and the wording of each is @ReportSpec@'s.
 worldProviderWith :: [(PackageName, Version)] -> World -> Provider TestM
 worldProviderWith unbuildableHere world =
-    Provider (BP.mkExpand (mkInstalledDb []) source [])
+    Provider (BP.mkExpand (mkInstalledDb []) source)
   where
     source =
         BP.ReleaseSource
@@ -199,8 +199,8 @@ runTestM m = runReaderT (unTestM m) (TestEnv mempty mempty)
 -- Running a world
 -- --------------------------------------------------------------------------
 
--- | The root package, whose sole release is @1.0.0@ with no flags. Deliberately
--- /not/ 'BP.rootName': see 'worldProvider'.
+-- | The root package, whose sole release is @1.0.0@ with no flags. An ordinary
+-- package of the world that the solve is seeded with: see 'worldProvider'.
 root :: PackageName
 root = pkg "root"
 
@@ -213,7 +213,7 @@ rootInstance = BuildSource v1 (mkFlagAssignment [])
 runSolve :: Provider TestM -> IO (Either Text (Map PackageName Instance))
 runSolve provider =
     either (Left . renderFailure) Right
-        <$> runTestM (solve provider root rootInstance)
+        <$> runTestM (solve provider [request root (singletonInstance rootInstance)])
 
 renderFailure :: SolveError -> Text
 renderFailure (NoSolution i) = reportConflict i
@@ -362,7 +362,7 @@ bootPackageStatesItself =
     -- reader errors because nothing here should reach it: a non-reinstallable
     -- package never consults the source side, and @ordinary@ has no versions.
     expandIn name offered =
-        BP.mkExpand db source [] (mkPackageName name) offered
+        BP.mkExpand db source (mkPackageName name) offered
       where
         db =
             mkInstalledDb
@@ -818,7 +818,7 @@ selfDependencyDropped =
                     | (p, pk) <- selfDepWorld
                     , r <- pkgReleases pk
                     ]
-        result <- BP.mkExpand (mkInstalledDb []) source [] (pkg "p") anySource
+        result <- BP.mkExpand (mkInstalledDb []) source (pkg "p") anySource
         case result of
             (Just (BuildSource _ _), incs) -> pure incs
             _ -> liftIO (assertFailure "expected p 1.0.0 to be chosen")

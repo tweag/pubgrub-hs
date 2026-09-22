@@ -53,7 +53,9 @@ import           PubGrub.InstanceSet            (Instance (BuildSource))
 import           PubGrub.Version                (Version)
 import qualified PubGrub.Version                as V
 import           PubGrub.Provider               (Provider (Provider))
+import           PubGrub.Incompatibility        (Incompatibility, request)
 import           PubGrub.Report                 (reportConflict)
+import qualified PubGrub.VersionSet             as VersionSet
 import           PubGrub.Solver                 (SolveError (..), SolverMsg,
                                                  solve)
 import           Test.Tasty                     (TestName, TestTree, testGroup)
@@ -115,9 +117,10 @@ instanceOf world p v =
 --  * the 'BP.ReleaseSource' answers from the world rather than from an index, and
 --    no @.cabal@ is ever parsed. Its two questions are exactly what a paper world
 --    can answer: which versions exist, and what one release declares.
---  * the world\'s root is an ordinary release rather than 'BP.rootName', so the
---    synthetic-root shortcut never fires and the root resolves through the same
---    path as every other package. Hence the empty target list.
+--  * the paper\'s root package is not a package here at all: its dependencies
+--    are the solve\'s seeds, one 'request' per dependency, which is what the
+--    spec says the root stands for (@:252@). So the worlds hold only the
+--    packages the paper resolves, and the expected solutions name only those.
 --  * the installed db is empty: these worlds have no pre-installed units, so the
 --    installed half of every 'PubGrub.InstanceSet.InstanceSet' is empty and the
 --    prefer-installed and non-reinstallable branches never run.
@@ -127,7 +130,7 @@ instanceOf world p v =
 -- to the single empty pin set. That is the shape every guard folds to while flags
 -- are fixed at their declared defaults.
 mkProvider :: World -> Provider PureM
-mkProvider world = Provider (BP.mkExpand (mkInstalledDb []) source [])
+mkProvider world = Provider (BP.mkExpand (mkInstalledDb []) source)
   where
     source =
         BP.ReleaseSource
@@ -193,19 +196,18 @@ instance HasLog LogEnv SolverMsg PureM where
 -- | Run the solver purely, discarding both log channels.
 runSolve
     :: Provider PureM
-    -> PackageName
-    -> Instance
+    -> [Incompatibility]
     -> Either SolveError (Map PackageName Instance)
-runSolve provider p i =
-    runIdentity (runReaderT (unPureM (solve provider p i)) (LogEnv mempty mempty))
+runSolve provider seeds =
+    runIdentity (runReaderT (unPureM (solve provider seeds)) (LogEnv mempty mempty))
 
--- | Run the solver against a world, rooted at @root 1.0.0@. A failure is kept
--- as its rendered report rather than 'show'n, because the derived 'Show' would
--- expand the whole derivation DAG as a tree.
-solveWorld :: World -> Either Text (Map PackageName Instance)
-solveWorld world =
+-- | Run the solver against a world, seeded with the paper's root dependencies.
+-- A failure is kept as its rendered report rather than 'show'n, because the
+-- derived 'Show' would expand the whole derivation DAG as a tree.
+solveWorld :: [(PackageName, VersionRange)] -> World -> Either Text (Map PackageName Instance)
+solveWorld rootDeps world =
     either (Left . renderFailure) Right $
-        runSolve (mkProvider world) (mkPackageName "root") (instanceOf world (mkPackageName "root") [1, 0, 0])
+        runSolve (mkProvider world) [request p (BP.widenTo (mkInstalledDb []) p (VersionSet.fromVersionRange vr)) | (p, vr) <- rootDeps]
 
 -- | Render a solver failure as its explanatory proof.
 renderFailure :: SolveError -> Text
@@ -223,9 +225,9 @@ renderFailure (NoSatisfier p _) =
 --
 -- A world that /solves/ writes its solution into the same file, so a golden diff
 -- says what happened rather than \"expected Left\".
-proofGolden :: TestName -> FilePath -> World -> TestTree
-proofGolden name file world =
-    goldenVsString name ("test/golden/" <> file) (pure (utf8 (rendered (solveWorld world))))
+proofGolden :: TestName -> FilePath -> [(PackageName, VersionRange)] -> World -> TestTree
+proofGolden name file rootDeps world =
+    goldenVsString name ("test/golden/" <> file) (pure (utf8 (rendered (solveWorld rootDeps world))))
   where
     rendered (Left proof) = proof <> T.pack "\n"
     rendered (Right sol) =
@@ -250,16 +252,14 @@ tests =
         "PubGrub paper examples"
         [ testCase "No Conflicts" $
             let world =
-                    [ (pkg "root", [Release [1, 0, 0] [(pkg "foo", caret [1, 0, 0])]])
-                    , (pkg "foo", [Release [1, 0, 0] [(pkg "bar", caret [1, 0, 0])]])
+                    [ (pkg "foo", [Release [1, 0, 0] [(pkg "bar", caret [1, 0, 0])]])
                     , (pkg "bar", [Release [1, 0, 0] [], Release [2, 0, 0] []])
                     ]
-             in solveWorld world
-                    @?= Right (expected world [("root", [1, 0, 0]), ("foo", [1, 0, 0]), ("bar", [1, 0, 0])])
+             in solveWorld [(pkg "foo", caret [1, 0, 0])] world
+                    @?= Right (expected world [("foo", [1, 0, 0]), ("bar", [1, 0, 0])])
         , testCase "Avoiding Conflict During Decision Making" $
             let world =
-                    [ (pkg "root", [Release [1, 0, 0] [(pkg "foo", caret [1, 0, 0]), (pkg "bar", caret [1, 0, 0])]])
-                    ,
+                    [
                         ( pkg "foo"
                         ,
                             [ Release [1, 1, 0] [(pkg "bar", caret [2, 0, 0])]
@@ -268,12 +268,11 @@ tests =
                         )
                     , (pkg "bar", [Release [1, 0, 0] [], Release [1, 1, 0] [], Release [2, 0, 0] []])
                     ]
-             in solveWorld world
-                    @?= Right (expected world [("root", [1, 0, 0]), ("foo", [1, 0, 0]), ("bar", [1, 1, 0])])
+             in solveWorld [(pkg "foo", caret [1, 0, 0]), (pkg "bar", caret [1, 0, 0])] world
+                    @?= Right (expected world [("foo", [1, 0, 0]), ("bar", [1, 1, 0])])
         , testCase "Performing Conflict Resolution" $
             let world =
-                    [ (pkg "root", [Release [1, 0, 0] [(pkg "foo", gte [1, 0, 0])]])
-                    ,
+                    [
                         ( pkg "foo"
                         ,
                             [ Release [2, 0, 0] [(pkg "bar", caret [1, 0, 0])]
@@ -282,12 +281,11 @@ tests =
                         )
                     , (pkg "bar", [Release [1, 0, 0] [(pkg "foo", caret [1, 0, 0])]])
                     ]
-             in solveWorld world
-                    @?= Right (expected world [("root", [1, 0, 0]), ("foo", [1, 0, 0])])
+             in solveWorld [(pkg "foo", gte [1, 0, 0])] world
+                    @?= Right (expected world [("foo", [1, 0, 0])])
         , testCase "Conflict Resolution With a Partial Satisfier" $
             let world =
-                    [ (pkg "root", [Release [1, 0, 0] [(pkg "foo", caret [1, 0, 0]), (pkg "target", caret [2, 0, 0])]])
-                    ,
+                    [
                         ( pkg "foo"
                         ,
                             [ Release [1, 1, 0] [(pkg "left", caret [1, 0, 0]), (pkg "right", caret [1, 0, 0])]
@@ -305,8 +303,8 @@ tests =
                         )
                     , (pkg "target", [Release [2, 0, 0] [], Release [1, 0, 0] []])
                     ]
-             in solveWorld world
-                    @?= Right (expected world [("root", [1, 0, 0]), ("foo", [1, 0, 0]), ("target", [2, 0, 0])])
+             in solveWorld [(pkg "foo", caret [1, 0, 0]), (pkg "target", caret [2, 0, 0])] world
+                    @?= Right (expected world [("foo", [1, 0, 0]), ("target", [2, 0, 0])])
         , -- @:1005@. The spec's own two lines are
           --
           -- > Because every version of foo depends on bar ^2.0.0 which depends on
@@ -314,26 +312,26 @@ tests =
           -- > So, because root depends on both baz ^1.0.0 and foo ^1.0.0, version
           -- > solving failed.
           --
-          -- Ours has the same two lines, because the provider states each
-          -- dependency over the depender's slot ('slotOf'). What is left is
-          -- CLAUDE.md's reporting gap 4, wording: a range where the spec says
-          -- \"every version of\", the root's synthetic version, no terminal
-          -- periods, and Cabal's range syntax for the spec's @^1.0.0@.
+          -- The first line is ours exactly, in Cabal's range syntax. The last
+          -- differs in one way: there is no root package here, so where the spec's
+          -- root \"depends on both baz ^1.0.0 and foo ^1.0.0\" ours says the two are
+          -- requested, which is the same fact without the package in front of it.
           proofGolden "Linear Error Reporting (unsat)" "linear-error-reporting.txt"
-            [ (pkg "root", [Release [1, 0, 0] [(pkg "foo", caret [1, 0, 0]), (pkg "baz", caret [1, 0, 0])]])
-            , (pkg "foo", [Release [1, 0, 0] [(pkg "bar", caret [2, 0, 0])]])
+            [(pkg "foo", caret [1, 0, 0]), (pkg "baz", caret [1, 0, 0])]
+            [ (pkg "foo", [Release [1, 0, 0] [(pkg "bar", caret [2, 0, 0])]])
             , (pkg "bar", [Release [2, 0, 0] [(pkg "baz", caret [3, 0, 0])]])
             , (pkg "baz", [Release [1, 0, 0] [], Release [3, 0, 0] []])
             ]
         , -- @:1150@. Here the derivation branches, and the shape the spec asks for
           -- is reproduced: one line per step, a line number minted only for the
-          -- conclusion that gets referred to later (1), and the back-reference in
-          -- the line that joins the two branches. Ours differs in which facts each
-          -- line fuses, and in the cosmetics above (gap 4, which includes the blank
-          -- line the spec puts between the branches).
+          -- conclusion that gets referred to later (1), the back-reference in the
+          -- line that joins the two branches, and the blank line between them.
+          -- Ours differs in which facts each branch's first line fuses, and its
+          -- last line says \"foo >=1.0.0 && <2 is requested\" where the spec's
+          -- root depends on it.
           proofGolden "Branching Error Reporting (unsat)" "branching-error-reporting.txt"
-            [ (pkg "root", [Release [1, 0, 0] [(pkg "foo", caret [1, 0, 0])]])
-            ,
+            [(pkg "foo", caret [1, 0, 0])]
+            [
                 ( pkg "foo"
                 ,
                     [ Release [1, 0, 0] [(pkg "a", caret [1, 0, 0]), (pkg "b", caret [1, 0, 0])]

@@ -72,19 +72,18 @@ than arranged. It is the baseline half of both deliverables.
 ```
 Solving for hashable
 Solution:
- root 0
-└─ hashable 1.5.1.0 -arch-native -random-initial-seed
-   ├─ base 4.21.0.0 (installed)
-   │  ├─ ghc-internal 9.1202.0 (installed)
-   │  ...
-   ├─ bytestring 0.12.2.0 (installed) (*)
-   ...
+hashable 1.5.1.0 -arch-native -random-initial-seed
+├─ base 4.21.0.0 (installed)
+│  ├─ ghc-internal 9.1202.0 (installed)
+│  ...
+├─ bytestring 0.12.2.0 (installed) (*)
+...
 read 0 .cabal files, decoded 3 from the derived index, served 23 repeat lookups from cache
 ```
 
-Each node shows the decided *instance*: a source release with the flag assignment it
-was decided under, or an installed unit as such. `(*)` marks a subtree already printed
-higher up.
+Each target is a root of the tree, and each node shows the decided *instance*: a
+source release with the flag assignment it was decided under, or an installed unit as
+such. `(*)` marks a subtree already printed higher up.
 
 Boot packages resolve to the exact unit from your GHC and are never built from source.
 Everything else resolves to the newest source release in range.
@@ -103,7 +102,7 @@ cannot be built from source, lens <3.10 is forbidden.
 Because base cannot be built from source and lens >=3.10 && <4.0 depends on
 base >=4.4 && <4.7, lens >=3.10 && <4.0 is forbidden.
 And because lens <3.10 is forbidden (1), lens <4.0 is forbidden.
-So, because root depends on lens <4, version solving failed.
+So, because lens <4 is requested, version solving failed.
 ```
 
 That is 7 sentences where cabal prints 18 lines for the same problem. Across a corpus

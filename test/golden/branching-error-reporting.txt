@@ -4,4 +4,4 @@ Because every version of a depends on b >=2.0.0 && <3 and foo <1.1.0 depends on 
 Because every version of x depends on y >=2.0.0 && <3 and foo >=1.1.0 depends on y >=1.0.0 && <2, foo >=1.1.0 is incompatible with x.
 And because foo >=1.1.0 depends on x >=1.0.0 && <2, foo >=1.1.0 is forbidden.
 And because foo <1.1.0 is forbidden (1), foo is forbidden.
-So, because root depends on foo >=1.0.0 && <2, version solving failed.
+So, because foo >=1.0.0 && <2 is requested, version solving failed.

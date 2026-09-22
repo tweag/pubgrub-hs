@@ -367,12 +367,26 @@ Cabal orders `1.2 < 1.2.0 < 1.2.0.0`. `docs/STATUS.md` §4.13 has the measuremen
   favour. Verdict agreement on the 26 problems holds. A new disagreement on a bound
   shaped like `base <=4.21` is this rule, not a bug.
 
-### The synthetic root's name carries a NUL byte
+### There is no root package; the request is a list of seeds
 
-`rootName = mkPackageName "\0root"`. GNU `grep` therefore treats every proof as binary
-and reports no matches without `-a`. `scripts/gate.sh` and `scripts/check-stats.sh`
-pass `-a` everywhere; the harness reads every child log as bytes. New tooling that
-greps a proof will read zero and look like it passed.
+`solve` takes a list of incompatibilities, one `request p R` per target, each the
+unit clause `{p: Negative R}` with cause `CauseRequest`. `Bridge.Provider.withProvider`
+builds them, because widening a range to instances needs the installed db. They
+propagate to derivations at decision level 0 before anything is decided, and three
+things in the solver rest on that:
+
+- **The terminal test is "satisfied by the seed derivations alone"**
+  (`satisfiedBySeeds`), checked before the satisfier search. It is
+  `references/pubgrub.md:377` with the root's one derivation replaced by the seeds'.
+- **The backtrack floor is level 0, not 1.** The spec stops at level 1 because that
+  is where its root was decided (`:399`–`:404`) and says level 0 is safe. Here the
+  first decision at level 1 is an ordinary target and a conflict may have to undo it.
+  Restoring `max 1` makes a unit clause on the first target loop forever.
+- **A terminal conflict is closed against the seeds** (`closeWithSeeds`), one
+  `priorCause` per seed, so the reported incompatibility is empty and the proof's
+  last line is "So, because …, version solving failed" with the request as its last
+  fact: "aeson ==2.3.1.0 is requested". There is no `root` in any proof, and no NUL
+  byte; the `-a` in the scripts is now only a precaution.
 
 ## Current scope limits
 
@@ -428,9 +442,12 @@ run, and `docs/STATUS.md` §4.9 states each one with its soundness argument:
    (`collapseNoInstances`).
 
 **The wording is pub's, in cabal's range syntax**, including every special case the
-spec lists at `references/pubgrub.md:1010`–`:1030`: "every version of foo", the root
-by name alone, "So," on the last line, a period per line, the blank line between
-branches. A negative term is never printed as "not …"; the sentence carries the
+spec lists at `references/pubgrub.md:1010`–`:1030`: "every version of foo", "So," on
+the last line, a period per line, the blank line between branches. Where pub names
+its root package ("myapp depends on foo") we have no root: a seed reads "foo >=1
+is requested", two of them "foo >=1 and bar are requested", and a seed whose range
+holds nothing "foo >9 is requested, which has no versions". A negative term is never
+printed as "not …"; the sentence carries the
 negation ("P requires N1 or N2", "if P1 and P2 then N1 or N2", "either X or Y").
 Installed units print by version, never by unit id, and a boot package's fact names
 the version it is pinned to: "base is pinned to 4.21.0.0 (installed)". An unbuildable
@@ -439,8 +456,8 @@ libpq, which is not found", or "is marked buildable: False". Never "cannot be bu
 because": the chain form already opens with "Because". The module is spelled as
 Cabal-syntax prints the field (`libpq`, not cabal's `libpq-any`).
 
-**A headline stands above the proof**, from `reportHeadline`: the request as the
-proof names it, and the world-fact leaves verbatim — "No solution for matterhorn
+**A headline stands above the proof**, from `reportHeadline`: the seeds the proof
+reaches, and the world-fact leaves verbatim — "No solution for matterhorn
 ==90000.1.1: base is pinned to 4.21.0.0 (installed)." It is not a proof sentence.
 The gate and the harness count by connective, so it is never counted, on the same
 footing as cabal's "Could not resolve dependencies:" line.

@@ -58,9 +58,8 @@ ALL=("${BENCH[@]}" "${CORPUS[@]}")
 # bootstrap or refresh it.
 "$EXE" "${INDEX_STATE[@]}" vector >/dev/null 2>&1 || true
 
-# `grep -a` is not optional anywhere below: a proof carries a real NUL byte from
-# the synthetic root's name, so GNU grep treats the output as binary and silently
-# reports no match without it.
+# `grep -a` everywhere below is a precaution: GNU grep treats output with a NUL
+# byte as binary and silently reports no match.
 FIELDS=(deciding chose conflicts learned resolving backtracked noversion)
 
 # The awk's two lines, reduced to one `key=value` per line in FIELDS order plus

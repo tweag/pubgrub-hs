@@ -193,8 +193,7 @@ screen lines at 80 columns it is shorter on 15 and equal on the `hlint` pair.
 does the deciding half: it fails on any regression in verdict agreement or proof
 length. See [STATUS.md](STATUS.md) §9 and [harness-plan.md](harness-plan.md).
 
-One trap for any tool over this corpus: **our proofs contain a NUL byte** (the
-synthetic root's name), so GNU `grep` treats them as binary and silently reports no
-matches without `-a`. The harness reads every child log as bytes and decodes it
-leniently; `scripts/gate.sh` passes `-a` everywhere. New tooling must do one or the
-other, or the proof-line count will read zero and look like a passing measurement.
+One habit worth keeping in any tool over this corpus: read a child's output as
+bytes and pass `-a` to `grep`. Until 2026-09-22 every proof carried a NUL byte in
+the synthetic root's name, and a tool that read it as text counted zero lines and
+looked like a passing measurement. The root is gone, so nothing depends on it now.

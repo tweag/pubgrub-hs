@@ -43,6 +43,7 @@ module PubGrub.Solver
 
 import           Colog                          (WithLog, logMsg)
 import           Control.Applicative            (Alternative (..))
+import           Control.Monad                  (foldM)
 import           Data.Foldable                  (Foldable (..))
 import           Data.List                      (sortOn)
 import           Data.Map.Strict                (Map)
@@ -51,12 +52,14 @@ import           Data.Maybe                     (fromMaybe, mapMaybe)
 import           Data.Sequence                  (Seq)
 import qualified Data.Sequence                  as Seq
 import           Distribution.Types.PackageName
+import           Data.List.NonEmpty             (nonEmpty)
+import qualified Data.List.NonEmpty             as NE
 import           PubGrub.Incompatibility        (IncompatRelation (..),
                                                  Incompatibility (..),
                                                  PackageTerm (..), anyTerm,
                                                  incompGet, incompRelation,
-                                                 isTerminal, noInstances,
-                                                 notRoot, priorCause)
+                                                 isRequest, noInstances,
+                                                 priorCause)
 import           PubGrub.InstanceSet            (Instance, InstanceSet,
                                                  emptyInstanceSet,
                                                  singletonInstance)
@@ -301,7 +304,12 @@ satisfierSearch ps i = do
     prevForSat <- require satPkg (satisfierOf ps satPkg startTerm')
     let satMap' = [(p, if p == satPkg then prevForSat else a) | (p, a) <- satMap]
     (_, prevAssign) <- latestSatisfier satMap'
-    let prevLevel = max 1 (aLevel prevAssign)
+    -- No floor. The spec stops at decision level 1 "where the root package was
+    -- selected" and notes that level 0 is safe (@references\/pubgrub.md:398@
+    -- and :401); here there is no root package, the requests are derivations
+    -- at level 0, and the first decision at level 1 is an ordinary one that a
+    -- conflict may have to undo.
+    let prevLevel = aLevel prevAssign
     pure $ case aKind satAssign of
         Derived _ cause
             | prevLevel >= satLevel -> (satPkg, SameDecisionLevels cause)
@@ -310,10 +318,68 @@ satisfierSearch ps i = do
     satisfierForTerm (p, it) = (,) p <$> require p (satisfierOf ps p (negateTerm it))
     require p = maybe (Left (NoSatisfier p i)) Right
     -- An incompatibility with no terms is the empty clause: unsatisfiable
-    -- outright, hence a terminal failure. 'isTerminal' catches it before
+    -- outright, hence a terminal failure. 'satisfiedBySeeds' catches it before
     -- conflict resolution ever gets here, so this is the same verdict by
     -- another route, not a second opinion.
     latestSatisfier = maybe (Left (NoSolution i)) Right . maximumOn (aIndex . snd)
+
+-- | The assignments the seeds made: the level-0 derivations whose cause is a
+-- 'PubGrub.Incompatibility.request'. They are the oldest assignments of all,
+-- and they are never backtracked.
+seedAssignments :: PartialSolution -> PackageName -> [Assignment]
+seedAssignments ps p = [a | a <- packageHistory ps p, isSeed a]
+  where
+    isSeed a = case aKind a of
+        Derived _ cause -> isRequest cause
+        Decided _       -> False
+
+-- | Is the incompatibility satisfied by the seeds' own derivations alone? Then
+-- no decision took part in the conflict, so nothing can be backtracked and
+-- version solving has failed. This is PubGrub's terminal test (no terms, or a
+-- single positive term that refers to the root package version) with the root
+-- package's one derivation replaced by whatever the seeds derived: an empty
+-- incompatibility is satisfied by anything, and @{root: Positive s}@ with the
+-- root's instance in @s@ is exactly "satisfied by the seed @{not root}@ alone".
+--
+-- Checked before the satisfier search, which is what keeps a seed from ever being
+-- a satisfier's cause: the seeds are the oldest assignments, so a seed derivation
+-- is the latest satisfier only when it is the only one.
+satisfiedBySeeds :: PartialSolution -> Incompatibility -> Bool
+satisfiedBySeeds ps inc = incompRelation seedTerm inc == ISatisfied
+  where
+    seedTerm p = foldr1 intersectTerm . NE.map assignmentTerm <$> nonEmpty (seedAssignments ps p)
+
+-- | Resolve a terminal incompatibility against the seeds it rests on, one
+-- 'priorCause' per seed, so that the incompatibility handed to the report is the
+-- empty one and its derivation ends with the request. A PubGrub proof with a
+-- root package ends the same way, \"So, because root depends on …, version
+-- solving failed\": there the request is the root's dependency facts, resolved
+-- into the terminal @{root}@; here the request is the seeds, and the last step
+-- is taken explicitly.
+--
+-- Each step is a genuine resolution: 'satisfiedBySeeds' holds, so every term is
+-- subsumed by its seed's derivation and the union over the pivot is ⊤. The
+-- emptiness test that drops it is the one 'PubGrub.Relation.relation' answered
+-- "satisfied" with, so the two agree. A term that nonetheless survives is left
+-- as it is: the verdict is decided, and the report prints the closing line as
+-- failure whatever the terms say.
+closeWithSeeds
+    :: (Monad m, WithLog env SolverMsg m)
+    => PartialSolution -> Incompatibility -> m Incompatibility
+closeWithSeeds ps = go
+  where
+    -- One pass over the seeds of every package still named; another pass while
+    -- a pass removed something. Two seeds on one package need the second pass:
+    -- the first alone leaves the part of its range the other seed excludes.
+    go inc = do
+        inc' <- foldM step inc [(p, cause) | p <- Map.keys (incompTerms inc), a <- seedAssignments ps p, Derived _ cause <- [aKind a]]
+        if Map.size (incompTerms inc') < Map.size (incompTerms inc) then go inc' else pure inc'
+    step inc (p, cause)
+        | Map.member p (incompTerms inc) = do
+            let next = priorCause inc cause p
+            logMsg (Resolving p next)
+            pure next
+        | otherwise = pure inc
 
 -- | Propagate the incompatibilities to a fixpoint: judge each with
 -- 'psRelation'; on @IAlmostSatisfied p@ derive (¬ its term for @p@) via
@@ -327,12 +393,10 @@ satisfierSearch ps i = do
 -- to merge ('PubGrub.Store').
 unitPropagation
     :: (Monad m, WithLog env SolverMsg m)
-    => PackageName
-    -> Instance
-    -> Store
+    => Store
     -> PartialSolution
     -> m (Either SolveError (Store, PartialSolution))
-unitPropagation rootPkg rootI = scan
+unitPropagation = scan
   where
     scan store ps = step store ps (storeClauses store)
 
@@ -346,7 +410,7 @@ unitPropagation rootPkg rootI = scan
                 -- on after. A terminal conflict logs the first and not the second,
                 -- which is the right shape — nothing was backtracked to.
                 logMsg (Conflict i)
-                conflictResolution rootPkg rootI i ps >>= \case
+                conflictResolution i ps >>= \case
                     Left err ->
                         pure (Left err)
                     Right (almostPkg, rootCause, ps') -> do
@@ -366,15 +430,13 @@ unitPropagation rootPkg rootI = scan
 -- solution alone.
 conflictResolution
     :: (Monad m, WithLog env SolverMsg m)
-    => PackageName
-    -> Instance
-    -> Incompatibility
+    => Incompatibility
     -> PartialSolution
     -> m (Either SolveError (PackageName, Incompatibility, PartialSolution))
-conflictResolution rootPkg rootV = loop
+conflictResolution = loop
   where
     loop current ps
-        | isTerminal rootPkg rootV current = pure (Left (NoSolution current))
+        | satisfiedBySeeds ps current = Left . NoSolution <$> closeWithSeeds ps current
         | otherwise =
             case satisfierSearch ps current of
                 Left err -> pure (Left err)
@@ -421,21 +483,24 @@ data SolverMsg
     | -- | backtracked to this decision level
       Backtracked Int
 
--- | Solve for a root package pinned to a root instance: alternate
--- 'unitPropagation' with decisions — take the first 'undecidedPositive'
--- package and ask the 'Provider' to 'expand' its range into an instance and
--- the incompatibilities that instance entails.
+-- | Solve for the seeds — one 'PubGrub.Incompatibility.request' per target,
+-- standing in for PubGrub's synthetic root package — by alternating
+-- 'unitPropagation' with decisions: take the first 'undecidedPositive' package
+-- and ask the 'Provider' to 'expand' its range into an instance and the
+-- incompatibilities that instance entails.
+--
+-- The seeds go in first and in order, so their derivations are the oldest
+-- assignments and the targets are decided in the order they were asked for.
 solve
     :: (Monad m, WithLog env SolverMsg m)
     => Provider m
-    -> PackageName
-    -> Instance
+    -> [Incompatibility]
     -> m (Either SolveError (Map PackageName Instance))
-solve provider rootPkg rootV =
-    go (insertClause (notRoot rootPkg rootV) emptyStore) emptyPS
+solve provider seeds =
+    go (insertClauses seeds emptyStore) emptyPS
     where
         go incompats ps =
-            unitPropagation rootPkg rootV incompats ps >>= \case
+            unitPropagation incompats ps >>= \case
                 Left err -> pure (Left err)
                 Right (incompats', ps') ->
                     case undecidedPositive ps' of

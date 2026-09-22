@@ -21,14 +21,13 @@ import qualified Distribution.Types.Version      as Cabal
 import           PubGrub.Version                 (Version)
 import qualified PubGrub.Version                 as V
 import           Distribution.Types.VersionRange (earlierVersion,
-                                                  orLaterVersion,
-                                                  thisVersion)
+                                                  orLaterVersion)
 import           PubGrub.Incompatibility         (IncompatCause (..),
                                                   Incompatibility (..),
                                                   UnbuildableReason (..),
                                                   fromDependency, noInstances,
                                                   onlyInstalled, priorCause,
-                                                  unbuildable)
+                                                  request, unbuildable)
 import           PubGrub.InstanceSet             (InstanceSet (..))
 import           PubGrub.InstanceSet.SourceCell  (SourceCell (..))
 import           PubGrub.Report                  (collapseNoInstances,
@@ -254,14 +253,17 @@ widenedRun =
             ["q ", "r ", "s ", "t "]
     , -- The depender's range is the union of the run's, and it may be neither
       -- wider nor narrower: wider claims facts the run does not have, narrower
-      -- drops one it does.
+      -- drops one it does. The chain is closed with a request for that union,
+      -- as the solver closes a terminal derivation, so the union is a line's
+      -- conclusion rather than the proof's last word.
       testCase "the depender is the union of the run's ranges" $ do
-        let inc =
+        let chain =
                 mixedChainOf
                     [ (range 1 2, "q", range 1 5)
                     , (range 2 3, "r", range 1 6)
                     , (range 3 4, "s", range 1 7)
                     ]
+            inc = priorCause chain (request pkgA (range 1 4)) pkgA
             proof = unlines (proofLines inc)
         assertBool
             ("a should span 1..4 in one sentence:\n" ++ proof)
@@ -309,23 +311,22 @@ bootLeaf =
 
 -- | The unbuildable leaf. It names what rules the release out — the module
 -- @pkg-config@ could not find, spelled as Cabal-syntax spells the field — rather
--- than saying only that it cannot be built. A lone leaf is the whole proof, and
--- the package is then the root, named bare; the headline test below has the
--- range.
+-- than saying only that it cannot be built. A lone leaf is rendered as the whole
+-- proof here, range and all.
 unbuildableLeaf :: [TestTree]
 unbuildableLeaf =
     [ testCase "a missing pkg-config module is named" $ do
         let proof = unlines (proofLines (unbuildable pkgA (from 1) (NE.singleton (missing "libpq"))))
-        assertBool proof ("a needs pkg-config package libpq, which is not found" `isInfixOf` proof)
+        assertBool proof ("a >=1 needs pkg-config package libpq, which is not found" `isInfixOf` proof)
     , testCase "several missing modules share one needs, in order" $ do
         let proof = unlines (proofLines (unbuildable pkgA (from 1) (NE.fromList [missing "libpq", missing "zlib"])))
-        assertBool proof ("a needs pkg-config packages libpq and zlib, which are not found" `isInfixOf` proof)
+        assertBool proof ("a >=1 needs pkg-config packages libpq and zlib, which are not found" `isInfixOf` proof)
     , testCase "buildable: False says so" $ do
         let proof = unlines (proofLines (unbuildable pkgA (from 1) (NE.singleton NotBuildable)))
-        assertBool proof ("a is marked buildable: False" `isInfixOf` proof)
+        assertBool proof ("a >=1 is marked buildable: False" `isInfixOf` proof)
     , testCase "both kinds of reason are joined with and" $ do
         let proof = unlines (proofLines (unbuildable pkgA (from 1) (NE.fromList [NotBuildable, missing "libpq"])))
-        assertBool proof ("a is marked buildable: False and needs pkg-config package libpq, which is not found" `isInfixOf` proof)
+        assertBool proof ("a >=1 is marked buildable: False and needs pkg-config package libpq, which is not found" `isInfixOf` proof)
     ]
 
 -- | A @pkgconfig-depends@ on the module at any version.
@@ -333,33 +334,41 @@ missing :: String -> UnbuildableReason
 missing name = MissingPkgConfig (PkgconfigDependency (mkPkgconfigName name) anyPkgconfigVersion)
 
 -- | The line above the proof: the request as the proof names it, and the
--- world-fact leaves verbatim.
+-- world-fact leaves verbatim. A terminal derivation ends by resolving against
+-- the seeds it rests on, as 'PubGrub.Solver' closes it, so the seeds are its
+-- last external facts.
 headline :: [TestTree]
 headline =
     [ testCase "names the request and the wall" $ do
-        let inc = priorCause (rootDependsOn pkgA (range 1 2)) (onlyInstalled pkgA [v 3] (from 1)) pkgA
+        let inc = priorCause (onlyInstalled pkgA [v 3] (from 1)) (request pkgA (range 1 2)) pkgA
         T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2: a is pinned to 3 (installed)."
     , -- The reason is part of the fact, so it is part of the wall.
       testCase "an unbuildable wall carries its reason" $ do
-        let inc = priorCause (rootDependsOn pkgA (range 1 2)) (unbuildable pkgA (from 1) (NE.singleton (missing "libpq"))) pkgA
+        let inc = priorCause (unbuildable pkgA (from 1) (NE.singleton (missing "libpq"))) (request pkgA (range 1 2)) pkgA
         T.unpack (reportHeadline inc)
             @?= "No solution for a >=1 && <2: a >=1 needs pkg-config package libpq, which is not found."
     , testCase "a pure version conflict has no wall" $ do
-        let inc = priorCause (rootDependsOn pkgA (range 1 2)) (hole pkgA (range 1 2)) pkgA
+        let inc = priorCause (hole pkgA (range 1 2)) (request pkgA (range 1 2)) pkgA
         T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2."
-    , -- Only the root dependencies the proof reaches are the request; a second one
-      -- the derivation never used did not fail.
-      testCase "names every root dependency in the proof, once" $ do
+    , -- Only the seeds the proof reaches are the request; a target the derivation
+      -- never used did not fail.
+      testCase "names every seed in the proof, once" $ do
         let inc =
                 priorCause
-                    (priorCause (rootDependsOn pkgA (range 1 2)) (aDependsOn (range 1 2) (range 5 9)) pkgA)
-                    (rootDependsOn pkgQ (range 1 5))
+                    (priorCause (aDependsOn (range 1 2) (range 5 9)) (request pkgA (range 1 2)) pkgA)
+                    (request pkgQ (range 1 5))
                     pkgQ
         T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2 and q >=1 && <5."
+    , -- The closing line of such a proof: the seeds, and failure by name.
+      testCase "the last line names the seeds and concludes failure" $ do
+        let inc =
+                priorCause
+                    (priorCause (aDependsOn (range 1 2) (range 5 9)) (request pkgA (range 1 2)) pkgA)
+                    (request pkgQ (range 1 5))
+                    pkgQ
+        T.unpack (reportConflict inc)
+            @?= "Because a >=1 && <2 depends on q >=5 && <9 and a >=1 && <2 is requested, q >=5 && <9 is required.\nSo, because q >=1 && <5 is requested, version solving failed."
     ]
-  where
-    root = mkPackageName "root"
-    rootDependsOn = fromDependency root (sourceOnly (VersionSet.fromVersionRange (thisVersion (cv 0))))
 
 -- | 'wrapProof': a hanging indent, and never a break inside a range.
 wrapping :: [TestTree]
@@ -399,7 +408,7 @@ wrapping =
     wrapped n = map T.unpack . T.lines . wrapProof n . T.pack
     isPrefixOf' p s = take (length p) s == p
     isSuffixOf' p s = reverse (take (length p) (reverse s)) == p
-    short = "So, because root depends on foo, version solving failed."
+    short = "So, because foo is requested, version solving failed."
     long = "Because aeson >=1.1.0.0 && <1.2.2.0 depends on base >=4.5 && <4.13 and bytestring >=0.10.0.1 && <0.10.6.0 || >=0.10.8.1 && <0.10.9.0 depends on base 4.21.0.0 (installed), aeson >=0.8.1.0 && <1.4.7.0 requires base >=4.2 && <4.15."
     seven = "base ^>=4.13.0.0 || ^>=4.14.0.0 || ^>=4.15.0.0 || ^>=4.16.0.0 || ^>=4.17.0.0 || ^>=4.18.0.0 || ^>=4.19.0.0."
 
@@ -429,7 +438,7 @@ styling =
     headline' = "No solution for foo >=1.0: bar is pinned to 2 (installed)."
     sentence = "And because foo >=1.0 && <2 depends on bar >=1.0, foo >=1.0 && <2 is forbidden"
     continuation = "    bar >=1.0 && <2 which depends on baz"
-    conclusion = "So, because root depends on foo >=1.0, version solving failed."
+    conclusion = "So, because foo >=1.0 is requested, version solving failed."
     unlines' = foldr1 (\a b -> a ++ "\n" ++ b)
     stripEscapes = T.replace (T.pack "\ESC[1m") T.empty . T.replace (T.pack "\ESC[2m") T.empty . T.replace (T.pack "\ESC[0m") T.empty
 
@@ -503,7 +512,7 @@ soundness =
     sameTerm _ _                              = False
 
 describe :: IncompatCause -> String
-describe CauseRoot{}          = "CauseRoot"
+describe CauseRequest{}       = "CauseRequest"
 describe CauseNoInstances{}   = "CauseNoInstances"
 describe CauseOnlyInstalled{} = "CauseOnlyInstalled"
 describe CauseUnbuildable{}   = "CauseUnbuildable"

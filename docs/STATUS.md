@@ -73,9 +73,9 @@ Not built: setup and build-tool dependencies (rung 4) and public sublibraries
 
 ## 3. The numbers
 
-Measured by `pubgrub-harness` at index-state `2026-09-09T02:42:09Z`: one desktop,
-the derived index rebuilt on that index, medians of three runs, no trace. The two
-reports as generated are in [reports/](reports/). Read
+Measured by `pubgrub-harness` on 2026-09-22 at index-state `2026-09-09T02:42:09Z`:
+one desktop, medians of three runs, no trace. The two reports as generated are in
+[reports/](reports/). Read
 [benchmarking.md](benchmarking.md) before you quote any figure below. The short version:
 counts are deterministic, elapsed time moves by ±25% between runs, and total
 allocation is the stable stand-in for time.
@@ -88,14 +88,14 @@ the better of the two.
 
 | problem | verdict | ours | cabal | our world / solve | cabal world / index / solve | our residency | cabal residency | our allocation | cabal allocation | our proof | cabal's message |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `vector` | both sat | **0.64** | 1.02 | 0.61 / 0.02 | 0.60 / 0.12 / 0.25 | **25.4** | 68.1 MB | **0.55** | 1.03 GB | — | — |
-| `pandoc` | both sat | **1.23** | 1.39 | 0.68 / 0.53 | 0.62 / 0.13 / 0.65 | **41.9** | 96.7 MB | **1.88** | 1.97 GB | — | — |
-| `conduit <1.3` | both UNSAT | **0.57** | 0.99 | 0.55 / 0.01 | 0.60 / 0.10 / 0.28 | **25.4** | 68.1 MB | **0.54** | 1.50 GB | **9** | 12 |
-| `lens <4` | both UNSAT | **0.73** | 1.17 | 0.67 / 0.05 | 0.59 / 0.15 / 0.40 | **25.4** | 68.1 MB | **0.68** | 2.06 GB | **7** | 18 |
-| `aeson <2` | both UNSAT | **0.74** | 1.72 | 0.57 / 0.17 | 0.56 / 0.10 / 1.04 | **25.4** | 91.3 MB | **1.23** | 5.60 GB | 55 | **26** |
-| `yesod` | both sat | 2.10 | **1.40** | 0.52 / 1.59 | 0.58 / 0.10 / 0.69 | **62.3** | 97.2 MB | 5.91 | **2.10** GB | — | — |
+| `vector` | both sat | **0.66** | 1.01 | 0.63 / 0.02 | 0.64 / 0.11 / 0.24 | **25.4** | 68.2 MB | **0.55** | 1.03 GB | — | — |
+| `pandoc` | both sat | **1.07** | 1.43 | 0.58 / 0.49 | 0.63 / 0.10 / 0.65 | **41.8** | 96.7 MB | **1.83** | 1.97 GB | — | — |
+| `conduit <1.3` | both UNSAT | **0.58** | 0.99 | 0.56 / 0.01 | 0.53 / 0.10 / 0.34 | **25.4** | 68.2 MB | **0.54** | 1.50 GB | **9** | 12 |
+| `lens <4` | both UNSAT | **0.68** | 1.09 | 0.63 / 0.05 | 0.58 / 0.11 / 0.39 | **25.4** | 68.2 MB | **0.68** | 2.06 GB | **7** | 18 |
+| `aeson <2` | both UNSAT | **0.75** | 1.76 | 0.57 / 0.18 | 0.56 / 0.12 / 1.04 | **25.4** | 91.4 MB | **1.23** | 5.60 GB | 38 | **26** |
+| `yesod` | both sat | 2.00 | **1.48** | 0.57 / 1.42 | 0.58 / 0.13 / 0.72 | **41.7** | 97.2 MB | 5.51 | **2.10** GB | — | — |
 
-All six verdicts agree. We use **1.6–3.6× less peak memory on all six**. We are faster
+All six verdicts agree. We use **2.3–3.6× less peak memory on all six**. We are faster
 on five of six and allocate less on five of six.
 
 **The phases say where our time goes, and it is not the solve.** Opening the world
@@ -106,7 +106,7 @@ matters. cabal's `index` phase is small because the work it names is lazy and la
 in its `solve` ([§3.3](#33-what-these-numbers-do-not-establish)).
 
 **`yesod` is where we lose, and it is the most useful row in the table.** cabal is
-1.5× faster on it and allocates 2.8× less. It is the only *satisfiable* problem in the
+1.4× faster on it and allocates 2.6× less. It is the only *satisfiable* problem in the
 set with real search in it: `vector` and `pandoc` resolve almost straight through.
 Every other row is either a walk-through or an unsatisfiable proof, so until `yesod`
 was enabled the set could not report this at all.
@@ -119,12 +119,12 @@ Our search counts on the same run:
 
 | problem | decisions | conflicts | no-version events | releases decoded | `.cabal` parses |
 | --- | --- | --- | --- | --- | --- |
-| `vector` | 39 | 0 | 0 | 114 | 0 |
-| `pandoc` | 270 | 1 | 0 | 2883 | 0 |
-| `conduit <1.3` | 16 | 8 | 1 | 174 | 0 |
-| `lens <4` | 65 | 23 | 2 | 268 | 0 |
-| `aeson <2` | 320 | 58 | 0 | 367 | 0 |
-| `yesod` | 839 | 14 | 0 | 3386 | 0 |
+| `vector` | 38 | 0 | 0 | 102 | 0 |
+| `pandoc` | 265 | 1 | 0 | 2831 | 0 |
+| `conduit <1.3` | 15 | 8 | 1 | 174 | 0 |
+| `lens <4` | 64 | 23 | 2 | 268 | 0 |
+| `aeson <2` | 319 | 58 | 0 | 367 | 0 |
+| `yesod` | 828 | 14 | 0 | 3248 | 0 |
 
 Every parse count is zero because the derived index answers every read
 ([§4.6](#46-the-derived-index-makes-a-read-a-decode)). That holds only while the
@@ -133,11 +133,13 @@ since are parsed until `pubgrub-index` is re-run, and a non-zero `parses` is the
 Reading the index at an index-state costs the world phase about 0.16 GB of
 allocation and 2 MB of residency on every run
 ([§4.12](#412-the-index-is-read-at-an-index-state)), which is visible on the smallest
-rows and nowhere else. The three search changes that moved these counts, the
-first-release slot rule ([§4.4](#44-a-release-owns-a-slot-not-a-point)), the version
-order ([§4.13](#413-versions-compare-with-trailing-zeros-insignificant)) and the
-buildability gate ([§4.14](#414-a-component-that-is-not-buildable-contributes-no-dependencies)),
-each record their before-and-after where they are described.
+rows and nowhere else. The changes that moved these counts, the first-release slot
+rule ([§4.4](#44-a-release-owns-a-slot-not-a-point)), the version order
+([§4.13](#413-versions-compare-with-trailing-zeros-insignificant)), the buildability
+gate ([§4.14](#414-a-component-that-is-not-buildable-contributes-no-dependencies))
+and the seeds ([§4.15](#415-the-request-is-a-list-of-seeds-not-a-root-package), one
+decision fewer everywhere), each record their before-and-after where they are
+described.
 
 **The plan diff finds one known gap and nothing else.** On the three satisfiable
 problems our plan is a *subset* of cabal's, and the two agree on every package they
@@ -195,8 +197,8 @@ a completeness column before it can render such a problem fairly.
   has, and most of it is a number nobody can account for. Settle this first.
 
   What sits *above* the floor is understood: the memoised reduced forms, so residency
-  tracks how many releases a solve read. That is why `pandoc` is at 41.9 MB and `yesod`
-  at 62.3 MB.
+  tracks how many releases a solve read. That is why `pandoc` and `yesod` sit at
+  about 42 MB.
 - **cabal's index work is not separated from its solve, and cannot be.** The `world`
   phase — index open, installed database, pkg-config database — is separated on both
   sides. The two solvers then do different index work: ours decodes a release when it
@@ -562,9 +564,12 @@ a conclusion wider than the two named causes justify.
 **The wording is pub's, in cabal's range syntax.** The spec leaves the sentences to
 the implementation (`:677`) and lists pub's special cases (`:1010`–`:1030`), and
 every one of them is in: "every version of foo" for a set that admits every version,
-the root by name alone, "So," on the last line, "version solving failed" instead of
-"root is forbidden", a period on every line, and the blank line between two branches
-(`:632`). A negative term is never printed as "not …": the sentence carries the
+"So," on the last line, "version solving failed" on it, a period on every line, and
+the blank line between two branches (`:632`). Where pub names its root package
+("myapp depends on foo ^1.0.0") there is no root here: the request is a seed per
+target, and a seed reads "foo >=1 is requested", two of them "foo >=1 and bar are
+requested", one whose range holds nothing "foo >9 is requested, which has no
+versions". A negative term is never printed as "not …": the sentence carries the
 negation, as pub's do. Two positive terms read "X is incompatible with Y", two
 negative ones "either X or Y", and a clause with several terms reads "P requires N1
 or N2" or "if P1 and P2 then N1 or N2". A boot package's fact names the version it
@@ -583,9 +588,9 @@ unbounded and `zlib >=1.2` with its range; cabal's `-any` is its spelling of the
 empty range and is not copied.
 
 **A headline stands above the proof.** The proof is read bottom-up — its first line
-is the deepest fact and the root appears only on the last — so `reportHeadline`
-says first what the proof will conclude: the request, as the root's dependency facts
-in the proof name it, and the world facts the proof rests on, verbatim:
+is the deepest fact and the request appears only on the last — so `reportHeadline`
+says first what the proof will conclude: the request, as the seeds the proof rests
+on name it, and the world facts the proof rests on, verbatim:
 `No solution for matterhorn ==90000.1.1: base is pinned to 4.21.0.0 (installed).`
 It claims nothing the proof does not, since every named fact is a premise of the
 derivation below it. The driver prints it, then a blank line, then the proof. It is
@@ -631,10 +636,44 @@ message quotes. A range the solver derived has no author and prints canonically.
 The linear example matches `:1005` sentence for sentence. The branching one differs
 from `:1150` only in which facts the derivation happened to pair.
 
-> **One trap for tooling.** The synthetic root's name carries a real NUL byte, so GNU
-> `grep` treats a proof as binary and reports no matches without `-a`.
-> `scripts/gate.sh` passes `-a` everywhere, and the harness reads every child log as
-> bytes. New tooling that greps a proof will read zero and look like it passed.
+### 4.15 The request is a list of seeds, not a root package
+
+`PubGrub.Solver.solve` takes a list of incompatibilities. Each target `p R` is
+`request p R`, the unit clause `{p: Negative R}` with cause `CauseRequest`, built by
+`Bridge.Provider.withProvider` because widening a range to instances needs the
+installed db. The spec's synthetic root (`references/pubgrub.md:252`) is these
+clauses with a package in front of them, and that package then had to be decided,
+printed, filtered out of every plan, and named with a NUL byte so it could not
+collide with a real one. Decided on 2026-07-30, built on 2026-09-22.
+
+The seeds propagate to derivations at decision level 0 before anything is decided,
+and three things follow:
+
+- **Terminal is "satisfied by the seed derivations alone"**, checked before the
+  satisfier search (`satisfiedBySeeds`). It is `:377` with the root's one derivation
+  replaced by the seeds': the empty incompatibility is satisfied by anything, and
+  `{root: Positive s}` with the root's instance in `s` is exactly "satisfied by the
+  seed `{not root}`". A conflict satisfied at level 0 by a *learned* derivation is
+  not terminal and resolves on through that derivation's cause, so the proof still
+  says why the fact was forced.
+- **The backtrack floor is level 0.** The spec's `max 1` (`:399`) protects its root
+  decision and it says level 0 is safe (`:402`). Here the first decision at level 1
+  is an ordinary target, and a learned unit clause on it has to be able to undo it;
+  with the floor kept, that case loops.
+- **A terminal conflict is closed against the seeds** (`closeWithSeeds`): one
+  `priorCause` per seed it rests on, in a pass repeated while a pass removes
+  something, so two seeds on one package both take part. The reported
+  incompatibility is empty, the last line reads "So, because …, version solving
+  failed", and the request is the last fact named: "aeson ==2.3.1.0 is requested".
+  The emptiness test that drops a seed's term is the one `relation` answered
+  "satisfied" with, so the two agree; if a term survived anyway the line would still
+  read as failure, because that is what it is.
+
+What it changed, measured on the 26 gate problems: every verdict the same, every
+proof the same length with "root depends on X" become "X is requested", the
+paper's two golden proofs changed on their last line only, and every problem has
+one decision fewer. There is no `root` in any proof and no NUL byte anywhere; the
+`-a` in the scripts is now a precaution.
 
 ### 4.10 Memoise the reduced form, never the parse tree
 
@@ -787,7 +826,7 @@ default nursery cabal's peak on `vector` reads 50.7 MB on the committed tree and
 MB here; under the 256 KB nursery it reads 64.3 MB and 66.0 MB. The first pair is the
 sampling moving, not the heap: `maximum residency` is the largest heap at any major
 collection, and with a 4 MB nursery there are six of them in a short run. The
-2026-09-09 table in [§3.1](#31-against-cabal-on-the-benchmark-set) carries cabal's
+2026-09-22 table in [§3.1](#31-against-cabal-on-the-benchmark-set) carries cabal's
 higher figures for that reason, not because cabal changed.
 [benchmarking.md](benchmarking.md) records the check.
 
@@ -1027,7 +1066,6 @@ exists in the code.**
 | thing | specification | note |
 | --- | --- | --- |
 | **Condition decisions** (rules D1, D2, D3) | [decision-semantics.md](decision-semantics.md) §2–§9 | a kernel-level change to what a decision is. Dormant: the cost it removes is currently zero |
-| **Seed incompatibilities** instead of a synthetic root | [decision-log.md](decision-log.md) | decided 2026-07-30. `solve` still takes `rootPkg` and `rootV` |
 | **`buildable:` as a condition** | [flags-semantics.md](flags-semantics.md) §1.5 | half built. `buildableCondition` returns the condition and `buildableAtDefaults` evaluates it. Satisfying it rather than evaluating it is the flag-axis half |
 | **User flag constraints** (`--flag`) | [flags-semantics.md](flags-semantics.md) §1.6 | do not exist. While every flag is manual, they are the only thing that can move one |
 | **The verdict oracle** (test) | [flags-semantics.md](flags-semantics.md) §6 | owed. It blocks condition decisions, and it is what would discharge O4's whole-loop claim |
@@ -1207,7 +1245,7 @@ the reason for reverting does not apply to it. See
 | deliverable | state |
 | --- | --- |
 | **Explanation showcase** — real failing problems, pubgrub-hs against cabal, side by side | **the problem set exists and we win on all of it, and all of it is pinned.** 20 real failures with every target pinned, six failure kinds, five positive controls. Shorter than cabal on 20 of 20: 76 proof sentences against 193. Shorter on two of the three benchmark unsat problems. Both of the spec's published examples are golden tests, and the linear one matches sentence for sentence. `pubgrub-harness` renders the two explanations as adjacent blocks for the 16 comparable problems, and the 2026-09-22 run is [reports/showcase.md](reports/showcase.md): shorter on 16 of 16 by sentences, 59 against 150 lines; on screen lines at 80 columns 159 against 337, shorter on 15 and equal on one. **On an unconstrained target the record inverts** ([§3.2](#32-against-cabal-on-the-failure-corpus)), and no such problem is in the corpus or the showcase |
-| **Benchmark report** — time and peak residency on real problems | **current numbers exist** for six problems, three sat and three unsat, both solvers. We use less peak memory on all six, and are faster and leaner in allocation on five of six. `yesod` is the exception on both. The 2026-09-09 run is [reports/benchmark.md](reports/benchmark.md). Its caveats: timings are medians of three runs against ±25% noise, cabal's lazy per-release parsing lands in its `solve` phase and cannot be separated without changing the work, and the 25 MB memory floor is unexplained |
+| **Benchmark report** — time and peak residency on real problems | **current numbers exist** for six problems, three sat and three unsat, both solvers. We use less peak memory on all six, and are faster and leaner in allocation on five of six. `yesod` is the exception on both. The 2026-09-22 run is [reports/benchmark.md](reports/benchmark.md). Its caveats: timings are medians of three runs against ±25% noise, cabal's lazy per-release parsing lands in its `solve` phase and cannot be separated without changing the work, and the 25 MB memory floor is unexplained |
 
 The baseline and the shared index are done. `cabal-install-solver` drives cabal's
 resolver from the same `withWorld`, which is what makes the comparison

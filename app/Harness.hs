@@ -16,11 +16,11 @@
 -- @cabal run pubgrub-harness -- --set corpus --reps 1@
 -- @cabal run pubgrub-harness -- 'lens <4'@                 — one problem
 --
--- Two traps this file is built around. The proof carries a real NUL byte (the
--- synthetic root's name), so every child log is read as bytes and decoded
--- leniently, never as a locale 'String'. And the driver's exit code says nothing —
--- it is 0 for a plan and 0 for a proof of no plan — so the verdict is read from the
--- text, exactly as @scripts/gate.sh@ reads it.
+-- Two things this file is built around. Every child log is read as bytes and
+-- decoded leniently, never as a locale 'String', so nothing a child prints can
+-- make the harness fail on decoding. And the driver's exit code says nothing —
+-- it is 0 for a plan and 0 for a proof of no plan — so the verdict is read from
+-- the text, exactly as @scripts/gate.sh@ reads it.
 module Main (main) where
 
 import Control.Exception (IOException, try)
@@ -339,8 +339,8 @@ captureTo path cmd args =
             ExitSuccess   -> 0
             ExitFailure n -> n)
 
--- | Read a file as bytes and decode leniently: a proof carries a NUL byte, and
--- the locale is nobody's business. Missing file: empty.
+-- | Read a file as bytes and decode leniently: the locale is nobody's business.
+-- Missing file: empty.
 readTextFile :: FilePath -> IO Text
 readTextFile path = do
     ok <- doesFileExist path
@@ -616,10 +616,10 @@ table hdr rows = row hdr : row (map (const "---") hdr) : map row rows
 fenced :: [Text] -> [Text]
 fenced body = ["```text"] ++ body ++ ["```"]
 
--- | The proof as a reader sees it: the synthetic root's NUL byte is dropped, so
--- @\0root ==0@ renders as @root ==0@. Counts are made on the raw lines.
+-- | A proof line as the reports print it, which is as the driver printed it.
+-- Counts are made on the raw lines.
 readable :: Text -> Text
-readable = T.filter (/= '\0')
+readable = id
 
 statInt :: Text -> Measured -> Maybe Integer
 statInt k m = mStats m >>= lookup k >>= readT
@@ -700,9 +700,9 @@ planDiff ours cabal
         (Nothing, _) -> ["- unavailable: the driver printed no `plan:` lines for ours"]
         (_, Nothing) -> ["- unavailable: the driver printed no `plan:` lines for cabal"]
         (Just ps, Just cs) ->
-            let ourMap = versionsOf (filter (not . isRoot) ps)
-                libLines = [c | c <- cs, not (isRoot c), maybe True (== "lib") (plQualifier c)]
-                otherLines = [c | c <- cs, not (isRoot c), maybe False (/= "lib") (plQualifier c)]
+            let ourMap = versionsOf ps
+                libLines = [c | c <- cs, maybe True (== "lib") (plQualifier c)]
+                otherLines = [c | c <- cs, maybe False (/= "lib") (plQualifier c)]
                 cabalMap = versionsOf libLines
                 onlyOurs = Map.keys (ourMap `Map.difference` cabalMap)
                 onlyCabal = Map.keys (cabalMap `Map.difference` ourMap)
@@ -726,7 +726,6 @@ planDiff ours cabal
                        | not (null otherLines) ]
             in ("- agree on " <> T.pack (show agree) <> " packages") : findings
   where
-    isRoot l = T.any (== '\0') (plName l)
     versionsOf :: [PlanLine] -> Map Text (Set Text)
     versionsOf = Map.fromListWith Set.union . map (\l -> (plName l, Set.singleton (plVersion l)))
     listNames = T.intercalate ", " . map tick
@@ -750,8 +749,7 @@ showcaseReport cfg env results =
     , "counted as the number of 80-column rows it fills. The line above each of our proofs"
     , "names the request and the facts about this machine the proof rests on; it is"
     , "not a sentence of the proof and is not counted, as cabal's `Could not resolve"
-    , "dependencies:` line is not. The synthetic root's NUL byte is dropped from the"
-    , "rendered proofs; the counts are made on the raw output."
+    , "dependencies:` line is not."
     , "" ]
     ++ headerLines cfg env results
     ++ [ ""

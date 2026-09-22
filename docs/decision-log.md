@@ -1260,6 +1260,46 @@ broad refutation against a message that reports one path.
 
 ---
 
+## Era 18 — Seeds instead of a synthetic root (Sep 22)
+
+### The request is a list of incompatibilities — HELD, decided Jul 30, built Sep 22
+
+*Sep 22.* Andrea asked for the July decision to be built. `solve` took a root
+package and its instance, seeded the store with `{not root}`, and the bridge answered
+the root's expansion with one dependency fact per target. The root then had to be
+decided, printed at the top of every tree, deleted from every plan, filtered out of
+the harness's diffs, and named `"\0root"` so it could not collide with a real
+package, which put a NUL byte in every proof and a `-a` on every grep.
+
+`solve` now takes a list of seeds, one `request p R` per target, the unit clause
+`{p: Negative R}` with cause `CauseRequest`. The bridge builds them in
+`withProvider`, since widening a range to instances needs the installed db. Three
+things in the kernel moved with it, each checked against the spec:
+
+- the terminal test became "satisfied by the seed derivations alone", the spec's
+  `:377` with the root's derivation replaced by the seeds'. A conflict satisfied at
+  level 0 by a *learned* derivation is not terminal and resolves on through that
+  derivation's cause, so the proof still says why the fact was forced;
+- the backtrack floor `max 1` went. The spec keeps level 1 because that is where its
+  root was decided and says level 0 is safe (`:399`–`:404`). With the seeds at level
+  0 the first decision at level 1 is an ordinary target, and a learned unit clause on
+  it had to be able to undo it; with the floor kept, that case looped;
+- a terminal conflict is closed against the seeds it rests on, one `priorCause` per
+  seed, so the reported incompatibility is empty and the last line keeps the spec's
+  shape, "So, because …, version solving failed", with the request as its last fact.
+
+The wording of a seed is "aeson ==2.3.1.0 is requested", two of them "baz >=1.0.0
+&& <2 and foo >=1.0.0 && <2 are requested", one with an empty range "aeson >9 is
+requested, which has no versions". The paper's two golden proofs changed on their
+last line only, and the paper's root is no longer a package of those worlds: its
+dependencies are the seeds, which is what `:252` says the root stands for.
+
+Measured on the 26 gate problems: every verdict the same, every proof the same
+length, 76 sentences, and every problem one decision fewer. The driver renders a
+forest, one tree per target. The `-a` in the scripts stayed as a precaution.
+
+---
+
 ## What is open, and what is settled
 
 Not here. [STATUS.md](STATUS.md) §8 carries both lists, where they are re-read.
