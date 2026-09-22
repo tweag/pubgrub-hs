@@ -5,13 +5,12 @@
 #
 #   scripts/gate.sh                  # everything
 #   OUT=/tmp/gate scripts/gate.sh    # keep the per-problem logs
-#   SKIP_LEAN=1 scripts/gate.sh      # everything but the Lean build
 #
 # The gates, in order:
 #
 #   problems   the union set still holds every problem it is meant to
 #   corpus     every problem in bench/unsat-problems.txt still fails to resolve
-#              under our solver (docs/failure-cases.md: all 17 reproduce here)
+#              under our solver (docs/failure-cases.md: all 20 reproduce here)
 #   agreement  ours and cabal's solver return the SAME verdict, over the union of
 #              bench/problems.txt and bench/unsat-problems.txt
 #   vs-cabal   our proof is no longer than cabal's message on any corpus problem
@@ -19,7 +18,6 @@
 #   golden     the two published PubGrub examples still render their exact proofs
 #   pkgconfig  the pkg-config / buildable: False modelling tests
 #   unit       the whole test suite
-#   lean       the Lean kernel model still builds
 #
 # Baselines are the five numbers below. EXPECT_PROBLEMS is exact. The other four
 # are floors or ceilings, not targets: a run that beats one prints IMPROVED and
@@ -30,14 +28,15 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
 # --- baselines --------------------------------------------------------------
-# Measured on 2026-08-23. See the header: floors and ceilings, not targets.
+# Measured on 2026-09-22 at the index-state in bench/index-state. See the
+# header: floors and ceilings, not targets.
 #
 # The proof baselines are over the CORPUS only, so adding a problem to
 # bench/problems.txt moves MIN_AGREEMENT and EXPECT_PROBLEMS and nothing else.
-: "${MIN_AGREEMENT:=23}"    # problems where both solvers return the same verdict
-: "${EXPECT_PROBLEMS:=23}"  # problems in the union set. A drop means a lost case
-: "${EXPECT_CORPUS:=17}"    # reproducible failure cases
-: "${MAX_PROOF:=60}"        # total proof sentences over the corpus (ceiling)
+: "${MIN_AGREEMENT:=26}"    # problems where both solvers return the same verdict
+: "${EXPECT_PROBLEMS:=26}"  # problems in the union set. A drop means a lost case
+: "${EXPECT_CORPUS:=20}"    # reproducible failure cases
+: "${MAX_PROOF:=76}"        # total proof sentences over the corpus (ceiling)
 : "${MAX_NOVER:=0}"         # total "no version for" lines over the corpus (ceiling)
 
 OUT=${OUT:-$(mktemp -d)}
@@ -244,20 +243,6 @@ run_tests() {
 run_tests golden '"$2==\"PubGrub paper examples\"&&$3~/Error Reporting/"'
 run_tests pkgconfig '"$3==\"buildability (pkg-config, buildable: False)\""'
 run_tests unit ''
-
-# --- gate: the Lean kernel model --------------------------------------------
-if [ "${SKIP_LEAN:-0}" = 1 ]; then
-    gate lean skipped "SKIP_LEAN=1"
-elif ! command -v lake >/dev/null 2>&1; then
-    gate lean FAIL "lake not on PATH"
-else
-    lean_log="$OUT/lean.log"
-    if (cd specification && timeout "$TIMEOUT" lake build) >"$lean_log" 2>&1; then
-        gate lean ok "$(grep -aoE 'Build completed successfully \([0-9]+ jobs\)' "$lean_log" | tail -1)"
-    else
-        gate lean FAIL "see $lean_log: $(grep -aE 'error' "$lean_log" | head -3 | tr '\n' ' ')"
-    fi
-fi
 
 # --- summary ----------------------------------------------------------------
 echo

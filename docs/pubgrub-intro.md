@@ -405,8 +405,7 @@ lists them. Each one is a reason not to reach for an off-the-shelf solver.
 
 > **There is no ASP component in this project, and there never was.** An early plan to
 > encode solving for Clingo was dropped before any code was written. See
-> [attic/README.md](attic/README.md) §1. The role of an independent checker is played
-> by the Lean model in [../specification/](../specification/), which is itself a draft.
+> [attic/README.md](attic/README.md) §1.
 
 ---
 

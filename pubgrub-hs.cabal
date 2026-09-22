@@ -190,30 +190,3 @@ executable pubgrub-harness
     default-language:   GHC2021
     default-extensions: ImportQualifiedPost
 
--- A throwaway measurement, not part of the solver: prototype/IndexBench.hs
--- prices the derived pre-environment index (bytes per entry under binary and
--- serialise, and the parse:flatten split).
-executable index-bench
-    import:             warnings
-    ghc-options:        -rtsopts
-    hs-source-dirs:     prototype
-    main-is:            IndexBench.hs
-    build-depends:
-        , base
-        , binary
-        , bytestring
-        , Cabal-syntax
-        , co-log
-        , containers
-        , deepseq
-        , hackage-security
-        , http-client
-        , mtl
-        , pubgrub-hs
-        , pubgrub-hs:bridge
-        , serialise
-        , text
-        , unliftio
-    default-language:   GHC2021
-    default-extensions: ImportQualifiedPost
-

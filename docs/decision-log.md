@@ -1260,15 +1260,9 @@ broad refutation against a message that reports one path.
 
 ---
 
-## What is open now
+## What is open, and what is settled
 
-**Not here.** Read [STATUS.md](STATUS.md) §8. This file used to carry its own list, and
-it drifted into asserting the opposite of the code.
-
-## What is settled
-
-**Not here either.** [STATUS.md](STATUS.md) §8 carries "Settled — please stop
-re-litigating", where it is re-read.
+Not here. [STATUS.md](STATUS.md) §8 carries both lists, where they are re-read.
 
 ---
 

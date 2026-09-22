@@ -60,14 +60,28 @@ instance Pretty Instance where
     pretty (UsePreInstalled pip) = T.pack "installed:" <> pretty (pipUnitId pip)
     pretty (BuildSource v fa)    = pretty v <> T.pack (showFlagAssignment fa)
 
--- | A set of instances in two halves: the pre-installed units, listed
--- explicitly, and the source instances, as a union of 'SourceCell's. A cell
--- keeps the version range it was built from, so a report can still be phrased
--- in ranges after the set algebra has run.
+-- | A set of 'Instance's of one package: the value a solver term ranges over.
+--
+-- The two halves are represented differently because they differ in kind. The
+-- installed half is /extensional/: the installed database is small and fully
+-- known, so it is a plain 'Set' of units. The source half is /intensional/: a
+-- dependency's declared range admits versions the index may not even have, so
+-- it is kept as a disjunction of 'SourceCell's, each a version range crossed
+-- with pinned flags, and never enumerated. A cell keeps its range, so a report
+-- can still be phrased in ranges after the set algebra has run.
+--
+-- The cell list is a disjunctive normal form and is /not/ canonical: two
+-- different lists can denote the same set, so there is deliberately no 'Eq' or
+-- 'Ord' instance. Use 'PubGrub.SetOps.equivalent' for semantic equality.
+-- 'isEmpty' is one-sided: it may answer "not empty" for a set that is empty in
+-- fact, because seeing that needs the index, but it never claims emptiness
+-- wrongly.
 data InstanceSet = InstanceSet
     { isInstalled :: Set PreInstalledPackage
-    -- ^ The pre-installed units in the set.
+    -- ^ The pre-installed units in the set, extensionally.
     , isSource    :: [SourceCell]
+    -- ^ The source releases in the set, as a disjunction of cells. Not
+    -- canonical; see above.
     }
 
 -- Every operation prunes with 'pruneCells', 'difference' once per rhs cell, so

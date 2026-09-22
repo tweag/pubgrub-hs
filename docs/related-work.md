@@ -27,20 +27,20 @@
 
 The single most useful thing in it is §1: **someone else solved our exact problem
 with the opposite representation, and published the bill.** If you read one entry,
-read that one. §2 is the most useful for [`../specification/`](../specification/),
-because it supplies the *shape of the theorem* we currently only state in prose.
+read that one. §2 is the most useful for anyone formalising the kernel, because it
+supplies the *shape of the theorem* we currently only state in prose.
 
 Ranked by how much each one bears on live work:
 
 | our problem | where it lives here | paper |
 |---|---|---|
-| extensional vs intensional version ranges | [`../CLAUDE.md`](../CLAUDE.md) "The set representation", [`attic/README.md`](attic/README.md) §7 | §1 aspcud |
+| extensional vs intensional version ranges | [`STATUS.md`](STATUS.md) §4.2, [`attic/README.md`](attic/README.md) §7 | §1 aspcud |
 | depender collapsing, and what it cost | [`collapsing.md`](collapsing.md) | §1.3 |
 | narrowing the universe before/while solving | `Bridge.Hackage`, and `collapsing.md`'s read cost | §1.2, §2.4 |
 | no lawful `Eq`, order-dependent pruning | `InstanceSet`, `SetOps.equivalent` | §2.1 |
 | one-sided `isEmpty`, `Relation.Inconclusive` | [`flags-semantics.md`](flags-semantics.md) O3/O4 | §2.2 |
 | three-state `FlagPin` | [`flags-semantics.md`](flags-semantics.md) §2. Specified and tested, but no pin is created while flags take their defaults | §2.3 (analogy only) |
-| correctness of conflict resolution | [`../specification/`](../specification/) — itself a draft, authoritative on nothing | §3 |
+| correctness of conflict resolution | stated in prose only; nothing in the repo proves it | §3 |
 | over-specific learned clauses (the old "2^k") | [`flags-semantics.md`](flags-semantics.md) §4.2 — **landed** | §8 |
 | prefer-installed / prefer-defaults / prefer-newest | `Bridge.Provider.preferDefaults`, rung 3. It never runs on real input while flags take their defaults | §5 |
 | explaining failure | `PubGrub.Report` | §6 |
@@ -188,9 +188,9 @@ remedy is the one to adopt in writing:
 > termination."
 
 **Do not characterise the output syntactically. Characterise it semantically.** If
-[`../specification/`](../specification/) — a draft, and authoritative on nothing —
-ever states anything about pruning, this is the shape it must take: *`pruneCells`
-and `mergeCells` preserve the denotation*, never *`pruneCells` yields a normal form*.
+anything is ever stated formally about pruning, this is the shape it must take:
+*`pruneCells` and `mergeCells` preserve the denotation*, never *`pruneCells` yields
+a normal form*.
 It is also, from the general theory, why `SetOps.equivalent` (mutual containment) is
 the right notion of equality and why `Eq` cannot be: there is no normal form to
 compare. `../CLAUDE.md` already forbids adding `Eq`. This is the principled version of
@@ -209,9 +209,9 @@ and, on §5:
 Give up precision to be able to work incrementally, then prove the approximation is
 *safe*. That is [`flags-semantics.md`](flags-semantics.md) O3/O4 — never claim
 emptiness wrongly, may fail to notice it — as a general principle, with the proof
-obligations named. Useful when writing the Lean statement for `isEmpty`: the
-obligation is one-directional (`isEmpty ⟹ denotation empty`), which is what the test
-suite already asserts and what the theory says is the correct shape.
+obligations named. Useful for any formal statement about `isEmpty`: the obligation
+is one-directional (`isEmpty ⟹ denotation empty`), which is what the test suite
+already asserts and what the theory says is the correct shape.
 
 ### 2.3 More truth values, for the same structural reason (analogy, not identity)
 
@@ -266,9 +266,8 @@ From theory to practice.** Artificial Intelligence 187–188:52–89.
 Inference as **unit propagation on nogoods**, with conflict-driven learning and
 backjumping. Structurally: their nogoods are our incompatibilities, their propagation
 is ours, their learning is conflict resolution. This is the rigorous account of the
-machinery `src/PubGrub/Solver.hs` implements — and, being peer-reviewed, a better
-check on the resolvent argument than [`../specification/`](../specification/), which
-is our own draft and proves things only about its own model.
+machinery `src/PubGrub/Solver.hs` implements, and the peer-reviewed check on the
+resolvent argument.
 
 **The instructive delta.** Their nogoods are over *ground atoms*, so propagation is
 complete and a term either is or is not satisfied. Ours are over intensional terms,

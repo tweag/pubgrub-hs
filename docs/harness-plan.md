@@ -237,8 +237,8 @@ Built 2026-09-03. [`app/Harness.hs`](../app/Harness.hs) is the executable
 is Step 1's acceptance test, and it passed on all 23 problems. `bench/compare.sh` was
 deleted and `bench/summarise.awk` stayed. The four excluded corpus problems carry
 `showcase:exclude` in their comment in `bench/unsat-problems.txt`; they are run and
-measured and not rendered, and the showcase headline reads "shorter on 13 of 13
-comparable problems".
+measured and not rendered, and the showcase headline read "shorter on 13 of 13
+comparable problems" on the 17-problem corpus of that day.
 
 Where the build differed from §3:
 

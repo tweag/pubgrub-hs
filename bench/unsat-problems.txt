@@ -26,8 +26,14 @@
 #    libpq installed, hpqtypes-extras resolves.
 #  * cabal solves setup and build-tool depends (solveExecutables = True) and we do
 #    not (rung 4 is unbuilt). On a package with a custom Setup.hs the two solvers
-#    are answering different questions. None of the 17 below has one, but check
+#    are answering different questions. None of the 20 below has one, but check
 #    before adding.
+#
+#  * Every target below is PINNED to one version. An unconstrained target obliges
+#    a complete proof to refute every one of its releases, where cabal's message
+#    is a search trace that stops at the first wall it hit; on such problems our
+#    proof is the longer text (docs/failure-cases.md, "What the corpus does not
+#    measure"). A comparison on this corpus is a comparison on pinned targets.
 
 # --- pkg-config: a C library this machine does not have -------------------------
 # The most common kind among popular packages, and the one that exercises
@@ -64,6 +70,16 @@ futhark ==0.27.1                # regex / time chain showcase:exclude (fails for
 # such a run once (docs/STATUS.md §4.9, rule 3); these two are the measure of it.
 scion-browser ==0.5.0           # 4 sentences against cabal's 11; was 16 against 12
 matterhorn ==90000.1.1          # 8 against 17; was 16 against 18 with 11 no-version lines
+
+# --- two targets, no boot package anywhere -------------------------------------
+# Each target resolves ALONE at the pinned index-state, so the failure is a
+# conflict between the two: aeson 2.3.1.0 against a depender still capped below
+# it. Found by pinning every target to its latest release and solving pairs of
+# popular packages together (docs/failure-cases.md). Each is one problem: the
+# reader splits on the comma.
+dhall ==1.42.3, aeson ==2.3.1.0     # dhall itself caps aeson <2.3
+hlint ==3.10, aeson ==2.3.1.0       # via deriving-aeson
+yesod ==1.6.2.3, aeson ==2.3.1.0    # via yesod-persistent and persistent
 
 # --- positive controls: these RESOLVE here --------------------------------------
 # Each failed on Hackage's builder and succeeds here, which is the point: a

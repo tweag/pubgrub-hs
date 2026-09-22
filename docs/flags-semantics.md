@@ -409,10 +409,9 @@ happens to declare.
   occurs could change which incompatibility is learned, whether it is asserting
   after backjumping, and whether the loop progresses. §6 already says this and
   owes the verdict oracle. O5 discharges one case (the provider's `{X}`,
-  recognisable through `R ∖ R`) and not the loop. The formal model draws the same
-  line — relation and propagation soundness use conservative emptiness, while the
-  satisfier-search results in `specification/PubGrub/PartialSolution.lean` require
-  exact emptiness.
+  recognisable through `R ∖ R`) and not the loop. The line to draw is the same
+  one: relation and propagation soundness hold under conservative emptiness, while
+  anything about the satisfier search would require exact emptiness.
 
   So: sound per query, unproven per solve. Treat the whole-loop claim as owed, not
   held.
@@ -933,7 +932,7 @@ moves.
 | §4.3 report wording | partial: constraints render, the not-applicable wording is not aligned |
 | §5 choice policy | implemented as release-major then fewest deviations, but over a **one-completion-per-cell** search — correct only while admissibility is assignment-independent (below). Currently vacuous: one completion exists, so "fewest deviations" ranks a single candidate |
 | §6 non-uniform universe, one-sided properties | in place |
-| §6 verdict oracle | owed, **and blocking for condition decisions**. Note `specification/PubGrub/Oracle.lean` shares the name and is a different artifact: it is a Lean model, not a differential test against the real solver |
+| §6 verdict oracle | owed, **and blocking for condition decisions** |
 | D1 determination before success | specified ([decision-semantics.md](decision-semantics.md) §3), not implemented |
 | D2 progress | specified ([decision-semantics.md](decision-semantics.md) §4), not implemented |
 | D3 concretisation | specified ([decision-semantics.md](decision-semantics.md) §5), not implemented |

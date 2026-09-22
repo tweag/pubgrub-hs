@@ -11,10 +11,14 @@ cabal-install's solver:
 2. Can it **match performance** on real problems?
 
 On the problems measured so far we use less peak memory than cabal on every one, and
-our failure proof is shorter than cabal's message on 17 of 17 real failures. cabal is
-faster than us on one of the six benchmark problems. This is not an integration into
-cabal-install, and it is not finished. See [`docs/STATUS.md`](docs/STATUS.md) for
-the current state and [`CLAUDE.md`](CLAUDE.md) for the architecture.
+our failure proof is shorter than cabal's message on all 20 real failures in the
+corpus, every one of them with its targets pinned to a version. On a problem with an
+*unconstrained* target the record inverts: a complete proof has to refute every
+release of it, where cabal's message is a search trace, and there our text is the
+longer one. cabal is faster than us on one of the six benchmark problems. This is not
+an integration into cabal-install, and it is not finished. See
+[`docs/STATUS.md`](docs/STATUS.md) for the current state and [`CLAUDE.md`](CLAUDE.md)
+for the architecture.
 
 [PubGrub]: https://github.com/dart-lang/pub/blob/master/doc/solver.md
 
@@ -103,13 +107,14 @@ So, because root depends on lens <4, version solving failed.
 ```
 
 That is 7 sentences where cabal prints 18 lines for the same problem. Across a corpus
-of 17 real Hackage failures we are shorter on all 17: 61 sentences against cabal's 166.
+of 20 real Hackage failures, every target pinned, we are shorter on all 20: 76
+sentences against cabal's 193.
 
 ## Test
 
 ```sh
-cabal test                  # 165 tests
-scripts/gate.sh             # every check that must not regress, over 23 real problems
+cabal test                  # 232 tests
+scripts/gate.sh             # every check that must not regress, over 26 real problems
 cabal run pubgrub-harness   # both solvers over both problem sets; writes bench/output/
 ```
 
@@ -135,7 +140,6 @@ bridge/Bridge/      the Cabal bridge (private library): reads the Hackage index,
 app/                the `pubgrub`, `pubgrub-index` and `pubgrub-harness` executables.
 test/               the test suite, plus test/golden/.
 docs/               STATUS.md first. See docs/STATUS.md §7 for what each file decides.
-specification/      a Lean model of the kernel. A draft, authoritative on nothing.
 ```
 
 ## Status and caveats
@@ -163,5 +167,5 @@ solvers over `bench/problems.txt`: medians of three runs, phases, residency,
 allocation, search counts and a plan diff) and `bench/output/showcase.md` (both
 explanations for every comparable corpus problem, as adjacent blocks, with the
 counts). Every header states the environment and the restrictions. `bench/output/` is
-git-ignored; a run meant to be quoted is copied into `docs/` on purpose. The run of
-2026-09-03 is in [`docs/reports/`](docs/reports/).
+git-ignored; a run meant to be quoted is copied into `docs/` on purpose. The runs in
+[`docs/reports/`](docs/reports/) are dated in their headers.

@@ -10,9 +10,6 @@
 > calls it `Qualifier`, and that is the word `../CLAUDE.md` and the shelved
 > qualified-goals design use. Same concept, two names. Read them as synonyms.
 >
-> Do not confuse this file with [`../specification/`](../specification/), which is a
-> Lean model of the **PubGrub kernel**. Different subject, similar name.
->
 > The solver as built handles one component per package and ignores scopes entirely.
 > See [STATUS.md](STATUS.md) §5.2.
 

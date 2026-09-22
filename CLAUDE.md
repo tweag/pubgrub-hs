@@ -35,9 +35,6 @@ you change anything, read it.
   *true*, with no types in it. It overrules this file.
 - **Decisions** are [`docs/decision-semantics.md`](docs/decision-semantics.md).
   Nothing in its §2–§9 is implemented.
-- **The Lean model** in `specification/` is **a draft and settles nothing.** It is our
-  own attempt at formalising PubGrub. Where it disagrees with `references/pubgrub.md`
-  or `docs/flags-semantics.md`, those are right and it is wrong.
 - **Cabal's build model** (components, scopes, Backpack) is
   [`docs/cabal-build-model.md`](docs/cabal-build-model.md), the reference for rungs 4
   and 5.
@@ -74,13 +71,17 @@ range holds spaces, and several targets are several arguments. Both problem file
 spell a multi-target problem with commas (`hlint, hadolint ==2.15.1`) and the
 readers split on commas, never on whitespace. Solving for more than one package is
 the only way to reach a conflict *between* two packages rather than between one
-package and the compiler.
+package and the compiler. **Every corpus target is pinned to one version**, and the
+proof-length record holds only there: an unconstrained target obliges a complete
+proof to refute every one of its releases, where cabal prints a search trace that
+stops at the first wall, and on such problems our proof is the longer text
+(`docs/STATUS.md` §3.2).
 
-**`scripts/gate.sh` decides whether a change is kept.** Nine gates over one pass of
-the problem set: problem count, the 17-case failure corpus, verdict agreement over all
-23 problems, proof length against cabal's own message, the proof and no-version
-totals, the golden proofs, the pkg-config modelling tests, the whole suite, and the
-Lean build. One line per gate, non-zero exit on any regression.
+**`scripts/gate.sh` decides whether a change is kept.** Eight gates over one pass of
+the problem set: problem count, the 20-case failure corpus, verdict agreement over all
+26 problems, proof length against cabal's own message, the proof and no-version
+totals, the golden proofs, the pkg-config modelling tests, and the whole suite. One
+line per gate, non-zero exit on any regression.
 
 Every run in it, and every harness run, is pinned to the index-state in
 `bench/index-state`, so the numbers stop moving with the weekly index refresh.
@@ -90,7 +91,7 @@ everything the local index holds. **Move the pin in the change that re-measures.
 It holds five numeric baselines. Only the problem count is exact. The other four are
 floors or ceilings rather than targets, and beating one prints `IMPROVED` and still
 exits 0. **Move a baseline in the change that earns it.** The two proof ceilings are
-currently tight — 61 sentences and 0 no-version lines — so a reporting change has to
+currently tight — 76 sentences and 0 no-version lines — so a reporting change has to
 earn its way past them.
 
 **[`docs/benchmarking.md`](docs/benchmarking.md) is the reference for measuring
@@ -125,7 +126,7 @@ app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solv
                  problem and repetition; writes bench/output/benchmark.md and showcase.md
 ```
 
-**Seven cabal components:**
+**Six cabal components:**
 
 | component | what it is |
 | --- | --- |
@@ -135,7 +136,6 @@ app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solv
 | executable `pubgrub-index` | `app/BuildIndex.hs` — builds the derived index |
 | executable `pubgrub-harness` | `app/Harness.hs` — the harness. Depends on neither library: it drives the `pubgrub` executable as a child, parses its `stats:`, `phases:` and `plan:` lines, and writes the two reports |
 | test-suite | `test/` — 11 spec modules plus `test/golden/` |
-| executable `index-bench` | `prototype/IndexBench.hs`, **throwaway**. It priced the derived index. Once nothing needs re-pricing, remove it and its stanza |
 
 **What each bridge module does.**
 
@@ -364,7 +364,7 @@ Cabal orders `1.2 < 1.2.0 < 1.2.0.0`. `docs/STATUS.md` §4.13 has the measuremen
   guard keeps Cabal's `withinRange` on purpose.
 - **This is a documented divergence from cabal.** 44 packages publish two spellings
   and 1,404 latest-release bounds admit a slightly different set, in the author's
-  favour. Verdict agreement on the 23 problems holds. A new disagreement on a bound
+  favour. Verdict agreement on the 26 problems holds. A new disagreement on a bound
   shaped like `base <=4.21` is this rule, not a bug.
 
 ### The synthetic root's name carries a NUL byte
