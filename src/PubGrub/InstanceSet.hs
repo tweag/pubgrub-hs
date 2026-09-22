@@ -176,9 +176,9 @@ memberFlagAssignment pins fa = all satisfied (Map.toList pins)
     satisfied (f, PinnedTo b)  = Map.lookup f assigned == Just b
     satisfied (f, NotDeclared) = Map.notMember f assigned
 
--- | Does the set admit every source instance of its package? True of the root's
--- term and of a depender that spans the whole version list. The report writes
--- such a set as "every version of foo".
+-- | Does the set admit every source instance of its package? True of an
+-- unconstrained target's request and of a depender that spans the whole version
+-- list. The report writes such a set as "every version of foo".
 --
 -- One-sided, like 'isEmpty': a set can admit everything without any single cell
 -- saying so, and this answers 'False' then. For a renderer that is the safe

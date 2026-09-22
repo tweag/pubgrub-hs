@@ -21,9 +21,10 @@ Haskell. There is no ASP component and there never was.
 
 ## Where to look first
 
-**[`docs/STATUS.md`](docs/STATUS.md) is the current-state document.** What works, why
-it is built that way, what is out of scope, and which file decides a question. Before
-you change anything, read it.
+**[`docs/STATUS.md`](docs/STATUS.md) is the current-state document.** What works,
+what is out of scope, and which file decides a question. Before you change anything,
+read it. **Why it is built that way is [`docs/DESIGN.md`](docs/DESIGN.md)**: one
+design decision per section, with the evidence that earned it.
 
 - **History** is [`docs/decision-log.md`](docs/decision-log.md). **Abandoned
   directions** are [`docs/attic/`](docs/attic/).
@@ -53,7 +54,7 @@ you change anything, read it.
 
 ```sh
 cabal build
-cabal test                           # 232 tests, ~0.3 s
+cabal test                           # 233 tests, ~0.3 s
 cabal run pubgrub -- aeson              # the driver; add -v for the search trace
 cabal run pubgrub -- 'aeson <2'         # a target is ONE argument: package and range
 cabal run pubgrub -- hlint 'aeson <2'   # several targets, solved together
@@ -75,7 +76,7 @@ package and the compiler. **Every corpus target is pinned to one version**, and 
 proof-length record holds only there: an unconstrained target obliges a complete
 proof to refute every one of its releases, where cabal prints a search trace that
 stops at the first wall, and on such problems our proof is the longer text
-(`docs/STATUS.md` §3.2).
+(`docs/STATUS.md` §2.2).
 
 **`scripts/gate.sh` decides whether a change is kept.** Eight gates over one pass of
 the problem set: problem count, the 20-case failure corpus, verdict agreement over all
@@ -189,307 +190,50 @@ it any more.
 
 ## Invariants you can break by accident
 
-This is the list of places where the code is not self-evident and a plausible edit is
-wrong.
+Each of these is a design decision whose argument and evidence are in
+[`docs/DESIGN.md`](docs/DESIGN.md). The line here is a reminder of what the plausible
+wrong edit is, not the argument. Read the section before you touch the code.
 
-### `InstanceSet` is intensional and non-canonical
-
-The solver's variables are package names. Its values are `Instance`s — one concrete
-way of having a package, either a pre-installed unit or a source release under a total
-flag assignment.
-
-```haskell
-data InstanceSet = InstanceSet
-    { isInstalled :: Set PreInstalledPackage   -- extensional: the db is small and known
-    , isSource    :: [SourceCell]              -- DNF, NOT canonicalised
-    }
-data SourceCell = SourceCell VersionSet (Map FlagName FlagPin)
-data FlagPin    = PinnedTo Bool | NotDeclared
-```
-
-- **Do not add `Eq` or `Ord`.** A non-canonical representation has no lawful
-  structural equality. Use `SetOps.equivalent` for semantic equality.
-- **`isEmpty` is one-sided.** It can answer "not empty" for a set that is empty in
-  fact, because seeing that needs the index. Claiming emptiness wrongly is forbidden.
-  Failing to notice it is allowed. Assert `isEmpty ⟹ model empty`, never `⟺`.
-- **`SourceCell` has no `SetOps` instance on purpose.** Cells are closed under
-  intersection but not under union or difference, so `SetOps` lives one layer up.
-- **Pruning between operations is load-bearing.** `differenceCell` drops null cells,
-  `union` merges cells with identical pins, and `pruneCells` drops subsumed cells.
-  Over 24 instance bans across 4 flags: **28,293 cells with null-dropping alone, 41
-  once `pruneCells` runs too.** `test/InstanceSetSpec.hs` is the guard.
-- **`pruneCells` gives determinism only.** It is not a preference order. Flag
-  preference is `Bridge.Provider.preferDefaults`, which ranks completed assignments by
-  how many flags deviate from the declared defaults.
-- **The three pin states are required**, not defensive. A two-state pin is not closed
-  under negation and silently loses the releases that do not declare the flag. See
-  `docs/STATUS.md` §4.3.
-- **`test/InstanceSetSpec.hs` needs its universe non-uniform** — releases must differ
-  in which flags they declare, including one declaring none. A uniform universe hid a
-  wrong `difference` for weeks. Keep its adapter pointed at the **intensional**
-  constructor.
-
-### `PubGrub.Store` merges on insert and keeps scan position
-
-Dependency facts about one `(depender, dependee)` pair with an identical dependee term
-merge as they arrive. Unbuildable facts about one package merge the same way, and only
-when their reasons agree as a set: a run missing `libpq` and a run declaring
-`buildable: False` stay two facts, or the proof would name one release's module
-against the other's range.
-
-A merge **replaces the existing clause where it already sits**. Clause position
-dominates propagation cost here, and prepending new knowledge is load-bearing. An
-earlier dedup memo cost 22%.
-
-The merged clause is rebuilt with its own constructor, so its cause stays a **leaf**.
-Letting conflict resolution reach the same range instead produces derived nodes, and
-those nodes are the proof lines this exists to remove.
-
-### The derived index is a cache
-
-`openStore` answers `Nothing` for a missing, unreadable or stale-format store, and
-every miss parses instead. Removing `_cache/derived-index.*` costs speed and never
-correctness.
-
-**It follows the index by block.** Each stored release carries the tar block it was
-parsed from, and `srLookup` serves it only when that is the block of the revision in
-force at the run's index-state. A release published or revised since the store was
-built, or read at an index-state before its latest revision, is a miss that parses.
-Re-run `cabal run pubgrub-index` after a refresh, or `parses` stops being zero.
-
-**Raise `storeFormatVersion` on any encoding change.** A generic CBOR encoding is
-positional, so reordering a constructor silently changes meaning. The version cache
-has the same rule under `cacheFormatVersion`, and one more: a `Revision` occupies
-`revisionBytes` on disk and the reader skips by that arithmetic, so a change to its
-encoding must change both.
-
-**What is stored is the pre-environment form, not the flattened one.** `envConfVar`
-resolves `os`, `arch` and `impl` against this machine, and buildability resolves
-`pkgconfig-depends` against its `pkg-config` database. If either changes, a flattened
-store is silently wrong. `componentDepsAtDefaultsStored` and
-`buildableAtDefaultsStored` run the *same* `flattenWith` over the *same* trees as their
-description-taking counterparts, so the two paths agree by construction.
-`test/StoredSpec.hs` asserts it anyway.
-
-**Note the baseline does not use the store.** `Bridge.Cabal.Baseline` still parses
-every release it inspects.
-
-### Memoise the reduced form, never the parse tree
-
-`Bridge.Provider.releaseReader` memoises only what the provider needs: declared flags,
-guarded dependencies, and a buildable flag.
-
-Retaining parsed descriptions cost **27.2 s and 904 MB** on `pandoc`, against 3.7 s
-and 83 MB uncached. Retained parse trees each pin their slice of the index, and every
-major garbage collection copies the lot. **Caching more was 7× slower and 10×
-bigger.**
-
-The decoded-slice cache holds **one** package for the same reason.
-
-### A dependency of `p` on `p` is dropped
-
-Real packages declare these constantly, because an executable or sublibrary of `p` is
-built against `p`'s library. It is an intra-package edge, not a version constraint.
-The rule is cabal's: `Builder.extendOpen` adds no goal and no edge when `qpn == qpn'`.
-
-Two changes are needed and **both** are load-bearing:
-
-- `Bridge.Provider` filters the occurrence out, so no such clause is minted.
-- `fromDependency` uses `Map.fromListWith intersectTerm`, so two entries about one
-  variable are intersected rather than overwritten.
-
-The second alone makes the clause honest, and an honest clause correctly *bans* the
-release, which is still the wrong answer. Tests: `StoreSpec` and `FlagSolveSpec`,
-"self-dependencies", each verified to fail without its own half.
-
-### An unbuildable component contributes no dependencies
-
-`Bridge.Cabal.Flatten.componentDeps` puts each sub-library's, each foreign library's
-and each executable's dependencies under the condition that the component is
-buildable, via Cabal-syntax's own `addBuildableCondition` — the function
-`Distribution.Solver.Modular.IndexConversion.convGPD` pipes every component through.
-Do not paraphrase it; a paraphrase is a second implementation to keep in step.
-
-Without it we **reject plans cabal accepts**. `http2-5.4.4`'s `hpack-encode` declares
-`aeson >=2` and ends `if flag(devel) … else buildable: False`; with `devel` off cabal
-drops the stanza and we did not, which made `optparse-applicative ==0.15.1.0`
-alongside `warp` unsolvable here. The same fault put `network-bsd`, `network-run` and
-`time-manager` in our `pandoc` plan. `docs/STATUS.md` §4.14.
-
-Two things are load-bearing:
-
-- **The library is not gated here.** An unbuildable library makes the release
-  unusable, not merely dependency-free, and `unbuildableAtDefaults` already carries
-  that with the reason attached — which is what lets a proof name the missing
-  `pkg-config` module.
-- **There is no target/dependency distinction.** cabal includes every package's
-  library, sub-libraries, foreign libraries and executables unconditionally; only
-  test-suites and benchmarks are gated, by stanza. Making executables target-only was
-  tried and rejected: it fixed `warp` but made `futhark ==0.27.1` resolve here while
-  cabal failed it, since `lsp-types`' `generator` executable is genuinely buildable.
-  All four are covered; no corpus problem has a foreign library, so
-  `test/FlattenSpec.hs` is the only thing holding that one.
-
-### Boot packages are installed-only
-
-`Bridge.Installed.nonReinstallablePackages` is the single list both solvers read.
-Such a package offers installed units or nothing. It never falls through to a source
-release. Prefer-installed alone let `aeson <2` plan to build `base 4.15.1.0` from
-source.
-
-### A depender term names a slot, not a version
-
-`Bridge.Provider.withSlots` gives each release the half-open range up to the next
-release present in the index. Adjacent slots **touch**, so unions coalesce and
-`difference` stops manufacturing empty holes between published releases. The
-**first** release's slot has no lower bound (`references/pubgrub.md:467`), and so
-does a walk that reaches it: `slotRange` decides, for both. Nothing is published
-below the first release, so the range is the same; its complement has no `<first`
-hole to discover and print.
-
-### Versions compare with trailing zeros insignificant
-
-`PubGrub.Version` is the core's version type: spelled as Hackage names the release,
-and compared with trailing zeros dropped, so `1.2` and `1.2.0.0` are one version where
-Cabal orders `1.2 < 1.2.0 < 1.2.0.0`. `docs/STATUS.md` §4.13 has the measurements.
-
-- **The spelling is display only.** `Eq` and `Ord` see the normal form. A `Set` keeps
-  whichever spelling was inserted, and `pretty` prints it as spelled. Where two
-  spellings meet at one cut, `VersionSet` keeps the shorter. Nothing may normalise
-  on the way out.
-- **Cabal's type stops at the bridge.** The index, the version cache, the derived
-  store and the baseline keep Cabal's `Version`. `Bridge.Hackage.pkgSolverVersions`
-  converts once per package, keeping the later tar entry where two spellings name one
-  version, and `Bridge.Provider` converts back to read a release. The `impl(ghc …)`
-  guard keeps Cabal's `withinRange` on purpose.
-- **This is a documented divergence from cabal.** 44 packages publish two spellings
-  and 1,404 latest-release bounds admit a slightly different set, in the author's
-  favour. Verdict agreement on the 26 problems holds. A new disagreement on a bound
-  shaped like `base <=4.21` is this rule, not a bug.
-
-### There is no root package; the request is a list of seeds
-
-`solve` takes a list of incompatibilities, one `request p R` per target, each the
-unit clause `{p: Negative R}` with cause `CauseRequest`. `Bridge.Provider.withProvider`
-builds them, because widening a range to instances needs the installed db. They
-propagate to derivations at decision level 0 before anything is decided, and three
-things in the solver rest on that:
-
-- **The terminal test is "satisfied by the seed derivations alone"**
-  (`satisfiedBySeeds`), checked before the satisfier search. It is
-  `references/pubgrub.md:377` with the root's one derivation replaced by the seeds'.
-- **The backtrack floor is level 0, not 1.** The spec stops at level 1 because that
-  is where its root was decided (`:399`–`:404`) and says level 0 is safe. Here the
-  first decision at level 1 is an ordinary target and a conflict may have to undo it.
-  Restoring `max 1` makes a unit clause on the first target loop forever.
-- **A terminal conflict is closed against the seeds** (`closeWithSeeds`), one
-  `priorCause` per seed, so the reported incompatibility is empty and the proof's
-  last line is "So, because …, version solving failed" with the request as its last
-  fact: "aeson ==2.3.1.0 is requested". There is no `root` in any proof, and no NUL
-  byte; the `-a` in the scripts is now only a precaution.
+- **`InstanceSet` is intensional and non-canonical** — DESIGN §2 and §3. No `Eq` or
+  `Ord`; `isEmpty` is one-sided; three pin states, not two; prune *between*
+  operations, not at the end.
+- **`PubGrub.Store` merges on insert and keeps scan position** — DESIGN §5. A merge
+  replaces the clause where it sits, and the merged clause stays a leaf.
+- **The derived index is a cache that follows the index by block** — DESIGN §6. It
+  stores the pre-environment form; raise `storeFormatVersion` on any encoding change.
+- **Memoise the reduced form, never the parse tree** — DESIGN §11.
+- **A dependency of `p` on `p` is dropped**, in two load-bearing halves — DESIGN §8.
+- **An unbuildable component contributes no dependencies**, through Cabal-syntax's
+  own `addBuildableCondition`; the library is not gated — DESIGN §15.
+- **Boot packages are installed-only** — DESIGN §7.
+- **A depender term names a slot, not a version**, and the first slot has no lower
+  bound — DESIGN §4.
+- **Versions compare with trailing zeros insignificant**, and Cabal's type stops at
+  the bridge — DESIGN §14.
+- **The request is a list of seeds**: the terminal test, the level-0 backtrack floor
+  and the closing step all rest on it — DESIGN §10.
+- **Decision order is discovery order**, measured against the spec's — DESIGN §12.
 
 ## Current scope limits
 
-- **Flags are fixed at their declared defaults.** They are applied, not searched.
-  `componentDepsAtDefaults` folds every guard to a literal on our side, and
-  `lookupGPD` marks every flag manual on cabal's. One instance per release, on both
-  sides. The search machinery is intact, unfed, and still tested. Before you
-  touch it, read `docs/STATUS.md` §5.1.
-- **One version per package name.** cabal solves qualified goals and can legitimately
-  plan two versions of one package. We cannot. This has to be specified before rung 4.
-- **No setup or build-tool dependencies** (rung 4) and **no public sublibraries**
-  (rung 5).
-- **No `preferred-versions`.**
-- **No user flag constraints** (`--flag`).
-
-### The rung ladder
-
-Build the end-to-end loop early, then add cabal-model fidelity one rung at a time.
-Each rung leaves a runnable solver.
-
-| rung | state |
-| --- | --- |
-| 0 — index reading on real Hackage data | ✅ |
-| 1 — version ranges | ✅ |
-| 2 — flags and conditional dependencies | ✅ applied, not searched |
-| 3 — `base` and GHC pinning, boot packages installed-only | ✅ |
-| — buildability (not a rung) | ✅ |
-| 4 — setup and build-tool dependencies | not started |
-| 5 — public sublibraries | not started |
-
-**Rung 4 owes two things.** Qualified goals, which were designed and shelved — the
-design and why it does not fix self-dependencies are in `docs/STATUS.md` §5.2. And the
-setup self-dependency exception: cabal keeps a reverse-dependency edge for a *setup*
-self-dependency, so the cycle forces a different setup script.
+[`docs/STATUS.md`](docs/STATUS.md) §3 states each one and why: flags fixed at their
+declared defaults (§4.1; the search machinery is intact, unfed and tested) and one
+version per package name (§4.2, where the shelved qualified-goals design is). Setup
+and build-tool dependencies, public sublibraries, `preferred-versions`, user flag
+constraints and flag search are not built; [`docs/TODO.md`](docs/TODO.md) says what
+each owes, and its last two sections list what is settled or was measured and
+rejected. The rung ladder is STATUS.md §1.
 
 ## Reporting
 
-`PubGrub.Report.reportConflict` walks the cause tree and prints a numbered proof
-following the spec's own reporting algorithm (`references/pubgrub.md:504`). Five rules
-run, and `docs/STATUS.md` §4.9 states each one with its soundness argument:
-
-1. A chain of two external facts is one sentence.
-2. Every other derived step is skipped.
-3. A run of steps about the same `(depender, dependee)` pair is one sentence.
-4. A run of three or more steps sharing only a **depender** is one sentence, stated as
-   `p ⋃S requires q₁ ⋃R₁ or … or qₙ ⋃Rₙ`. Its guard is the operation itself:
-   `priorCauseTerms` is applied once to the merged fact and must land term for term on
-   the conclusion the line is attached to, so the rule asserts no step the proof did
-   not already take. It is what a problem with an **unconstrained** target needs —
-   refuting one walks the target's whole version history, and consecutive releases
-   rarely fail over the same dependee, so rule 3 never fires there.
-5. Empty-range leaves are absorbed into the sibling they were resolved against
-   (`collapseNoInstances`).
-
-**The wording is pub's, in cabal's range syntax**, including every special case the
-spec lists at `references/pubgrub.md:1010`–`:1030`: "every version of foo", "So," on
-the last line, a period per line, the blank line between branches. Where pub names
-its root package ("myapp depends on foo") we have no root: a seed reads "foo >=1
-is requested", two of them "foo >=1 and bar are requested", and a seed whose range
-holds nothing "foo >9 is requested, which has no versions". A negative term is never
-printed as "not …"; the sentence carries the
-negation ("P requires N1 or N2", "if P1 and P2 then N1 or N2", "either X or Y").
-Installed units print by version, never by unit id, and a boot package's fact names
-the version it is pinned to: "base is pinned to 4.21.0.0 (installed)". An unbuildable
-release's fact names what rules it out: "hpqtypes >=1.10.0.2 needs pkg-config package
-libpq, which is not found", or "is marked buildable: False". Never "cannot be built
-because": the chain form already opens with "Because". The module is spelled as
-Cabal-syntax prints the field (`libpq`, not cabal's `libpq-any`).
-
-**A headline stands above the proof**, from `reportHeadline`: the seeds the proof
-reaches, and the world-fact leaves verbatim — "No solution for matterhorn
-==90000.1.1: base is pinned to 4.21.0.0 (installed)." It is not a proof sentence.
-The gate and the harness count by connective, so it is never counted, on the same
-footing as cabal's "Could not resolve dependencies:" line.
-
-**The driver wraps; the reporter does not.** `wrapProof` wraps at the terminal's
-width, or 80 columns off a terminal, with a four-space hanging indent, and never
-breaks inside a range (before a `||` only when the range alone overflows the line).
-`reportConflict` stays one sentence per line for the golden proofs, and a
-continuation line starts with the indent, so the gate and the harness never count it.
-
-**The showcase counts screen lines as well as sentences**: ours as printed at 80
-columns, cabal's lines as the 80-column rows each fills. The gate counts sentences.
-
-**Colour is a terminal-only layer.** `styleProof` dims ranges and bolds the
-connectives, the headline and the `So,` line; stripping the escapes gives the input
-back. The driver applies it only on a terminal with `NO_COLOR` unset and `TERM` not
-`dumb`. Every log, the gate and the harness read plain text.
-
-**Do not chase byte-parity with pub's output.** `^1.0.0` is Dart syntax and cabal
-writes `>=1.0.0 && <2`. The target is the same sentences and information, in cabal's
-range syntax.
-
-**A declared range is quoted as its author wrote it.** `VersionSet` carries the
-declared `VersionRange` as a display tag that only `fromVersionRange` sets, every
-operation drops, and `Eq`/`Ord` ignore. So `^>=4.13.0.0` prints as `^>=4.13.0.0`, and
-a derived range prints canonically. `fillGaps` is in reserve for derived terms only:
-filling a declared range would discard its spelling.
-
-**One item is dormant, not closed.** Where cells share a version set and their pins
-for one flag exhaust all three states, that flag must drop out of the pin map. No
-cell is pinned while flags take their defaults, so no proof can show this. It returns
-with the flag axis.
+`PubGrub.Report.reportConflict` follows the spec's own reporting algorithm
+(`references/pubgrub.md:504`). [`docs/DESIGN.md`](docs/DESIGN.md) §9 states the five
+rules with their soundness arguments, the headline, the wrapping and colour layers,
+and the wording: pub's sentences in cabal's range syntax, a declared range quoted as
+its author wrote it, no byte-parity with pub. Two things there matter to every
+change in this area: the gate and the harness count sentences by connective, so a
+new line must open with none of them; and the golden proofs are the spec's own
+examples, so a wording change earns its way past them.
 
 ## Conventions
 

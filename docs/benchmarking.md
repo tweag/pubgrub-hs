@@ -9,7 +9,7 @@ cabal run pubgrub-harness     # both solvers over both problem sets; writes the 
 scripts/check-stats.sh        # --stats against bench/summarise.awk, on every problem
 ```
 
-**STATUS.md §3 holds the current numbers.** This file holds the method.
+**STATUS.md §2 holds the current numbers.** This file holds the method.
 
 ---
 
@@ -121,7 +121,7 @@ refresh. Per-run logs are left in `<output>/runs/`.
 It writes two markdown files into `bench/output/`, which is git-ignored. A run meant
 to be quoted is copied into `docs/` on purpose.
 
-- **`benchmark.md`**, from `bench/problems.txt`: the STATUS.md §3.1 table with the
+- **`benchmark.md`**, from `bench/problems.txt`: the STATUS.md §2.1 table with the
   phases split out, the search-count table, and a plan diff per satisfiable problem
   over the library domain. A package cabal plans at two versions is reported as its
   qualified goals showing through, not as a disagreement.
@@ -280,7 +280,7 @@ release published or revised since parses on demand. The answers stay right. Re-
 
 **Reading the index at an index-state has a fixed price.** The version cache is
 decoded and filtered on every run, and that allocates about 0.15 GB inside the `world`
-phase, on every problem alike (STATUS.md §4.12). It moves the allocation of the
+phase, on every problem alike (DESIGN.md §13). It moves the allocation of the
 smallest rows of the benchmark table and nothing else, and it is why the benchmark
 set was re-measured on 2026-09-09 rather than compared across the change.
 
@@ -291,7 +291,7 @@ the cabal baseline read 50.7 MB before the index-state work and 65.8 MB after, w
 under `+RTS -A256k`, which collects often enough to see the real peak, it read 64.3 MB
 and 66.0 MB. Before attributing a residency change to the code, re-run both sides
 with `-A256k`; if the two agree there, the default-nursery number moved by sampling.
-The STATUS.md §3.1 table carries the default-nursery numbers.
+The STATUS.md §2.1 table carries the default-nursery numbers.
 
 ## Comparing against cabal
 
@@ -327,7 +327,7 @@ For the explanation deliverable the comparable quantity is **length**: our proof
 against cabal's message. The harness's `showcase.md` prints both per problem, and
 `scripts/gate.sh` holds the corpus totals as ceilings. Over the 20-case corpus cabal's
 message runs 7 to 17 lines. Ours has no bound on length, and on an unconstrained
-target it is the longer text (STATUS.md §3.2).
+target it is the longer text (STATUS.md §2.2).
 
 **A proof is counted by connective, not by line number.** The reporter numbers only
 the conclusions it refers back to (`references/pubgrub.md:673`). In a linear

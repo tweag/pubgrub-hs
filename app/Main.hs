@@ -337,7 +337,7 @@ parseTarget s = case eitherParsec s of
 -- would print @aeson -any@, which is not what anybody typed.
 --
 -- The proof's own headline names the request separately and does not go through
--- here: it lists the root dependencies the /proof/ reached, which is a smaller
+-- here: it lists the requests the /proof/ reached, which is a smaller
 -- set when a target resolved fine (see 'PubGrub.Report.reportHeadline').
 renderTargets :: [(PackageName, VersionRange)] -> String
 renderTargets = intercalate " and " . map one
@@ -440,7 +440,7 @@ runOurs opts t0 counters provider seeds = do
 -- deferred parse), but the 'PackageIndex' over them is built lazily when the
 -- solver first looks a package up, and every @.cabal@ parse happens on demand
 -- inside the solve. So @index@ is the record allocation only, and most of what
--- STATUS.md §3.3 calls cabal's index cost lands in @solve@. Forcing the index
+-- STATUS.md §2.3 calls cabal's index cost lands in @solve@. Forcing the index
 -- here would move the number, not the work — and would change what is being
 -- measured, since a solve that never touches most of the index would then pay
 -- for all of it.

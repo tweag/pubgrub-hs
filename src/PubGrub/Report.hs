@@ -576,8 +576,8 @@ renderReport root0 = (headline, proof)
     -- could have. Neither can fuse where it should not.
     pair c1 c2
         -- Two seeds close a proof together: "baz >=1 && <2 and foo >=1 && <2 are
-        -- requested", where the spec's root has "depends on both"
-        -- (references/pubgrub.md:1021).
+        -- requested", the spec's "depends on both" sentence
+        -- (references/pubgrub.md:1021) without a depender in front of it.
         | CauseRequest p1 r1 <- incompCause c1
         , CauseRequest p2 r2 <- incompCause c2 =
             bare p1 r1 <> " and " <> bare p2 r2 <> " are requested"

@@ -3,7 +3,7 @@
 > **What this is.** The plan for the harness: the command that runs both solvers over
 > a problem set, repeats the timings, diffs the plans, and renders the two explanations
 > side by side. Written 2026-09-03 against the tree as it stood then
-> ([STATUS.md](STATUS.md) §9), and built the same day.
+> ([STATUS.md](STATUS.md) §5), and built the same day.
 >
 > **What this is not.** Not a specification. §6 records the choices Andrea made on
 > 2026-09-03. §3 is the plan as written; §7 records what was built and where it
@@ -22,7 +22,7 @@ Two generated documents, from one command, with the caveats baked into their hea
 
 Every header states the environment, because every number depends on it: GHC and
 `base`, the pkg-config packages present and absent, the Hackage index snapshot date,
-and the three restrictions STATUS.md §9 says a published number must carry. Flags are
+and the three restrictions STATUS.md §5 says a published number must carry. Flags are
 pinned to their declared defaults on both sides. We solve one version per package
 name. Setup and build-tool dependencies are unmodelled.
 
@@ -32,17 +32,16 @@ name. Setup and build-tool dependencies are unmodelled.
 
 ## 2. One constraint that shapes the design
 
-STATUS.md §1 says "one process must run both solvers". That cannot be literal. Peak
-residency and peak RSS are per-process numbers, and the RTS reports one maximum for the
-whole process, so two solvers in one process cannot be measured against each other on
-memory at all.
+The requirement the project had stated for the comparison was "one process must run
+both solvers". That cannot be literal. Peak residency and peak RSS are per-process
+numbers, and the RTS reports one maximum for the whole process, so two solvers in one
+process cannot be measured against each other on memory at all.
 
-What the sentence is protecting is that both solvers see the same world. That is
+What the requirement is protecting is that both solvers see the same world. That is
 already guaranteed one level down: `pubgrub` and `pubgrub --cabal` are the same
 executable, and both are fed from one `Bridge.Provider.withWorld`. So the harness is
 **one command that drives that executable as a child process**, once per solver, per
-problem, per repetition, and reads what the child prints. Update STATUS.md §1 when
-this lands.
+problem, per repetition, and reads what the child prints.
 
 ## 3. The pieces, in the order to build them
 
@@ -50,8 +49,9 @@ Each step leaves a runnable tree and is useful on its own.
 
 ### Step 1 — `--stats`: counted without being traced
 
-STATUS.md §8 item 6, and the thing [benchmarking.md](benchmarking.md) calls "the one
-thing that is missing". Every count today is derived by counting `-v` trace lines, so a
+The last open question on the list of the day, and what
+[benchmarking.md](benchmarking.md) then called "the one thing that is missing". Every
+count is derived by counting `-v` trace lines, so a
 run cannot be both quiet and counted, and every timed run in `bench/compare.sh` pays
 for rendering thousands of lines it does not need.
 
@@ -77,14 +77,14 @@ it.
 
 ### Step 2 — phase timings inside the child
 
-The benchmark caveat STATUS.md §3.3 repeats is "index build is not separated from
+The benchmark caveat STATUS.md §2.3 repeats is "index build is not separated from
 solve". Only the child can separate them, because only it knows where the phases are.
 
 Take `getMonotonicTime` at three points in `main`: before `withWorld`, after it
 (index opened, installed db and pkg-config db read), and after the solve returns and
 before the answer is rendered. On the cabal side the split is different and worth
 naming: `runBaseline` builds `sourcePackageIndex` before `solveWithCabal` runs, and that
-build is the "record for all ~153k releases" cost that STATUS.md §3.3 says is not
+build is the "record for all ~153k releases" cost that STATUS.md §2.3 says is not
 separated. Time it as its own phase. Print:
 
 ```
@@ -114,9 +114,9 @@ plan: setup mtl 2.2.2 source
 ```
 
 The diff compares the **library** domain only, since that is the only one we solve
-(STATUS.md §5.2). It reports three things: packages in one plan and not the other,
+(STATUS.md §3.2). It reports three things: packages in one plan and not the other,
 packages resolved to different versions, and cabal's non-library domains as a list,
-not as a disagreement. The synthetic root (`\0root`) is filtered out before printing.
+not as a disagreement.
 
 **Acceptance.** On the six benchmark problems the harness prints the same two plan
 divergences that were found by hand when the baseline landed
@@ -143,7 +143,7 @@ The problem sets are the two files that exist. `bench/problems.txt` feeds the
 benchmark report. `bench/unsat-problems.txt` feeds the showcase. The parser is the
 same three lines of `sed` logic, ported.
 
-**Acceptance.** `cabal run pubgrub-harness` reproduces the STATUS.md §3.1 and §3.2
+**Acceptance.** `cabal run pubgrub-harness` reproduces the STATUS.md §2.1 and §3.2
 tables from one command, and `bench/compare.sh` can be deleted.
 
 ### Step 5 — the two reports
@@ -153,7 +153,7 @@ markdown tables. Two files, written to `bench/output/` by default and never comm
 from there; a run that is meant to be quoted gets copied into `docs/` deliberately.
 Add `bench/output/` to `.gitignore` in the same change.
 
-**The benchmark report** is STATUS.md §3.1 with the phases split out and the medians
+**The benchmark report** is STATUS.md §2.1 with the phases split out and the medians
 labelled as medians, plus the search-count table, plus a header stating the machine,
 the index snapshot date, and the three restrictions.
 
@@ -181,7 +181,7 @@ for every problem, what each solver said and which restrictions applied.
 
 ### Step 6 — retire what it replaces
 
-`bench/compare.sh` goes. `bench/summarise.awk` stays, as the hand tool. STATUS.md §3
+`bench/compare.sh` goes. `bench/summarise.awk` stays, as the hand tool. STATUS.md §2
 becomes "generated by the harness on `<date>`; see `bench/output/`", with the tables
 pasted in. [benchmarking.md](benchmarking.md) loses its "one thing that is missing"
 section and gains a short "running the harness" one. `scripts/gate.sh` is unchanged.
@@ -189,7 +189,7 @@ section and gains a short "running the harness" one. `scripts/gate.sh` is unchan
 ## 4. What is deliberately left out
 
 - **Fixing `yesod`.** The harness reports it as the row where cabal wins. The
-  decision-order fix is a solver change with its own trade (STATUS.md §4.11) and does
+  decision-order fix is a solver change with its own trade (DESIGN.md §12) and does
   not belong in a measurement tool.
 - **Explaining the 22 MB floor.** The harness measures it more carefully, with the
   world phase separated, which is a prerequisite for explaining it. It does not explain
@@ -205,7 +205,7 @@ section and gains a short "running the harness" one. `scripts/gate.sh` is unchan
 | --- | --- |
 | the index refreshes between two runs of the harness | the warm-up run happens first, and the report header records the snapshot date read from `_cache/timestamp.json`. A refresh mid-run is detected by the deterministic counts varying, which the harness asserts on |
 | the derived index is behind the index | the header states `parses` for every problem. Non-zero means re-run `pubgrub-index` before quoting anything |
-| the proof contains a NUL byte | the harness reads `Text`, and the root is filtered from plans. Any shell it spawns to grep gets `-a` |
+| the proof contains a NUL byte | the harness reads `Text`. Any shell it spawns to grep gets `-a` |
 | `--stats` and the awk disagree | Step 1's acceptance test, kept in `scripts/`, run before the awk is retired |
 | noise read as signal | medians, allocation as the headline, and the `±25%` warning printed in the report itself |
 | the gate's text parsers read the new lines | the new lines are prefixed and open with none of the connectives the gate counts. Run the gate after Step 1 |

@@ -644,7 +644,7 @@ wrongly Satisfied or Contradicted, allowed to be Inconclusive.
 
   The obligation is a **brute-force verdict oracle** over generated finite
   worlds — not a second solver. Enumerate all legal selections directly (at most
-  one instance per package. Reachable from the root with no extras. Intrinsically
+  one instance per package. Reachable from the targets with no extras. Intrinsically
   admissible. Every selected instance's dependency facts satisfied. Translated
   user constraints satisfied) and assert:
 
@@ -909,7 +909,7 @@ moves.
 > guards are genuine conditions — including §9's worked trace. That coverage is the
 > only reason it is safe to leave the machinery in place. What changes is which rows below are *exercised*
 > rather than merely *held*, and the table now says so. This is a scope cut for a
-> first release, recorded in [STATUS.md](STATUS.md) §5.1. The flag axis
+> first release, recorded in [STATUS.md](STATUS.md) §3.1. The flag axis
 > is expected back, and §10's couplings are written for whoever brings it back.
 
 | obligation | status |

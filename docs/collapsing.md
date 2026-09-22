@@ -275,7 +275,8 @@ A proof line now reads `base cannot be built from source`.
 
 - **The first query for a boot package**, when it is already source-only. The fact
   rides out with a decision, and there has been no decision yet. Stating all eight
-  facts at the root closes this and takes `lens` to a two-line proof, but it costs
+  facts up front, at level 0, closes this and takes `lens` to a two-line proof, but
+  it costs
   `aeson` 41% more allocation and 466 more decisions. Measured and rejected.
 - **A dead-space range.** `widen` puts a declared bound into a term verbatim, so
   `>=0.2.2` against an index whose oldest matching release is `0.2.2.0` leaves a window
@@ -285,5 +286,5 @@ A proof line now reads `base cannot be built from source`.
   that nothing below the oldest release exists, and the last `no version` line in
   the corpus was this kind, in `futhark`: `no version for regex in <0.0.0.1`. It is
   gone since the first release's slot lost its lower bound
-  ([STATUS.md](STATUS.md) §4.4, `references/pubgrub.md:467`): a depender term that
+  ([DESIGN.md](DESIGN.md) §4, `references/pubgrub.md:467`): a depender term that
   starts at the first release now has no `<first` complement to discover empty.

@@ -4,7 +4,7 @@
 > document generalises, by name rather than by line.
 >
 > **Dormant, and deliberately not withdrawn.** Flags are not
-> a search dimension ([STATUS.md](STATUS.md) §5.1): every flag is fixed
+> a search dimension ([STATUS.md](STATUS.md) §3.1): every flag is fixed
 > at its declared default, so a release has exactly one instance and the costs this
 > document exists to remove — re-offering a version per irrelevant flag assignment,
 > searching assignments outside the constraint store, naming uninvolved flags in every

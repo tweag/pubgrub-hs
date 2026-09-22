@@ -34,7 +34,7 @@ Ranked by how much each one bears on live work:
 
 | our problem | where it lives here | paper |
 |---|---|---|
-| extensional vs intensional version ranges | [`STATUS.md`](STATUS.md) §4.2, [`attic/README.md`](attic/README.md) §7 | §1 aspcud |
+| extensional vs intensional version ranges | [`DESIGN.md`](DESIGN.md) §2, [`attic/README.md`](attic/README.md) §7 | §1 aspcud |
 | depender collapsing, and what it cost | [`collapsing.md`](collapsing.md) | §1.3 |
 | narrowing the universe before/while solving | `Bridge.Hackage`, and `collapsing.md`'s read cost | §1.2, §2.4 |
 | no lawful `Eq`, order-dependent pruning | `InstanceSet`, `SetOps.equivalent` | §2.1 |

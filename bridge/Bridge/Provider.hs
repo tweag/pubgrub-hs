@@ -376,7 +376,7 @@ mkExpand installedDb source = expand'
             -- clause; @banRest@ says why that is the safe direction.)
             --
             -- This broadens a learned clause, and broadening is what made stating
-            -- all eight boot facts at the root expensive (see 'onlyInstalledFact').
+            -- all eight boot facts up front expensive (see 'onlyInstalledFact').
             -- Emitting one fact where it is needed is expected not to be, but that
             -- is to be measured on the search, not assumed.
             Nothing

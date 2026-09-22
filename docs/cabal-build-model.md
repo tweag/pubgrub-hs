@@ -11,7 +11,7 @@
 > qualified-goals design use. Same concept, two names. Read them as synonyms.
 >
 > The solver as built handles one component per package and ignores scopes entirely.
-> See [STATUS.md](STATUS.md) §5.2.
+> See [STATUS.md](STATUS.md) §3.2.
 
 ## Scope of this specification
 

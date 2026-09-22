@@ -31,7 +31,7 @@ Two packages, each requiring an incompatible range of `text`. No assignment of a
 
 The naive approach — enumerate every combination of versions and test consistency — is exponential in the number of packages. A real solver must learn from conflicts: when a combination fails, record *why* it failed so the same dead end is never explored again. This is what PubGrub does.
 
-**PubGrub's contract:** given a root package and an oracle that can fetch dependencies on demand, return either:
+**PubGrub's contract:** given a set of targets and an oracle that can fetch dependencies on demand, return either:
 - a `Map PackageName Version` assigning exactly one version to every required package, or
 - a human-readable derivation tree explaining why no such assignment exists.
 
@@ -173,10 +173,9 @@ data Incompatibility p vs = Incompatibility
 ```
 
 Reads: "it is impossible for foo to be outside `>=1 && <2`", which forces `foo` into
-the plan at a version in that range. One per target; together they are what the
-spec's synthetic root package stands for (`references/pubgrub.md:252`). This is
-the first incompatibility added to every solve. It is immediately a unit clause, so it
-forces the solver to select the root package.
+the plan at a version in that range. One per target (`references/pubgrub.md:252`).
+These are the first incompatibilities added to every solve. Each is immediately a
+unit clause, so it forces the target into the plan.
 
 Note the term is `Negative` of the **singleton**, not of the empty set. `Negative empty`
 is the always-true term, which would make the clause vacuous.
@@ -365,7 +364,7 @@ The printer walks the DAG:
 
 > **Deduplication.** The derivation structure is a DAG, not a tree, so the same incompatibility can be a parent of several nodes. A printer that recurses naively repeats large subtrees. Give a line number to any incompatibility referenced more than once, and replace repeated expansions with a back-reference.
 
-**The real reporter does more than this.** It follows the spec's own reporting algorithm (`references/pubgrub.md:504`), which fuses chains, skips every other derived step, states a run of steps once, and absorbs empty-range leaves. That is what takes a proof from hundreds of lines to a handful. See [STATUS.md](STATUS.md) §4.9.
+**The real reporter does more than this.** It follows the spec's own reporting algorithm (`references/pubgrub.md:504`), which fuses chains, skips every other derived step, states a run of steps once, and absorbs empty-range leaves. That is what takes a proof from hundreds of lines to a handful. See [DESIGN.md](DESIGN.md) §9.
 
 *Lives in: [`src/PubGrub/Report.hs`](../src/PubGrub/Report.hs)*
 
@@ -392,7 +391,7 @@ lists them. Each one is a reason not to reach for an off-the-shelf solver.
 1. **Version ranges.** A package's version space is potentially unbounded, and a range
    represents a whole interval without enumerating it. Expanding ranges into concrete
    version sets costs work *and* has to be undone again to talk to a user. This is why
-   our set type is intensional — see [STATUS.md](STATUS.md) §4.2.
+   our set type is intensional — see [DESIGN.md](DESIGN.md) §2.
 2. **Lazy formulas.** In a standard encoding all clauses are stated before solving
    begins. PubGrub adds dependency incompatibilities on demand, as releases are
    decided. For a registry the size of Hackage, loading every dependency of every
@@ -487,7 +486,7 @@ The modular solver handles two features of the Cabal dependency problem that the
 
 PubGrub as specified treats dependencies as unconditional. Handling flags needs either a pre-expansion of every flag combination, or a richer value domain. This project takes the second option: a solver variable's value is an *instance*, which is a version together with a total flag assignment. [flags-semantics.md](flags-semantics.md) specifies what that costs and requires.
 
-Note that flags are **not currently searched**. Every flag takes its declared default, so a release has exactly one instance. See [STATUS.md](STATUS.md) §5.1.
+Note that flags are **not currently searched**. Every flag takes its declared default, so a release has exactly one instance. See [STATUS.md](STATUS.md) §3.1.
 
 **Installed against new instances.** The modular solver distinguishes packages already installed in the GHC package database from new packages to be downloaded, and it prefers installed instances. Our provider does the same, in `expand`. The distinction is not built into the algorithm: it lives entirely in the provider, which is where an `Instance` can be a pre-installed unit.
 

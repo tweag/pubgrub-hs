@@ -114,8 +114,9 @@ type World = [(PackageName, Pkg)]
 --
 --  * the 'BP.ReleaseSource' answers from a list rather than from an index, so no
 --    @.cabal@ is ever parsed.
---  * the world's root is an ordinary release, seeded as the one request, so it
---    is resolved through the same path as every other package.
+--  * the package named @root@ is an ordinary release of the world, seeded as
+--    the one request, so it is resolved through the same path as every other
+--    package.
 --
 -- The installed db is empty: these worlds have no pre-installed units, so every
 -- 'PubGrub.InstanceSet.InstanceSet' has an empty installed side.
@@ -199,8 +200,8 @@ runTestM m = runReaderT (unTestM m) (TestEnv mempty mempty)
 -- Running a world
 -- --------------------------------------------------------------------------
 
--- | The root package, whose sole release is @1.0.0@ with no flags. An ordinary
--- package of the world that the solve is seeded with: see 'worldProvider'.
+-- | The package the solve is seeded with, whose sole release is @1.0.0@ with no
+-- flags. An ordinary package of the world: see 'worldProvider'.
 root :: PackageName
 root = pkg "root"
 

@@ -117,10 +117,9 @@ instanceOf world p v =
 --  * the 'BP.ReleaseSource' answers from the world rather than from an index, and
 --    no @.cabal@ is ever parsed. Its two questions are exactly what a paper world
 --    can answer: which versions exist, and what one release declares.
---  * the paper\'s root package is not a package here at all: its dependencies
---    are the solve\'s seeds, one 'request' per dependency, which is what the
---    spec says the root stands for (@:252@). So the worlds hold only the
---    packages the paper resolves, and the expected solutions name only those.
+--  * the paper\'s top-level dependencies are the solve\'s seeds, one 'request'
+--    per dependency (@:252@). So the worlds hold only the packages the paper
+--    resolves, and the expected solutions name only those.
 --  * the installed db is empty: these worlds have no pre-installed units, so the
 --    installed half of every 'PubGrub.InstanceSet.InstanceSet' is empty and the
 --    prefer-installed and non-reinstallable branches never run.
@@ -201,7 +200,7 @@ runSolve
 runSolve provider seeds =
     runIdentity (runReaderT (unPureM (solve provider seeds)) (LogEnv mempty mempty))
 
--- | Run the solver against a world, seeded with the paper's root dependencies.
+-- | Run the solver against a world, seeded with the paper's top-level dependencies.
 -- A failure is kept as its rendered report rather than 'show'n, because the
 -- derived 'Show' would expand the whole derivation DAG as a tree.
 solveWorld :: [(PackageName, VersionRange)] -> World -> Either Text (Map PackageName Instance)
@@ -313,9 +312,9 @@ tests =
           -- > solving failed.
           --
           -- The first line is ours exactly, in Cabal's range syntax. The last
-          -- differs in one way: there is no root package here, so where the spec's
-          -- root \"depends on both baz ^1.0.0 and foo ^1.0.0\" ours says the two are
-          -- requested, which is the same fact without the package in front of it.
+          -- differs in one way: where the spec's line has a depender for baz
+          -- ^1.0.0 and foo ^1.0.0, ours says the two are requested, which is the
+          -- same fact without the package in front of it.
           proofGolden "Linear Error Reporting (unsat)" "linear-error-reporting.txt"
             [(pkg "foo", caret [1, 0, 0]), (pkg "baz", caret [1, 0, 0])]
             [ (pkg "foo", [Release [1, 0, 0] [(pkg "bar", caret [2, 0, 0])]])
@@ -328,7 +327,7 @@ tests =
           -- line that joins the two branches, and the blank line between them.
           -- Ours differs in which facts each branch's first line fuses, and its
           -- last line says \"foo >=1.0.0 && <2 is requested\" where the spec's
-          -- root depends on it.
+          -- has a depender for it.
           proofGolden "Branching Error Reporting (unsat)" "branching-error-reporting.txt"
             [(pkg "foo", caret [1, 0, 0])]
             [

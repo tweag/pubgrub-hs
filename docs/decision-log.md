@@ -82,7 +82,7 @@ was in range.
 
 Note the date: this is **pre-reboot**. `expand` is one of the few pieces of Era 2
 that survived the rewrite intact, which is why it can feel older than the code
-around it. Splitting it *back* is still an open question — [STATUS.md](STATUS.md) §8.
+around it. Splitting it *back* is still an open question — [TODO.md](TODO.md) §4.
 
 ---
 
@@ -431,7 +431,7 @@ Every metric improved at once, which the walk could not do: `pandoc` 2871 reads 
 17.31 → 1.53 GB allocated, 81.0 → 22.6 MB resident. `lens <4`'s proof went 80 → 9 lines
 against cabal's 22. At that point we were faster than cabal on all five problems and
 leaner in memory on all five. (The set has since grown to six, and `yesod` is where
-cabal wins — [STATUS.md](STATUS.md) §3.1.)
+cabal wins — [STATUS.md](STATUS.md) §2.1.)
 
 Three lessons worth the entry:
 
@@ -1083,7 +1083,7 @@ entry where two spellings named one version, and the provider converted back on 
 read. The property suite's oracle, Cabal's own range algebra, was no longer one, and
 the membership properties were named as the semantic oracle instead; seven
 trailing-zero properties and two tie-break cases were added, 205 tests to 214. The
-measurement program was deleted once its numbers were in `STATUS.md` §4.13.
+measurement program was deleted once its numbers were in `DESIGN.md` §14.
 
 **What it did.** Nine of the 23 problems moved, same machine and same index-state
 either side: the eight phantom no-version events were gone, `aeson <2` went 400 to
@@ -1168,7 +1168,7 @@ not. `Bridge.Cabal.Flatten.componentDepsWith` walked `condLibrary`, `condSubLibr
 and `condExecutables` and read each tree's `condTreeConstraints` while ignoring its
 node's `buildable:`, so `http2 ==5.4.4` pulled `aeson` and `aeson-pretty` in through
 `hpack-encode`, a stanza that ends `if flag(devel) … else buildable: False` and that
-cabal therefore never sees. STATUS.md §3.1 and §5.3 had recorded the effect since
+cabal therefore never sees. STATUS.md §2.1 and §4.3 had recorded the effect since
 Sep 3, but only as extra packages in a *satisfiable* plan — `network-run` under
 `pandoc` — which read as cosmetic. It was not: it rejected plans cabal accepts.
 
@@ -1302,7 +1302,7 @@ forest, one tree per target. The `-a` in the scripts stayed as a precaution.
 
 ## What is open, and what is settled
 
-Not here. [STATUS.md](STATUS.md) §8 carries both lists, where they are re-read.
+Not here. [TODO.md](TODO.md) §5 and §6 carry both lists, where they are re-read.
 
 ---
 

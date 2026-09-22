@@ -116,10 +116,9 @@ incompGet p (Incompatibility m _ ) = Map.lookup p m
 
 -- | A seed: what the solve is asked for. It is impossible for @p@ to be
 -- /outside/ @s@, which forces @p@ into the plan at an instance in @s@. One per
--- target, and together they stand for the algorithm's synthetic root package: a
--- root whose dependencies are the targets is the same set of unit clauses with a
--- package in front of them, and that package then has to be printed, planned and
--- filtered out again. Seeds state the request directly.
+-- target. Seeds take the place of the algorithm's opening incompatibility on a
+-- synthetic root package, with the request stated directly, so no package stands
+-- in front of the targets to be printed, planned and filtered out again.
 --
 -- A seed is a unit clause, so propagation turns it into a derivation at decision
 -- level 0 before anything is decided; "PubGrub.Solver" recognises a conflict that

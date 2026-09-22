@@ -55,7 +55,7 @@ hjsonschema ==1.10.0            # base and bytestring, via aeson
 
 # --- dead range: a declared bound naming a version never published -------------
 # `widen` puts the declared range into the term verbatim, so the dead space survives
-# into the proof. Narrowing it was measured and rejected twice (docs/STATUS.md §8).
+# into the proof. Narrowing it was measured and rejected twice (docs/TODO.md §6).
 atelier-testing ==0.2.0.0       # atelier-core >=0.3 && <0.3.0.0, and two more showcase:exclude (fails for a different reason than cabal)
 cpsa ==4.4.9                    # deepseq, two slots against installed base
 happstack-hsp ==7.3.7.8         # template-haskell history
@@ -67,7 +67,7 @@ futhark ==0.27.1                # regex / time chain showcase:exclude (fails for
 
 # --- the two long chains -------------------------------------------------------
 # Both walk a dependency's bound history release by release. PubGrub.Report states
-# such a run once (docs/STATUS.md §4.9, rule 3); these two are the measure of it.
+# such a run once (docs/DESIGN.md §9, rule 3); these two are the measure of it.
 scion-browser ==0.5.0           # 4 sentences against cabal's 11; was 16 against 12
 matterhorn ==90000.1.1          # 8 against 17; was 16 against 18 with 11 no-version lines
 

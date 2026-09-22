@@ -304,11 +304,10 @@ satisfierSearch ps i = do
     prevForSat <- require satPkg (satisfierOf ps satPkg startTerm')
     let satMap' = [(p, if p == satPkg then prevForSat else a) | (p, a) <- satMap]
     (_, prevAssign) <- latestSatisfier satMap'
-    -- No floor. The spec stops at decision level 1 "where the root package was
-    -- selected" and notes that level 0 is safe (@references\/pubgrub.md:398@
-    -- and :401); here there is no root package, the requests are derivations
-    -- at level 0, and the first decision at level 1 is an ordinary one that a
-    -- conflict may have to undo.
+    -- No floor. The requests are derivations at level 0, so the first decision
+    -- at level 1 is an ordinary one that a conflict may have to undo. The spec
+    -- stops at level 1 (@references\/pubgrub.md:398@), where its root package
+    -- was selected, and notes that level 0 is safe (:401).
     let prevLevel = aLevel prevAssign
     pure $ case aKind satAssign of
         Derived _ cause
@@ -335,11 +334,11 @@ seedAssignments ps p = [a | a <- packageHistory ps p, isSeed a]
 
 -- | Is the incompatibility satisfied by the seeds' own derivations alone? Then
 -- no decision took part in the conflict, so nothing can be backtracked and
--- version solving has failed. This is PubGrub's terminal test (no terms, or a
--- single positive term that refers to the root package version) with the root
--- package's one derivation replaced by whatever the seeds derived: an empty
--- incompatibility is satisfied by anything, and @{root: Positive s}@ with the
--- root's instance in @s@ is exactly "satisfied by the seed @{not root}@ alone".
+-- version solving has failed. This is PubGrub's terminal test stated over the
+-- seeds: there the only level-0 derivation is a fixed one, here it is whatever
+-- the seeds derived. An empty incompatibility is satisfied by anything, and one
+-- whose every term is subsumed by a seed's derivation is satisfied before
+-- anything is decided.
 --
 -- Checked before the satisfier search, which is what keeps a seed from ever being
 -- a satisfier's cause: the seeds are the oldest assignments, so a seed derivation
@@ -351,11 +350,9 @@ satisfiedBySeeds ps inc = incompRelation seedTerm inc == ISatisfied
 
 -- | Resolve a terminal incompatibility against the seeds it rests on, one
 -- 'priorCause' per seed, so that the incompatibility handed to the report is the
--- empty one and its derivation ends with the request. A PubGrub proof with a
--- root package ends the same way, \"So, because root depends on …, version
--- solving failed\": there the request is the root's dependency facts, resolved
--- into the terminal @{root}@; here the request is the seeds, and the last step
--- is taken explicitly.
+-- empty one and its derivation ends with the request. A PubGrub proof ends the
+-- same way (\"…, version solving failed\"), with the request as the last fact
+-- named; here the request is the seeds, and the last step is taken explicitly.
 --
 -- Each step is a genuine resolution: 'satisfiedBySeeds' holds, so every term is
 -- subsumed by its seed's derivation and the union over the pivot is ⊤. The
@@ -483,11 +480,10 @@ data SolverMsg
     | -- | backtracked to this decision level
       Backtracked Int
 
--- | Solve for the seeds — one 'PubGrub.Incompatibility.request' per target,
--- standing in for PubGrub's synthetic root package — by alternating
--- 'unitPropagation' with decisions: take the first 'undecidedPositive' package
--- and ask the 'Provider' to 'expand' its range into an instance and the
--- incompatibilities that instance entails.
+-- | Solve for the seeds, one 'PubGrub.Incompatibility.request' per target, by
+-- alternating 'unitPropagation' with decisions: take the first
+-- 'undecidedPositive' package and ask the 'Provider' to 'expand' its range into
+-- an instance and the incompatibilities that instance entails.
 --
 -- The seeds go in first and in order, so their derivations are the oldest
 -- assignments and the targets are decided in the order they were asked for.

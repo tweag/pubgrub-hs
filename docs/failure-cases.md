@@ -124,7 +124,7 @@ Two things this table is evidence for beyond length:
 - **The chain fusion fires in the wild.** `depends on X which depends on Y` appears in
   14 of the first 17. It had only ever been seen in the spec's own worked example, so it
   looked like a rule that never fires on real input. That is also what made the empty-range
-  clutter look cosmetic ([STATUS.md](STATUS.md) §4.9, rule 5): those holes were what
+  clutter look cosmetic ([DESIGN.md](DESIGN.md) §9, rule 5): those holes were what
   kept the fusion from pairing.
 - **`references/pubgrub.md:476` pays.** `hpqtypes-extras` says
   `hpqtypes >=1.10.0.2 needs pkg-config package libpq, which is not found` where
@@ -147,7 +147,7 @@ failures in it are real rather than an artefact of the environment.
   or on the local pkg-config db. Install `libpq` and `hpqtypes-extras` resolves. Any
   published figure has to state the environment.
 - **Both solvers run with every flag pinned to its declared default**
-  ([STATUS.md](STATUS.md) §5.1). That is a restriction of the problem, and it removes
+  ([STATUS.md](STATUS.md) §3.1). That is a restriction of the problem, and it removes
   exactly the escape cabal's *automatic* flags would provide.
 - **cabal solves setup and build-tool depends and we do not.** On a package with a
   custom `Setup.hs` the two are answering different questions. None of the 20 has one.
@@ -170,7 +170,7 @@ the same dependee, so the same-pair fusion never fires. cabal's message is a sea
 trace instead: on `optparse-applicative ==0.15.1.0, criterion` it prints 26 lines, 20
 of them `trying:`, explains `criterion-1.6.5.0` only and never why 1.6.4 and below
 fail, and 4 of the 23 end at `Backjump limit reached`, a resource limit where we
-print a refutation. Rule 4 of the reporter ([STATUS.md](STATUS.md) §4.9) was built
+print a refutation. Rule 4 of the reporter ([DESIGN.md](DESIGN.md) §9) was built
 from that sweep and took the three longest from 46, 65 and 63 sentences to 34, 54 and
 46. It is not enough: each remaining sentence names a different depender.
 
@@ -191,9 +191,8 @@ headline it prints is "shorter on 16 of 16 comparable problems", by sentences; b
 screen lines at 80 columns it is shorter on 15 and equal on the `hlint` pair.
 `scripts/gate.sh`
 does the deciding half: it fails on any regression in verdict agreement or proof
-length. See [STATUS.md](STATUS.md) §9 and [harness-plan.md](harness-plan.md).
+length. See [STATUS.md](STATUS.md) §5 and [harness-plan.md](harness-plan.md).
 
 One habit worth keeping in any tool over this corpus: read a child's output as
-bytes and pass `-a` to `grep`. Until 2026-09-22 every proof carried a NUL byte in
-the synthetic root's name, and a tool that read it as text counted zero lines and
-looked like a passing measurement. The root is gone, so nothing depends on it now.
+bytes and pass `-a` to `grep`. A tool that reads a proof as text and meets a byte
+it cannot decode counts zero lines and looks like a passing measurement.
