@@ -4,27 +4,37 @@
 --
 -- A terminal 'Incompatibility' carries the 'IncompatCause' tree that produced
 -- it, which is all this module needs: 'reportConflict' replays that tree as a
--- written argument. Ranges print in Cabal syntax (@>=1.0.0 && <2@), and a
--- declared range prints as its author spelled it (@^>=1.0.0@, see
--- 'PubGrub.VersionSet.declaredRange').
+-- written argument.
 --
--- == Two rules keep the proof short
+-- == How the proof is made
 --
--- Replayed naively, one line per derived incompatibility and each naming one
--- external fact, a proof is too long to read to the end.
+-- The walker, @derived@, visits a derived step and emits one line for it: a
+-- connective, a __premise__, and what the step concludes. The premise is what
+-- varies, and it is chosen by a __rule__ — the first of @lineRules@ to fire.
+-- A rule is a @do@ block in 'Maybe', written in the vocabulary of
+-- "PubGrub.Report.Rule": each line reads a view of the tree or states a guard,
+-- and the last says the premise and names the sub-derivation, if any, the line
+-- continues (@Line@). Two facts named together in one premise are joined by a
+-- second table, @clauseRules@, in the same language. The sentences themselves
+-- are "PubGrub.Report.Wording"'s, and the headline above the proof is
+-- "PubGrub.Report.Headline"'s.
 --
---  * __A chain of two external facts is one sentence.__ Where a dependency's
---    dependee is the depender of the next, the proof says \"@foo@ depends on
---    @bar@ /which depends on/ @baz@\" rather than naming @bar@ twice, and where
---    two facts share a depender it says \"depends on /both/ X and Y\". Both
---    live in @pair@.
+-- Two rules keep the proof short. Replayed naively, one line per derived
+-- incompatibility and each naming one external fact, a proof is too long to
+-- read to the end.
 --
---  * __Every other derived step is skipped.__ Where a step's derived cause has a
---    single derived cause of its own, that intermediate /conclusion/ is left out
---    and both external facts are named in one line. Since most derivation graphs
---    are linear chains, this halves them.
+--  * __A chain of two external facts is one sentence__ (@chainOfTwo@,
+--    @sharedDepender@). Where a dependency's dependee is the depender of the
+--    next, the proof says \"@foo@ depends on @bar@ /which depends on/ @baz@\"
+--    rather than naming @bar@ twice, and where two facts share a depender it
+--    says \"depends on /both/ X and Y\".
 --
--- Three more rules shorten it further — two run collapses in @oneDerived@, and
+--  * __Every other derived step is skipped__ (@everyOtherStep@). Where a step's
+--    derived cause has a single derived cause of its own, that intermediate
+--    /conclusion/ is left out and both external facts are named in one line.
+--    Since most derivation graphs are linear chains, this halves them.
+--
+-- Three more rules shorten it further — @samePairRun@, @wideningRun@ and
 -- 'collapseNoInstances' — and each carries its soundness argument where it is
 -- defined.
 --
@@ -41,34 +51,60 @@
 module PubGrub.Report
     ( reportConflict
     , reportHeadline
+    , collapseNoInstances
+      -- * Re-exported from "PubGrub.Report.Layout"
     , wrapProof
     , styleProof
     , rangeToken
-    , collapseNoInstances
     ) where
 
-import           Control.Applicative            ((<|>))
 import           Control.Monad                  (guard)
-import           Data.Char                      (isDigit)
-import           Data.List                      (minimumBy, nub, unsnoc)
-import           Data.Ord                       (comparing)
 import qualified Data.Map.Strict                as Map
 import           Data.Maybe                     (fromMaybe)
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
-import           Data.List.NonEmpty             (NonEmpty)
-import qualified Data.List.NonEmpty             as NE
-import           Distribution.Pretty            (prettyShow)
 import           Distribution.Types.PackageName (PackageName)
 import           PubGrub.Incompatibility        (IncompatCause (..),
                                                  Incompatibility (..),
-                                                 UnbuildableReason (..),
                                                  priorCauseTerms)
-import           PubGrub.InstanceSet            (InstanceSet, isEveryVersion)
-import           PubGrub.Pretty                 (Pretty (..))
-import           PubGrub.SetOps                 (SetOps (intersect, union), equivalent,
-                                                 isSubsetOf)
-import           PubGrub.Term                   (Term (..), unionTerm)
+import           PubGrub.InstanceSet            (InstanceSet)
+import           PubGrub.Report.Headline        (headline)
+import           PubGrub.Report.Layout          (rangeToken, styleProof,
+                                                 wrapProof)
+import           PubGrub.Report.Rule
+import           PubGrub.Report.Wording         (bare, dep, leaf, named,
+                                                 summary, summaryTerms)
+import           PubGrub.SetOps                 (equivalent, isSubsetOf)
+import           PubGrub.Term                   (Term (..))
+
+-- | Render an incompatibility and its derivation as a human-readable proof.
+reportConflict :: Incompatibility -> Text
+reportConflict root0
+    | isDerived root = render (reverse (outLines (derived True root (Out [] 1))))
+    -- The terminal incompatibility is itself an external fact: nothing was
+    -- derived, so the fact is the whole explanation.
+    | otherwise = leaf root
+  where
+    -- The holes go first: a derivation step that only established that a range
+    -- is empty is not a step worth a line, and leaving them in is what stops
+    -- the chain fusion from ever firing on a real problem.
+    root = collapseNoInstances root0
+
+    -- Every line is a sentence and ends as one. A blank line between two
+    -- branches of a derivation (references/pubgrub.md:632) stays blank.
+    render ls = T.intercalate "\n" [line n t | (n, t) <- ls]
+    line _ "" = ""
+    line n t  = prefix n <> t <> "."
+    prefix Nothing  = ""
+    prefix (Just n) = T.pack (show n) <> ". "
+
+-- | One or two lines to put above the proof: see "PubGrub.Report.Headline".
+reportHeadline :: Incompatibility -> Text
+reportHeadline = headline . collapseNoInstances
+
+-- --------------------------------------------------------------------------
+-- The walker
+-- --------------------------------------------------------------------------
 
 -- | The proof under construction: its lines __newest first__, and the next free
 -- line number.
@@ -76,6 +112,288 @@ data Out = Out
     { outLines :: [(Maybe Int, Text)]
     , outNext  :: !Int
     }
+
+emit :: Text -> Out -> Out
+emit t out = out{outLines = (Nothing, t) : outLines out}
+
+-- | Give the line just emitted a number, so a later line can cite it. Numbers
+-- are minted here and nowhere else.
+numberLast :: Out -> (Int, Out)
+numberLast out = case outLines out of
+    ((Just n, t) : rest) -> (n, out{outLines = (Just n, t) : rest})
+    ((Nothing, t) : rest) ->
+        ( outNext out
+        , out{outLines = (Just (outNext out), t) : rest, outNext = outNext out + 1}
+        )
+    -- Unreachable: every branch emits at least one line before this is called.
+    -- Answering with the unused number keeps the proof well-formed if it ever is.
+    [] -> (outNext out, out)
+
+-- | Explain one derived incompatibility, ending with the line that concludes it.
+-- @final@ marks the last line of the whole proof, which reads \"So, …\" and
+-- concludes failure by name.
+derived :: Bool -> Incompatibility -> Out -> Out
+derived final inc out = case bothDerived inc of
+    -- Case 1 (references/pubgrub.md:595): both causes derived — the derivation
+    -- branches, and this is the only place a line number is wanted. Explain the
+    -- first branch, number the line it ends on, then explain the second and close
+    -- by referring back. The blank line between the two branches is the spec's
+    -- (:632): it marks that a new line of derivation starts. No rule chooses
+    -- this: it is the structure of the proof, not a way of saying a step.
+    Just (c1, c2) ->
+        let (n, out') = numberLast (derived False c1 out)
+         in emit
+                (opening (Just c2) <> summary c1 <> " (" <> T.pack (show n) <> "), " <> says inc)
+                (derived False c2 (emit "" out'))
+    Nothing -> case firstOf lineRules inc of
+        Just (Line premise below) ->
+            emit
+                (opening below <> premise <> ", " <> says inc)
+                (maybe out (\d -> derived False d out) below)
+        -- Not reached: a derived step either branches, chains or joins two
+        -- facts, and the last two rules of the table fire on any such step.
+        Nothing -> emit (leaf inc) out
+  where
+    -- "So," marks the conclusion (references/pubgrub.md:1027); "Because" opens a
+    -- line of derivation, which only a step with nothing below it does; "And
+    -- because" continues one.
+    opening below
+        | final = "So, because "
+        | Just _ <- below = "And because "
+        | otherwise = "Because "
+    says c
+        | final = "version solving failed"
+        | otherwise = summary c
+
+-- --------------------------------------------------------------------------
+-- The line rules
+-- --------------------------------------------------------------------------
+
+-- | What a rule proposes for one line of the proof.
+data Line
+    = Line
+        Text
+        -- ^ the premise, which goes after the connective
+        (Maybe Incompatibility)
+        -- ^ the sub-derivation the line continues, explained before it; a line
+        -- that continues nothing opens a line of derivation
+
+-- | The rules for a step that is not a branch, tried in this order. The two
+-- run rules go before the ordinary skip because they collapse what the skip
+-- would print two facts at a time; 'oneFact' is the spec's case 2.iii and
+-- fires on any chain step, so the table is total over chain steps.
+lineRules :: [Rule Incompatibility Line]
+lineRules =
+    [ twoFacts
+    , wideningRun
+    , samePairRun
+    , everyOtherStep
+    , oneFact
+    ]
+
+-- | Case 3: both causes are external. One line, and the only case that opens a
+-- line of derivation rather than continuing one.
+twoFacts :: Rule Incompatibility Line
+twoFacts step = do
+    (c1, c2) <- bothExternal step
+    pure (Line (clause c1 c2) Nothing)
+
+-- | Case 2.ii — the every-other-step skip. The derived cause's own conclusion
+-- is left unsaid and the two external facts are named together here, which is
+-- where a long linear chain loses half its lines.
+everyOtherStep :: Rule Incompatibility Line
+everyOtherStep step = do
+    (d, e) <- chainStep step
+    (dd, de) <- chainStep d
+    pure (Line (clause de e) (Just dd))
+
+-- | Case 2.iii: the derived cause branches or bottoms out, so it gets its own
+-- lines and this one closes with the external fact alone.
+oneFact :: Rule Incompatibility Line
+oneFact step = do
+    (d, e) <- chainStep step
+    pure (Line (leaf e) (Just d))
+
+-- | __The same-pair run.__ Before the ordinary every-other-step skip, look for a
+-- run of steps that all say the same kind of thing: this range of @p@ depends on
+-- @q@, and so does the next range, and the next. That is one fact about @p@ as a
+-- whole, and printed a range at a time it walks one bound's history an adjacent
+-- pair of releases at a time (four of @matterhorn@'s ten lines did this to
+-- @hashable@).
+--
+-- It is /not/ the collapsing of adjacent versions' identical dependencies,
+-- which merges facts with an __identical__ dependee range. Here the dependee
+-- ranges differ — that is why the solver had to derive its way along them — and
+-- what is printed is their union.
+--
+-- Stating the union of the facts is sound on its own — each says @p ∈ Sᵢ@
+-- requires @q ∈ Rᵢ@, so @p ∈ ⋃S@ requires @q ∈ ⋃R@ — but a line may not claim
+-- to justify more of @p@ than the step it is attached to concluded, and the
+-- last two guards are what stop it: the conclusion really is \"p requires q\",
+-- and the collapsed depender range is one it covers. 'isSubsetOf' is one-sided
+-- the safe way: it can only refuse a collapse that would have been fine.
+samePairRun :: Rule Incompatibility Line
+samePairRun step = do
+    (d, e) <- chainStep step
+    (p, s, q, r) <- asDependency e
+    let (rest, more) = runWhile (dependencyOn p q) d
+    guard (not (null more))
+    ss <- unions (s : map fst more)
+    rs <- unions (r : map snd more)
+    sInc <- concludesRequires p q step
+    guard (ss `isSubsetOf` sInc)
+    pure (Line (dep p ss q rs) (Just rest))
+  where
+    -- A fact about this @(depender, dependee)@ pair: its two ranges.
+    dependencyOn p q e = do
+        (p', s, q', r) <- asDependency e
+        guard (p' == p && q' == q)
+        pure (s, r)
+
+-- | Is this step's conclusion of the shape \"p requires q\"? If so, the range of
+-- @p@ it speaks for. Anything else and a collapsed sentence would be attached
+-- to a claim it does not support.
+concludesRequires :: PackageName -> PackageName -> Rule Incompatibility InstanceSet
+concludesRequires p q step = case Map.toList (incompTerms step) of
+    [(a, Positive s), (b, Negative _)] | (a, b) == (p, q) -> Just s
+    [(b, Negative _), (a, Positive s)] | (a, b) == (p, q) -> Just s
+    _                                                     -> Nothing
+
+-- | __The widening run.__ The same-pair run needs every fact in the run to name
+-- the same dependee, and needs the step's conclusion to be the two-term \"p
+-- requires q\". Neither holds on a problem with an /unconstrained/ target:
+-- refuting one takes a walk along the target's whole version history, and
+-- consecutive releases rarely fail over the same dependee. @aeson@ against
+-- @optparse-applicative ==0.15.1.0@ spent thirteen lines on that walk, folding
+-- in one @aeson@ dependency each time while every other term stood still.
+--
+-- So collect the run by __depender alone__ and state it once. Each fact says
+-- @p ∈ Sᵢ@ requires @qᵢ ∈ Rᵢ@, so their union says @p ∈ ⋃S@ requires
+-- @q₁ ∈ ⋃R₁@ or … or @qₙ ∈ ⋃Rₙ@: if @p@ is in the union it is in some @Sᵢ@, and
+-- that fact's own dependee is one of the disjuncts. Nothing else about @p@ is
+-- claimed, which is why 'mergeFacts' refuses a run where some package is a
+-- depender in one fact and a dependee in another — the argument is about one
+-- depender and holds for nothing else.
+--
+-- Three facts at least. Two of them fit one line as they are, where the
+-- ordinary skip already puts them, and naming both says strictly more than
+-- naming their union — so the union has to buy a line to be worth taking. The
+-- same-pair run still takes two facts whose dependee agrees.
+--
+-- __The guard is the operation, not a description of it.__ A line that stands
+-- for a run has to arrive where the run arrived, and the only way to know that
+-- is to go there: 'PubGrub.Incompatibility.priorCauseTerms' — the term algebra
+-- 'PubGrub.Incompatibility.priorCause' itself runs, pivoting on the depender —
+-- is applied once to the merged fact, and the collapse is taken only if the
+-- result is term for term the conclusion this line is attached to. So the rule
+-- needs no subset side-condition of its own, and it needs no case analysis over
+-- what the run did: whether the depender __accumulated__ (@aeson@ climbing from
+-- @\<0.8.0.1@ to @\<2.2.5.0@) or was __eliminated__ (@directory@ losing one slot
+-- per fact until nothing was left), one step over the union lands where @n@
+-- steps over the members landed, or the collapse does not happen.
+wideningRun :: Rule Incompatibility Line
+wideningRun step = do
+    (d, e) <- chainStep step
+    (p, _, _, _) <- asDependency e
+    let (rest, more) = runWhile (dependencyOf p) d
+    guard (length more >= 2)
+    merged <- mergeFacts (e : more)
+    guard (sameTerms (priorCauseTerms p (incompTerms rest) merged) (incompTerms step))
+    pure (Line (runFact p merged) (Just rest))
+  where
+    -- A fact with this depender, whatever it depends on.
+    dependencyOf p e = do
+        (p', _, _, _) <- asDependency e
+        guard (p' == p)
+        pure e
+
+    -- The merged fact, as its sentence. With one dependee it is the shape the
+    -- same-pair run prints, word for word, so a run that both could take reads
+    -- the same either way; with several it is a requirement with alternatives,
+    -- and "requires" rather than "depends on" because a union of declared
+    -- dependencies is something the solver worked out, not something an author
+    -- wrote (references/pubgrub.md:1005).
+    runFact p terms = case Map.toList (Map.delete p terms) of
+        [(q, Negative r)] | Just (Positive sp) <- Map.lookup p terms -> dep p sp q r
+        _ -> summaryTerms terms
+
+-- --------------------------------------------------------------------------
+-- The clause rules: two external facts as one premise
+-- --------------------------------------------------------------------------
+
+-- | Two external facts, as one clause: the first of 'clauseRules' to fire, or
+-- the two facts side by side.
+clause :: Incompatibility -> Incompatibility -> Text
+clause c1 c2 = fromMaybe (leaf c1 <> " and " <> leaf c2) (firstOf clauseRules (c1, c2))
+
+-- | Each fusion is guarded so that it cannot say more than the facts do, and
+-- 'PubGrub.SetOps.isEmpty' on an 'InstanceSet' is one-sided — it may fail to
+-- notice that a set is empty — so a guard can only fail to fuse where it could
+-- have, never fuse where it should not.
+clauseRules :: [Rule (Incompatibility, Incompatibility) Text]
+clauseRules =
+    [ twoRequests
+    , symmetric dependsOnNothing
+    , symmetric requestsNothing
+    , symmetric chainOfTwo
+    , sharedDepender
+    ]
+
+-- | Two seeds close a proof together: \"baz >=1 && <2 and foo >=1 && <2 are
+-- requested\", the spec's \"depends on both\" sentence without a depender in
+-- front of it.
+twoRequests :: Rule (Incompatibility, Incompatibility) Text
+twoRequests (c1, c2) = do
+    (p1, r1) <- asRequest c1
+    (p2, r2) <- asRequest c2
+    pure (bare p1 r1 <> " and " <> bare p2 r2 <> " are requested")
+
+-- | A dependency whose dependee range the solver has already found empty.
+-- Naming both facts would print that range /twice/ in one sentence, and on a
+-- real proof it is not short: haddock 2.29.1's bound on base is seven windows.
+--
+-- Saying it once is sound only when the dependency's whole range is inside the
+-- empty one, which is what the 'isSubsetOf' checks. Where it is only partly
+-- inside, the two facts stay separate — absorbing that case means widening the
+-- term rather than dropping a clause, so it is not a rendering change.
+dependsOnNothing :: Rule (Incompatibility, Incompatibility) Text
+dependsOnNothing (fact, hole) = do
+    (q', empty) <- asHole hole
+    (p, s, q, r) <- asDependency fact
+    guard (q == q' && r `isSubsetOf` empty)
+    pure (dep p s q r <> ", which has no versions")
+
+-- | A request whose whole range is empty reads the same way.
+requestsNothing :: Rule (Incompatibility, Incompatibility) Text
+requestsNothing (fact, hole) = do
+    (p', empty) <- asHole hole
+    (p, r) <- asRequest fact
+    guard (p == p' && r `isSubsetOf` empty)
+    pure (bare p r <> " is requested, which has no versions")
+
+-- | A __chain__ — the first fact's dependee is the second's depender — reads
+-- \"a depends on b which depends on c\". That is only true if every instance the
+-- first fact leaves open for the middle package is one the second fact speaks
+-- about, hence the 'isSubsetOf'.
+chainOfTwo :: Rule (Incompatibility, Incompatibility) Text
+chainOfTwo (c1, c2) = do
+    (p1, s1, q1, r1) <- asDependency c1
+    (p2, s2, q2, r2) <- asDependency c2
+    guard (q1 == p2 && r1 `isSubsetOf` s2)
+    pure (dep p1 s1 q1 r1 <> " which depends on " <> bare q2 r2)
+
+-- | __One depender, two dependees__ reads \"a depends on both b and c\", for
+-- which the two facts must be about the same instances of @a@.
+sharedDepender :: Rule (Incompatibility, Incompatibility) Text
+sharedDepender (c1, c2) = do
+    (p1, s1, q1, r1) <- asDependency c1
+    (p2, s2, q2, r2) <- asDependency c2
+    guard (p1 == p2 && s1 `equivalent` s2)
+    pure (named p1 s1 <> " depends on both " <> bare q1 r1 <> " and " <> bare q2 r2)
+
+-- --------------------------------------------------------------------------
+-- The pre-pass
+-- --------------------------------------------------------------------------
 
 -- | Absorb \"no version for @p@ in @r@\" facts into the sibling they were resolved
 -- against, and drop the step.
@@ -101,9 +419,9 @@ data Out = Out
 --  * __the dependee's whole range is empty.__ Then the union over the pivot is ⊤, the
 --    dependee entry drops out of the resolvent, and rebuilding would produce a
 --    dependency fact whose dependee range is /gone/ — the proof would say \"haddock
---    >=2.29.1 is forbidden\" and never mention @base@. @pair@ renders that case as
---    \"depends on … , which has no versions\", which keeps the range, so the guard
---    here is that the node must still carry a term for both packages.
+--    >=2.29.1 is forbidden\" and never mention @base@. @dependsOnNothing@ renders
+--    that case as \"depends on … , which has no versions\", which keeps the range,
+--    so the guard here is that the node must still carry a term for both packages.
 --  * __the sibling is itself derived.__ Only an external dependency fact is
 --    absorbed into; dropping the hole beside a derived sibling would print a
 --    conclusion wider than the line's two causes justify.
@@ -113,17 +431,14 @@ collapseNoInstances inc = case incompCause inc of
         let c1' = collapseNoInstances c1
             c2' = collapseNoInstances c2
             node = Incompatibility (incompTerms inc) (CauseDerivedFrom c1' c2')
-         in fromMaybe node (absorb node c1' c2' `orElse` absorb node c2' c1')
+         in fromMaybe node (symmetric (absorb node) (c1', c2'))
     _ -> inc
   where
-    orElse (Just x) _ = Just x
-    orElse Nothing y  = y
-
     -- @hole@ is a range known empty, @other@ the dependency fact it was resolved
-    -- against. Answers with the node re-labelled as that dependency, over the node's
-    -- own terms.
-    absorb node hole other = do
-        p <- emptyRange hole
+    -- against. Answers with the node re-labelled as that dependency, over the
+    -- node's own terms.
+    absorb node (hole, other) = do
+        (p, _) <- asHole hole
         (p1, q) <- dependencyPackages other
         guard (p == p1 || p == q)
         guard (Map.size (incompTerms node) == 2)
@@ -131,785 +446,6 @@ collapseNoInstances inc = case incompCause inc of
         r2 <- negative =<< Map.lookup q (incompTerms node)
         pure (Incompatibility (incompTerms node) (CauseDependency p1 s1 (q, r2)))
 
-    emptyRange c = case incompCause c of
-        CauseNoInstances p _ -> Just p
-        _                    -> Nothing
-
     dependencyPackages c = case incompCause c of
         CauseDependency p1 _ (q, _) | p1 /= q -> Just (p1, q)
         _                                     -> Nothing
-
-    positive (Positive s) = Just s
-    positive _            = Nothing
-    negative (Negative s) = Just s
-    negative _            = Nothing
-
--- | Wrap every line of a rendered proof (or headline) at @width@ columns, with a
--- four-space hanging indent on continuation lines, and never inside a range.
---
--- A proof sentence is a mixture of prose and ranges, and a range broken across
--- lines — @>=0.10.8.1 &&@ at one end and @<0.10.9.0 ||@ at the other — is the
--- worst place a terminal can wrap it. So a range is an atom here: a token that
--- opens with a comparison, @&&@, @||@, @(installed)@ or a bare version sticks to
--- the token before it, and a break falls only between atoms. An atom too long for
--- a line of its own is broken before a @||@, the one seam a range has, and an atom
--- with no seam overflows rather than break inside.
---
--- 'reportConflict' does not wrap: it writes one sentence per line, so a reader
--- that counts sentences by the start of a line can tell a continuation line here
--- by its indent.
-wrapProof :: Int -> Text -> Text
-wrapProof width = T.intercalate "\n" . concatMap (wrapLine width) . T.lines
-
-wrapLine :: Int -> Text -> [Text]
-wrapLine width line
-    | T.length line <= width = [line]
-    | otherwise = zipWith (<>) ("" : repeat indent) (build True [] (atoms (T.words line)))
-  where
-    indent = T.replicate 4 " "
-    room first = if first then width else width - T.length indent
-
-    -- Greedy: an atom that fits joins the line, one that does not starts the next,
-    -- and one that fits no line is split at a seam.
-    build _ cur [] = [T.unwords cur | not (null cur)]
-    build first cur (a : as)
-        | T.length (T.unwords (cur ++ [a])) <= room first = build first (cur ++ [a]) as
-        | not (null cur) = T.unwords cur : build False [] (a : as)
-        | otherwise = case splitSeam (room first) a of
-            (h, Just rest) -> h : build False [] (rest : as)
-            (h, Nothing)   -> h : build False [] as
-
-    -- The longest prefix of the atom's @||@-separated pieces that fits, and what is
-    -- left; the whole atom when it has no seam that helps.
-    splitSeam n a = case T.splitOn " || " a of
-        pieces@(_ : _ : _) ->
-            let prefixes = [(k, T.intercalate " || " (take k pieces)) | k <- [length pieces, length pieces - 1 .. 1]]
-             in case [(k, t) | (k, t) <- prefixes, T.length t <= n] of
-                    (k, t) : _ | k < length pieces -> (t, Just ("|| " <> T.intercalate " || " (drop k pieces)))
-                    _ -> (a, Nothing)
-        _ -> (a, Nothing)
-
-    -- A preposition joins what is before it to its object: "depends on
-    -- bytestring >=0.10.4 && <0.11" and "pinned to 4.21.0.0 (installed)" are one
-    -- atom each, so neither "depends" nor "on" is left at the end of a line.
-    atoms [] = []
-    atoms (t : ts) = let (stuck, rest) = span rangeToken ts in go (t : stuck) rest
-    go cur [] = [T.unwords cur]
-    go cur (t : ts)
-        | t `elem` ["on", "of", "to", "with"], (u : us) <- ts =
-            let (stuck, rest) = span rangeToken us in go (cur ++ t : u : stuck) rest
-        | otherwise = let (stuck, rest) = span rangeToken ts in T.unwords cur : go (t : stuck) rest
-
--- | A token of a rendered sentence that belongs to a range rather than to the
--- prose: a comparison, @&&@, @||@, @(installed)@, or a bare version (possibly
--- ending the sentence: @4.21.0.0@ or @4.21.0.0.@). 'wrapProof' keeps such a token
--- on the line of the token before it; 'styleProof' dims it.
-rangeToken :: Text -> Bool
-rangeToken u =
-    any (`T.isPrefixOf` u) [">=", ">", "<", "==", "^>=", "&&", "||", "(installed)"]
-        || isVersion u
-  where
-    isVersion t = let v = T.dropWhileEnd (== '.') t in not (T.null v) && T.all (\c -> isDigit c || c == '.') v
-
--- | Colour a wrapped proof for a terminal: ranges dim, so the package names stand
--- out by contrast and a reader can skim the names and skip the bounds; the
--- connective that opens a sentence bold, so the sentences can be told apart from
--- their continuation lines; and the conclusion — the \"So,\" line — and the
--- headline bold throughout. Nothing is coloured that is not already there:
--- stripping the escapes gives the input back.
---
--- Whether to apply it is the caller's decision, not this module's. Apply it only
--- on a terminal with @NO_COLOR@ unset and @TERM@ not @dumb@; anything that reads
--- the proof as text expects it plain.
-styleProof :: Text -> Text
-styleProof = T.intercalate "\n" . go False . T.lines
-  where
-    -- @wholeBold@: the line before was a headline or the conclusion, so a
-    -- continuation of it is bold throughout as well.
-    go _ [] = []
-    go wholeBold (l : ls)
-        | T.null l = l : go False ls
-        | "    " `T.isPrefixOf` l = (if wholeBold then bold l else tokens 0 l) : go wholeBold ls
-        | "No solution" `T.isPrefixOf` l || "So, because" `T.isPrefixOf` l = bold l : go True ls
-        | otherwise = tokens (openerOf (T.words l)) l : go False ls
-
-    tokens opener l =
-        let (lead, body) = T.span (== ' ') l
-            (op, rest) = splitAt opener (T.words body)
-         in lead <> T.unwords (map bold op ++ dimRuns rest)
-
-    -- A run of range tokens is one dimmed span.
-    dimRuns [] = []
-    dimRuns ws = case span rangeToken ws of
-        ([], w : rest) -> w : dimRuns rest
-        (run, rest)    -> dim (T.unwords run) : dimRuns rest
-
-    -- How many leading tokens make up the connective: "Because", "And because",
-    -- and "1. And because"; a continuation line has none.
-    openerOf ws = case ws of
-        (n : "And" : "because" : _) | isNumber n -> 3
-        ("And" : "because" : _) -> 2
-        ("Because" : _) -> 1
-        _ -> 0
-    isNumber n = case T.unsnoc n of
-        Just (ds, '.') -> not (T.null ds) && T.all isDigit ds
-        _              -> False
-    bold t = "\ESC[1m" <> t <> "\ESC[0m"
-    dim t = "\ESC[2m" <> t <> "\ESC[0m"
-
--- | Render an incompatibility and its derivation as a human-readable proof.
-reportConflict :: Incompatibility -> Text
-reportConflict = snd . renderReport
-
--- | One line to put above the proof: what was asked for, and the facts about this
--- machine the proof rests on.
---
--- The proof is read bottom-up — its first line is the deepest fact and the
--- request appears only on the last — so a reader of the matterhorn proof meets
--- @hashable@ before learning that @base@ is the wall. This line says both first,
--- in the proof's own words: the request is the seeds the proof rests on
--- ('CauseRequest'), and the walls are its world-fact leaves
--- ('CauseOnlyInstalled', 'CauseUnbuildable'), verbatim. It claims nothing the
--- proof does not: every named fact is a premise of the derivation below it.
---
---  > No solution for matterhorn ==90000.1.1: base is pinned to 4.21.0.0 (installed).
-reportHeadline :: Incompatibility -> Text
-reportHeadline = fst . renderReport
-
-renderReport :: Incompatibility -> (Text, Text)
-renderReport root0 = (headline, proof)
-  where
-    proof = case incompCause root of
-        CauseDerivedFrom _ _ ->
-            render (reverse (outLines (derived True root (Out [] 1))))
-        -- The terminal incompatibility is itself an external fact: nothing was
-        -- derived, so the fact is the whole explanation.
-        _ -> leaf root
-
-    headline = T.concat ["No solution", forWhat, walls, ".", culprit]
-      where
-        forWhat = case requests of
-            [] -> ""
-            rs -> " for " <> T.intercalate " and " rs
-        walls = case nub [leaf c | c <- externals root, isWorld c] of
-            [] -> ""
-            ws -> ": " <> T.intercalate "; " ws
-        -- What was asked for, as the proof itself names it. A seed the proof
-        -- never reaches is not the one that failed.
-        requests = nub [bare p r | c <- externals root, CauseRequest p r <- [incompCause c]]
-        seeds = nub [p | c <- externals root, CauseRequest p _ <- [incompCause c]]
-        isWorld c = case incompCause c of
-            CauseOnlyInstalled{} -> True
-            CauseUnbuildable{}   -> True
-            _                    -> False
-
-        -- The package the search gave up on, as a second sentence: "No version of
-        -- regex is compatible with ghcide >=2.15.0.0, lsp-types >=2.0.0.0 and
-        -- regex-tdfa >=1.3.1.0 together, and lsp-types >=2.0.0.0 depends on regex."
-        --
-        -- The sentence is a derived step read out, not a summary written over the
-        -- proof. A step resolves on one package, the pivot, and either keeps a
-        -- narrowed term for it or drops it when its two terms union to ⊤
-        -- (references/pubgrub.md:419 and :426). The step that drops @p@ is the
-        -- proof's own statement that, with the step's remaining terms all in
-        -- force, no version of @p@ is left — so the terms are named, and the
-        -- "together" is the conjunction the incompatibility is. The dependers are
-        -- the dependency leaves under that step whose dependee is @p@: they are why
-        -- @p@ is in the plan at all.
-        --
-        -- Which package. Every pivot is dropped somewhere, and most of them are
-        -- dropped at the one step that refutes their whole range in one go. The
-        -- one worth a sentence is the package whose range had to be cut in pieces
-        -- and refuted a piece at a time: a step below narrowed its term before a
-        -- step above dropped it. Of those, the one dropped nearest the root is the
-        -- last thing the solver had to give up on. A seed is never named: the
-        -- headline has said it already, and the proof's last line says it again.
-        culprit = case wallStory <|> pivotStory of
-            Nothing -> ""
-            Just s  -> "\n" <> s <> "."
-
-        pivotStory = case eliminated root of
-            Nothing        -> Nothing
-            Just (p, node) -> Just (gaveUpOn p node)
-
-        -- __The wall story.__ Where the proof rests on a pinned package, the
-        -- reader wants three things joined: who wants @x@, the window their
-        -- bounds leave for it, and that nothing in that window builds against
-        -- the installed version. The proof has each, apart: the window is spread
-        -- over the dependency leaves, and the refutation is a derived step of
-        -- the shape "x in W is incompatible with base 4.21.0.0 (installed)" — one
-        -- positive term on @x@ and the rest positive terms on wall packages — or
-        -- "x in W is forbidden" with the wall among its premises. That step is the
-        -- wall doing its work, and it is chosen nearest the root.
-        --
-        -- The window is what the seeds force. A dependency leaf is in play when
-        -- its depender's range covers a seed's, or covers the dependee range of
-        -- a leaf already in play; the chain from the request is then forced,
-        -- and @x@ must sit in the intersection of the in-play leaves' ranges for
-        -- it. The line is only printed when that window lies inside the union of
-        -- the ranges the wall steps refute, so "no x there builds" is exactly
-        -- what those steps say. 'isSubsetOf' is one-sided the safe way.
-        wallStory = do
-            (x, wallTexts) <- case wallSteps of
-                [] -> Nothing
-                ss -> let (_, x, _, ws) = minimumBy (comparing (\(d, _, _, _) -> d)) ss in Just (x, ws)
-            let refuted = foldr1 union [w | (_, x', w, _) <- wallSteps, x' == x]
-                wanting = Map.toList (Map.fromListWith meet [(d, (s, r)) | (d, s, q, r) <- inPlay, q == x])
-                meet (s1, r1) (s2, r2) = (s1 `union` s2, r1 `intersect` r2)
-            window <- case [r | (_, (_, r)) <- wanting] of
-                []       -> Nothing
-                (r : rs) -> Just (foldr intersect r rs)
-            guard (window `isSubsetOf` refuted)
-            let who = listing [named d s | (d, (s, _)) <- wanting]
-                leaves = case wanting of
-                    [_] -> " needs "
-                    _   -> " leave only "
-            pure (who <> leaves <> bare x window <> ", and no " <> pretty x <> " there builds on " <> listing wallTexts)
-
-        -- Every derived step of the wall shape, with its depth, the package, the
-        -- range refuted and the walls it was refuted against, as text.
-        wallSteps = go (0 :: Int) root
-          where
-            go depth n = here ++ case incompCause n of
-                CauseDerivedFrom a b -> go (depth + 1) a ++ go (depth + 1) b
-                _                    -> []
-              where
-                here = case [(p, s) | (p, Positive s) <- Map.toList (incompTerms n)] of
-                    ps
-                        | isDerived n
-                        , length ps == Map.size (incompTerms n)
-                        , [(x, w)] <- [(p, s) | (p, s) <- ps, p `notElem` pinnedPackages]
-                        , x `notElem` seeds
-                        , let against = [wallText p | (p, _) <- ps, p `elem` pinnedPackages]
-                        , let pinned = nub [wallText p | c <- externals n, CauseOnlyInstalled p (_ : _) <- [incompCause c]]
-                        , not (null against) || not (null pinned) ->
-                            [(depth, x, w, if null against then pinned else against)]
-                    _ -> []
-
-        -- The pinned packages the proof rests on, and each as "base 4.21.0.0
-        -- (installed)": the installed version is what a reader can act on, and a
-        -- step's own term for the wall may be its whole source side, which would
-        -- print as the bare name.
-        pinnedPackages = map fst pinnedWalls
-        pinnedWalls = nub [(p, vs) | c <- externals root, CauseOnlyInstalled p vs@(_ : _) <- [incompCause c]]
-        wallText p = case lookup p pinnedWalls of
-            Just vs -> pretty p <> " " <> T.intercalate " or " (map pretty vs) <> " (installed)"
-            Nothing -> pretty p
-
-        -- The dependency leaves the seeds force, as (depender, its range, dependee,
-        -- its range): the fixed point described above.
-        inPlay = grow [l | l@(d, s, _, _) <- allDeps, or [r `isSubsetOf` s | (p, r) <- seedRanges, p == d]]
-          where
-            allDeps = [(d, s, q, r) | c <- externals root, Just (d, s, q, r) <- [asDependency c]]
-            seedRanges = [(p, r) | c <- externals root, CauseRequest p r <- [incompCause c]]
-            grow have =
-                let more = [l | l@(d, s, _, _) <- allDeps, not (l `elemBy` have), or [r `isSubsetOf` s | (_, _, q, r) <- have, q == d]]
-                 in if null more then have else grow (have ++ more)
-            elemBy (d, s, q, r) have = or [d == d' && q == q' && s `equivalent` s' && r `equivalent` r' | (d', s', q', r') <- have]
-
-        -- __The pivot story__, for a proof with no wall to name. The step's
-        -- positive terms are what has to be present together; a negative term is
-        -- a way out — "unless q <2" — since ¬(A ∧ B ∧ q ∉ R) is A ∧ B → q ∈ R.
-        -- The dependers come first, as "lsp-types >=2.0.0.0 needs regex", so no
-        -- pronoun has to reach back for @p@. When the only things present are the
-        -- dependers themselves, "needs regex, and … compatible with lsp-types"
-        -- would say the same thing twice, and the shape is "no version of p suits
-        -- d", where "suits" carries the dependency.
-        gaveUpOn p node
-            | not (null positives)
-            , all ((`elem` dependers) . fst) positives =
-                "No version of " <> pretty p <> " suits " <> listing (map (uncurry bare) positives) <> escape
-            | null leaves =
-                "No version of " <> pretty p <> " is compatible with " <> present <> escape
-            | otherwise =
-                needs <> ", and no version of " <> pretty p <> " is compatible with " <> present <> escape
-          where
-            positives = [(q, r) | (q, Positive r) <- Map.toList (incompTerms node)]
-            negatives = [bare q r | (q, Negative r) <- Map.toList (incompTerms node)]
-            present = case positives of
-                []  -> "anything"
-                [x] -> uncurry bare x
-                xs  -> listing (map (uncurry bare) xs) <> " together"
-            escape = case negatives of
-                [] -> ""
-                ns -> " unless " <> T.intercalate " or " ns
-            -- The dependency leaves under the step whose dependee is @p@, one
-            -- entry per depender with its ranges unioned: each leaf says
-            -- @d ∈ Sᵢ@ depends on @p@, so @d ∈ ⋃S@ does.
-            leaves =
-                Map.toList
-                    (Map.fromListWith union [(d, s) | c <- externals node, CauseDependency d s (q, _) <- [incompCause c], q == p, d /= p])
-            dependers = map fst leaves
-            needs = case leaves of
-                [(d, s)] -> named d s <> " needs " <> pretty p
-                ds       -> listing [named d s | (d, s) <- ds] <> (if length ds == 2 then " both need " else " all need ") <> pretty p
-
-        -- "a, b and c"
-        listing xs = case unsnoc xs of
-            Just (front@(_ : _), l) -> T.intercalate ", " front <> " and " <> l
-            _                       -> T.intercalate ", " xs
-
-        -- The candidate dropped nearest the root, if any. A package the headline
-        -- already names as a wall is not a candidate either: it is pinned or
-        -- unbuildable, and the wall says so in fewer words.
-        eliminated inc = case go (0 :: Int) inc of
-            [] -> Nothing
-            cs -> Just (snd (minimumBy (comparing fst) cs))
-          where
-            go depth n = case incompCause n of
-                CauseDerivedFrom a b ->
-                    [ (depth, (p, n))
-                    | Just p <- [dropped n a b]
-                    , p `notElem` seeds
-                    , p `notElem` walled
-                    , narrowedBelow p a || narrowedBelow p b
-                    ]
-                        ++ go (depth + 1) a
-                        ++ go (depth + 1) b
-                _ -> []
-        walled = nub (concat [wallPackage c | c <- externals root])
-        wallPackage c = case incompCause c of
-            CauseOnlyInstalled p _  -> [p]
-            CauseUnbuildable p _ _  -> [p]
-            _                       -> []
-
-        -- The pivot of a step that dropped it: the one package both causes name
-        -- and the step does not. Every other package the causes share survives
-        -- the step, intersected, so at most one is missing.
-        dropped n a b =
-            case [p | p <- Map.keys (Map.intersectionWith const (incompTerms a) (incompTerms b)), Map.notMember p (incompTerms n)] of
-                [p] -> Just p
-                _   -> Nothing
-
-        -- Does some step in this subtree narrow @p@: resolve on it and keep it? The
-        -- step's term for @p@ is then the union of its causes' two terms and
-        -- differs from both; a package the causes merely share is intersected
-        -- instead, and a pivot whose union equals one side learnt nothing.
-        -- 'equivalent' is one-sided the safe way: doubt means no candidate.
-        narrowedBelow p n = case incompCause n of
-            CauseDerivedFrom a b -> narrowedAt p n a b || narrowedBelow p a || narrowedBelow p b
-            _                    -> False
-        narrowedAt p n a b
-            | Just ta <- Map.lookup p (incompTerms a)
-            , Just tb <- Map.lookup p (incompTerms b)
-            , Just t <- Map.lookup p (incompTerms n) =
-                sameTerm t (unionTerm ta tb) && not (sameTerm t ta) && not (sameTerm t tb)
-            | otherwise = False
-
-    -- The external facts at the leaves, in proof order.
-    externals inc = case incompCause inc of
-        CauseDerivedFrom a b -> externals a ++ externals b
-        _                    -> [inc]
-
-    -- The holes go first: a derivation step that only established that a range is
-    -- empty is not a step worth a line, and leaving them in is what stops the chain
-    -- fusion below from ever firing on a real problem.
-    root = collapseNoInstances root0
-
-    -- Every line is a sentence and ends as one. A blank line between two branches
-    -- of a derivation (references/pubgrub.md:632) stays blank.
-    render ls = T.intercalate "\n" [line n t | (n, t) <- ls]
-    line _ "" = ""
-    line n t  = prefix n <> t <> "."
-    prefix Nothing  = ""
-    prefix (Just n) = T.pack (show n) <> ". "
-
-    -- A package with the set it is constrained to, as words. A set admitting every
-    -- version reads "every version of foo" (references/pubgrub.md:1013) where the
-    -- sentence calls for it — as the subject of "depends on" or "requires" — and
-    -- the bare name where it does not: pub writes "foo is forbidden", not "every
-    -- version of foo is forbidden", and "depends on bar" rather than "depends on
-    -- every version of bar".
-    named :: PackageName -> InstanceSet -> Text
-    named p s
-        | isEveryVersion s = "every version of " <> pretty p
-        | otherwise        = pretty p <> " " <> pretty s
-
-    bare :: PackageName -> InstanceSet -> Text
-    bare p s
-        | isEveryVersion s = pretty p
-        | otherwise        = pretty p <> " " <> pretty s
-
-    -- Explain one derived incompatibility, ending with the line that concludes it.
-    -- @final@ marks the last line of the whole proof, which reads "So, …".
-    derived final inc out = case incompCause inc of
-        CauseDerivedFrom c1 c2 -> case (isDerived c1, isDerived c2) of
-            -- Case 3 (references/pubgrub.md:668): both causes are external. One
-            -- line, and the only case that opens a line of derivation rather than
-            -- continuing one.
-            (False, False) ->
-                emit (opening final "Because " <> pair c1 c2 <> ", " <> says final inc) out
-            -- Case 2 (references/pubgrub.md:641): one derived cause, one external
-            -- fact.
-            (True, False) -> oneDerived final c1 c2 inc out
-            (False, True) -> oneDerived final c2 c1 inc out
-            -- Case 1 (references/pubgrub.md:595): both causes derived — the
-            -- derivation branches, and this is the only place a line number is
-            -- wanted. Explain the first branch, number the line it ends on, then
-            -- explain the second and close by referring back.
-            -- The blank line between the two branches is the spec's (:632): it
-            -- marks that a new line of derivation starts.
-            (True, True) ->
-                let (n, out') = numberLast (derived False c1 out)
-                 in emit
-                        ( opening final "And because "
-                            <> summary c1
-                            <> " ("
-                            <> T.pack (show n)
-                            <> "), "
-                            <> says final inc
-                        )
-                        (derived False c2 (emit "" out'))
-        -- Not reached: 'derived' is only ever called on a derived node.
-        _ -> emit (leaf inc) out
-
-    -- Case 2, with @d@ the derived cause and @e@ the external fact.
-    --
-    -- Before the ordinary every-other-step skip, look for a __run__ of steps that
-    -- all say the same kind of thing, and state the run once. There are two kinds,
-    -- tried widest first.
-    --
-    -- __The same-pair run__ (the second equation): this range of @p@ depends on
-    -- @q@, and so does the next range, and the next. That is one fact about @p@ as
-    -- a whole, and printed a range at a time it walks one bound's history an
-    -- adjacent pair of releases at a time (four of @matterhorn@'s ten lines did
-    -- this to @hashable@). It is /not/ the same thing as references/pubgrub.md:456's
-    -- collapsing, which merges facts with an __identical__ dependee range. Here the
-    -- dependee ranges differ — that is why the solver had to derive its way along
-    -- them — and what is printed is their union.
-    --
-    -- __The widening run__ (the first equation). The same-pair run needs every fact
-    -- in the run to name the same dependee, and needs the step's conclusion to be
-    -- the two-term "p requires q". Neither holds on a problem with an
-    -- /unconstrained/ target: refuting one takes a walk along the target's whole
-    -- version history, and consecutive releases rarely fail over the same dependee.
-    -- @aeson@ against @optparse-applicative ==0.15.1.0@ spent thirteen lines on
-    -- that walk, folding in one @aeson@ dependency each time while every other term
-    -- stood still.
-    --
-    -- So collect the run by __depender alone__ and state it once. Each fact says
-    -- @p ∈ Sᵢ@ requires @qᵢ ∈ Rᵢ@, so their union says @p ∈ ⋃S@ requires
-    -- @q₁ ∈ ⋃R₁@ or … or @qₙ ∈ ⋃Rₙ@: if @p@ is in the union it is in some @Sᵢ@, and
-    -- that fact's own dependee is one of the disjuncts. Nothing else about @p@ is
-    -- claimed, which is why 'mergeFacts' refuses a run where some package is a
-    -- depender in one fact and a dependee in another — the argument is about one
-    -- depender and holds for nothing else.
-    --
-    -- __The guard is the operation, not a description of it.__ A line that stands
-    -- for a run has to arrive where the run arrived, and the only way to know that
-    -- is to go there: 'PubGrub.Incompatibility.priorCauseTerms' — the term algebra
-    -- 'PubGrub.Incompatibility.priorCause' itself runs, pivoting on the depender —
-    -- is applied once to the merged fact, and the collapse is taken only if the
-    -- result is term for term the conclusion this line is attached to. So the rule
-    -- needs no subset side-condition of its own, and it needs no case analysis over
-    -- what the run did: whether the depender __accumulated__ (@aeson@ climbing from
-    -- @\<0.8.0.1@ to @\<2.2.5.0@) or was __eliminated__ (@directory@ losing one slot
-    -- per fact until nothing was left), one step over the union lands where @n@
-    -- steps over the members landed, or the collapse does not happen.
-    oneDerived final d e inc out
-        | Just (p, _, _, _) <- asDependency e
-        , -- Three facts at least. Two of them fit one line as they are, where the
-          -- ordinary skip already puts them, and naming both says strictly more
-          -- than naming their union — so the union has to buy a line to be worth
-          -- taking. The same-pair run still takes two facts whose dependee agrees.
-          (rest', extra@(_ : _ : _)) <- dependerRun p d
-        , Just merged <- mergeFacts (e : extra)
-        , sameTerms (priorCauseTerms p (incompTerms rest') merged) (incompTerms inc) =
-            emit
-                (opening final "And because " <> runFact p merged <> ", " <> says final inc)
-                (derived False rest' out)
-    oneDerived final d e inc out
-        | Just (p, s, q, r) <- asDependency e
-        , (rest', extra@(_ : _)) <- depRun p q d
-        , let ss = foldr1 union (s : map fst extra)
-        , let rs = foldr1 union (r : map snd extra)
-        , -- Only when the conclusion really is "p requires q", and the collapsed
-          -- depender range is one the conclusion covers. Stating the union of the
-          -- facts is sound on its own — each says @p ∈ Sᵢ@ requires @q ∈ Rᵢ@, so
-          -- @p ∈ ⋃S@ requires @q ∈ ⋃R@ — but a line may not claim to justify more
-          -- of @p@ than the step it is attached to concluded, and this is what stops
-          -- it. 'isSubsetOf' is one-sided the safe way: it can only refuse a
-          -- collapse that would have been fine.
-          concludesRequires p q inc
-        , Just (Positive sInc) <- Map.lookup p (incompTerms inc)
-        , ss `isSubsetOf` sInc =
-            emit
-                (opening final "And because " <> dep p ss q rs <> ", " <> says final inc)
-                (derived False rest' out)
-    oneDerived final d e inc out = case chainStep d of
-        -- Case 2.ii — the every-other-step skip. @d@'s own conclusion is left
-        -- unsaid and the two external facts are named together here, which is
-        -- where a long linear chain loses half its lines.
-        Just (pd, pe) ->
-            emit
-                (opening final "And because " <> pair pe e <> ", " <> says final inc)
-                (derived False pd out)
-        -- Case 2.iii: @d@ branches or bottoms out, so it gets its own lines and
-        -- this one closes with the external fact alone.
-        Nothing ->
-            emit
-                (opening final "And because " <> leaf e <> ", " <> says final inc)
-                (derived False d out)
-
-    -- The merged fact of a widening run, as its sentence. With one dependee it is
-    -- the shape the same-pair run prints, word for word, so a run that both could
-    -- take reads the same either way; with several it is a requirement with
-    -- alternatives, and "requires" rather than "depends on" because a union of
-    -- declared dependencies is something the solver worked out, not something an
-    -- author wrote (references/pubgrub.md:1005).
-    runFact p terms = case Map.toList (Map.delete p terms) of
-        [(q, Negative r)] | Just (Positive sp) <- Map.lookup p terms -> dep p sp q r
-        _ -> summaryTerms terms
-
-    -- Walk down the derived spine collecting external dependency facts with the
-    -- given depender, whatever they depend /on/. Answers where the run bottoms out
-    -- and what it collected.
-    dependerRun p = go []
-      where
-        go acc node = case chainStep node of
-            Just (pd, pe)
-                | Just (p', _, _, _) <- asDependency pe
-                , p' == p ->
-                    go (pe : acc) pd
-            _ -> (node, acc)
-
-    -- The facts of a run as one term map: every set unioned, polarity kept. A
-    -- package that is a depender in one fact and a dependee in another has no
-    -- merged term, and refusing to merge those is what keeps the union argument
-    -- above honest — it holds for a run with /one/ depender and nothing else.
-    mergeFacts = foldr step (Just Map.empty)
-      where
-        step f acc = acc >>= combineWith sameWay (incompTerms f)
-        sameWay (Positive x) (Positive y) = Just (Positive (x `union` y))
-        sameWay (Negative x) (Negative y) = Just (Negative (x `union` y))
-        sameWay _ _                       = Nothing
-
-    -- Combine two term maps package by package, keeping the terms only one of
-    -- them names and failing the whole map where @f@ fails on a shared one.
-    combineWith f a b = sequenceA (Map.unionWith comb (Just <$> a) (Just <$> b))
-      where
-        comb mx my = do
-            x <- mx
-            y <- my
-            f x y
-
-    -- Two term maps naming the same packages, each with the same polarity and an
-    -- equivalent set. 'equivalent' is the semantic test: 'InstanceSet' is
-    -- non-canonical, so two maps that mean the same thing rarely look the same.
-    sameTerms a b =
-        Map.keys a == Map.keys b
-            && and [sameTerm x y | (x, y) <- zip (Map.elems a) (Map.elems b)]
-
-    sameTerm (Positive x) (Positive y) = x `equivalent` y
-    sameTerm (Negative x) (Negative y) = x `equivalent` y
-    sameTerm _ _                       = False
-
-    -- Walk down the derived spine collecting external dependency facts that are all
-    -- about the same @(depender, dependee)@ package pair. Answers where the run
-    -- bottoms out and what it collected; an empty collection means there was no run
-    -- and the ordinary cases apply.
-    depRun p q = go []
-      where
-        go acc node = case chainStep node of
-            Just (pd, pe)
-                | Just (p', s, q', r) <- asDependency pe
-                , p' == p
-                , q' == q ->
-                    go ((s, r) : acc) pd
-            _ -> (node, acc)
-
-    -- Is this step's conclusion of the shape "p requires q"? Anything else and the
-    -- collapsed sentence would be attached to a claim it does not support.
-    concludesRequires p q inc = case Map.toList (incompTerms inc) of
-        [(a, Positive _), (b, Negative _)] -> (a, b) == (p, q)
-        [(b, Negative _), (a, Positive _)] -> (a, b) == (p, q)
-        _                                  -> False
-
-    -- A derived node that can be folded into its parent's line: exactly one
-    -- derived cause and one external fact. Answers with the pair, the derived
-    -- cause first.
-    chainStep inc = case incompCause inc of
-        CauseDerivedFrom a b -> case (isDerived a, isDerived b) of
-            (True, False) -> Just (a, b)
-            (False, True) -> Just (b, a)
-            _             -> Nothing
-        _ -> Nothing
-
-    -- "So," instead of "And" marks the conclusion rather than another step
-    -- (references/pubgrub.md:1027).
-    opening final base = if final then "So, because " else base
-
-    emit t out = out{outLines = (Nothing, t) : outLines out}
-
-    -- Give the line just emitted a number, so a later line can cite it. Numbers
-    -- are minted here and nowhere else.
-    numberLast out = case outLines out of
-        ((Just n, t) : rest) -> (n, out{outLines = (Just n, t) : rest})
-        ((Nothing, t) : rest) ->
-            ( outNext out
-            , out{outLines = (Just (outNext out), t) : rest, outNext = outNext out + 1}
-            )
-        -- Unreachable: every branch emits at least one line before this is called.
-        -- Answering with the unused number keeps the proof well-formed if it ever is.
-        [] -> (outNext out, out)
-
-    isDerived c = case incompCause c of
-        CauseDerivedFrom _ _ -> True
-        _                    -> False
-
-    -- Two external facts, as one clause. Two fusions, each guarded so that it
-    -- cannot say more than the facts do:
-    --
-    --  * a __chain__ — the first fact's dependee is the second's depender — reads
-    --    "a depends on b which depends on c". That is only true if every instance
-    --    the first fact leaves open for the middle package is one the second fact
-    --    speaks about, hence the 'isSubsetOf';
-    --  * __one depender, two dependees__ reads "a depends on both b and c", for
-    --    which the two facts must be about the same instances of @a@.
-    --
-    -- 'PubGrub.SetOps.isEmpty' on an 'InstanceSet' is one-sided — it may fail to
-    -- notice that a set is empty — so both guards can only fail to fuse where they
-    -- could have. Neither can fuse where it should not.
-    pair c1 c2
-        -- Two seeds close a proof together: "baz >=1 && <2 and foo >=1 && <2 are
-        -- requested", the spec's "depends on both" sentence
-        -- (references/pubgrub.md:1021) without a depender in front of it.
-        | CauseRequest p1 r1 <- incompCause c1
-        , CauseRequest p2 r2 <- incompCause c2 =
-            bare p1 r1 <> " and " <> bare p2 r2 <> " are requested"
-    pair c1 c2 = case (emptyRangeFor c1 c2, emptyRangeFor c2 c1) of
-        -- A dependency whose dependee range the solver has already found empty.
-        -- Naming both facts would print that range /twice/ in one sentence, and
-        -- on a real proof it is not short: haddock 2.29.1's bound on base is
-        -- seven windows.
-        --
-        -- Saying it once is sound only when the dependency's whole range is inside
-        -- the empty one, which is what the 'isSubsetOf' checks. Where it is only
-        -- partly inside, the two facts stay separate — absorbing that case means
-        -- widening the term rather than dropping a clause, so it is not a
-        -- rendering change.
-        (Just one, _) -> one
-        (_, Just one) -> one
-        _ -> pairDeps c1 c2
-
-    -- @dep@'s dependee range known empty by @hole@? A request whose whole range
-    -- is empty reads the same way.
-    emptyRangeFor dep' hole = case (asDependency dep', incompCause dep', incompCause hole) of
-        (Just (p, s, q, r), _, CauseNoInstances q' empty)
-            | q == q', r `isSubsetOf` empty ->
-                Just (dep p s q r <> ", which has no versions")
-        (_, CauseRequest p r, CauseNoInstances p' empty)
-            | p == p', r `isSubsetOf` empty ->
-                Just (bare p r <> " is requested, which has no versions")
-        _ -> Nothing
-
-    pairDeps c1 c2 = case (asDependency c1, asDependency c2) of
-        (Just (p1, s1, q1, r1), Just (p2, s2, q2, r2))
-            | q1 == p2, r1 `isSubsetOf` s2 -> chain p1 s1 q1 r1 q2 r2
-            | q2 == p1, r2 `isSubsetOf` s1 -> chain p2 s2 q2 r2 q1 r1
-            | p1 == p2, s1 `equivalent` s2 ->
-                named p1 s1
-                    <> " depends on both "
-                    <> bare q1 r1
-                    <> " and "
-                    <> bare q2 r2
-        _ -> leaf c1 <> " and " <> leaf c2
-
-    chain p s q r q' r' =
-        dep p s q r <> " which depends on " <> bare q' r'
-
-    -- A dependency fact whose dependee term survived. 'fromDependency' drops that
-    -- term when the dependency is unsatisfiable, and then there is no "depends on"
-    -- left to render: the clause is a bare ban on the depender and reads as one.
-    asDependency c = case incompCause c of
-        CauseDependency p s (q, r)
-            | q /= p, Map.member q (incompTerms c) -> Just (p, s, q, r)
-        _ -> Nothing
-
-    -- External facts at the leaves of the proof. Rendered from the cause rather
-    -- than from the bare terms so that each explains itself: an empty range is the
-    -- range being unsatisfiable rather than a conflict with anything else, a
-    -- compiler-provided package names the version it is pinned to instead of
-    -- reading "no version" — the bound that failed is only legible against that
-    -- version, and nothing else in the proof states it — and a release that cannot
-    -- be built here says /that/, and why, rather than looking absent
-    -- (references/pubgrub.md:475).
-    leaf c = case incompCause c of
-        CauseRequest p s -> bare p s <> " is requested"
-        CauseNoInstances p s -> "no version for " <> pretty p <> " in " <> pretty s
-        CauseOnlyInstalled p [] -> pretty p <> " is not installed and cannot be built from source"
-        CauseOnlyInstalled p vs ->
-            pretty p <> " is pinned to " <> T.intercalate " or " (map pretty vs) <> " (installed)"
-        CauseUnbuildable p s why -> named p s <> " " <> reasons why
-        _ -> case asDependency c of
-            Just (p, s, q, r) -> dep p s q r
-            Nothing           -> summary c
-
-    -- Why a release cannot be built, as the predicate of its sentence: \"needs
-    -- pkg-config package libpq, which is not found\", and \"is marked buildable:
-    -- False\". The two are joined with \"and\" when both hold, and several modules
-    -- share one \"needs\". Not \"cannot be built because …\": the chain form puts
-    -- this leaf after a \"Because\" of its own, and two in one sentence read badly.
-    --
-    -- The module is spelled as Cabal-syntax prints the @pkgconfig-depends@ field:
-    -- @libpq@ unbounded, @zlib >=1.2@ with its range. Cabal's own message reads
-    -- \"pkg-config package libpq-any, not found in the pkg-config database\"; the
-    -- @-any@ is its spelling of the empty range, and is not copied.
-    reasons :: NonEmpty UnbuildableReason -> Text
-    reasons why =
-        T.intercalate " and " $
-            ["is marked buildable: False" | NotBuildable `elem` why] ++ needs
-      where
-        needs = case [T.pack (prettyShow d) | MissingPkgConfig d <- NE.toList why] of
-            []  -> []
-            [m] -> ["needs pkg-config package " <> m <> ", which is not found"]
-            ms  -> ["needs pkg-config packages " <> listing ms <> ", which are not found"]
-        -- "libpq, zlib and openssl"
-        listing ms = case unsnoc ms of
-            Just (front@(_ : _), l) -> T.intercalate ", " front <> " and " <> l
-            _                       -> T.intercalate ", " ms
-
-    -- What a line concludes. The proof's last line concludes the empty
-    -- incompatibility, which is failure by name (references/pubgrub.md:1030); it
-    -- is stated as such whatever the terms say, because that is what the line is.
-    says final c
-        | final = "version solving failed"
-        | otherwise = summary c
-
-    -- What an incompatibility says, in pub's own forms (the spec leaves the
-    -- wording to the implementation, references/pubgrub.md:677; these are pub's,
-    -- in cabal's range syntax). A negative term is never written as "not …": it
-    -- says the package /must/ be in that set, and the sentence carries the
-    -- negation — "foo requires bar >=2", "if foo and bar then baz <3", "either
-    -- foo <2 or bar <3".
-    summary c = summaryTerms (incompTerms c)
-
-    summaryTerms ts = case Map.toList ts of
-        [] -> "version solving failed"
-        [(p, Positive r)] -> bare p r <> " is forbidden"
-        [(p, Negative r)] -> bare p r <> " is required"
-        [(p1, Positive r1), (p2, Negative r2)] -> requires p1 r1 p2 r2
-        [(p2, Negative r2), (p1, Positive r1)] -> requires p1 r1 p2 r2
-        [(p1, Positive r1), (p2, Positive r2)] -> bare p1 r1 <> " is incompatible with " <> bare p2 r2
-        [(p1, Negative r1), (p2, Negative r2)] -> "either " <> bare p1 r1 <> " or " <> bare p2 r2
-        terms ->
-            let positives = [(p, r) | (p, Positive r) <- terms]
-                negatives = [bare p r | (p, Negative r) <- terms]
-                anyOf = T.intercalate " or "
-             in case (positives, negatives) of
-                    ([(p, r)], _ : _) -> named p r <> " requires " <> anyOf negatives
-                    (_ : _, _ : _) ->
-                        "if " <> T.intercalate " and " (map (uncurry bare) positives)
-                            <> " then " <> anyOf negatives
-                    (_, []) -> "one of " <> anyOf (map (uncurry bare) positives) <> " must be false"
-                    ([], _) -> "one of " <> anyOf negatives <> " must be true"
-
-    -- Keep the depender's range so distinct derivation steps stay distinct
-    -- ("assoc ==1.0.2 depends on …" vs "assoc >=1.0.2 && <1.1 depends on …").
-    dep p1 r1 p2 r2 = named p1 r1 <> " depends on " <> bare p2 r2
-
-    -- A /derived/ two-term incompatibility. The spec says "requires" here and
-    -- keeps "depends on" for the external fact (references/pubgrub.md:1005,
-    -- both in one line): a dependency is declared in a @.cabal@ file, a
-    -- requirement is what the solver worked out from one.
-    requires p1 r1 p2 r2 = named p1 r1 <> " requires " <> bare p2 r2

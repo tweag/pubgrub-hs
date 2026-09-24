@@ -28,6 +28,10 @@ library
         PubGrub.Provider
         PubGrub.Relation
         PubGrub.Report
+        PubGrub.Report.Headline
+        PubGrub.Report.Layout
+        PubGrub.Report.Rule
+        PubGrub.Report.Wording
         PubGrub.SetOps
         PubGrub.Solver
         PubGrub.Store

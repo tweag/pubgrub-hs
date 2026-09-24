@@ -366,7 +366,7 @@ The printer walks the DAG:
 
 **The real reporter does more than this.** It follows the spec's own reporting algorithm (`references/pubgrub.md:504`), which fuses chains, skips every other derived step, states a run of steps once, and absorbs empty-range leaves. That is what takes a proof from hundreds of lines to a handful. See [DESIGN.md](DESIGN.md) §9.
 
-*Lives in: [`src/PubGrub/Report.hs`](../src/PubGrub/Report.hs)*
+*Lives in: [`src/PubGrub/Report.hs`](../src/PubGrub/Report.hs) and [`src/PubGrub/Report/`](../src/PubGrub/Report/)*
 
 ---
 

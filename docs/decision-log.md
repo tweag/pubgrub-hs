@@ -1300,6 +1300,46 @@ forest, one tree per target. The `-a` in the scripts stayed as a precaution.
 
 ---
 
+## Era 19 — The reporter's rules in one language (Sep 25)
+
+### A rule is a `do` block in `Maybe`, and a table is tried in order — HELD
+
+*Sep 25.* Andrea was concerned that `PubGrub.Report` had become a collection of
+ad-hoc rules: 920 lines in which the spec's three cases, our two run collapses, the
+chain fusions and the headline's two stories were each a guard on `oneDerived` or a
+clause of `pair`, with the matching, the soundness check and the sentence
+interleaved in every one. He asked for a refactor with a little language for
+expressing the rules.
+
+The language turned out to be one Haskell already had. Every rule was a partial
+function — read a shape off the tree, check a side-condition, say a sentence — and
+every one of them was already half-written as a `Maybe` computation. So a rule is
+now a `do` block in `Maybe` in a fixed vocabulary: views of the tree (`chainStep`,
+`bothExternal`, `asDependency`, `asHole`, `runWhile`, `everywhere`, `nearestRoot`)
+and guards on terms (`sameTerms`, `mergeFacts`, `unions`) in
+`PubGrub.Report.Rule`; the sentences (`named`, `bare`, `dep`, `leaf`, `summary`,
+`listing`) in `PubGrub.Report.Wording`. A table of rules is a list tried by
+`firstOf`, and a rule over two facts that does not care which is which is wrapped in
+`symmetric`. `Report.hs` keeps the walker, the pre-pass and the two tables:
+`lineRules` (case 3, the widening run, the same-pair run, the every-other-step skip,
+case 2.iii) and `clauseRules` (two seeds, a dependency on an empty range, the chain,
+the shared depender). The headline moved to `PubGrub.Report.Headline` with its two
+stories as a table, and the wrapping and colour layers to `PubGrub.Report.Layout`.
+`runWhile` replaced the two hand-written run walkers, `everywhere` and
+`nearestRoot` the two hand-written tree searches, and `unions` the three `foldr1`s.
+
+Nothing was allowed to change in the output. The check was the two binaries over
+all 26 problems at the pinned index-state, log against log: identical. The gate
+passed with the same numbers, the goldens unchanged, and the suite at 237.
+
+What was rejected: a named `Rule` record (a name nobody reads is dead weight; the
+haddock on each rule is its name), a shape type for the three spec cases (it would
+have made the "not reached" fallback disappear at the cost of a second set of
+constructors), and putting the branching case in the table (it mints the line
+number, which is the walker's business, not a way of saying a step).
+
+---
+
 ## What is open, and what is settled
 
 Not here. [TODO.md](TODO.md) §5 and §6 carry both lists, where they are re-read.

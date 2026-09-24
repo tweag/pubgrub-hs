@@ -322,14 +322,14 @@ per line. Five rules do the work.
    conclusion goes unsaid. Most derivation graphs here are linear chains, so this rule
    halves them.
 3. **A run of same-pair steps is one sentence.** Where a proof walked a dependency's
-   bound history one adjacent pair at a time, `oneDerived` finds the maximal run of
+   bound history one adjacent pair at a time, `samePairRun` finds the maximal run of
    chain steps about the same `(depender, dependee)` pair and states them once, as
    their union. This is sound because each fact says `p ∈ Sᵢ` requires `q ∈ Rᵢ`, so
    `p ∈ ⋃S` requires `q ∈ ⋃R`.
 4. **A run collected by depender alone is one sentence.** Rule 3 needs one dependee
    for the whole run; on a problem with an *unconstrained* target there is no such
    run, because refuting one walks the target's version history and consecutive
-   releases rarely fail over the same dependee. So `oneDerived` also finds the
+   releases rarely fail over the same dependee. So `wideningRun` finds the
    maximal run of chain steps sharing a *depender*, whatever they depend on, and
    states it as `p ∈ ⋃S requires q₁ ∈ ⋃R₁ or … or qₙ ∈ ⋃Rₙ`. Sound for the same
    reason as rule 3: if `p` is in the union it is in some `Sᵢ`, and that fact's own
@@ -342,6 +342,22 @@ per line. Five rules do the work.
 Every fusion is guarded, so a fused sentence cannot claim more than the facts do.
 Rules 1 to 3 use a subset test, and one-sided `isEmpty` means such a guard can only
 decline to fuse — never fuse wrongly.
+
+**Every rule is written in one language.** A rule is a partial function from a piece
+of the derivation tree to what it makes of it, written as a `do` block in `Maybe`
+whose lines each read a view of the tree (`chainStep`, `asDependency`, `runWhile`),
+state a guard (`isSubsetOf`, `sameTerms`) or, last, say the sentence. The vocabulary
+is `PubGrub.Report.Rule`, the sentences are `PubGrub.Report.Wording`, and a table of
+rules is tried in order by `firstOf`, so the order of a table is part of its meaning
+and is written next to it. There are three tables: `lineRules` chooses the premise
+of a proof line and the sub-derivation it continues (rules 2, 3 and 4, plus the
+spec's cases 2.iii and 3); `clauseRules` joins two external facts into one premise
+(rule 1, the seeds, and a dependency on an empty range); and the headline's two
+stories are tried as a table of their own. Rule 5 is a pre-pass over the tree and
+not a table, and the spec's branching case is the walker's own structure, since it
+mints the line number. The views are read-only and the guards are predicates, so a
+rule can choose how a step is said and cannot change what the proof claims; adding
+a rule is adding a `do` block and a line in a table.
 
 **Rule 4's guard is the operation itself.** A line standing for a run has to arrive
 where the run arrived, so `PubGrub.Incompatibility.priorCauseTerms` — the term algebra

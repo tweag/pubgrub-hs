@@ -501,8 +501,9 @@ untouched =
     , -- The dependee's *whole* range being empty makes the union over the pivot ⊤,
       -- so the dependee entry drops out of the step's terms. Rebuilding from those
       -- terms would produce a dependency fact with no dependee range in it, and the
-      -- proof would never mention @q@ at all. The report's @pair@ renders this
-      -- case as "depends on …, which has no versions", which keeps the range.
+      -- proof would never mention @q@ at all. 'PubGrub.Report.dependsOnNothing'
+      -- renders this case as "depends on …, which has no versions", which keeps
+      -- the range.
       testCase "a wholly empty dependee range stays a derivation step" $ do
         let dep = dependsOnQ (range 1 2)
             step = priorCause dep (hole pkgQ (range 1 5)) pkgQ
