@@ -413,6 +413,55 @@ not a proof sentence: the gate counts by connective and the harness keeps it apa
 which is the footing of cabal's own `Could not resolve dependencies:` line, left out
 of its count too. The golden proofs are the spec's and carry no headline.
 
+**A second headline line says what the proof is about.** The proof's last line
+names the request and its first names the deepest fact, and what a reader wants is
+in between: which package ran out of versions, who wanted it, and what it ran into.
+On `matterhorn ==90000.1.1` the proof has all three, apart — the window in two
+dependency leaves, the refutation in a middle line, the wall on the headline — so
+the second line joins them: `matterhorn >=50200.18.0 and mattermost-api >=90000.1.0
+leave only aeson >=2.0.1.0 && <2.2, and no aeson there builds on base 4.21.0.0
+(installed).` That says what to do, which no single proof line does. Two rules
+produce it, tried in that order, and each is a derived step read out rather than a
+summary written over the proof.
+
+*The wall rule.* Where the proof rests on a pinned package, the step that does
+the work has the shape "x in W is incompatible with base 4.21.0.0 (installed)" —
+one positive term on `x`, the rest positive terms on pinned packages — or "x in W
+is forbidden" with the pinned leaf among its premises. It is taken nearest the
+root. The window is what the seeds force: a dependency leaf is in play when its
+depender's range covers a seed's range, or the dependee range of a leaf already in
+play, so the chain from the request is forced and `x` must sit in the intersection
+of the in-play ranges for it. The line is printed only when that window lies inside
+the union of the ranges the wall steps refute, so "no x there builds" is exactly
+what those steps say. With one depender it reads "hjsonschema >=1.9.0 needs aeson
+>=0.11 && <1.4, and no aeson there builds on base 4.21.0.0 (installed)"; the
+declared range is the leaf's, verbatim. The wall is always spelled with its
+installed version, since a step's own term for it may be its whole source side.
+
+*The pivot rule*, for a proof with no wall to name. A step resolves on one package
+and either keeps a narrowed term for it or drops it when its two terms union to ⊤
+(`references/pubgrub.md:418`, `:425`); the step that drops `p` is the proof's own
+statement that, with its remaining terms in force, no version of `p` is left. The
+one worth a line is the package refuted a piece at a time — narrowed at a step
+below, dropped at a step above — nearest the root. The dependers come first, so no
+pronoun reaches back: `lsp-types >=2.0.0.0 needs regex, and no version of regex is
+compatible with ghcide >=2.15.0.0, lsp-types >=2.0.0.0 and regex-tdfa >=1.3.1.0
+together.` A negative term is a way out, "unless aeson >=1.3 && <2.3", since
+¬(A ∧ B ∧ q ∉ R) is A ∧ B → q ∈ R; where the only things present are the dependers
+the shape is "no version of deriving-aeson suits hlint >=3.4.1 unless aeson >=1.3
+&& <2.3". This rule names survivors of a step, and which packages survive is the
+order the solver eliminated things — `ghcide` stands where `time` would be read —
+which is why the wall rule goes first wherever it applies.
+
+Neither names a seed, since the headline has just said it, nor a pinned package as
+the culprit, since the wall says it in fewer words. Over the corpus the line
+appears on 14 of 20 problems, ten by the wall rule and four by the pivot rule; the
+six without it are the proofs of two sentences, where the proof is already the
+summary. `isSubsetOf` and `equivalent` are one-sided, and every guard fails the
+safe way: doubt means no line, never a wrong one. The harness carries the whole
+block, wrapped lines included, and the gate is untouched because the line opens
+with no connective.
+
 **The driver wraps, the reporter does not.** A proof sentence runs to 400
 characters on `hjsonschema`, and a terminal that wraps it by itself breaks inside a
 range. `wrapProof` wraps every line at the terminal's width, or 80 columns off a

@@ -46,9 +46,13 @@ import           Test.Tasty.HUnit                (assertBool, assertFailure,
 -- Fixtures
 -- --------------------------------------------------------------------------
 
-pkgA, pkgQ :: PackageName
+pkgA, pkgB, pkgQ, pkgR, pkgS, pkgBase :: PackageName
 pkgA = mkPackageName "a"
+pkgBase = mkPackageName "base"
+pkgB = mkPackageName "b"
 pkgQ = mkPackageName "q"
+pkgR = mkPackageName "r"
+pkgS = mkPackageName "s"
 
 v :: Int -> Version
 v n = V.mkVersion [n]
@@ -339,7 +343,50 @@ missing name = MissingPkgConfig (PkgconfigDependency (mkPkgconfigName name) anyP
 -- last external facts.
 headline :: [TestTree]
 headline =
-    [ testCase "names the request and the wall" $ do
+    [ -- The second line names the package the search gave up on: the pivot of
+      -- a step that dropped it after a step below had narrowed it. Here @q@ is
+      -- refuted a piece at a time — @[1,3)@ through @r@, @>=3@ through @s@ —
+      -- and the only thing left standing at the dropping step is the depender.
+      testCase "names the package refuted a piece at a time, and who depends on it" $ do
+        let aNeedsQ = fromDependency pkgA (range 1 2) pkgQ (from 1)
+            lowQ = priorCause (fromDependency pkgQ (range 1 3) pkgR (range 1 2)) (hole pkgR (range 1 2)) pkgR
+            highQ = priorCause (fromDependency pkgQ (from 3) pkgS (range 1 2)) (hole pkgS (range 1 2)) pkgS
+            narrowed = priorCause aNeedsQ lowQ pkgQ
+            dropped' = priorCause narrowed highQ pkgQ
+            inc = priorCause dropped' (request pkgA (range 1 2)) pkgA
+        T.unpack (reportHeadline inc)
+            @?= "No solution for a >=1 && <2.\nNo version of q suits a >=1 && <2."
+    , -- With something present that is not a depender, the step's terms are
+      -- what @q@ cannot be reconciled with, and the depender is named after.
+      testCase "names what the package cannot be reconciled with" $ do
+        let aNeedsQ = fromDependency pkgA (range 1 2) pkgQ (from 1)
+            lowQ = priorCause (fromDependency pkgQ (range 1 3) pkgR (range 1 2)) (hole pkgR (range 1 2)) pkgR
+            highQ = priorCause (fromDependency pkgQ (from 3) pkgS (range 1 2)) (fromDependency pkgB (range 1 2) pkgS (from 2)) pkgS
+            narrowed = priorCause aNeedsQ lowQ pkgQ
+            dropped' = priorCause narrowed highQ pkgQ
+            inc = priorCause (priorCause dropped' (request pkgA (range 1 2)) pkgA) (request pkgB (range 1 2)) pkgB
+        T.unpack (reportHeadline inc)
+            @?= "No solution for a >=1 && <2 and b >=1 && <2.\na >=1 && <2 needs q, and no version of q is compatible with a >=1 && <2 and b >=1 && <2 together."
+    , -- Where the proof rests on a pinned package, the line joins who wants
+      -- @q@, the window they leave for it, and the wall it fails against: the
+      -- step "q >=1 && <5 is forbidden" with the pinned base among its premises.
+      testCase "against a wall, names the window and the wall" $ do
+        let aNeedsQ = fromDependency pkgA (range 1 2) pkgQ (range 1 5)
+            qNeedsOldBase = fromDependency pkgQ (range 1 5) pkgBase (range 0 4)
+            qForbidden = priorCause qNeedsOldBase (onlyInstalled pkgBase [v 5] (from 0)) pkgBase
+            inc = priorCause (priorCause aNeedsQ qForbidden pkgQ) (request pkgA (range 1 2)) pkgA
+        T.unpack (reportHeadline inc)
+            @?= "No solution for a >=1 && <2: base is pinned to 5 (installed).\na >=1 && <2 needs q >=1 && <5, and no q there builds on base 5 (installed)."
+    , -- A package refuted in one step was not given up on piece by piece, so
+      -- nothing is added: the proof's two lines already say it all.
+      testCase "a package refuted in one step earns no second line" $ do
+        let inc =
+                priorCause
+                    (priorCause (fromDependency pkgA (range 1 2) pkgQ (range 1 5)) (hole pkgQ (range 1 5)) pkgQ)
+                    (request pkgA (range 1 2))
+                    pkgA
+        T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2."
+    , testCase "names the request and the wall" $ do
         let inc = priorCause (onlyInstalled pkgA [v 3] (from 1)) (request pkgA (range 1 2)) pkgA
         T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2: a is pinned to 3 (installed)."
     , -- The reason is part of the fact, so it is part of the wall.

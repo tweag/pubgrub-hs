@@ -30,7 +30,7 @@ import Data.Char (isAlphaNum, isDigit)
 import Data.List (dropWhileEnd, nub, sort)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe, isNothing, listToMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, isNothing, mapMaybe)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
@@ -206,7 +206,7 @@ data Run = Run
     , runReads     :: Maybe Reads
     , runIndexState :: Maybe Text           -- ^ the child's @index-state:@ line: the state the run was really at
     , runPlan      :: Maybe [PlanLine]      -- ^ 'Nothing' when no @plan:@ line was printed
-    , runHeadline  :: Maybe Text            -- ^ the line above our proof: the request and the walls
+    , runHeadline  :: [Text]                -- ^ the block above our proof: the request and the walls, and the package the search gave up on; wrapped lines included
     , runProof     :: [Text]                -- ^ our proof as printed: sentences, their continuation lines, and the blank line between branches
     , runMessage   :: [Text]                -- ^ cabal's @Could not resolve dependencies:@ block
     }
@@ -227,7 +227,7 @@ parseRun code logText timeText rtsText = Run
     , runPlan      = case mapMaybe parsePlanLine ls of
                         [] -> Nothing
                         ps -> Just ps
-    , runHeadline  = listToMaybe (filter ("No solution" `T.isPrefixOf`) ls)
+    , runHeadline  = headlineBlock ls
     , runProof     = proofBlock ls
     , runMessage   = cabalBlock ls
     }
@@ -296,10 +296,17 @@ parsePlanLine l = do
         [q, n, v, k] -> Just (PlanLine (Just q) n v k)
         _            -> Nothing
 
--- | The proof as the driver printed it: from its first sentence to its last,
--- keeping the wrapped continuation lines (they start with the indent) and the
--- blank line the reporter puts between two branches of a derivation. Sentences
--- are counted by 'isProofLine', so neither kind of extra line is counted.
+-- | The headline as printed: from the @No solution@ line to the blank line before
+-- the proof, wrapped continuation lines and all.
+--
+-- 'proofBlock', below, takes the proof as printed: from its first sentence to its
+-- last, keeping the wrapped continuation lines (they start with the indent) and
+-- the blank line the reporter puts between two branches of a derivation.
+-- Sentences are counted by 'isProofLine', so neither kind of extra line is
+-- counted.
+headlineBlock :: [Text] -> [Text]
+headlineBlock ls = takeWhile (not . T.null) (dropWhile (not . ("No solution" `T.isPrefixOf`)) ls)
+
 proofBlock :: [Text] -> [Text]
 proofBlock ls = dropWhileEnd T.null (takeWhile inProof (dropWhile (not . isProofLine) ls))
   where
@@ -376,7 +383,7 @@ data Measured = Measured
     , mReads     :: Maybe Reads
     , mIndexState :: Maybe Text            -- ^ the state the runs were really at, as the driver said
     , mPlan      :: Maybe [PlanLine]
-    , mHeadline  :: Maybe Text
+    , mHeadline  :: [Text]
     , mProof     :: [Text]
     , mMessage   :: [Text]
     , mMissing   :: [Text]                  -- ^ contract lines the driver did not print
@@ -792,7 +799,9 @@ showcaseReport cfg env results =
                 <> screen ours <> " screen lines against " <> screenAt80 cabal <> "." ]
         | (p, ours, cabal) <- comparable ]
   where
-    withHeadline m body = maybe body (\h -> readable h : "" : body) (mHeadline m)
+    withHeadline m body = case mHeadline m of
+        [] -> body
+        hs -> map readable hs ++ "" : body
     excluded = [ r | r@(p, _, _) <- results, probExcluded p ]
     comparable = [ r | r@(p, _, _) <- results, not (probExcluded p) ]
     ourCount (_, ours, _) = length (filter isProofLine (mProof ours))
