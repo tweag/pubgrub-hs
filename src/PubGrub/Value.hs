@@ -1,12 +1,14 @@
 -- | The values a 'PubGrub.Variable.Var' takes, and sets of them.
 --
--- A package variable takes an 'Instance'; a flag variable takes a 'Bool'. A set
--- of values is a set of instances or a set of Booleans, and the two kinds never
--- meet: a term is always about one variable, and every operation on terms
--- combines two terms about the same variable. The mixed cases of the 'SetOps'
--- instance are therefore unreachable; they are given a total definition rather
--- than an error, and the definition is the one that would make a reached case
--- visible (an empty result, never a silently widened one).
+-- A package variable takes an 'Instance'; a flag variable takes a 'Bool'. A
+-- value is therefore a sum, 'Value'. A /set/ of values is not: the subsets of
+-- @A + B@ are the pairs of a subset of @A@ and a subset of @B@, so 'ValueSet'
+-- is the product of an 'InstanceSet' and a 'BoolSet'. Every set operation is
+-- componentwise and total, with no case for sets \"of different kinds\" — a
+-- package variable's set simply has an empty flag component, and a flag
+-- variable's set an empty instance component. 'InstanceSet' is the same shape
+-- one level down: the installed units and the source range are the two halves
+-- of a set over @PreInstalled + Version@.
 module PubGrub.Value
     ( -- * Values
       Value (..)
@@ -18,10 +20,11 @@ module PubGrub.Value
     , noValues
     , memberBool
     , ValueSet (..)
-    , emptyValueSetLike
+    , emptyValueSet
+    , instanceSet
+    , flagSet
     , singletonValue
     , memberValue
-    , packageSet
       -- * A plan
     , Resolved (..)
     , resolvedInstance
@@ -76,6 +79,7 @@ data BoolSet = BoolSet
     deriving (Eq, Ord, Show)
 
 instance SetOps BoolSet where
+    empty = noValues
     union (BoolSet f t) (BoolSet f' t') = BoolSet (f || f') (t || t')
     intersect (BoolSet f t) (BoolSet f' t') = BoolSet (f && f') (t && t')
     difference (BoolSet f t) (BoolSet f' t') = BoolSet (f && not f') (t && not t')
@@ -99,50 +103,49 @@ instance Pretty BoolSet where
     pretty (BoolSet True False)  = T.pack "off"
     pretty (BoolSet False False) = T.pack "neither"
 
--- | A set of values of one variable.
-data ValueSet
-    = PackageSet InstanceSet
-    | FlagSet BoolSet
+-- | A set of values: some instances and some Booleans. Both components are
+-- canonical, so the set has a lawful 'Eq' and 'Ord' and an exact 'isEmpty'.
+data ValueSet = ValueSet
+    { vsInstances :: InstanceSet
+    , vsFlags     :: BoolSet
+    }
     deriving (Eq, Ord, Show)
 
--- | Componentwise. The mixed cases cannot arise (see the module header); they
--- answer with the empty set of the left operand's kind for an intersection or
--- a difference, and with the left operand for a union.
 instance SetOps ValueSet where
-    union (PackageSet a) (PackageSet b) = PackageSet (a `union` b)
-    union (FlagSet a) (FlagSet b)       = FlagSet (a `union` b)
-    union a _                           = a
-    intersect (PackageSet a) (PackageSet b) = PackageSet (a `intersect` b)
-    intersect (FlagSet a) (FlagSet b)       = FlagSet (a `intersect` b)
-    intersect a _                           = emptyValueSetLike a
-    difference (PackageSet a) (PackageSet b) = PackageSet (a `difference` b)
-    difference (FlagSet a) (FlagSet b)       = FlagSet (a `difference` b)
-    difference a _                           = emptyValueSetLike a
-    isEmpty (PackageSet a) = isEmpty a
-    isEmpty (FlagSet a)    = isEmpty a
+    empty = emptyValueSet
+    union (ValueSet a b) (ValueSet a' b') = ValueSet (a `union` a') (b `union` b')
+    intersect (ValueSet a b) (ValueSet a' b') = ValueSet (a `intersect` a') (b `intersect` b')
+    difference (ValueSet a b) (ValueSet a' b') = ValueSet (a `difference` a') (b `difference` b')
+    isEmpty (ValueSet a b) = isEmpty a && isEmpty b
 
--- | The empty set of the same kind.
-emptyValueSetLike :: ValueSet -> ValueSet
-emptyValueSetLike (PackageSet _) = PackageSet emptyInstanceSet
-emptyValueSetLike (FlagSet _)    = FlagSet noValues
+-- | No values. @Negative emptyValueSet@ is the always-true term ⊤ for any
+-- variable; @Positive emptyValueSet@ is the never-true term ⊥.
+emptyValueSet :: ValueSet
+emptyValueSet = ValueSet emptyInstanceSet noValues
 
+-- | These instances, and no Boolean: the set a term about a package ranges
+-- over.
+instanceSet :: InstanceSet -> ValueSet
+instanceSet s = ValueSet s noValues
+
+-- | These Booleans, and no instance: the set a term about a flag ranges over.
+flagSet :: BoolSet -> ValueSet
+flagSet = ValueSet emptyInstanceSet
+
+-- | The set holding exactly one value — the shape of a decision.
 singletonValue :: Value -> ValueSet
-singletonValue (PackageValue i) = PackageSet (singletonInstance i)
-singletonValue (FlagValue b)    = FlagSet (boolSet b)
+singletonValue (PackageValue i) = instanceSet (singletonInstance i)
+singletonValue (FlagValue b)    = flagSet (boolSet b)
 
 memberValue :: Value -> ValueSet -> Bool
-memberValue (PackageValue i) (PackageSet s) = memberInstance i s
-memberValue (FlagValue b) (FlagSet s)       = memberBool b s
-memberValue _ _                             = False
+memberValue (PackageValue i) s = memberInstance i (vsInstances s)
+memberValue (FlagValue b) s    = memberBool b (vsFlags s)
 
--- | The instances a set holds, if it is a set of instances.
-packageSet :: ValueSet -> Maybe InstanceSet
-packageSet (PackageSet s) = Just s
-packageSet (FlagSet _)    = Nothing
-
+-- | The components that hold anything; in practice one, since a set is only
+-- ever about one variable.
 instance Pretty ValueSet where
-    pretty (PackageSet s) = pretty s
-    pretty (FlagSet s)    = pretty s
+    pretty (ValueSet is bs) =
+        T.intercalate (T.pack " or ") ([pretty is | not (isEmpty is)] ++ [pretty bs | not (isEmpty bs)])
 
 -- --------------------------------------------------------------------------
 -- A plan

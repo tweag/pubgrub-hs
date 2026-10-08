@@ -147,7 +147,7 @@ wallStory root = do
 wallStep :: Incompatibility Cabal -> Rule (Incompatibility Cabal) (PackageName, InstanceSet, [Text])
 wallStep root n = do
     guard (isDerived n)
-    let ps = [(p, s) | (PackageVar p, Positive (PackageSet s)) <- Map.toList (incompTerms n)]
+    let ps = [(p, s) | (PackageVar p, Positive (ValueSet s _)) <- Map.toList (incompTerms n)]
     guard (length ps == Map.size (incompTerms n))
     (x, w) <- case [(p, s) | (p, s) <- ps, p `notElem` pinnedPackages] of
         [one] -> Just one

@@ -8,17 +8,17 @@ import qualified Data.Set as Set
 -- SetOps
 -- ---------------------------------------------------------------------------
 
--- | The operations the solver needs from a set of values: closed under
--- intersection, union and difference, with an emptiness test — a /ring of
+-- | The operations the solver needs from a set of values: the empty set, closure
+-- under intersection, union and difference, and an emptiness test — a /ring of
 -- sets/, not a Boolean algebra.
 --
 -- Deliberately absent: @complement@. A complement needs a universe of values,
 -- and nothing here wants one: the only place negation is needed is
 -- 'PubGrub.Term.Term', where it is a polarity flip that costs nothing. Pairing
--- a set with a polarity turns this ring into a Boolean algebra. (Per package
--- the instance universe /is/ knowable from the 'PubGrub.InstanceSet.Index',
--- but the algebra never has to ask for it.)
+-- a set with a polarity turns this ring into a Boolean algebra. (A domain may
+-- well know its universe, but the algebra never has to ask for it.)
 class SetOps a where
+    empty       :: a
     intersect   :: a -> a -> a
     union       :: a -> a -> a
     difference  :: a -> a -> a
@@ -48,6 +48,7 @@ equivalent :: SetOps s => s -> s -> Bool
 equivalent x y = x `isSubsetOf` y && y `isSubsetOf` x
 
 instance Ord a => SetOps (Set a) where
+    empty = Set.empty
     intersect = Set.intersection
     union = Set.union
     difference = Set.difference

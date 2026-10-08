@@ -34,15 +34,14 @@ import           Distribution.Types.PkgconfigDependency (PkgconfigDependency)
 import           PubGrub.Incompatibility                (Domain (..),
                                                          Incompatibility (..),
                                                          MergeRule (MergeRule))
-import           PubGrub.InstanceSet                    (InstanceSet,
-                                                         emptyInstanceSet)
+import           PubGrub.InstanceSet                    (InstanceSet)
 import           PubGrub.SetOps                         (SetOps (..))
 import           PubGrub.Term                           (Term (..),
                                                          intersectTerm,
                                                          isTopTerm)
-import           PubGrub.Value                          (Value, ValueSet (..),
-                                                         boolSet, bothValues,
-                                                         noValues,
+import           PubGrub.Value                          (Value, ValueSet, boolSet,
+                                                         bothValues, flagSet,
+                                                         instanceSet,
                                                          singletonValue)
 import           PubGrub.Variable                       (Flag, Var (..))
 import           PubGrub.Version                        (Version)
@@ -60,11 +59,6 @@ instance Domain Cabal where
     type ValueOf Cabal = Value
     type SetOf Cabal = ValueSet
     type CauseOf Cabal = IncompatCause
-
-    -- The empty set has a kind: a term about a flag is combined with sets of
-    -- Booleans, a term about a package with sets of instances.
-    emptySet (PackageVar _) = PackageSet emptyInstanceSet
-    emptySet (FlagVar _ _)  = FlagSet noValues
 
     singleton _ = singletonValue
 
@@ -124,7 +118,7 @@ data UnbuildableReason
 -- level 0 before anything is decided; 'PubGrub.Solver' recognises a conflict that
 -- rests on those derivations alone as the end of the search.
 request :: PackageName -> InstanceSet -> Incompatibility Cabal
-request p s = Incompatibility (Map.singleton (PackageVar p) (Negative (PackageSet s))) (CauseRequest p s)
+request p s = Incompatibility (Map.singleton (PackageVar p) (Negative (instanceSet s))) (CauseRequest p s)
 
 -- | A package that may not be built from source at all: only an already-installed
 -- unit of it can be selected. The term is /every source instance/ — any version
@@ -147,7 +141,7 @@ request p s = Incompatibility (Map.singleton (PackageVar p) (Negative (PackageSe
 -- the shape.
 onlyInstalled :: PackageName -> [Version] -> InstanceSet -> Incompatibility Cabal
 onlyInstalled p installed anySource =
-    Incompatibility (Map.singleton (PackageVar p) (Positive (PackageSet anySource))) (CauseOnlyInstalled p installed)
+    Incompatibility (Map.singleton (PackageVar p) (Positive (instanceSet anySource))) (CauseOnlyInstalled p installed)
 
 -- | Instances that cannot be built in this environment, and so must never be
 -- selected. This is the PubGrub algorithm's rule for a version that cannot be
@@ -171,7 +165,7 @@ onlyInstalled p installed anySource =
 -- 'onlyInstalled': the clause's term is the ban, and the reasons are what the
 -- sentence says instead of a bare \"cannot be built\".
 unbuildable :: PackageName -> InstanceSet -> NonEmpty UnbuildableReason -> Incompatibility Cabal
-unbuildable p s why = Incompatibility (Map.singleton (PackageVar p) (Positive (PackageSet s))) (CauseUnbuildable p s why)
+unbuildable p s why = Incompatibility (Map.singleton (PackageVar p) (Positive (instanceSet s))) (CauseUnbuildable p s why)
 
 -- | Dependency incompatibility: @package@ in @instances@, with each flag of
 -- @guard@ at the value it names, requires @dep@ in @depSet@:
@@ -207,9 +201,9 @@ fromDependency pkgName pkgSet guard depName depSet =
     Incompatibility
         ( Map.fromListWith
             intersectTerm
-            ( (PackageVar pkgName, Positive (PackageSet pkgSet))
-                : [(FlagVar pkgName f, Positive (FlagSet (boolSet b))) | (f, b) <- Map.toList guard]
-                ++ [(PackageVar depName, Negative (PackageSet depSet)) | not (isTopTerm (Negative (PackageSet depSet)))]
+            ( (PackageVar pkgName, Positive (instanceSet pkgSet))
+                : [(FlagVar pkgName f, Positive (flagSet (boolSet b))) | (f, b) <- Map.toList guard]
+                ++ [(PackageVar depName, Negative (instanceSet depSet)) | not (isTopTerm (Negative (instanceSet depSet)))]
             )
         )
         (CauseDependency pkgName pkgSet guard (depName, depSet))
@@ -229,8 +223,8 @@ declaresFlag :: PackageName -> InstanceSet -> Flag -> Incompatibility Cabal
 declaresFlag p s f =
     Incompatibility
         ( Map.fromList
-            [ (PackageVar p, Positive (PackageSet s))
-            , (FlagVar p f, Negative (FlagSet bothValues))
+            [ (PackageVar p, Positive (instanceSet s))
+            , (FlagVar p f, Negative (flagSet bothValues))
             ]
         )
         (CauseDeclaresFlag p s f)

@@ -36,7 +36,8 @@ import           PubGrub.Term               (Term (..), intersectTerm,
                                              isBottomTerm, isTopTerm,
                                              negateTerm, unionTerm)
 import           PubGrub.Value              (BoolSet (..), Value (..),
-                                             ValueSet (..), boolSet,
+                                             boolSet,
+                                             flagSet, instanceSet,
                                              memberValue, singletonValue)
 import           PubGrub.Version            (Version, mkVersion,
                                              toCabalVersion)
@@ -188,7 +189,7 @@ tests =
                 (memberValue (FlagValue b) (singletonValue (FlagValue b)), memberValue (FlagValue (not b)) (singletonValue (FlagValue b)))
                     === (True, False)
             , testProperty "a package value never belongs to a flag set, nor the reverse" $ \b ->
-                (memberValue (PackageValue (BuildSource (mkVersion [1]))) (FlagSet (boolSet b)), memberValue (FlagValue b) (PackageSet emptyInstanceSet))
+                (memberValue (PackageValue (BuildSource (mkVersion [1]))) (flagSet (boolSet b)), memberValue (FlagValue b) (instanceSet emptyInstanceSet))
                     === (False, False)
             ]
         ]

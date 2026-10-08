@@ -19,11 +19,14 @@ data Instance = UsePreInstalled PreInstalledPackage | BuildSource Version   -- P
 data InstanceSet = InstanceSet { isInstalled :: Set PreInstalledPackage, isSource :: VersionSet }
 
 data Value    = PackageValue Instance   | FlagValue Bool     -- PubGrub.Value
-data ValueSet = PackageSet   InstanceSet | FlagSet  BoolSet
+data ValueSet = ValueSet { vsInstances :: InstanceSet, vsFlags :: BoolSet }
 ```
 
 A solver variable is a package name or an automatic flag of a package. A
-package takes an instance; a flag takes a Boolean. A flag's identity is its
+package takes an instance; a flag takes a Boolean. A set of values is a
+product, not a sum: the subsets of `Instance + Bool` are the pairs of an
+`InstanceSet` and a `BoolSet`, so every set operation is componentwise and a
+package variable's set simply has an empty flag component. A flag's identity is its
 *declaration*, name and default together: two releases declaring `fast` the
 same way share the variable, a release that changed the default has a different
 one. Manual flags are never variables; they are resolved at their defaults when

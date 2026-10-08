@@ -160,7 +160,7 @@ asRequest c = case incompCause c of
 -- | A hole: a range the solver found to hold no releases.
 asHole :: Rule (Incompatibility Cabal) (PackageName, InstanceSet)
 asHole c = case incompCause c of
-    CauseNoInstances (PackageVar p) (PackageSet s) -> Just (p, s)
+    CauseNoInstances (PackageVar p) s -> Just (p, vsInstances s)
     _                                              -> Nothing
 
 -- | An /unconditional/ dependency fact whose dependee term survived, as

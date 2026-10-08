@@ -366,13 +366,9 @@ mkExpand
 mkExpand installedDb source = expand'
   where
     expand' :: Var -> ValueSet -> m (Maybe Value, [Incompatibility Cabal])
-    expand' (FlagVar _ (Flag _ dflt)) (FlagSet admitted) =
-        pure (listToMaybe [FlagValue b | b <- [dflt, not dflt], memberBool b admitted], [])
-    expand' (PackageVar pn) (PackageSet range) = expandPackage pn range
-    -- A set of the wrong kind for the variable: unreachable, since every term is
-    -- built for its variable. Answered as "nothing fits", which the solver turns
-    -- into a ban on the set rather than a decision on it.
-    expand' _ _ = pure (Nothing, [])
+    expand' (FlagVar _ (Flag _ dflt)) set =
+        pure (listToMaybe [FlagValue b | b <- [dflt, not dflt], memberBool b (vsFlags set)], [])
+    expand' (PackageVar pn) set = expandPackage pn (vsInstances set)
 
     -- An 'InstanceSet' is a symbolic description (a version range plus the
     -- installed units in it), not a container: membership is decidable but it

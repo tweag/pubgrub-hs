@@ -369,6 +369,7 @@ complementVersionSet vs = fromCuts (go (Cut version0 Before) (cutsOf vs))
 -- | The class asks for no complement, because not every payload has one.
 -- Version ranges do, so 'difference' is computed through it here.
 instance SetOps VersionSet where
+    empty = emptyVersionSet
     intersect = intersectionVersionSet
     union = unionVersionSet
     difference a b = intersectionVersionSet a (complementVersionSet b)

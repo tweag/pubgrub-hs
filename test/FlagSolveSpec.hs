@@ -69,7 +69,7 @@ import           PubGrub.Report                 (reportConflict)
 import           PubGrub.Solver                 (SolveError (..), SolverMsg,
                                                  solve)
 import           PubGrub.Value                  (Resolved (..), Value (..),
-                                                 ValueSet (..), foldFlags)
+                                                 foldFlags, instanceSet)
 import           PubGrub.Variable               (Flag (..), Var (..))
 import           PubGrub.Version                (Version)
 import qualified PubGrub.Version                as V
@@ -535,7 +535,7 @@ bootPackageStatesItself =
     -- The real provider rule over a world with one installed unit of @name@ and no
     -- releases at all, asked about that package with @offered@ on the table.
     expandIn name offered =
-        BP.mkExpand db source (PackageVar (mkPackageName name)) (PackageSet offered)
+        BP.mkExpand db source (PackageVar (mkPackageName name)) (instanceSet offered)
       where
         db =
             mkInstalledDb
@@ -613,7 +613,7 @@ unbuildableStatesItself =
           -- settles on 1.0.0, and hands both out together.
           testCase "the fact rides out with the release the scan settles on" $ do
             let provider = worldProviderUnder FlagPackages [(pkg "foo", v2)] world
-            result <- runTestM (expand provider (PackageVar (pkg "foo")) (PackageSet (sourceInstances VersionSet.fullVersionSet)))
+            result <- runTestM (expand provider (PackageVar (pkg "foo")) (instanceSet (sourceInstances VersionSet.fullVersionSet)))
             case result of
                 (Just (PackageValue (BuildSource v)), incs) -> do
                     v @?= v1
@@ -655,7 +655,7 @@ selfDependencyDropped =
 
     expandSelfDep = do
         let provider = worldProviderUnder FlagPackages [] selfDepWorld
-        result <- expand provider (PackageVar (pkg "p")) (PackageSet (sourceInstances VersionSet.fullVersionSet))
+        result <- expand provider (PackageVar (pkg "p")) (instanceSet (sourceInstances VersionSet.fullVersionSet))
         case result of
             (Just (PackageValue (BuildSource _)), incs) -> pure incs
             _ -> liftIO (assertFailure "expected p 1.0.0 to be chosen")

@@ -25,14 +25,13 @@ import           PubGrub.Cabal                   (Cabal,
                                                   fromDependency,
                                                   request)
 import           PubGrub.Incompatibility         (Incompatibility,
-                                                  anyTermFor,
-                                                  incompGet,
-                                                  noInstances)
+                                                  incompGet, noInstances)
 import           PubGrub.InstanceSet             (Instance (..),
                                                   InstanceSet (..),
                                                   singletonInstance)
 import           PubGrub.SetOps                  (equivalent)
-import           PubGrub.Value                   (Value (..), ValueSet (..))
+import           PubGrub.Value                   (Value (..), ValueSet,
+                                                  instanceSet)
 import           PubGrub.Variable                (Var (..))
 import           PubGrub.Solver                  (Assignment (..),
                                                   AssignmentKind (..),
@@ -44,8 +43,8 @@ import           PubGrub.Solver                  (Assignment (..),
                                                   varHistory,
                                                   termIntersectionFor,
                                                   undecidedPositive)
-import           PubGrub.Term                    (Term (..), intersectTerm,
-                                                  negateTerm)
+import           PubGrub.Term                    (Term (..), anyTerm,
+                                                  intersectTerm, negateTerm)
 import qualified PubGrub.VersionSet              as VersionSet
 import           Test.Tasty                      (TestTree, testGroup)
 import           Test.Tasty.QuickCheck           (Arbitrary (..), Gen, Property,
@@ -86,7 +85,7 @@ sets =
 incompatibilities :: [Incompatibility Cabal]
 incompatibilities =
     [request p (singletonInstance i) | PackageVar p <- packages, PackageValue i <- instances]
-        ++ [noInstances p (PackageSet s) | p <- packages, s <- sets]
+        ++ [noInstances p (instanceSet s) | p <- packages, s <- sets]
         ++ [ fromDependency p s Map.empty q t
            | (PackageVar p, PackageVar q) <- zip packages (drop 1 packages)
            , s <- take 1 sets
@@ -146,7 +145,7 @@ mDerive :: Var -> Incompatibility Cabal -> Model -> Model
 mDerive p cause (Model as l n) =
     Model (as ++ [Assignment n l p (Derived term cause)]) l (n + 1)
   where
-    term = maybe (anyTermFor p) negateTerm (incompGet p cause)
+    term = maybe anyTerm negateTerm (incompGet p cause)
 
 mBacktrack :: Int -> Model -> Model
 mBacktrack level (Model as _ n) = Model (filter ((<= level) . aLevel) as) level n

@@ -69,6 +69,7 @@ data InstanceSet = InstanceSet
     deriving (Eq, Ord, Show)
 
 instance SetOps InstanceSet where
+    empty = emptyInstanceSet
     union a b = InstanceSet (isInstalled a `Set.union` isInstalled b) (isSource a `union` isSource b)
     intersect a b = InstanceSet (isInstalled a `Set.intersection` isInstalled b) (isSource a `intersect` isSource b)
     difference a b = InstanceSet (isInstalled a `Set.difference` isInstalled b) (isSource a `difference` isSource b)

@@ -37,10 +37,10 @@ cause type, the five constructors a `.cabal` fact is stated through, and the mer
 the cabal renderer and is written over `Cabal` on purpose.
 
 The variable type is declared injective — a variable type belongs to one domain — so
-that a variable alone tells the compiler its domain, and the two operations that need
-only a variable, the empty set of its kind and the singleton of a value, take nothing
-else. The empty set has a kind at all because the cabal domain has two: a term about a
-flag is combined with sets of Booleans, a term about a package with sets of instances.
+that a variable alone tells the compiler its domain, and `singleton`, which needs only
+a variable and a value, takes nothing else. The empty set needs no variable: it is
+`SetOps.empty`, one per set type, because a set of values of a sum type is a product
+(§3).
 
 Nothing observable changed when this was done: the gate came out identical, the
 goldens unchanged, and the suite at the same count. What it buys is that the solver
@@ -95,6 +95,18 @@ The solver's variables are `Var`: a package name, or an automatic flag of a pack
 A package takes an `Instance` — a pre-installed unit or a source release — and a flag
 takes a `Bool`. A decision on a package is a release; the flags that release declares
 are decided after it, each on its own.
+
+**A set of values is a product, not a sum.** `Value` is `PackageValue Instance |
+FlagValue Bool`, and the subsets of `Instance + Bool` are the pairs of an
+`InstanceSet` and a `BoolSet`, so `ValueSet` is that pair. Every set operation is
+componentwise and total; a package variable's set has an empty flag component and a
+flag variable's an empty instance component, which is simply true of them. The empty
+set is one constant, `SetOps.empty`, and the ⊤ term `anyTerm` needs no variable.
+`InstanceSet` has the same shape one level down: the installed units and the source
+range are the two halves of a set over `PreInstalled + Version`. Until 2026-10-08
+`ValueSet` was the sum `PackageSet InstanceSet | FlagSet BoolSet`, which gave every
+binary operation an unreachable mixed case to answer, an `emptyValueSetLike` that
+asked a set its kind, and an `emptySet` in the domain class that took the variable.
 
 **A flag's identity is its declaration.** `Flag` is a name together with its declared
 default. Two releases that declare `fast` with the same default share the variable,

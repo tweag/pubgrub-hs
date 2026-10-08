@@ -70,7 +70,7 @@ import           PubGrub.Incompatibility        (Incompatibility (..),
                                                  priorCauseTerms)
 import           PubGrub.InstanceSet            (InstanceSet)
 import           PubGrub.Report.Headline        (headline)
-import           PubGrub.Value                  (ValueSet (..), packageSet)
+import           PubGrub.Value                  (ValueSet (..))
 import           PubGrub.Variable               (Var (..))
 import           PubGrub.Report.Layout          (rangeToken, styleProof,
                                                  wrapProof)
@@ -258,8 +258,8 @@ samePairRun step = do
 -- to a claim it does not support.
 concludesRequires :: PackageName -> PackageName -> Rule (Incompatibility Cabal) InstanceSet
 concludesRequires p q step = case Map.toList (incompTerms step) of
-    [(a, Positive (PackageSet s)), (b, Negative _)] | (a, b) == (PackageVar p, PackageVar q) -> Just s
-    [(b, Negative _), (a, Positive (PackageSet s))] | (a, b) == (PackageVar p, PackageVar q) -> Just s
+    [(a, Positive s), (b, Negative _)] | (a, b) == (PackageVar p, PackageVar q) -> Just (vsInstances s)
+    [(b, Negative _), (a, Positive s)] | (a, b) == (PackageVar p, PackageVar q) -> Just (vsInstances s)
     _ -> Nothing
 
 -- | __The widening run.__ The same-pair run needs every fact in the run to name
@@ -317,8 +317,8 @@ wideningRun step = do
     -- dependencies is something the solver worked out, not something an author
     -- wrote (references/pubgrub.md:1005).
     runFact p terms = case Map.toList (Map.delete (PackageVar p) terms) of
-        [(PackageVar q, Negative (PackageSet r))]
-            | Just (Positive (PackageSet sp)) <- Map.lookup (PackageVar p) terms -> dep p sp q r
+        [(PackageVar q, Negative r)]
+            | Just (Positive sp) <- Map.lookup (PackageVar p) terms -> dep p (vsInstances sp) q (vsInstances r)
         _ -> summaryTerms terms
 
 -- --------------------------------------------------------------------------
@@ -443,8 +443,8 @@ collapseNoInstances inc = case incompCause inc of
         (p1, q) <- dependencyPackages other
         guard (p == p1 || p == q)
         guard (Map.size (incompTerms node) == 2)
-        s1 <- packageSet =<< positive =<< Map.lookup (PackageVar p1) (incompTerms node)
-        r2 <- packageSet =<< negative =<< Map.lookup (PackageVar q) (incompTerms node)
+        s1 <- vsInstances <$> (positive =<< Map.lookup (PackageVar p1) (incompTerms node))
+        r2 <- vsInstances <$> (negative =<< Map.lookup (PackageVar q) (incompTerms node))
         pure (Incompatibility (incompTerms node) (CauseDependency p1 s1 Map.empty (q, r2)))
 
     dependencyPackages c = case incompCause c of

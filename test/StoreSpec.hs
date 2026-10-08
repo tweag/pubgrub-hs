@@ -34,7 +34,7 @@ import           PubGrub.Incompatibility        (Incompatibility (..),
                                                  noInstances)
 import           PubGrub.InstanceSet            (InstanceSet (..))
 import           PubGrub.SetOps                 (SetOps (isEmpty), equivalent)
-import           PubGrub.Value                  (ValueSet (..))
+import           PubGrub.Value                  (ValueSet (..), instanceSet)
 import           PubGrub.Variable               (Flag (..), Var (..))
 import           PubGrub.Term                   (Term (..))
 import           PubGrub.Store                  (emptyStore, insertClause,
@@ -87,7 +87,7 @@ dependency p s q r = fromDependency p s Map.empty q r
 
 -- | A ban on a range of a package, as the solver mints one.
 ban :: PackageName -> InstanceSet -> Incompatibility Cabal
-ban p s = noInstances (PackageVar p) (PackageSet s)
+ban p s = noInstances (PackageVar p) (instanceSet s)
 
 -- | @a@ over some range depends on @q@ in @1..3@.
 dependsOnQ :: InstanceSet -> Incompatibility Cabal
@@ -390,7 +390,7 @@ selfDepTests =
         -- p in [1,2) requires p in [2,3): impossible for every instance of p in
         -- [1,2), and says nothing whatever about the rest of p.
         case Map.toList (incompTerms (dependency pkgA (slot 1 2) pkgA (range 2 3))) of
-            [(p, Positive (PackageSet s))] -> do
+            [(p, Positive (ValueSet s _))] -> do
                 p @?= PackageVar pkgA
                 s `shouldDenote` sourceOnly (halfOpen 1 2)
             ts ->

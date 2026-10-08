@@ -114,15 +114,26 @@ termIsUniversal (Negative s) = isEmpty s
 --
 -- >>> isEmpty (Negative Set.empty :: Term (Set Int))
 -- False
+--
+-- The empty set of states is ⊥, which is /positive/ ('isBottomTerm').
 instance SetOps a => SetOps (Term a) where
+    empty = Positive empty
     intersect = intersectTerm
     union = unionTerm
     difference = differenceTerm
     isEmpty = isEmptyTerm
 
--- | The always-true term: "absent, or any value". This is the ⊤ an
+-- | The always-true term ⊤: "absent, or any value". This is what an
 -- 'PubGrub.Incompatibility.Incompatibility' never stores — such an entry says
--- nothing, so it is dropped from the map instead.
+-- nothing, so it is dropped from the map instead — and the identity used when a
+-- variable is missing from one.
+--
+-- >>> isTopTerm (anyTerm :: Term (Set Int))
+-- True
+anyTerm :: SetOps a => Term a
+anyTerm = Negative empty
+
+-- | Is this ⊤?
 --
 -- >>> isTopTerm (Negative Set.empty :: Term (Set Int))
 -- True

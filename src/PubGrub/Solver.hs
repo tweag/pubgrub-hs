@@ -58,7 +58,7 @@ import qualified Data.List.NonEmpty             as NE
 import           PubGrub.Incompatibility        (Domain (..),
                                                  IncompatRelation (..),
                                                  Incompatibility (..),
-                                                 VarTerm (..), anyTermFor,
+                                                 VarTerm (..),
                                                  incompGet, incompRelation,
                                                  noInstances, priorCause)
 import           PubGrub.Provider               (Provider (..))
@@ -66,8 +66,8 @@ import           PubGrub.SetOps                 (SetOps (..))
 import           PubGrub.Store                  (Store, emptyStore,
                                                  insertClause, insertClauses,
                                                  storeClauses)
-import           PubGrub.Term                   (Term (..), intersectTerm,
-                                                 negateTerm)
+import           PubGrub.Term                   (Term (..), anyTerm,
+                                                 intersectTerm, negateTerm)
 
 
 -- --------------------------------------------------------------------------
@@ -182,7 +182,7 @@ addDecision p i ps@PartialSolution{psLevel, psNextIndex} =
 -- current level.
 addDerivation :: Domain d => VarOf d -> Incompatibility d -> PartialSolution d -> PartialSolution d
 addDerivation p cause ps@PartialSolution{psLevel, psNextIndex} =
-    let term = maybe (anyTermFor p) negateTerm (incompGet p cause)
+    let term = maybe anyTerm negateTerm (incompGet p cause)
      in recordAssignment (Assignment psNextIndex psLevel p (Derived term cause)) ps
 
 -- | Backtrack: drop every assignment strictly above the target level.
@@ -262,7 +262,7 @@ satisfierOf
     -> VarOf d
     -> Term (SetOf d)
     -> Maybe (Assignment d)
-satisfierOf ps p startTerm = go (anyTermFor p) (varHistory ps p)
+satisfierOf ps p startTerm = go anyTerm (varHistory ps p)
   where
     go _ [] = Nothing
     go acc (a : as)
@@ -299,7 +299,7 @@ satisfierSearch ps i = do
     satMap <- traverse satisfierForTerm (Map.toList (incompTerms i))
     (satVar, satAssign) <- latestSatisfier satMap
     let satLevel = aLevel satAssign
-        it_s = fromMaybe (anyTermFor satVar) (incompGet satVar i)
+        it_s = fromMaybe anyTerm (incompGet satVar i)
         startTerm' = intersect (assignmentTerm satAssign) (negateTerm it_s)
     prevForSat <- require satVar (satisfierOf ps satVar startTerm')
     let satMap' = [(p, if p == satVar then prevForSat else a) | (p, a) <- satMap]

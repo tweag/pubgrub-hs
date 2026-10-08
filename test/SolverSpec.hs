@@ -57,8 +57,8 @@ allInstances = [rootI, foo1, foo2, bar1]
 mkProvider :: Applicative m => (Instance -> [(PackageName, [Instance])]) -> Provider Cabal m
 mkProvider deps = Provider expand'
   where
-    expand' (PackageVar p) (PackageSet range) =
-        case filter (`memberInstance` range) allInstances of
+    expand' (PackageVar p) set =
+        case filter (`memberInstance` vsInstances set) allInstances of
             [] -> pure (Nothing, [])
             candidates ->
                 let chosen = maximumBy (comparing version) candidates

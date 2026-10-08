@@ -14,7 +14,6 @@ module PubGrub.Incompatibility
     , noMerging
       -- * Terms about variables
     , VarTerm (..)
-    , anyTermFor
       -- * Incompatibilities
     , Incompatibility (..)
     , incompGet
@@ -32,8 +31,8 @@ import           Data.Map.Strict  (Map)
 import qualified Data.Map.Strict  as Map
 import           PubGrub.Relation (Relation (..), relation)
 import           PubGrub.SetOps   (SetOps (..))
-import           PubGrub.Term     (Term (..), intersectTerm, isTopTerm,
-                                   unionTerm)
+import           PubGrub.Term     (Term (..), anyTerm, intersectTerm,
+                                   isTopTerm, unionTerm)
 
 -- --------------------------------------------------------------------------
 -- Domain
@@ -47,7 +46,7 @@ import           PubGrub.Term     (Term (..), intersectTerm, isTopTerm,
 --
 -- One type fixes the variable, set and cause types together. The variable type
 -- is declared injective so that a variable alone names its domain, which is what
--- lets 'emptySet' and 'singleton' take a variable and nothing else.
+-- lets 'singleton' take a variable and nothing else.
 class (Ord (VarOf d), SetOps (SetOf d)) => Domain d where
     -- | The variables the solver assigns values to.
     type VarOf d = (v :: Type) | v -> d
@@ -58,11 +57,6 @@ class (Ord (VarOf d), SetOps (SetOf d)) => Domain d where
     -- | Why an incompatibility holds. Provenance only: no solver decision
     -- consults it, and it never affects what an incompatibility means.
     type CauseOf d
-
-    -- | The empty set of the variable's kind. The ⊤ term for a variable is its
-    -- negation ('anyTermFor'), and it takes the variable because a domain may
-    -- have sets of more than one kind.
-    emptySet :: VarOf d -> SetOf d
 
     -- | The set holding exactly one value of the variable — the shape of a
     -- decision.
@@ -117,12 +111,6 @@ data VarTerm d = VarTerm
     { termVar :: VarOf d
     , termSet :: Term (SetOf d)
     }
-
--- | The always-true term ⊤ for a variable: \"absent, or any value\". The
--- identity used when a variable is missing from an incompatibility's map. It
--- takes the variable because the empty set has a kind ('emptySet').
-anyTermFor :: Domain d => VarOf d -> Term (SetOf d)
-anyTermFor v = Negative (emptySet v)
 
 -- --------------------------------------------------------------------------
 -- Incompatibility
@@ -243,8 +231,8 @@ priorCauseTerms pivot cur sat = finalTerms
             intersectTerm
             (Map.delete pivot cur)
             (Map.delete pivot sat)
-    t1 = Map.findWithDefault (anyTermFor pivot) pivot cur
-    t2 = Map.findWithDefault (anyTermFor pivot) pivot sat
+    t1 = Map.findWithDefault anyTerm pivot cur
+    t2 = Map.findWithDefault anyTerm pivot sat
     unioned = unionTerm t1 t2
     finalTerms
         | isTopTerm unioned = merged

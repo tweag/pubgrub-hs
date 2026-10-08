@@ -63,13 +63,12 @@ import           PubGrub.Variable               (Flag, Var (..))
 -- bar\". A flag reads as its owner with a sign: @foo +fast@, @foo -fast@, or
 -- @foo flag fast@ when both values are in.
 named :: Var -> ValueSet -> Text
-named (PackageVar p) (PackageSet s) = namedP p s
-named v s                           = bare v s
+named (PackageVar p) s = namedP p (vsInstances s)
+named v s              = bare v s
 
 bare :: Var -> ValueSet -> Text
-bare (PackageVar p) (PackageSet s) = bareP p s
-bare (FlagVar p f) (FlagSet bs)    = pretty p <> " " <> flagText f bs
-bare v s                           = pretty v <> " " <> pretty s
+bare (PackageVar p) s = bareP p (vsInstances s)
+bare (FlagVar p f) s  = pretty p <> " " <> flagText f (vsFlags s)
 
 namedP :: PackageName -> InstanceSet -> Text
 namedP p s

@@ -33,7 +33,7 @@ import           PubGrub.Incompatibility         (Incompatibility (..),
                                                   noInstances,
                                                   priorCause)
 import           PubGrub.InstanceSet             (InstanceSet (..))
-import           PubGrub.Value                   (ValueSet (..))
+import           PubGrub.Value                   (instanceSet)
 import           PubGrub.Variable                (Var (..))
 import           PubGrub.Report                  (collapseNoInstances,
                                                   reportConflict,
@@ -95,7 +95,7 @@ dependsOnQ dependers = dependency pkgA dependers pkgQ (range 1 5)
 
 -- | The hole the solver learns when a range holds no releases.
 hole :: PackageName -> InstanceSet -> Incompatibility Cabal
-hole p s = noInstances (PackageVar p) (PackageSet s)
+hole p s = noInstances (PackageVar p) (instanceSet s)
 
 causeOf :: Incompatibility Cabal -> IncompatCause
 causeOf = incompCause

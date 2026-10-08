@@ -1392,6 +1392,23 @@ What was rejected: explicit type parameters `Incompatibility v s c` as in pubgru
 to carry them), and same-named type aliases for the cabal instantiation (they fight the
 import system wherever a constructor is used).
 
+### A set of values is a product of sets, not a sum — HELD
+
+`ValueSet` had been `PackageSet InstanceSet | FlagSet BoolSet`, a sum in parallel
+with `Value`, so every set operation had a mixed case that cannot arise and still
+needed a total answer, `emptyValueSetLike` asked a set its kind, and the domain
+class had to take the variable to produce an empty set. The subsets of a sum are a
+product of subsets, so `ValueSet` became `InstanceSet × BoolSet` with componentwise
+operations and no mixed cases, `SetOps` gained `empty`, `anyTerm` lost its variable,
+and `emptySet` left the `Domain` class. The reporter and provider read the component
+the variable names instead of matching on a constructor. Gate identical, 229 tests.
+
+What was rejected: indexing `Var`, `Value` and `ValueSet` by a kind with GADTs,
+which makes the mixed cases unrepresentable but puts existentials in the generic
+core for a problem only the cabal domain has; and encoding a flag's Boolean as a
+version so that everything is an `InstanceSet`, which the spike did and the entry
+above rejected as an encoding.
+
 ---
 
 ## What is open, and what is settled
