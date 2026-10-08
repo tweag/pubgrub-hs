@@ -1,7 +1,7 @@
 -- | The incompatibility store: what the solver has learned, in the order
 -- propagation scans it, with facts that say the same thing __merged as they
--- arrive__ — dependency facts about the same pair of packages, and unbuildable
--- facts about the same package.
+-- arrive__ — dependency facts about the same pair of packages, declarations of
+-- the same flag, and unbuildable facts about the same package.
 --
 -- == Why this is not just a list
 --
@@ -41,9 +41,9 @@
 --
 -- == The merged clause is a leaf, and that is the point for reports
 --
--- It is rebuilt with its own constructor — 'fromDependency', or
--- 'PubGrub.Incompatibility.unbuildable' — so its cause stays a leaf cause with the
--- unioned term. The alternative — letting conflict resolution reach
+-- It is rebuilt with its own constructor — 'fromDependency',
+-- 'PubGrub.Incompatibility.declaresFlag' or 'PubGrub.Incompatibility.unbuildable'
+-- — so its cause stays a leaf cause with the unioned term. The alternative — letting conflict resolution reach
 -- the same range by resolving the narrow facts against each other — produces
 -- 'CauseDerivedFrom' nodes, and those derived nodes /are/ the proof lines this
 -- exists to remove. Merging at insert does not shorten those lines; it stops
@@ -67,14 +67,14 @@ import qualified Data.List.NonEmpty             as NE
 import           Data.Set                       (Set)
 import qualified Data.Set                       as Set
 import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Incompatibility        (IncompatCause (..),
+import           PubGrub.Incompatibility        (Guard, IncompatCause (..),
                                                  Incompatibility (..),
                                                  UnbuildableReason,
-                                                 fromDependency, unbuildable)
-import           PubGrub.Index.PreInstalled     (PreInstalledPackage)
-import           PubGrub.InstanceSet            (InstanceSet (..))
-import           PubGrub.InstanceSet.SourceCell (SourceCell)
+                                                 declaresFlag, fromDependency,
+                                                 unbuildable)
+import           PubGrub.InstanceSet            (InstanceSet)
 import           PubGrub.SetOps                 (SetOps (..))
+import           PubGrub.Variable               (Flag)
 
 -- | The clauses, newest first, plus an index of which of them a new dependency
 -- fact could merge with.
@@ -92,9 +92,10 @@ data Store = Store
 
 -- | What has to match for two clauses to be merged.
 --
--- Two shapes qualify. A dependency fact ('MergeDep') matches on the depender
--- package, the dependee package, and the __dependee instance set__, which must be
--- identical rather than merely overlapping. An unbuildable fact
+-- Three shapes qualify. A dependency fact ('MergeDep') matches on the depender
+-- package, the dependee package, its guard, and the __dependee instance set__,
+-- which must be identical rather than merely overlapping. A flag declaration
+-- ('MergeDeclares') matches on the package and the flag. An unbuildable fact
 -- ('MergeUnbuildable') matches on the package and the __reasons__: it is a unit
 -- clause, so there is no second term to agree about, and two of them giving the
 -- same reasons are the same fact about two runs of releases. PubGrub asks for
@@ -104,35 +105,23 @@ data Store = Store
 -- reasons compare as a set, so their order in the @.cabal@ does not keep two
 -- identical facts apart.
 --
--- On the dependency side, the set is compared /structurally/, via 'setKey'.
--- 'InstanceSet' deliberately has no 'Eq' — its source side is a non-canonical DNF, so structural equality is
--- not semantic equality and a lawful instance is impossible. That general problem
--- does not arise here, because the sets being compared are not general: a
--- dependee set is minted by the provider from a declared range and never
--- rewritten, so it is always one cell with an empty pin map over a canonical
--- 'VersionSet' alongside an extensional installed set. For sets of that shape
--- structural equality /is/ semantic equality. Sets that have been through the
--- algebra are non-canonical, and they only appear in 'CauseDerivedFrom'
--- clauses, which are not merge candidates.
+-- On the dependency side the dependee set is compared with 'Eq', which
+-- 'InstanceSet' has lawfully: both of its halves are canonical.
 --
--- The accumulated term of a merged clause is /not/ compared against anything: it
--- has been through 'union' and is therefore non-canonical, and neither key looks
--- at it.
+-- The accumulated depender term of a merged clause is /not/ part of any key:
+-- it is what the merge grows.
 data MergeKey
-    = MergeDep PackageName PackageName SetKey
+    = MergeDep PackageName PackageName Guard InstanceSet
+      -- ^ a dependency fact merges only with one under the /same/ guard: the
+      -- union argument above holds term for term, and the guard's terms are
+      -- identical on both sides
+    | MergeDeclares PackageName Flag
+      -- ^ two releases declaring the same flag: one clause over both
     | MergeUnbuildable PackageName (Set UnbuildableReason)
     deriving (Eq, Ord)
 
--- | A structural key for an 'InstanceSet'. Cells are sorted so that two DNFs
--- differing only in cell order compare equal; nothing else is normalised, and
--- nothing needs to be (see 'MergeKey').
-type SetKey = (Set PreInstalledPackage, [SourceCell])
-
-setKey :: InstanceSet -> SetKey
-setKey s = (isInstalled s, Set.toAscList (Set.fromList (isSource s)))
-
--- | The key of a clause that may take part in a merge: a dependency fact or an
--- unbuildable one.
+-- | The key of a clause that may take part in a merge: a dependency fact, a flag
+-- declaration, or an unbuildable fact.
 --
 -- A clause is judged by its /cause/ rather than by its term map, because the term
 -- map has already lost what is needed: 'fromDependency' drops the dependee entry
@@ -141,9 +130,10 @@ setKey s = (isInstalled s, Set.toAscList (Set.fromList (isSource s)))
 -- with each other rather than being excluded.
 mergeKey :: Incompatibility -> Maybe MergeKey
 mergeKey i = case incompCause i of
-    CauseDependency p _ (q, depSet) -> Just (MergeDep p q (setKey depSet))
-    CauseUnbuildable p _ why        -> Just (MergeUnbuildable p (Set.fromList (NE.toList why)))
-    _                               -> Nothing
+    CauseDependency p _ g (q, depSet) -> Just (MergeDep p q g depSet)
+    CauseDeclaresFlag p _ f           -> Just (MergeDeclares p f)
+    CauseUnbuildable p _ why          -> Just (MergeUnbuildable p (Set.fromList (NE.toList why)))
+    _                                 -> Nothing
 
 emptyStore :: Store
 emptyStore = Store{stClauses = [], stMergeable = Set.empty}
@@ -187,8 +177,10 @@ mergeInto k new = go
         | otherwise = c : go cs
 
     merged c = case (incompCause c, incompCause new) of
-        (CauseDependency p aSet (q, depSet), CauseDependency _ bSet _) ->
-            fromDependency p (aSet `union` bSet) q depSet
+        (CauseDependency p aSet g (q, depSet), CauseDependency _ bSet _ _) ->
+            fromDependency p (aSet `union` bSet) g q depSet
+        (CauseDeclaresFlag p aSet f, CauseDeclaresFlag _ bSet _) ->
+            declaresFlag p (aSet `union` bSet) f
         -- Two unit clauses banning instances of the same package: ¬(p ∈ A) and
         -- ¬(p ∈ B) is ¬(p ∈ A∪B), so the union claims nothing new. Slots touch, so
         -- for runs of adjacent unbuildable releases the union is one contiguous

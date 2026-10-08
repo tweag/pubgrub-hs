@@ -3,7 +3,7 @@
 --
 -- The rendered output of the pass is covered end to end by @PaperSpec@'s golden
 -- files. What is covered here is the pass itself, on derivation trees built by hand
--- with 'priorCause' — because the property that makes it sound is not visible in a
+-- with 'resolveOn' — because the property that makes it sound is not visible in a
 -- rendered proof: __it must preserve the node's terms exactly__. It re-labels a
 -- derivation step as the leaf it is equivalent to; it must never widen or narrow
 -- what the proof claims.
@@ -29,7 +29,8 @@ import           PubGrub.Incompatibility         (IncompatCause (..),
                                                   onlyInstalled, priorCause,
                                                   request, unbuildable)
 import           PubGrub.InstanceSet             (InstanceSet (..))
-import           PubGrub.InstanceSet.SourceCell  (SourceCell (..))
+import           PubGrub.Value                   (ValueSet (..))
+import           PubGrub.Variable                (Var (..))
 import           PubGrub.Report                  (collapseNoInstances,
                                                   reportConflict,
                                                   reportHeadline, styleProof,
@@ -62,7 +63,15 @@ cv :: Int -> Cabal.Version
 cv n = Cabal.mkVersion [n]
 
 sourceOnly :: VersionSet.VersionSet -> InstanceSet
-sourceOnly vs = InstanceSet{isInstalled = Set.empty, isSource = [SourceCell vs Map.empty]}
+sourceOnly vs = InstanceSet{isInstalled = Set.empty, isSource = vs}
+
+-- | An unconditional dependency fact, the shape every fact here has.
+dependency :: PackageName -> InstanceSet -> PackageName -> InstanceSet -> Incompatibility
+dependency p s q r = fromDependency p s Map.empty q r
+
+-- | A resolution step on a package.
+resolveOn :: Incompatibility -> Incompatibility -> PackageName -> Incompatibility
+resolveOn a b p = priorCause a b (PackageVar p)
 
 -- | @[lo, hi)@, the shape a release slot and a declared range both have.
 range :: Int -> Int -> InstanceSet
@@ -78,11 +87,11 @@ from lo = sourceOnly (VersionSet.fromVersionRange (orLaterVersion (cv lo)))
 
 -- | @a@ over @dependers@ depends on @q@ in @1..5@.
 dependsOnQ :: InstanceSet -> Incompatibility
-dependsOnQ dependers = fromDependency pkgA dependers pkgQ (range 1 5)
+dependsOnQ dependers = dependency pkgA dependers pkgQ (range 1 5)
 
 -- | The hole the solver learns when a range holds no releases.
 hole :: PackageName -> InstanceSet -> Incompatibility
-hole = noInstances
+hole p s = noInstances (PackageVar p) (PackageSet s)
 
 causeOf :: Incompatibility -> IncompatCause
 causeOf = incompCause
@@ -123,12 +132,12 @@ absorbed =
       -- nothing. The step establishes only the union, so it stops being a step.
       testCase "a hole on the depender side becomes one dependency fact" $ do
         let dep = dependsOnQ (range 1 2)
-            step = priorCause dep (hole pkgA (range 2 4)) pkgA
+            step = resolveOn dep (hole pkgA (range 2 4)) pkgA
         holesIn step @?= 1
         let collapsed = collapseNoInstances step
         holesIn collapsed @?= 0
         case causeOf collapsed of
-            CauseDependency p s (q, r) -> do
+            CauseDependency p s _ (q, r) -> do
                 (p, q) @?= (pkgA, pkgQ)
                 -- the depender is the union of the two, which is what the step
                 -- concluded; the dependee is untouched
@@ -140,15 +149,15 @@ absorbed =
       -- terms rather than union anything itself.
       testCase "a hole on the dependee side narrows the dependee range" $ do
         let dep = dependsOnQ (range 1 2)
-            step = priorCause dep (hole pkgQ (range 4 5)) pkgQ
+            step = resolveOn dep (hole pkgQ (range 4 5)) pkgQ
         case causeOf (collapseNoInstances step) of
-            CauseDependency _ _ (q, r) -> do
+            CauseDependency _ _ _ (q, r) -> do
                 q @?= pkgQ
                 assertBool "dependee should have lost 4..5" (r `equivalent` range 1 4)
             c -> assertFailure ("expected a dependency leaf, got " ++ describe c)
     , testCase "the pass reaches holes below the root" $ do
-        let inner = priorCause (dependsOnQ (range 1 2)) (hole pkgA (range 2 4)) pkgA
-            outer = priorCause inner (hole pkgQ (range 4 5)) pkgQ
+        let inner = resolveOn (dependsOnQ (range 1 2)) (hole pkgA (range 2 4)) pkgA
+            outer = resolveOn inner (hole pkgQ (range 4 5)) pkgQ
         holesIn outer @?= 2
         holesIn (collapseNoInstances outer) @?= 0
     ]
@@ -159,7 +168,7 @@ absorbed =
 
 -- | @a@ over @dependers@ depends on @q@ over @dependees@.
 aDependsOn :: InstanceSet -> InstanceSet -> Incompatibility
-aDependsOn dependers dependees = fromDependency pkgA dependers pkgQ dependees
+aDependsOn dependers dependees = dependency pkgA dependers pkgQ dependees
 
 -- | A linear chain of steps, each adding one more range of @a@ with a slightly
 -- wider requirement on @q@ — the shape a proof takes when it walks a
@@ -169,7 +178,7 @@ chainOf [] = error "chainOf: needs at least two facts"
 chainOf ((s0, r0) : rest) =
     foldl step (aDependsOn s0 r0) rest
   where
-    step acc (s, r) = priorCause acc (aDependsOn s r) pkgA
+    step acc (s, r) = resolveOn acc (aDependsOn s r) pkgA
 
 proofLines :: Incompatibility -> [String]
 proofLines = map T.unpack . T.lines . reportConflict
@@ -196,9 +205,9 @@ sameePairRun =
       -- that stood for a fact about @r@ and did not mention @r@ would be claiming
       -- something the facts do not say.
       testCase "a step about a different dependee keeps that dependee named" $ do
-        let other = fromDependency pkgA (range 3 4) (mkPackageName "r") (range 1 9)
-            base = priorCause (aDependsOn (range 1 2) (range 1 5)) (aDependsOn (range 2 3) (range 1 6)) pkgA
-            inc = priorCause base other pkgA
+        let other = dependency pkgA (range 3 4) (mkPackageName "r") (range 1 9)
+            base = resolveOn (aDependsOn (range 1 2) (range 1 5)) (aDependsOn (range 2 3) (range 1 6)) pkgA
+            inc = resolveOn base other pkgA
             proof = unlines (proofLines inc)
         assertBool ("r should still be named:\n" ++ proof) ("r " `isInfixOf` proof)
     ]
@@ -212,7 +221,7 @@ sameePairRun =
 -- rule 5.
 aRequires :: InstanceSet -> String -> InstanceSet -> Incompatibility
 aRequires dependers dependee dependees =
-    fromDependency pkgA dependers (mkPackageName dependee) dependees
+    dependency pkgA dependers (mkPackageName dependee) dependees
 
 -- | A chain of steps that all name @a@ as the depender and nothing else in
 -- common: the shape a proof takes when it walks a target's whole version
@@ -221,7 +230,7 @@ mixedChainOf :: [(InstanceSet, String, InstanceSet)] -> Incompatibility
 mixedChainOf [] = error "mixedChainOf: needs at least two facts"
 mixedChainOf ((s0, q0, r0) : rest) = foldl step (aRequires s0 q0 r0) rest
   where
-    step acc (s, q, r) = priorCause acc (aRequires s q r) pkgA
+    step acc (s, q, r) = resolveOn acc (aRequires s q r) pkgA
 
 widenedRun :: [TestTree]
 widenedRun =
@@ -267,7 +276,7 @@ widenedRun =
                     , (range 2 3, "r", range 1 6)
                     , (range 3 4, "s", range 1 7)
                     ]
-            inc = priorCause chain (request pkgA (range 1 4)) pkgA
+            inc = resolveOn chain (request pkgA (range 1 4)) pkgA
             proof = unlines (proofLines inc)
         assertBool
             ("a should span 1..4 in one sentence:\n" ++ proof)
@@ -286,9 +295,9 @@ widenedRun =
       -- fact stands for it, and the steps must stay separate.
       testCase "a second depender stops the run" $ do
         let inc =
-                priorCause
+                resolveOn
                     (mixedChainOf [(range 1 2, "q", range 1 5), (range 2 3, "r", range 1 6)])
-                    (fromDependency pkgQ (range 1 5) pkgA (range 3 4))
+                    (dependency pkgQ (range 1 5) pkgA (range 3 4))
                     pkgA
             proof = unlines (proofLines inc)
         assertBool ("q should be named as a depender:\n" ++ proof) ("q " `isInfixOf` proof)
@@ -348,69 +357,69 @@ headline =
       -- refuted a piece at a time — @[1,3)@ through @r@, @>=3@ through @s@ —
       -- and the only thing left standing at the dropping step is the depender.
       testCase "names the package refuted a piece at a time, and who depends on it" $ do
-        let aNeedsQ = fromDependency pkgA (range 1 2) pkgQ (from 1)
-            lowQ = priorCause (fromDependency pkgQ (range 1 3) pkgR (range 1 2)) (hole pkgR (range 1 2)) pkgR
-            highQ = priorCause (fromDependency pkgQ (from 3) pkgS (range 1 2)) (hole pkgS (range 1 2)) pkgS
-            narrowed = priorCause aNeedsQ lowQ pkgQ
-            dropped' = priorCause narrowed highQ pkgQ
-            inc = priorCause dropped' (request pkgA (range 1 2)) pkgA
+        let aNeedsQ = dependency pkgA (range 1 2) pkgQ (from 1)
+            lowQ = resolveOn (dependency pkgQ (range 1 3) pkgR (range 1 2)) (hole pkgR (range 1 2)) pkgR
+            highQ = resolveOn (dependency pkgQ (from 3) pkgS (range 1 2)) (hole pkgS (range 1 2)) pkgS
+            narrowed = resolveOn aNeedsQ lowQ pkgQ
+            dropped' = resolveOn narrowed highQ pkgQ
+            inc = resolveOn dropped' (request pkgA (range 1 2)) pkgA
         T.unpack (reportHeadline inc)
             @?= "No solution for a >=1 && <2.\nNo version of q suits a >=1 && <2."
     , -- With something present that is not a depender, the step's terms are
       -- what @q@ cannot be reconciled with, and the depender is named after.
       testCase "names what the package cannot be reconciled with" $ do
-        let aNeedsQ = fromDependency pkgA (range 1 2) pkgQ (from 1)
-            lowQ = priorCause (fromDependency pkgQ (range 1 3) pkgR (range 1 2)) (hole pkgR (range 1 2)) pkgR
-            highQ = priorCause (fromDependency pkgQ (from 3) pkgS (range 1 2)) (fromDependency pkgB (range 1 2) pkgS (from 2)) pkgS
-            narrowed = priorCause aNeedsQ lowQ pkgQ
-            dropped' = priorCause narrowed highQ pkgQ
-            inc = priorCause (priorCause dropped' (request pkgA (range 1 2)) pkgA) (request pkgB (range 1 2)) pkgB
+        let aNeedsQ = dependency pkgA (range 1 2) pkgQ (from 1)
+            lowQ = resolveOn (dependency pkgQ (range 1 3) pkgR (range 1 2)) (hole pkgR (range 1 2)) pkgR
+            highQ = resolveOn (dependency pkgQ (from 3) pkgS (range 1 2)) (dependency pkgB (range 1 2) pkgS (from 2)) pkgS
+            narrowed = resolveOn aNeedsQ lowQ pkgQ
+            dropped' = resolveOn narrowed highQ pkgQ
+            inc = resolveOn (resolveOn dropped' (request pkgA (range 1 2)) pkgA) (request pkgB (range 1 2)) pkgB
         T.unpack (reportHeadline inc)
             @?= "No solution for a >=1 && <2 and b >=1 && <2.\na >=1 && <2 needs q, and no version of q is compatible with a >=1 && <2 and b >=1 && <2 together."
     , -- Where the proof rests on a pinned package, the line joins who wants
       -- @q@, the window they leave for it, and the wall it fails against: the
       -- step "q >=1 && <5 is forbidden" with the pinned base among its premises.
       testCase "against a wall, names the window and the wall" $ do
-        let aNeedsQ = fromDependency pkgA (range 1 2) pkgQ (range 1 5)
-            qNeedsOldBase = fromDependency pkgQ (range 1 5) pkgBase (range 0 4)
-            qForbidden = priorCause qNeedsOldBase (onlyInstalled pkgBase [v 5] (from 0)) pkgBase
-            inc = priorCause (priorCause aNeedsQ qForbidden pkgQ) (request pkgA (range 1 2)) pkgA
+        let aNeedsQ = dependency pkgA (range 1 2) pkgQ (range 1 5)
+            qNeedsOldBase = dependency pkgQ (range 1 5) pkgBase (range 0 4)
+            qForbidden = resolveOn qNeedsOldBase (onlyInstalled pkgBase [v 5] (from 0)) pkgBase
+            inc = resolveOn (resolveOn aNeedsQ qForbidden pkgQ) (request pkgA (range 1 2)) pkgA
         T.unpack (reportHeadline inc)
             @?= "No solution for a >=1 && <2: base is pinned to 5 (installed).\na >=1 && <2 needs q >=1 && <5, and no q there builds on base 5 (installed)."
     , -- A package refuted in one step was not given up on piece by piece, so
       -- nothing is added: the proof's two lines already say it all.
       testCase "a package refuted in one step earns no second line" $ do
         let inc =
-                priorCause
-                    (priorCause (fromDependency pkgA (range 1 2) pkgQ (range 1 5)) (hole pkgQ (range 1 5)) pkgQ)
+                resolveOn
+                    (resolveOn (dependency pkgA (range 1 2) pkgQ (range 1 5)) (hole pkgQ (range 1 5)) pkgQ)
                     (request pkgA (range 1 2))
                     pkgA
         T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2."
     , testCase "names the request and the wall" $ do
-        let inc = priorCause (onlyInstalled pkgA [v 3] (from 1)) (request pkgA (range 1 2)) pkgA
+        let inc = resolveOn (onlyInstalled pkgA [v 3] (from 1)) (request pkgA (range 1 2)) pkgA
         T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2: a is pinned to 3 (installed)."
     , -- The reason is part of the fact, so it is part of the wall.
       testCase "an unbuildable wall carries its reason" $ do
-        let inc = priorCause (unbuildable pkgA (from 1) (NE.singleton (missing "libpq"))) (request pkgA (range 1 2)) pkgA
+        let inc = resolveOn (unbuildable pkgA (from 1) (NE.singleton (missing "libpq"))) (request pkgA (range 1 2)) pkgA
         T.unpack (reportHeadline inc)
             @?= "No solution for a >=1 && <2: a >=1 needs pkg-config package libpq, which is not found."
     , testCase "a pure version conflict has no wall" $ do
-        let inc = priorCause (hole pkgA (range 1 2)) (request pkgA (range 1 2)) pkgA
+        let inc = resolveOn (hole pkgA (range 1 2)) (request pkgA (range 1 2)) pkgA
         T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2."
     , -- Only the seeds the proof reaches are the request; a target the derivation
       -- never used did not fail.
       testCase "names every seed in the proof, once" $ do
         let inc =
-                priorCause
-                    (priorCause (aDependsOn (range 1 2) (range 5 9)) (request pkgA (range 1 2)) pkgA)
+                resolveOn
+                    (resolveOn (aDependsOn (range 1 2) (range 5 9)) (request pkgA (range 1 2)) pkgA)
                     (request pkgQ (range 1 5))
                     pkgQ
         T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2 and q >=1 && <5."
     , -- The closing line of such a proof: the seeds, and failure by name.
       testCase "the last line names the seeds and concludes failure" $ do
         let inc =
-                priorCause
-                    (priorCause (aDependsOn (range 1 2) (range 5 9)) (request pkgA (range 1 2)) pkgA)
+                resolveOn
+                    (resolveOn (aDependsOn (range 1 2) (range 5 9)) (request pkgA (range 1 2)) pkgA)
                     (request pkgQ (range 1 5))
                     pkgQ
         T.unpack (reportConflict inc)
@@ -494,7 +503,7 @@ untouched =
     [ -- Two empty ranges do not make a sentence, and there is no dependency to
       -- absorb into.
       testCase "two holes stay a derivation step" $ do
-        let step = priorCause (hole pkgA (range 1 2)) (hole pkgA (range 2 4)) pkgA
+        let step = resolveOn (hole pkgA (range 1 2)) (hole pkgA (range 2 4)) pkgA
         case causeOf (collapseNoInstances step) of
             CauseDerivedFrom _ _ -> pure ()
             c -> assertFailure ("expected the step to survive, got " ++ describe c)
@@ -506,7 +515,7 @@ untouched =
       -- the range.
       testCase "a wholly empty dependee range stays a derivation step" $ do
         let dep = dependsOnQ (range 1 2)
-            step = priorCause dep (hole pkgQ (range 1 5)) pkgQ
+            step = resolveOn dep (hole pkgQ (range 1 5)) pkgQ
         Map.size (incompTerms step) @?= 1
         case causeOf (collapseNoInstances step) of
             CauseDerivedFrom _ _ -> pure ()
@@ -515,7 +524,7 @@ untouched =
       -- built from source" would have to widen *that* claim, which would say the
       -- empty range cannot be built from source — a different and false statement.
       testCase "a hole is not absorbed into a boot-package fact" $ do
-        let step = priorCause (onlyInstalled pkgA [v 3] (from 1)) (hole pkgA (range 1 2)) pkgA
+        let step = resolveOn (onlyInstalled pkgA [v 3] (from 1)) (hole pkgA (range 1 2)) pkgA
         case causeOf (collapseNoInstances step) of
             CauseDerivedFrom _ _ -> pure ()
             c -> assertFailure ("expected the step to survive, got " ++ describe c)
@@ -523,8 +532,8 @@ untouched =
       -- Dropping the hole here would print a conclusion wider than the two causes
       -- named on the line justify, because the widening is what the hole paid for.
       testCase "a hole against a derived sibling stays a derivation step" $ do
-        let inner = priorCause (dependsOnQ (range 1 2)) (dependsOnQ (range 2 3)) pkgQ
-            step = priorCause inner (hole pkgA (range 3 4)) pkgA
+        let inner = resolveOn (dependsOnQ (range 1 2)) (dependsOnQ (range 2 3)) pkgQ
+            step = resolveOn inner (hole pkgA (range 3 4)) pkgA
         case causeOf (collapseNoInstances step) of
             CauseDerivedFrom _ _ -> pure ()
             c -> assertFailure ("expected the step to survive, got " ++ describe c)
@@ -540,8 +549,8 @@ soundness =
       -- what it claims. If this ever fails, the proof has started asserting something
       -- the solver did not derive.
       testCase "the terms of every collapsed node are unchanged" $ do
-        let inner = priorCause (dependsOnQ (range 1 2)) (hole pkgA (range 2 4)) pkgA
-            outer = priorCause inner (hole pkgQ (range 4 5)) pkgQ
+        let inner = resolveOn (dependsOnQ (range 1 2)) (hole pkgA (range 2 4)) pkgA
+            outer = resolveOn inner (hole pkgQ (range 4 5)) pkgQ
         mapM_ sameTerms [inner, outer]
     ]
   where
@@ -565,4 +574,5 @@ describe CauseNoInstances{}   = "CauseNoInstances"
 describe CauseOnlyInstalled{} = "CauseOnlyInstalled"
 describe CauseUnbuildable{}   = "CauseUnbuildable"
 describe CauseDependency{}    = "CauseDependency"
+describe CauseDeclaresFlag{}  = "CauseDeclaresFlag"
 describe CauseDerivedFrom{}   = "CauseDerivedFrom"

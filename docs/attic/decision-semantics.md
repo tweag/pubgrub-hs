@@ -1,10 +1,18 @@
 # Specification: condition decisions
 
+> **Retired 2026-10-08.** Condition decisions were a way to decide only the flags a
+> guard made relevant, inside a model where the flag lived in the package's value.
+> With flags as solver variables ([../flags-as-variables.md](../flags-as-variables.md))
+> a flag is decided on its own, after its owner, which is what D1–D3 were reaching
+> for without the kernel change. Nothing here was implemented. Kept for its
+> analysis of what a decision must settle. Links below point at files as they were.
+>
+
 > **Status:** specification. Nothing in §2–§9 is implemented. §11 records the code this
 > document generalises, by name rather than by line.
 >
 > **Dormant, and deliberately not withdrawn.** Flags are not
-> a search dimension ([STATUS.md](STATUS.md) §3.1): every flag is fixed
+> a search dimension ([STATUS.md](../STATUS.md) §3.1): every flag is fixed
 > at its declared default, so a release has exactly one instance and the costs this
 > document exists to remove — re-offering a version per irrelevant flag assignment,
 > searching assignments outside the constraint store, naming uninvolved flags in every

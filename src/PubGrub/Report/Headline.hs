@@ -41,10 +41,13 @@ import           PubGrub.Incompatibility        (IncompatCause (..),
 import           PubGrub.InstanceSet            (InstanceSet)
 import           PubGrub.Pretty                 (Pretty (..))
 import           PubGrub.Report.Rule
-import           PubGrub.Report.Wording         (bare, leaf, listing, named)
+import           PubGrub.Report.Wording         (bare, bareP, leaf, listing,
+                                                 namedP)
 import           PubGrub.SetOps                 (SetOps (intersect, union),
-                                                 equivalent, isSubsetOf)
+                                                 isSubsetOf)
 import           PubGrub.Term                   (Term (..), unionTerm)
+import           PubGrub.Value                  (ValueSet (..))
+import           PubGrub.Variable               (Var (..))
 import           PubGrub.Version                (Version)
 
 -- | The headline of a proof whose holes have been absorbed
@@ -60,7 +63,7 @@ headline root = T.concat ["No solution", forWhat, walls, ".", culprit]
         ws -> ": " <> T.intercalate "; " ws
     -- What was asked for, as the proof itself names it. A seed the proof
     -- never reaches is not the one that failed.
-    requests = nub [bare p r | (p, r) <- seedRanges root]
+    requests = nub [bareP p r | (p, r) <- seedRanges root]
     isWorld c = case incompCause c of
         CauseOnlyInstalled{} -> True
         CauseUnbuildable{}   -> True
@@ -131,11 +134,11 @@ wallStory root = do
         []       -> Nothing
         (r : rs) -> Just (foldr intersect r rs)
     guard (window `isSubsetOf` refuted)
-    let who = listing [named d s | (d, (s, _)) <- wanting]
+    let who = listing [namedP d s | (d, (s, _)) <- wanting]
         leaves = case wanting of
             [_] -> " needs "
             _   -> " leave only "
-    pure (who <> leaves <> bare x window <> ", and no " <> pretty x <> " there builds on " <> listing wallTexts)
+    pure (who <> leaves <> bareP x window <> ", and no " <> pretty x <> " there builds on " <> listing wallTexts)
 
 -- | A derived step of the wall shape: the package refuted, the range refuted,
 -- and the walls it was refuted against, as text. A seed is never the package:
@@ -143,7 +146,7 @@ wallStory root = do
 wallStep :: Incompatibility -> Rule Incompatibility (PackageName, InstanceSet, [Text])
 wallStep root n = do
     guard (isDerived n)
-    let ps = [(p, s) | (p, Positive s) <- Map.toList (incompTerms n)]
+    let ps = [(p, s) | (PackageVar p, Positive (PackageSet s)) <- Map.toList (incompTerms n)]
     guard (length ps == Map.size (incompTerms n))
     (x, w) <- case [(p, s) | (p, s) <- ps, p `notElem` pinnedPackages] of
         [one] -> Just one
@@ -167,7 +170,7 @@ inPlay root = grow [l | l@(d, s, _, _) <- allDeps, or [r `isSubsetOf` s | (p, r)
     grow have =
         let more = [l | l@(d, s, _, _) <- allDeps, not (l `elemBy` have), or [r `isSubsetOf` s | (_, _, q, r) <- have, q == d]]
          in if null more then have else grow (have ++ more)
-    elemBy (d, s, q, r) have = or [d == d' && q == q' && s `equivalent` s' && r `equivalent` r' | (d', s', q', r') <- have]
+    elemBy l have = l `elem` have
 
 -- --------------------------------------------------------------------------
 -- The pivot story
@@ -199,16 +202,19 @@ pivotStory root = do
 droppedStep :: Incompatibility -> Rule Incompatibility (PackageName, Incompatibility)
 droppedStep root n = do
     (a, b) <- derivedFrom n
-    p <- dropped n a b
+    v <- dropped n a b
+    p <- case v of
+        PackageVar p -> Just p
+        FlagVar{}    -> Nothing
     guard (p `notElem` seeds root)
     guard (p `notElem` walled root)
-    guard (narrowedBelow p a || narrowedBelow p b)
+    guard (narrowedBelow v a || narrowedBelow v b)
     pure (p, n)
 
 -- | The pivot of a step that dropped it: the one package both causes name and
 -- the step does not. Every other package the causes share survives the step,
 -- intersected, so at most one is missing.
-dropped :: Incompatibility -> Incompatibility -> Incompatibility -> Maybe PackageName
+dropped :: Incompatibility -> Incompatibility -> Incompatibility -> Maybe Var
 dropped n a b =
     case [p | p <- Map.keys (Map.intersectionWith const (incompTerms a) (incompTerms b)), Map.notMember p (incompTerms n)] of
         [p] -> Just p
@@ -219,12 +225,12 @@ dropped n a b =
 -- from both; a package the causes merely share is intersected instead, and a
 -- pivot whose union equals one side learnt nothing. 'equivalent' is one-sided
 -- the safe way: doubt means no candidate.
-narrowedBelow :: PackageName -> Incompatibility -> Bool
+narrowedBelow :: Var -> Incompatibility -> Bool
 narrowedBelow p n = case derivedFrom n of
     Just (a, b) -> narrowedAt p n a b || narrowedBelow p a || narrowedBelow p b
     Nothing     -> False
 
-narrowedAt :: PackageName -> Incompatibility -> Incompatibility -> Incompatibility -> Bool
+narrowedAt :: Var -> Incompatibility -> Incompatibility -> Incompatibility -> Bool
 narrowedAt p n a b
     | Just ta <- Map.lookup p (incompTerms a)
     , Just tb <- Map.lookup p (incompTerms b)
@@ -263,8 +269,8 @@ gaveUpOn p node
     -- so @d ∈ ⋃S@ does.
     leaves =
         Map.toList
-            (Map.fromListWith union [(d, s) | c <- externals node, CauseDependency d s (q, _) <- [incompCause c], q == p, d /= p])
-    dependers = map fst leaves
+            (Map.fromListWith union [(d, s) | c <- externals node, CauseDependency d s g (q, _) <- [incompCause c], Map.null g, q == p, d /= p])
+    dependers = map (PackageVar . fst) leaves
     needs = case leaves of
-        [(d, s)] -> named d s <> " needs " <> pretty p
-        ds       -> listing [named d s | (d, s) <- ds] <> (if length ds == 2 then " both need " else " all need ") <> pretty p
+        [(d, s)] -> namedP d s <> " needs " <> pretty p
+        ds       -> listing [namedP d s | (d, s) <- ds] <> (if length ds == 2 then " both need " else " all need ") <> pretty p

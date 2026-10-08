@@ -16,20 +16,21 @@ module PartialSolutionSpec (tests) where
 import qualified Data.Map.Strict                 as Map
 import           Data.Maybe                      (mapMaybe)
 import qualified Data.Set                        as Set
-import           Distribution.Types.Flag         (mkFlagAssignment)
-import           Distribution.Types.PackageName  (PackageName, mkPackageName)
+import           Distribution.Types.PackageName  (mkPackageName)
 import           Distribution.Types.Version      (mkVersion)
 import qualified PubGrub.Version                 as V
 import           Distribution.Types.VersionRange (earlierVersion,
                                                   orLaterVersion, thisVersion)
-import           PubGrub.Incompatibility         (Incompatibility, anyTerm,
-                                                  fromDependency, incompGet,
-                                                  noInstances, request)
+import           PubGrub.Incompatibility         (Incompatibility,
+                                                  anyTermFor, fromDependency,
+                                                  incompGet, noInstances,
+                                                  request)
 import           PubGrub.InstanceSet             (Instance (..),
                                                   InstanceSet (..),
                                                   singletonInstance)
-import           PubGrub.InstanceSet.SourceCell  (SourceCell (..))
 import           PubGrub.SetOps                  (equivalent)
+import           PubGrub.Value                   (Value (..), ValueSet (..))
+import           PubGrub.Variable                (Var (..))
 import           PubGrub.Solver                  (Assignment (..),
                                                   AssignmentKind (..),
                                                   PartialSolution (..),
@@ -56,17 +57,16 @@ import           Test.Tasty.QuickCheck           (Arbitrary (..), Gen, Property,
 -- | Probe packages. Every query is checked for all of them, so keep the list
 -- short — and keep it a superset of what the generators use, so that packages
 -- which were never mentioned (the @Nothing@ / @⊤@ case) are checked too.
-packages :: [PackageName]
-packages = map mkPackageName ["a", "b", "c", "d"]
+packages :: [Var]
+packages = map (PackageVar . mkPackageName) ["a", "b", "c", "d"]
 
-instances :: [Instance]
-instances = [BuildSource (V.mkVersion [k]) (mkFlagAssignment []) | k <- [1 .. 3]]
+instances :: [Value]
+instances = [PackageValue (BuildSource (V.mkVersion [k])) | k <- [1 .. 3]]
 
--- | Range-shaped instance sets, built with the intensional constructor: one
--- cell carrying a version range, as the provider mints them.
+-- | Range-shaped instance sets, as the provider mints them.
 sets :: [InstanceSet]
 sets =
-    [ InstanceSet{isInstalled = Set.empty, isSource = [SourceCell vs Map.empty]}
+    [ InstanceSet{isInstalled = Set.empty, isSource = vs}
     | vs <-
         map
             VersionSet.fromVersionRange
@@ -82,10 +82,10 @@ sets =
 -- mention (⊤, the term-absent case) is reachable too.
 incompatibilities :: [Incompatibility]
 incompatibilities =
-    [request p (singletonInstance i) | p <- packages, i <- instances]
-        ++ [noInstances p s | p <- packages, s <- sets]
-        ++ [ fromDependency p s q t
-           | (p, q) <- zip packages (drop 1 packages)
+    [request p (singletonInstance i) | PackageVar p <- packages, PackageValue i <- instances]
+        ++ [noInstances p (PackageSet s) | p <- packages, s <- sets]
+        ++ [ fromDependency p s Map.empty q t
+           | (PackageVar p, PackageVar q) <- zip packages (drop 1 packages)
            , s <- take 1 sets
            , t <- sets
            ]
@@ -135,33 +135,33 @@ data Model = Model
 emptyModel :: Model
 emptyModel = Model{mAssignments = [], mLevel = 0, mNextIndex = 0}
 
-mDecide :: PackageName -> Instance -> Model -> Model
+mDecide :: Var -> Value -> Model -> Model
 mDecide p i (Model as l n) =
     Model (as ++ [Assignment n (l + 1) p (Decided i)]) (l + 1) (n + 1)
 
-mDerive :: PackageName -> Incompatibility -> Model -> Model
+mDerive :: Var -> Incompatibility -> Model -> Model
 mDerive p cause (Model as l n) =
     Model (as ++ [Assignment n l p (Derived term cause)]) l (n + 1)
   where
-    term = maybe anyTerm negateTerm (incompGet p cause)
+    term = maybe (anyTermFor p) negateTerm (incompGet p cause)
 
 mBacktrack :: Int -> Model -> Model
 mBacktrack level (Model as _ n) = Model (filter ((<= level) . aLevel) as) level n
 
-mHistory :: Model -> PackageName -> [Assignment]
+mHistory :: Model -> Var -> [Assignment]
 mHistory m p = filter ((== p) . aPackage) (mAssignments m)
 
-mTerm :: Model -> PackageName -> Maybe (Term InstanceSet)
+mTerm :: Model -> Var -> Maybe (Term ValueSet)
 mTerm m p = case map assignmentTerm (mHistory m p) of
     []     -> Nothing
     t : ts -> Just (foldl intersectTerm t ts)
 
-mSolution :: Model -> Map.Map PackageName Instance
+mSolution :: Model -> Map.Map Var Value
 mSolution m =
     Map.fromList
         [(aPackage a, i) | a <- mAssignments m, Just i <- [decidedInstance a]]
 
-mUndecidedPositive :: Model -> [(PackageName, InstanceSet)]
+mUndecidedPositive :: Model -> [(Var, ValueSet)]
 mUndecidedPositive m =
     mapMaybe positive (filter (`notElem` decided) pkgs)
   where
@@ -194,21 +194,21 @@ step op (ps, m) = case op of
 -- Comparisons
 -- --------------------------------------------------------------------------
 
--- | Terms are compared up to set equivalence, not structurally: 'InstanceSet'
--- is a non-canonical DNF and has no lawful @Eq@.
-termEquiv :: Term InstanceSet -> Term InstanceSet -> Bool
+-- | Terms are compared up to set equivalence, which with canonical sets is
+-- equality; the semantic form says what is being compared.
+termEquiv :: Term ValueSet -> Term ValueSet -> Bool
 termEquiv (Positive x) (Positive y) = equivalent x y
 termEquiv (Negative x) (Negative y) = equivalent x y
 termEquiv _ _                       = False
 
-maybeTermEquiv :: Maybe (Term InstanceSet) -> Maybe (Term InstanceSet) -> Bool
+maybeTermEquiv :: Maybe (Term ValueSet) -> Maybe (Term ValueSet) -> Bool
 maybeTermEquiv Nothing Nothing   = True
 maybeTermEquiv (Just x) (Just y) = termEquiv x y
 maybeTermEquiv _ _               = False
 
 -- | An assignment's identity, ignoring the term (compared separately, by
 -- equivalence).
-key :: Assignment -> (Int, Int, PackageName, Maybe Instance)
+key :: Assignment -> (Int, Int, Var, Maybe Value)
 key a = (aIndex a, aLevel a, aPackage a, decidedInstance a)
 
 check :: String -> Bool -> Property

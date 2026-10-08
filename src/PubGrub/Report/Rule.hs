@@ -57,8 +57,10 @@ import           Distribution.Types.PackageName (PackageName)
 import           PubGrub.Incompatibility        (IncompatCause (..),
                                                  Incompatibility (..))
 import           PubGrub.InstanceSet            (InstanceSet)
-import           PubGrub.SetOps                 (SetOps (union), equivalent)
+import           PubGrub.SetOps                 (SetOps (union))
 import           PubGrub.Term                   (Term (..))
+import           PubGrub.Value                  (ValueSet (..))
+import           PubGrub.Variable               (Var (..))
 
 -- | A rule reads an @a@ and either fires with a @b@ or declines.
 type Rule a b = a -> Maybe b
@@ -157,17 +159,20 @@ asRequest c = case incompCause c of
 -- | A hole: a range the solver found to hold no releases.
 asHole :: Rule Incompatibility (PackageName, InstanceSet)
 asHole c = case incompCause c of
-    CauseNoInstances p s -> Just (p, s)
-    _                    -> Nothing
+    CauseNoInstances (PackageVar p) (PackageSet s) -> Just (p, s)
+    _                                              -> Nothing
 
--- | A dependency fact whose dependee term survived, as @(depender, its range,
--- dependee, its range)@. 'PubGrub.Incompatibility.fromDependency' drops that
+-- | An /unconditional/ dependency fact whose dependee term survived, as
+-- @(depender, its range, dependee, its range)@. A fact under a flag guard is not
+-- this view: every rule built on it reads the fact as "p in S depends on q in
+-- R", which a guarded fact does not say, and such facts are rendered from their
+-- cause instead. 'PubGrub.Incompatibility.fromDependency' drops the dependee
 -- term when the dependency is unsatisfiable, and then there is no \"depends on\"
 -- left to render: the clause is a bare ban on the depender and reads as one.
 asDependency :: Rule Incompatibility (PackageName, InstanceSet, PackageName, InstanceSet)
 asDependency c = case incompCause c of
-    CauseDependency p s (q, r)
-        | q /= p, Map.member q (incompTerms c) -> Just (p, s, q, r)
+    CauseDependency p s g (q, r)
+        | q /= p, Map.null g, Map.member (PackageVar q) (incompTerms c) -> Just (p, s, q, r)
     _ -> Nothing
 
 -- --------------------------------------------------------------------------
@@ -194,23 +199,19 @@ unions (s : ss) = Just (go s ss)
 -- | Two terms of the same polarity over equivalent sets. 'equivalent' is the
 -- semantic test: 'InstanceSet' is non-canonical, so two terms that mean the
 -- same thing rarely look the same.
-sameTerm :: Term InstanceSet -> Term InstanceSet -> Bool
-sameTerm (Positive x) (Positive y) = x `equivalent` y
-sameTerm (Negative x) (Negative y) = x `equivalent` y
-sameTerm _ _                       = False
+sameTerm :: Term ValueSet -> Term ValueSet -> Bool
+sameTerm = (==)
 
 -- | Two term maps naming the same packages, term for term the same.
-sameTerms :: Map PackageName (Term InstanceSet) -> Map PackageName (Term InstanceSet) -> Bool
-sameTerms a b =
-    Map.keys a == Map.keys b
-        && and [sameTerm x y | (x, y) <- zip (Map.elems a) (Map.elems b)]
+sameTerms :: Map Var (Term ValueSet) -> Map Var (Term ValueSet) -> Bool
+sameTerms = (==)
 
 -- | The facts of a run as one term map: every set unioned, polarity kept. A
 -- package that is a depender in one fact and a dependee in another has no
 -- merged term, and refusing to merge those is what keeps the union argument of
 -- the widening rule honest — it holds for a run with /one/ depender and nothing
 -- else.
-mergeFacts :: [Incompatibility] -> Maybe (Map PackageName (Term InstanceSet))
+mergeFacts :: [Incompatibility] -> Maybe (Map Var (Term ValueSet))
 mergeFacts = foldr step (Just Map.empty)
   where
     step f acc = acc >>= combineWith sameWay (incompTerms f)
@@ -221,10 +222,10 @@ mergeFacts = foldr step (Just Map.empty)
 -- | Combine two term maps package by package, keeping the terms only one of
 -- them names and failing the whole map where @f@ fails on a shared one.
 combineWith
-    :: (Term InstanceSet -> Term InstanceSet -> Maybe (Term InstanceSet))
-    -> Map PackageName (Term InstanceSet)
-    -> Map PackageName (Term InstanceSet)
-    -> Maybe (Map PackageName (Term InstanceSet))
+    :: (Term ValueSet -> Term ValueSet -> Maybe (Term ValueSet))
+    -> Map Var (Term ValueSet)
+    -> Map Var (Term ValueSet)
+    -> Maybe (Map Var (Term ValueSet))
 combineWith f a b = sequenceA (Map.unionWith comb (Just <$> a) (Just <$> b))
   where
     comb mx my = do

@@ -6,8 +6,10 @@ the depender** to be stated as one incompatibility. The spec wants
 depender's range runs from the first release that has the dependency to the first that
 does not.
 
-The emission *shape* is [`flags-semantics.md`](flags-semantics.md) §4.2. This file is
-about the mechanism and its cost. It is self-contained on purpose.
+The unit of emission is one *occurrence*: a guard paired with one dependency, stated
+over the depender's slot, with the guard's flags as terms of their own
+([DESIGN.md §3](DESIGN.md#3-a-flag-is-a-variable-and-a-decision-is-one-variables-value)).
+This file is about the mechanism and its cost. It is self-contained on purpose.
 
 > **Two mechanisms run, and neither replaces the other.**
 >
@@ -30,16 +32,14 @@ directions while each neighbour carries the *same* occurrence: the same guard, a
 same `Dependency`. It then emits the contiguous half-open range from the lowest such
 release to the first release above the highest.
 
-**Comparison is per dependency, not per group.** Comparing whole dependency sets is
-the mistake `flags-semantics.md` §4.2 calls out as "a serious mistake, not a
-conservative one". Two assignments that agree about `q` but differ on an unrelated
-dependency would fail to group, so the depender term would still name the irrelevant
-flag.
+**Comparison is per dependency, not per group.** Comparing whole dependency sets
+would refuse to group two releases that agree about `q` but differ on an unrelated
+dependency, and the fact about `q` would stay one release wide for no reason.
 
-**An identical guard is what keeps the flag axis sound.** Every release in the span
-declares the flags the guard mentions, because a release that did not could not have
-produced that guard. So the third pin state is not needed here, and flags the guard
-never mentions stay free in the cell.
+**An identical guard, over the same automatic flags, is what keeps the flag axis
+sound.** A flag variable is named by the owner, the flag and its declared default, so
+a neighbour that declares the guard's flags with a different default has different
+variables and is not spanned (`Bridge.Provider.sameFlags`).
 
 **The walk stops at an unparseable neighbour.** Spanning it would claim a fact about a
 release nobody could read.
@@ -58,16 +58,10 @@ an identical dependee term, and replaces it with the union of the depender terms
 
 Three properties make this work.
 
-**Term equality is exact for the terms it compares.** `InstanceSet` is non-canonical
-DNF, so it has no lawful `Eq`. The general problem never arises here:
-
-- a dependee term is minted by `Bridge.Provider.widen` and never rewritten. Its shape
-  is a canonical `Data.Set` of installed units plus *one* source cell with an *empty*
-  pin map and a canonical `VersionSet`. There is no DNF freedom, so structural equality
-  and semantic equality coincide.
-- non-canonicity only arises for terms that have been through the algebra, and those
-  incompatibilities carry `CauseDerivedFrom` rather than `CauseDependency`. They are
-  never merge candidates. pubgrub-rs restricts the same way, through `as_dependency`.
+**Term equality is exact.** `InstanceSet` is canonical in both halves and has a
+lawful `Eq`, so the dependee term and the guard are compared with it. Only
+`CauseDependency` and `CauseDeclaresFlag` clauses are merge candidates; derived
+clauses never are, as in pubgrub-rs's `as_dependency`.
 
 One detail copied from pubgrub-rs: *both* clauses lacking a term for the dependee
 counts as equal. That is the unsatisfiable-dependency case, where the term was dropped

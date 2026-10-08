@@ -27,7 +27,7 @@
 | Derived index | every release parsed once into `_cache/derived-index.cbor`. A read is a CBOR decode, served only for the revision in force |
 | Version ranges | full. The solver resolves real packages end to end |
 | Version order | ours, not Cabal's: trailing zeros are insignificant, so `1.2` and `1.2.0.0` are one version. Cabal's type stops at the bridge ([DESIGN.md §14](DESIGN.md#14-versions-compare-with-trailing-zeros-insignificant)) |
-| Flags | applied, not searched. Every flag takes its declared default on both sides |
+| Flags | fixed at their declared defaults by default; `--flags search` makes every automatic flag a solver variable, on both sides ([§3.1](#31-flags-are-fixed-at-their-declared-defaults-unless-asked)) |
 | Boot packages | the installed database becomes instances. A boot package offers installed units or nothing |
 | Buildability | a release whose library cannot be built here is not offered, and the proof says why: the `pkg-config` module that is missing, by name, or `buildable: False` |
 | Explanations | `PubGrub.Report` prints a numbered proof that follows the spec's own reporting algorithm |
@@ -42,7 +42,7 @@ is added one rung at a time; each rung leaves a runnable solver.
 | --- | --- |
 | 0 — index reading on real Hackage data | built |
 | 1 — version ranges | built |
-| 2 — flags and conditional dependencies | built: applied, not searched ([§3.1](#31-flags-are-fixed-at-their-declared-defaults)) |
+| 2 — flags and conditional dependencies | built, behind `--flags search` ([§3.1](#31-flags-are-fixed-at-their-declared-defaults-unless-asked)) |
 | 3 — `base` and GHC pinning, boot packages installed-only | built |
 | — buildability (not a rung) | built |
 | 4 — setup and build-tool dependencies | not started ([TODO.md §1.1](TODO.md#11-setup-and-build-tool-dependencies-rung-4)) |
@@ -188,9 +188,10 @@ a completeness column before it can render such a problem fairly.
   changes what is measured.
 - **The times are medians of three runs**, against ±25% noise on this machine. Three
   is enough for a median and not for a spread, and the report quotes none.
-- **Both solvers run with every flag pinned to its declared default.** That is a
-  restriction of the problem, not a property of either solver. See
-  [§3.1](#31-flags-are-fixed-at-their-declared-defaults).
+- **Both solvers run with every flag pinned to its declared default**, the
+  `--flags fixed` default. That is a restriction of the problem, not a property of
+  either solver, and the numbers here were taken under it. See
+  [§3.1](#31-flags-are-fixed-at-their-declared-defaults-unless-asked).
 - **cabal solves setup and build-tool dependencies and we do not.** On a package with
   a custom `Setup.hs` the two solvers answer different questions.
 
@@ -198,46 +199,38 @@ a completeness column before it can render such a problem fairly.
 
 ## 3. What is deliberately out of scope
 
-### 3.1 Flags are fixed at their declared defaults
+### 3.1 Flags are fixed at their declared defaults, unless asked
 
-Flags are parsed and applied. They are not a search dimension. A release's
-dependencies are the ones its own declared defaults select. No flag is a variable the
-solver can set.
+By default flags are parsed and applied, not searched: a release's dependencies are
+the ones its own declared defaults select. `--flags search` makes every *automatic*
+flag a solver variable, for both solvers; manual flags stay at their defaults either
+way. The model is [flags-as-variables.md](flags-as-variables.md).
 
 Both solvers are told, and each takes it differently:
 
-- **ours, at flatten time.** `Bridge.Cabal.Flatten.componentDepsAtDefaults` resolves
-  flag conditions against the release's defaults, so every guard folds to a literal.
-  No pinned cell is ever built, and a release offers exactly one instance.
-- **cabal's, at the index read.** `Bridge.Hackage.lookupGPD` marks every flag manual,
-  so cabal's `enforceManualFlags` prunes every branch whose value is neither the
-  default nor named by a user constraint. We pass no user constraints.
+- **ours, at flatten time.** `Bridge.Cabal.Flatten.componentDepsStored` resolves
+  every manual flag — every flag, under `fixed` — against the release's defaults, so
+  a guard that reaches the provider mentions automatic flags only.
+- **cabal's, at the index build.** Under `fixed`, `Bridge.Cabal.Baseline.sourcePackageIndex`
+  marks every flag manual, so cabal's `enforceManualFlags` prunes every branch whose
+  value is neither the default nor named by a user constraint. We pass no user
+  constraints. Under `search` the descriptions are left as written.
 
-Doing it at the single shared read is what keeps the comparison structural. Neither
-solver can be handed a different universe by accident.
+Both solvers see one index either way, which is what keeps the comparison structural.
 
-**Two consequences for anyone reading a number taken under this scope.** A manual flag
+**Two consequences for anyone reading a number taken under `fixed`.** A manual flag
 is not *weak*, so cabal's `deferWeakFlagChoices` stops deferring the flags that
 influence dependencies. That perturbs cabal's goal ordering, not only its flag values.
 And an automatic flag is exactly what cabal would have flipped to escape an
-unsatisfiable dependency, so some problems that resolved before will not. Both solvers
-fail together, which is what makes the comparison fair. It is still a restriction of
-the problem, and any published result must say so.
+unsatisfiable dependency, so some problems that resolve under `search` do not under
+`fixed` — two of the twenty corpus cases ([flags-as-variables.md §5](flags-as-variables.md)).
+Both solvers fail together, which is what makes the comparison fair. It is still a
+restriction of the problem, and any published result must say which model it ran.
 
-**The machinery is kept and still tested.** `componentDeps`, `expandGuard`,
-`preferDefaults`, the three-state pin and its property suite are all here.
-[flags-semantics.md](flags-semantics.md) is unchanged as a specification, and only its
-degenerate case runs. `test/InstanceSetSpec.hs` exercises the algebra and
-`test/FlagSolveSpec.hs` exercises the provider rule on hand-built releases with real
-guards. That is the only reason it is safe to leave in.
-
-**One trap is armed and not firing.** The provider tries one flag completion per
-candidate region. If a region's default completion is unusable while another
-completion of the same region is fine, the shortcut misses a valid instance. The
-symptom is a confident, wrong "no solution", which
-[flags-semantics.md](flags-semantics.md)'s O6 forbids. With one completion per release
-that case has no instances. What restoring the search owes is
-[TODO.md §3](TODO.md#3-flag-search).
+**What the search still owes.** Buildability is judged at the declared defaults, so a
+release unbuildable only under some assignment is treated as buildable; user flag
+constraints (`--flag`) do not exist; and the gate's recorded baselines are for
+`fixed` ([TODO.md §3](TODO.md#3-flag-search)).
 
 ### 3.2 One version per package name
 
@@ -276,8 +269,7 @@ specifications mostly do not overlap.
 | file | authoritative on | status |
 | --- | --- | --- |
 | [`references/pubgrub.md`](../references/pubgrub.md) | **the algorithm.** A vendored copy of pub's spec | tracked, 1233 lines. Reference — never edit. Before you cite a line, check it: several later citations land on blank lines |
-| [flags-semantics.md](flags-semantics.md) | **flags**, and the value and set language | a specification. Only its degenerate case runs |
-| [decision-semantics.md](decision-semantics.md) | what a **decision** is | a specification. Nothing in §2–§9 is implemented |
+| [flags-as-variables.md](flags-as-variables.md) | **flags**: an automatic flag as a solver variable, what the provider emits, what it was measured against | current |
 | [`../CLAUDE.md`](../CLAUDE.md) | build commands, architecture, conventions | current |
 | [DESIGN.md](DESIGN.md) | **why the solver is built this way**: one design decision per section, with the evidence behind it | current |
 | [collapsing.md](collapsing.md) | **depender collapsing**: what runs, what it costs, and the five ways to make it cheaper | current |
@@ -292,25 +284,18 @@ specifications mostly do not overlap.
 | [decision-log.md](decision-log.md) | project history | narrative. Authoritative on nothing |
 | this file | current state | a summary. The rows above decide |
 
-### How the two specifications relate
+### The two retired specifications
 
-They are layered, not competing.
-
-- **flags-semantics.md defines the language**: what a value is, what a constraint
-  mentioning a flag means, and which set operations must be exact.
-- **decision-semantics.md defines what the solver does** with that language: what a
-  decision is, and when a solve may declare success.
-
-decision-semantics.md defers to flags-semantics.md on flags and never overrules it. It
-deviates from `references/pubgrub.md` only where its §1 registers the deviation. Its
-prerequisite — per-fact guarded emission, flags-semantics.md §4.2 — is built, so it is
-no longer inert. It is dormant instead, because the cost it removes is zero while
-flags take their defaults.
-
-Both specifications name their rules with letters: **O1–O7** for obligations the code
-must guarantee, and **D1–D3** for rules about decisions. The two cited most often are
-**O6** (the provider must never report "nothing available" when something is
-available) and **D1** (when a solve may declare success).
+[attic/flags-semantics.md](attic/flags-semantics.md) and
+[attic/decision-semantics.md](attic/decision-semantics.md) specified the earlier
+model, in which a package's value carried a total flag assignment and its sets were
+a DNF of cells. They were retired on 2026-10-08 when flags became variables
+([flags-as-variables.md](flags-as-variables.md), [DESIGN.md §3](DESIGN.md#3-a-flag-is-a-variable-and-a-decision-is-one-variables-value)).
+Their obligation letters (O1–O7, D1–D3) are still cited in older text; the one that
+survives as a live requirement is O6, which now reads: the provider must never answer
+"nothing available" for a set that admits a value, and under the variable model a
+release has exactly one instance, so the completeness it asked for holds by
+construction.
 
 ### How much of the authority is in the repo
 
@@ -359,8 +344,9 @@ The gate decides and the harness measures, and neither replaces the other.
 regression in verdict agreement or proof length. `pubgrub-harness` runs them three
 times, diffs the plans, separates the phases, and writes the two reports.
 
-**One thing both deliverables must state outright.** Both solvers run with every flag
-pinned to its declared default. That makes the comparison fair, because neither side
-can flip a flag to escape. It also makes some real failures unreachable. A benchmark
-or a showcase that does not say so is misleading, however honest its numbers are.
+**One thing both deliverables must state outright.** The recorded numbers were taken
+with every flag pinned to its declared default (`--flags fixed`). That makes the
+comparison fair, because neither side can flip a flag to escape. It also makes some
+real failures unreachable. A benchmark or a showcase that does not say which flag
+model it ran is misleading, however honest its numbers are.
 

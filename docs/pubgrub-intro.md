@@ -8,8 +8,9 @@
 > readable, not to replace it.
 >
 > **What it does not cover.** Flags and the instance model, which are the parts that
-> took the most work. Those are [flags-semantics.md](flags-semantics.md) and
-> [decision-semantics.md](decision-semantics.md). For the current state of the code,
+> took the most work. Those are [attic/flags-semantics.md](attic/flags-semantics.md) and
+> [attic/decision-semantics.md](attic/decision-semantics.md), both retired on
+> 2026-10-08 in favour of [flags-as-variables.md](flags-as-variables.md). For the current state of the code,
 > see [STATUS.md](STATUS.md).
 
 This document introduces the PubGrub version-solving algorithm and how this project implements it. All examples use Cabal package names and PVP version syntax. The goal is enough precision to drive implementation, not a formal proof.
@@ -68,7 +69,7 @@ class SetOps a where
 
 ```haskell
 newtype Provider m = Provider
-  { expand :: PackageName -> InstanceSet -> m (Maybe Instance, [Incompatibility]) }
+  { expand :: Var -> ValueSet -> m (Maybe Value, [Incompatibility]) }
 ```
 
 Given a package and the accumulated constraint on it, commit to one instance and report
@@ -90,7 +91,7 @@ Four points about it:
 
 The choice and its consequences always travel together, so the solver never holds one
 without the other. The reference Rust implementation keeps them as two methods, and
-splitting ours back is an open question ([flags-semantics.md](flags-semantics.md) §8).
+splitting ours back is an open question ([attic/flags-semantics.md](attic/flags-semantics.md) §8).
 
 > **PVP vs SemVer.** Cabal uses the [Package Versioning Policy](https://pvp.haskell.org/). In PVP, `^>=1.2` means `>= 1.2 && < 1.3` — the two *leftmost* version components form the major version. This differs from SemVer's `^1.2`, which means `>= 1.2.0 && < 2.0.0`. Be careful when reading Cargo or npm documentation: their version range semantics differ.
 
@@ -484,7 +485,7 @@ The modular solver handles two features of the Cabal dependency problem that the
 
 **Boolean flags.** Cabal `.cabal` files can declare conditional dependencies gated on boolean flags (for example, `flag use-bytestring-builder`). The modular solver interleaves flag decisions with package decisions.
 
-PubGrub as specified treats dependencies as unconditional. Handling flags needs either a pre-expansion of every flag combination, or a richer value domain. This project takes the second option: a solver variable's value is an *instance*, which is a version together with a total flag assignment. [flags-semantics.md](flags-semantics.md) specifies what that costs and requires.
+PubGrub as specified treats dependencies as unconditional. Handling flags needs either a pre-expansion of every flag combination, a richer value domain, or more variables. This project took the second option for a while — a solver variable's value was a version together with a total flag assignment ([attic/flags-semantics.md](attic/flags-semantics.md)) — and now takes the third: an automatic flag is a solver variable of its own, decided after the release that declares it, and a guarded dependency is an incompatibility whose terms name the flags it holds under ([flags-as-variables.md](flags-as-variables.md)).
 
 Note that flags are **not currently searched**. Every flag takes its declared default, so a release has exactly one instance. See [STATUS.md](STATUS.md) §3.1.
 

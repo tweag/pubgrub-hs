@@ -1,10 +1,11 @@
 -- | Incompatibilities: the solver's unit of knowledge.
 module PubGrub.Incompatibility
-    ( PackageTerm (..)
+    ( VarTerm (..)
     , Incompatibility (..)
     , IncompatCause (..)
+    , Guard
     , UnbuildableReason (..)
-    , anyTerm
+    , anyTermFor
     , incompGet
     , request
     , isRequest
@@ -12,6 +13,7 @@ module PubGrub.Incompatibility
     , onlyInstalled
     , unbuildable
     , fromDependency
+    , declaresFlag
     , IncompatRelation (..)
     , incompRelation
     , priorCause
@@ -23,42 +25,49 @@ import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Distribution.Types.PackageName
 import           Distribution.Types.PkgconfigDependency (PkgconfigDependency)
-import           PubGrub.Version                 (Version)
-import           PubGrub.InstanceSet            (InstanceSet, emptyInstanceSet)
+import           PubGrub.InstanceSet            (InstanceSet,
+                                                 emptyInstanceSet)
 import           PubGrub.Relation               (Relation (..), relation)
 import           PubGrub.Term                   (Term (..), intersectTerm,
                                                  isTopTerm, unionTerm)
+import           PubGrub.Value                  (ValueSet (..), boolSet,
+                                                 bothValues, noValues)
+import           PubGrub.Variable               (Flag, Var (..))
+import           PubGrub.Version                (Version)
 
 -- --------------------------------------------------------------------------
--- PackageTerm
+-- VarTerm
 -- --------------------------------------------------------------------------
 
--- | One term about one package — an /assignment/, the unit the partial
+-- | One term about one variable — an /assignment/, the unit the partial
 -- solution records. A decision is the special case where the term is
--- @Positive@ of a singleton 'InstanceSet'.
+-- @Positive@ of a singleton.
 --
--- Contrast 'Incompatibility', which also pairs packages with terms but makes
+-- Contrast 'Incompatibility', which also pairs variables with terms but makes
 -- the opposite judgement: an assignment /asserts/ its term, an
 -- incompatibility forbids its terms from all holding at once.
-data PackageTerm = PackageTerm
-    { termPackage   :: PackageName
-    , termInstances :: Term InstanceSet
+data VarTerm = VarTerm
+    { termVar :: Var
+    , termSet :: Term ValueSet
     }
 
--- | The always-true term ⊤ over instances: "absent, or any instance".
--- The identity used when a package is missing from an incompatibility's map.
-anyTerm :: Term InstanceSet
-anyTerm = Negative emptyInstanceSet
+-- | The always-true term ⊤ for a variable: \"absent, or any value\". The
+-- identity used when a variable is missing from an incompatibility's map. It
+-- takes the variable because the empty set has a kind: a term about a flag is
+-- combined with sets of Booleans, a term about a package with sets of instances.
+anyTermFor :: Var -> Term ValueSet
+anyTermFor (PackageVar _) = Negative (PackageSet emptyInstanceSet)
+anyTermFor (FlagVar _ _)  = Negative (FlagSet noValues)
 
 -- --------------------------------------------------------------------------
 -- Incompatibility
 -- --------------------------------------------------------------------------
 
--- | An incompatibility is a set of package terms that cannot /all/ hold
+-- | An incompatibility is a set of terms that cannot /all/ hold
 -- simultaneously:
 --
 -- @
--- Incompatibility m  ≡  ¬ (⋀ over (pkg, term) in m: term holds of pkg)
+-- Incompatibility m  ≡  ¬ (⋀ over (var, term) in m: term holds of var)
 -- @
 --
 -- Equivalently (De Morgan) it is a /disjunction/ of negated terms — the only
@@ -66,7 +75,7 @@ anyTerm = Negative emptyInstanceSet
 -- the familiar dependency shape:
 --
 -- @
--- ¬(app ∈ {app-1} ∧ ¬(lib ∈ {lib-2,lib-3}))    -- "if app is instance app-1, lib is 2 or 3"
+-- ¬(app ∈ {app-1} ∧ ¬(lib ∈ {lib-2,lib-3}))    -- "if app is app-1, lib is 2 or 3"
 -- @
 --
 -- Canonical-form corollaries: an entry that is ⊤ ('PubGrub.Term.isTopTerm')
@@ -81,16 +90,21 @@ anyTerm = Negative emptyInstanceSet
 -- numbered proof ("PubGrub.Report"). The cause is provenance only: no solver
 -- decision consults it, and it never affects what an incompatibility means.
 data Incompatibility = Incompatibility
-    { incompTerms :: Map PackageName (Term InstanceSet)
+    { incompTerms :: Map Var (Term ValueSet)
     , incompCause :: IncompatCause
     }
 
+-- | The flags a dependency holds under, each with the value it needs. Empty for
+-- an unconditional dependency. Every flag is one of the depender's own.
+type Guard = Map Flag Bool
+
 data IncompatCause
     = CauseRequest PackageName InstanceSet                        -- request
-    | CauseNoInstances PackageName InstanceSet                    -- noInstances
+    | CauseNoInstances Var ValueSet                               -- noInstances
     | CauseOnlyInstalled PackageName [Version]                    -- onlyInstalled
     | CauseUnbuildable PackageName InstanceSet (NonEmpty UnbuildableReason)  -- unbuildable
-    | CauseDependency PackageName InstanceSet (PackageName, InstanceSet)  -- fromDependency
+    | CauseDependency PackageName InstanceSet Guard (PackageName, InstanceSet)  -- fromDependency
+    | CauseDeclaresFlag PackageName InstanceSet Flag              -- declaresFlag
     | CauseDerivedFrom Incompatibility Incompatibility            -- priorCause
 
 -- | Why a release's library cannot be built on this machine: one entry per
@@ -108,9 +122,9 @@ data UnbuildableReason
       -- ^ a @pkgconfig-depends@ this machine's @pkg-config@ cannot satisfy
     deriving (Eq, Ord, Show)
 
--- | The term an incompatibility states about @p@, if any.
-incompGet :: PackageName -> Incompatibility -> Maybe (Term InstanceSet)
-incompGet p (Incompatibility m _ ) = Map.lookup p m
+-- | The term an incompatibility states about @v@, if any.
+incompGet :: Var -> Incompatibility -> Maybe (Term ValueSet)
+incompGet v (Incompatibility m _) = Map.lookup v m
 
 -- Constructors ---------------------------------------------------------------
 
@@ -124,7 +138,7 @@ incompGet p (Incompatibility m _ ) = Map.lookup p m
 -- level 0 before anything is decided; "PubGrub.Solver" recognises a conflict that
 -- rests on those derivations alone as the end of the search.
 request :: PackageName -> InstanceSet -> Incompatibility
-request p s = Incompatibility (Map.singleton p (Negative s)) (CauseRequest p s)
+request p s = Incompatibility (Map.singleton (PackageVar p) (Negative (PackageSet s))) (CauseRequest p s)
 
 -- | Is this a seed?
 isRequest :: Incompatibility -> Bool
@@ -132,15 +146,14 @@ isRequest i = case incompCause i of
     CauseRequest{} -> True
     _              -> False
 
--- | The provider has nothing to offer in this instance set of the package, so
--- none of it can be selected.
-noInstances :: PackageName -> InstanceSet -> Incompatibility
-noInstances p s = Incompatibility (Map.singleton p (Positive s)) (CauseNoInstances p s)
+-- | The provider has nothing to offer in this set of values of the variable,
+-- so none of it can be selected.
+noInstances :: Var -> ValueSet -> Incompatibility
+noInstances v s = Incompatibility (Map.singleton v (Positive s)) (CauseNoInstances v s)
 
 -- | A package that may not be built from source at all: only an already-installed
--- unit of it can be selected. The term is /every source instance/ — any version,
--- no flags pinned — so the clause forbids the whole source side of the package at
--- once.
+-- unit of it can be selected. The term is /every source instance/ — any version
+-- — so the clause forbids the whole source side of the package at once.
 --
 -- This is a fact about the world rather than about a range, which is why it has its
 -- own cause. Rendered as 'CauseNoInstances' it would read \"no version for base in
@@ -158,7 +171,7 @@ noInstances p s = Incompatibility (Map.singleton p (Positive s)) (CauseNoInstanc
 -- non-reinstallable boot packages). The core only needs to know the shape.
 onlyInstalled :: PackageName -> [Version] -> InstanceSet -> Incompatibility
 onlyInstalled p installed anySource =
-    Incompatibility (Map.singleton p (Positive anySource)) (CauseOnlyInstalled p installed)
+    Incompatibility (Map.singleton (PackageVar p) (Positive (PackageSet anySource))) (CauseOnlyInstalled p installed)
 
 -- | Instances that cannot be built in this environment at all, and so must never
 -- be selected. The provider states this /instead of/ a release's dependencies:
@@ -170,14 +183,6 @@ onlyInstalled p installed anySource =
 -- range is empty, which reads as \"no version for foo in …\" when the truth is
 -- that the versions exist and cannot be built here.
 --
--- Why the instances rather than the versions: the reason may be
--- assignment-dependent (@buildable: False@ under some flag assignment, a
--- @pkgconfig-depends@ guarded by a flag), so the /set/ is what carries the claim.
--- While flags are fixed at their defaults it is one unpinned cell per release
--- slot, which is every instance of that release; with flags searched it would be
--- the region where the release's buildability condition is false, and nothing
--- here would change.
---
 -- Adjacent unbuildable versions need not be stated together: adjacent slots
 -- touch, so "PubGrub.Store" unions two of these into one contiguous clause as
 -- they arrive, exactly as it does for dependency facts — when they give the same
@@ -188,14 +193,26 @@ onlyInstalled p installed anySource =
 -- of 'onlyInstalled': the clause's term is the ban, and the reasons are what
 -- the sentence says instead of a bare \"cannot be built\".
 unbuildable :: PackageName -> InstanceSet -> NonEmpty UnbuildableReason -> Incompatibility
-unbuildable p s why = Incompatibility (Map.singleton p (Positive s)) (CauseUnbuildable p s why)
+unbuildable p s why = Incompatibility (Map.singleton (PackageVar p) (Positive (PackageSet s))) (CauseUnbuildable p s why)
 
--- | Dependency incompatibility: @package@ in @instances@ requires @dep@ in
--- @depSet@ — encoded @{ package: Positive instances, dep: Negative depSet }@.
--- The instance sets are minted by the provider (a @.cabal@ dependency
--- constrains versions; the provider widens that to instances). If @depSet@ is
--- empty the dependency is unsatisfiable and the entry would be ⊤, so it is
--- dropped, leaving a unit ban on @package@.
+-- | Dependency incompatibility: @package@ in @instances@, with each flag of
+-- @guard@ at the value it names, requires @dep@ in @depSet@:
+--
+-- @{ package: Positive instances, f₁: Positive {b₁}, …, dep: Negative depSet }@
+--
+-- The guard's terms are /positive/: they are antecedents, like the depender's
+-- own term, and a positive singleton over a flag is \"the flag is in play and has
+-- this value\". With the depender decided and the dependee out of range, unit
+-- propagation derives @Negative {b}@ for the one open flag — \"absent or the
+-- other value\" — and the owner's standing 'declaresFlag' clause narrows that to
+-- the other value. With the flags in place instead, it derives the dependee's
+-- range. An empty guard is an unconditional dependency, the common case.
+--
+-- A guard is a conjunction. A disjunctive @.cabal@ condition is several of
+-- these, one per disjunct, each of which implies the dependency on its own.
+--
+-- If @depSet@ is empty the dependency is unsatisfiable and the entry would be ⊤,
+-- so it is dropped, leaving a ban on the depender under the guard.
 --
 -- __'Map.fromListWith', not 'Map.fromList'__, and it is load-bearing when
 -- @package == dep@ — a __self-dependency__. Both entries are then about one
@@ -212,67 +229,89 @@ unbuildable p s why = Incompatibility (Map.singleton p (Positive s)) (CauseUnbui
 -- guard rather than the rule. Keeping it correct rather than rejecting it also
 -- keeps 'PubGrub.Store.mergeInto', which rebuilds through this constructor,
 -- safe by construction.
-fromDependency :: PackageName -> InstanceSet -> PackageName -> InstanceSet -> Incompatibility
-fromDependency pkgName pkgSet depName depSet =
+fromDependency :: PackageName -> InstanceSet -> Guard -> PackageName -> InstanceSet -> Incompatibility
+fromDependency pkgName pkgSet guard depName depSet =
     Incompatibility
-        (if isTopTerm (Negative depSet)
-            then Map.singleton pkgName (Positive pkgSet)
-            else
-                Map.fromListWith
-                    intersectTerm
-                    [(pkgName, Positive pkgSet), (depName, Negative depSet)])
-        (CauseDependency pkgName pkgSet (depName, depSet))
+        ( Map.fromListWith
+            intersectTerm
+            ( (PackageVar pkgName, Positive (PackageSet pkgSet))
+                : [(FlagVar pkgName f, Positive (FlagSet (boolSet b))) | (f, b) <- Map.toList guard]
+                ++ [(PackageVar depName, Negative (PackageSet depSet)) | not (isTopTerm (Negative (PackageSet depSet)))]
+            )
+        )
+        (CauseDependency pkgName pkgSet guard (depName, depSet))
+
+-- | A release declares an automatic flag: @package@ in @instances@ requires the
+-- flag to be in play, at either value:
+--
+-- @{ package: Positive instances, flag: Negative {False, True} }@
+--
+-- This is what makes a flag a goal — propagation derives a positive term for
+-- it the moment its owner is decided, and the provider is then asked to decide
+-- it, offering the declared default first. Nothing else ever derives a positive
+-- term for a flag, so a flag is only ever decided while a release declaring it
+-- is decided, and a learned clause that mentions it under a wider term about
+-- the owner is inert for the owner's other releases.
+declaresFlag :: PackageName -> InstanceSet -> Flag -> Incompatibility
+declaresFlag p s f =
+    Incompatibility
+        ( Map.fromList
+            [ (PackageVar p, Positive (PackageSet s))
+            , (FlagVar p f, Negative (FlagSet bothValues))
+            ]
+        )
+        (CauseDeclaresFlag p s f)
 
 -- Judging against the partial solution -----------------------------------------
 
 -- | How an incompatibility relates to the partial solution.
 data IncompatRelation
     = ISatisfied
-    | IContradicted PackageName
-    | -- | all terms satisfied but one (the named package): the unit case
-      IAlmostSatisfied PackageName
+    | IContradicted Var
+    | -- | all terms satisfied but one (the named variable): the unit case
+      IAlmostSatisfied Var
     | IInconclusive
     deriving (Eq, Show)
 
--- | Judge an incompatibility against the partial solution. @lookupTerm p@ is
--- the accumulated term the partial solution holds for @p@, or 'Nothing' if
--- @p@ is unmentioned (equivalent to 'anyTerm', and always inconclusive).
+-- | Judge an incompatibility against the partial solution. @lookupTerm v@ is
+-- the accumulated term the partial solution holds for @v@, or 'Nothing' if
+-- @v@ is unmentioned (equivalent to ⊤, and always inconclusive).
 incompRelation
-    :: (PackageName -> Maybe (Term InstanceSet))
+    :: (Var -> Maybe (Term ValueSet))
     -> Incompatibility
     -> IncompatRelation
 incompRelation lookupTerm (Incompatibility m _) = go ISatisfied (Map.toList m)
   where
     go acc [] = acc
-    go acc ((p, it) : rest) =
-        case lookupTerm p of
+    go acc ((v, it) : rest) =
+        case lookupTerm v of
             Just term ->
                 case relation term it of
                     Satisfied    -> go acc rest
-                    Contradicted -> IContradicted p
-                    Inconclusive -> almost p acc rest
-            Nothing -> almost p acc rest
+                    Contradicted -> IContradicted v
+                    Inconclusive -> almost v acc rest
+            Nothing -> almost v acc rest
     -- absent or inconclusive term: at most one allowed for AlmostSatisfied
-    almost p ISatisfied rest = go (IAlmostSatisfied p) rest
+    almost v ISatisfied rest = go (IAlmostSatisfied v) rest
     almost _ _ _             = IInconclusive
 
 -- | Rule of Resolution. From the current incompatibility and the cause of the
--- satisfier (sharing @package@), derive their resolvent: union the shared
--- package's terms, intersect every other package's terms, and drop the shared
+-- satisfier (sharing @pivot@), derive their resolvent: union the shared
+-- variable's terms, intersect every other variable's terms, and drop the shared
 -- entry if the union becomes ⊤.
 priorCause
     :: Incompatibility
     -- ^ current incompatibility
     -> Incompatibility
     -- ^ satisfier's cause
-    -> PackageName
-    -- ^ shared (pivot) package
+    -> Var
+    -- ^ shared (pivot) variable
     -> Incompatibility
-priorCause current@(Incompatibility cur _) satCause@(Incompatibility sat _) package =
-    Incompatibility (priorCauseTerms package cur sat) (CauseDerivedFrom current satCause)
+priorCause current@(Incompatibility cur _) satCause@(Incompatibility sat _) pivot =
+    Incompatibility (priorCauseTerms pivot cur sat) (CauseDerivedFrom current satCause)
 
 -- | The terms a 'priorCause' arrives at, without the derivation node: the pivot's
--- two terms unioned, every other package's intersected, and the pivot dropped
+-- two terms unioned, every other variable's intersected, and the pivot dropped
 -- where the union says nothing.
 --
 -- Split out so that "PubGrub.Report" can replay a step rather than describe one.
@@ -281,23 +320,23 @@ priorCause current@(Incompatibility cur _) satCause@(Incompatibility sat _) pack
 -- exactly on the terms the run arrived at — so the check is the operation itself,
 -- not a second account of it.
 priorCauseTerms
-    :: PackageName
-    -- ^ shared (pivot) package
-    -> Map PackageName (Term InstanceSet)
+    :: Var
+    -- ^ shared (pivot) variable
+    -> Map Var (Term ValueSet)
     -- ^ terms of the current incompatibility
-    -> Map PackageName (Term InstanceSet)
+    -> Map Var (Term ValueSet)
     -- ^ terms of the satisfier's cause
-    -> Map PackageName (Term InstanceSet)
-priorCauseTerms package cur sat = finalTerms
+    -> Map Var (Term ValueSet)
+priorCauseTerms pivot cur sat = finalTerms
   where
     merged =
         Map.unionWith
             intersectTerm
-            (Map.delete package cur)
-            (Map.delete package sat)
-    t1 = Map.findWithDefault anyTerm package cur
-    t2 = Map.findWithDefault anyTerm package sat
+            (Map.delete pivot cur)
+            (Map.delete pivot sat)
+    t1 = Map.findWithDefault (anyTermFor pivot) pivot cur
+    t2 = Map.findWithDefault (anyTermFor pivot) pivot sat
     unioned = unionTerm t1 t2
     finalTerms
         | isTopTerm unioned = merged
-        | otherwise = Map.insert package unioned merged
+        | otherwise = Map.insert pivot unioned merged

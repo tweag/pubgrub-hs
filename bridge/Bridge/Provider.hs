@@ -29,10 +29,12 @@ module Bridge.Provider
     , Release (..)
     ) where
 
-import           Bridge.Cabal.Flatten                         (GuardedDeps,
-                                                               componentDepsAtDefaultsStored,
+import           Bridge.Cabal.Flatten                         (FlagModel (..),
+                                                               GuardedDeps,
+                                                               componentDepsStored,
                                                                expandGuard,
-                                                               srFlags, toStored,
+                                                               srFlags, srManual,
+                                                               toStored,
                                                                unbuildableAtDefaultsStored)
 import           Bridge.Hackage.Store                         (StoreReader (..),
                                                                openStore)
@@ -54,10 +56,11 @@ import           Colog                                        (WithLog, logMsg)
 import           Data.IORef                                   (atomicModifyIORef',
                                                                newIORef,
                                                                readIORef)
-import           Data.List                                    (sortOn)
+import           Data.List                                    (find, sortOn)
 import qualified Data.List.NonEmpty                           as NE
 import qualified Data.Map.Strict                              as Map
-import           Data.Maybe                                   (fromMaybe,
+import           Data.Maybe                                   (catMaybes,
+                                                               fromMaybe,
                                                                listToMaybe)
 import           Data.Ord                                     (Down (..))
 import           Data.Set                                     (Set)
@@ -74,9 +77,12 @@ import           Distribution.Solver.Types.PkgConfigDb        (PkgConfigDb,
 import           Distribution.Simple.Program.Db               (defaultProgramDb)
 import           Distribution.System                          (Platform,
                                                                buildPlatform)
-import           Distribution.Types.Flag                      (FlagAssignment,
-                                                               FlagName,
-                                                               unFlagAssignment)
+import           Distribution.Types.Condition                 (Condition (..))
+import           PubGrub.Value                                (Value (..),
+                                                               ValueSet (..),
+                                                               memberBool)
+import           PubGrub.Variable                             (Flag (..),
+                                                               Var (..))
 import           Distribution.Types.PackageName               (PackageName)
 import qualified Distribution.Types.Version                   as Cabal
 import qualified PubGrub.Version                              as V
@@ -86,6 +92,7 @@ import           Hackage.Security.Client.Repository.Cache     (Cache)
 import           Network.HTTP.Client                          (Manager)
 import           PubGrub.Incompatibility                      (Incompatibility,
                                                                UnbuildableReason,
+                                                               declaresFlag,
                                                                fromDependency,
                                                                onlyInstalled,
                                                                request,
@@ -96,10 +103,8 @@ import           PubGrub.InstanceSet                          (HasVersion (..),
                                                                Instance (..),
                                                                InstanceSet (..),
                                                                memberInstance,
-                                                               singletonUsePreInstalled)
-import           PubGrub.InstanceSet.SourceCell               (SourceCell (..),
-                                                               assignmentFrom,
-                                                               pinnedCell)
+                                                               singletonInstance,
+                                                               sourceInstances)
 
 import           Distribution.Types.Dependency                (depPkgName,
                                                                depVerRange)
@@ -120,8 +125,8 @@ import           UnliftIO                                     (MonadUnliftIO,
 -- boot package has to admit its installed unit.
 withProvider
     :: (MonadUnliftIO m, WithLog env Text m)
-    => Cache -> Manager -> IndexState -> [(PackageName, VersionSet)] -> (Provider m -> [Incompatibility] -> m a) -> m a
-withProvider cache manager state targets act =
+    => Cache -> Manager -> IndexState -> FlagModel -> [(PackageName, VersionSet)] -> (Provider m -> [Incompatibility] -> m a) -> m a
+withProvider cache manager state model targets act =
     withWorld cache manager state $ \world -> do
         let handle = wIndex world
             platform = wPlatform world
@@ -133,7 +138,7 @@ withProvider cache manager state targets act =
         -- so its absence costs speed and never correctness.
         store <- liftIO (openStore (cacheDirOf cache))
         (readRelease, lookupStats) <-
-            liftIO (releaseReader platform cInfo (wPkgConfig world) handle store)
+            liftIO (releaseReader model platform cInfo (wPkgConfig world) handle store)
         let installedDb = mkInstalledDb installed
             provider =
                 Provider
@@ -219,8 +224,12 @@ withWorld cache manager state act =
 -- environment already resolved. So they are derived once per release and reused
 -- for every assignment tried against it.
 data Release = Release
-    { relFlags     :: [(FlagName, Bool)]
+    { relAutomatic :: [Flag]
+    -- ^ the automatic flags, each a solver variable of its own. Empty under
+    -- 'FixedFlags', where every flag is treated as manual.
     , relGuarded   :: GuardedDeps
+    -- ^ the dependencies as flag-guarded groups; a guard mentions automatic
+    -- flags only, everything else having been resolved
     , relUnbuildable :: [UnbuildableReason]
     -- ^ why this release's library cannot be built here, if it cannot: @buildable@
     -- and @pkgconfig-depends@ resolved against the machine, at the declared flag
@@ -247,13 +256,14 @@ data Release = Release
 -- Parse failures are cached too: a malformed description is a stable fact
 -- about the index.
 releaseReader
-    :: Platform
+    :: FlagModel
+    -> Platform
     -> CompilerInfo
     -> Maybe PkgConfigDb
     -> IndexHandle
     -> Maybe StoreReader
     -> IO (PackageName -> Cabal.Version -> IO (Either ParseError Release), IO (Int, Int, Int))
-releaseReader platform cInfo pkgConfig handle store = do
+releaseReader model platform cInfo pkgConfig handle store = do
     -- (entries, parsed, decoded, reused). @parsed@ counts .cabal files actually
     -- put through Cabal-syntax and @decoded@ counts entries served by the derived
     -- index. They are kept apart because a parse costs about 27 times a decode
@@ -296,8 +306,10 @@ releaseReader platform cInfo pkgConfig handle store = do
 
         fromStored sr =
             Release
-                { relFlags = srFlags sr
-                , relGuarded = componentDepsAtDefaultsStored platform cInfo sr
+                { relAutomatic = case model of
+                    FixedFlags   -> []
+                    FlagPackages -> [Flag f d | (f, d) <- srFlags sr, f `notElem` srManual sr]
+                , relGuarded = componentDepsStored model platform cInfo sr
                 , relUnbuildable = unbuildableAtDefaultsStored pkgConfig platform cInfo sr
                 }
 
@@ -328,30 +340,53 @@ data ReleaseSource m = ReleaseSource
 -- It needs a text log channel and __not__ 'MonadIO': reading a release runs in
 -- whatever @m@ the 'ReleaseSource' was built in, so an in-memory world can drive
 -- it purely, as @test\/PaperSpec.hs@ does.
+--
+-- Three kinds of question arrive:
+--
+--  * __a flag__ ('FlagVar'): answered from the variable alone. The declared
+--    default is part of the flag's identity ('PubGrub.Variable.Flag'), so it is
+--    offered first where the set admits it, and the other value otherwise.
+--    Nothing is reported: the clause that made the flag a goal, and the guarded
+--    dependencies that consult it, went out with its owner.
+--  * __a package__ ('PackageVar') whose set admits an installed unit: the newest
+--    such unit, strictly preferred, with its whole transitive closure pinned to
+--    the exact units it was built against.
+--  * __a package__ otherwise: the newest source release the set admits that can
+--    be built here, with its dependencies, each under the flags that guard it, and
+--    one 'declaresFlag' clause per automatic flag it declares.
 mkExpand
     :: forall m env
      . (WithLog env Text m)
     => InstalledDb
     -> ReleaseSource m
-    -> PackageName
-    -> InstanceSet
-    -> m (Maybe Instance, [Incompatibility])
+    -> Var
+    -> ValueSet
+    -> m (Maybe Value, [Incompatibility])
 mkExpand installedDb source = expand'
   where
-    -- An 'InstanceSet' is a symbolic description (version ranges plus flag
-    -- pins), not a container: membership is decidable but it cannot be
-    -- enumerated. So walk the package's own candidates, installed units first
-    -- and then source (version, cell) pairs newest first, and commit to the
-    -- first the offered set admits. A source candidate's @.cabal@ is parsed
-    -- only when it is tried.
-    expand' :: PackageName -> InstanceSet -> m (Maybe Instance, [Incompatibility])
-    expand' pn range = do
+    expand' :: Var -> ValueSet -> m (Maybe Value, [Incompatibility])
+    expand' (FlagVar _ (Flag _ dflt)) (FlagSet admitted) =
+        pure (listToMaybe [FlagValue b | b <- [dflt, not dflt], memberBool b admitted], [])
+    expand' (PackageVar pn) (PackageSet range) = expandPackage pn range
+    -- A set of the wrong kind for the variable: unreachable, since every term is
+    -- built for its variable. Answered as "nothing fits", which the solver turns
+    -- into a ban on the set rather than a decision on it.
+    expand' _ _ = pure (Nothing, [])
+
+    -- An 'InstanceSet' is a symbolic description (a version range plus the
+    -- installed units in it), not a container: membership is decidable but it
+    -- cannot be enumerated. So walk the package's own candidates, installed units
+    -- first and then source releases newest first, and commit to the first the
+    -- offered set admits. A source release's @.cabal@ is read only when it is
+    -- tried.
+    expandPackage :: PackageName -> InstanceSet -> m (Maybe Value, [Incompatibility])
+    expandPackage pn range = do
         let installedHere = [toPreInstalled u | u <- Map.findWithDefault [] pn (idbByName installedDb)]
             admissible = sortOn (Down . version) (filter (`Set.member` isInstalled range) installedHere)
         case listToMaybe admissible of
             Just chosen -> do
                 incs <- consequencesOfUsePreInstalled chosen
-                pure (Just (UsePreInstalled chosen), onlyInstalledFact pn ++ incs)
+                pure (Just (PackageValue (UsePreInstalled chosen)), onlyInstalledFact pn ++ incs)
             -- No admissible installed unit. For most packages that means falling
             -- through to source releases; for a non-reinstallable one it means
             -- nothing at all, because its Hackage releases cannot be built against
@@ -372,8 +407,6 @@ mkExpand installedDb source = expand'
             -- It replaces a clause rather than adding one: @banRest@ subtracts what
             -- the provider stated, and the fact covers every instance in a
             -- source-only range, so the @noInstances@ clause is dropped as empty.
-            -- ('isEmpty' is one-sided, so at worst the store carries a redundant
-            -- clause; @banRest@ says why that is the safe direction.)
             --
             -- This broadens a learned clause, and broadening is what made stating
             -- all eight boot facts up front expensive (see 'onlyInstalledFact').
@@ -384,16 +417,13 @@ mkExpand installedDb source = expand'
                 | otherwise -> firstUsable (withSlots (rsVersionsOf source pn))
 
                 where
-                    -- Releases newest first (@docs/flags-semantics.md@ §5,
-                    -- between-releases half). One @.cabal@ read per release, not
-                    -- per candidate assignment.
+                    -- Releases newest first. One @.cabal@ read per release.
                     --
                     -- @stated@ accumulates the facts learned about releases the scan
                     -- rejects on the way past, newest first. They ride out with
                     -- whichever release it settles on: incompatibilities are
                     -- context-independent, so the solver never requires them to be
-                    -- about the instance just decided
-                    -- (@docs\/flags-semantics.md@ §10).
+                    -- about the instance just decided.
                     firstUsable = scan []
 
                     -- An exhausted list answers @Nothing@, and the facts go with it.
@@ -409,9 +439,9 @@ mkExpand installedDb source = expand'
                         case result of
                             -- A .cabal that fails to parse: warn and skip. The
                             -- release then drops out of the universe the solve
-                            -- runs over (§1.5), so the warning has to be visible.
-                            -- If every release fails, the solver turns @Nothing@
-                            -- into "no instances in range".
+                            -- runs over, so the warning has to be visible. If every
+                            -- release fails, the solver turns @Nothing@ into "no
+                            -- instances in range".
                             Left err -> do
                                 logMsg
                                     ( T.pack
@@ -438,81 +468,44 @@ mkExpand installedDb source = expand'
                             -- p in range" when the versions exist and cannot be built
                             -- here. With it, the proof line gives the reason, naming the
                             -- module @pkg-config@ could not find, as cabal's own message
-                            -- does. The clause covers the release's whole slot: see
-                            -- 'unbuildableFact'.
+                            -- does.
+                            --
+                            -- The clause covers the release's whole slot. Buildability
+                            -- is judged at the declared flag defaults, so this is one
+                            -- verdict per release; a release unbuildable only under some
+                            -- assignment would need the guard carried into the clause,
+                            -- which is not done.
                             Right release | Just why <- NE.nonEmpty (relUnbuildable release) ->
                                 scan (unbuildableFact pn slot why : stated) rest
-                            Right release ->
-                                -- Each guarded dependency becomes one incompatibility
-                                -- @{pn: D, dep: not T}@. The depender @D@ is every
-                                -- instance of @v@ whose flags satisfy the guard, not
-                                -- just @inst@, so refuting it rules out every flag
-                                -- assignment that shares the dependency at once. Only
-                                -- guards that @inst@ satisfies are emitted.
-                                case listToMaybe (usableAssignments v release) of
-                                    Nothing -> scan stated rest
-                                    Just flags -> do
-                                        let inst = BuildSource v flags
-                                        incs <-
-                                            sequence
-                                                [ dependencyInc pn v slot guard assignment dep
-                                                | -- for each guarded dependency of the chosen release
-                                                  (guard, deps) <- relGuarded release
-                                                , Just assignment <- [NE.nonEmpty (expandGuard guard)]
-                                                , -- only if the guard admits the chosen instance, which is what
-                                                  -- makes the fact true of it
-                                                  inst `memberInstance` slotInstances slot assignment
-                                                , dep <- deps
-                                                , -- and not a self-dependency: an
-                                                  -- intra-package edge, not a version
-                                                  -- constraint (see the note below)
-                                                  depPkgName dep /= pn
-                                                ]
-                                        pure (Just inst, reverse stated ++ incs)
-
-                    -- The assignments this release could be built under, in
-                    -- preference order, keeping only those the offered set
-                    -- admits. Each cell admitting @v@ contributes one assignment:
-                    -- its pins, completed at the declared defaults. That finds a
-                    -- member if the cell has one, because a cell constrains each
-                    -- flag independently. It stops being enough once
-                    -- admissibility depends on the assignment (@buildable: False@
-                    -- under some flags): that is the open completeness obligation
-                    -- O6 in @docs/flags-semantics.md@.
-                    usableAssignments v release =
-                        [ flags
-                        | flags <- preferDefaults declared (map (assignmentFrom declared) cells)
-                        , memberInstance (BuildSource v flags) range
-                        ]
-                      where
-                        declared = relFlags release
-                        cells =
-                            filter (\c -> scVersionSet c `VersionSet.contains` v) (isSource range)
-
-    -- | Candidate assignments in preference order, deduplicated: fewest
-    -- deviations from the release's declared defaults first, then a deterministic
-    -- tie-break on the assignment itself
-    -- (@docs/flags-semantics.md@ §5, within-a-release half).
-    --
-    -- The cost is a property of the /completed assignment/, never of the cell it
-    -- came from. Ranking cells by pin count instead looks equivalent and is not: a
-    -- one-pin cell @f = False@ beats a two-pin @f = True, g = True@ on pin count,
-    -- yet with both flags defaulting to True the second cell is the all-default
-    -- assignment and the first is a deviation.
-    preferDefaults :: [(FlagName, Bool)] -> [FlagAssignment] -> [FlagAssignment]
-    preferDefaults declared =
-        Map.elems . Map.fromList . map key
-      where
-        key fa = ((deviations fa, unFlagAssignment fa), fa)
-        deviations fa =
-            length [() | (f, b) <- unFlagAssignment fa, lookup f declared /= Just b]
+                            Right release
+                                | not (BuildSource v `memberInstance` range) -> scan stated rest
+                                | otherwise -> do
+                                    -- The release is the instance. With it go one
+                                    -- 'declaresFlag' clause per automatic flag, which is
+                                    -- what makes each flag a goal of its own, and one
+                                    -- dependency clause per guarded occurrence and
+                                    -- disjunct of its guard, each naming the flags it
+                                    -- holds under. A self-dependency is dropped: it is an
+                                    -- intra-package edge, not a version constraint (see
+                                    -- the note at 'consequencesOfUsePreInstalled').
+                                    let flags = relAutomatic release
+                                        declared = [declaresFlag pn (slotInstances slot) f | f <- flags]
+                                    incs <-
+                                        sequence
+                                            [ guardedInc pn v slot flags guard pins dep
+                                            | (guard, deps) <- relGuarded release
+                                            , pins <- expandGuard guard
+                                            , dep <- deps
+                                            , depPkgName dep /= pn
+                                            ]
+                                    pure (Just (PackageValue (BuildSource v)), reverse stated ++ declared ++ catMaybes incs)
 
     -- | For a non-reinstallable package, the standing fact that it can __only__ be an
     -- installed unit: no source release of it may be selected, whatever the range.
     -- It is emitted alongside the decision that first commits to one of its
     -- installed units.
     --
-    -- 'expand'' never offers a source release of such a package, so without the
+    -- 'expandPackage' never offers a source release of such a package, so without the
     -- fact the solver rediscovers the rule one range at a time: every range of
     -- @base@ holding only source releases costs a decision, a provider call
     -- answering 'Nothing', and a @noInstances@ clause for that range.
@@ -528,12 +521,6 @@ mkExpand installedDb source = expand'
     -- change which satisfier conflict resolution picks. That is search-path luck
     -- rather than a principle, and worth revisiting if the @aeson@ path is ever
     -- understood.
-    --
-    -- Riding along with a decision needs no new interface: incompatibilities are
-    -- context-independent, so the solver never requires them to be about the
-    -- instance just decided (@docs\/flags-semantics.md@ §10). A package whose
-    -- /first/ query is already source-only still pays once: @conduit \'<1.3\'@ and
-    -- @lens \'<4\'@ each keep one such event.
     onlyInstalledFact pn
         | isNonReinstallable pn = [onlyInstalled pn (installedVersionsOf pn) anySourceRelease]
         | otherwise = []
@@ -547,49 +534,29 @@ mkExpand installedDb source = expand'
     -- | The fact that a release cannot be built in this environment: a unit clause
     -- banning every instance of its version __slot__ (@references\/pubgrub.md:476@).
     --
-    -- Unpinned, because with flags fixed at their declared defaults a release has
-    -- exactly one instance and buildability is a property of the release. Under a
-    -- searched flag axis a release can be unbuildable at one assignment and fine
-    -- at another, and the term would have to be the region where
-    -- 'Bridge.Cabal.Flatten.buildableCondition' is false.
-    --
     -- The slot, rather than the single version, lets 'PubGrub.Store' union a run of
     -- unbuildable releases into one clause: adjacent slots touch, so the union has
     -- no hole between the releases and reads as the range the spec asks for. The
     -- store merges only runs that give the same reasons, so a release missing
     -- @libpq@ and one declaring @buildable: False@ stay two facts, each with its own
     -- sentence.
-    unbuildableFact pn slot why = unbuildable pn (slotInstances slot (NE.singleton Map.empty)) why
+    unbuildableFact pn slot why = unbuildable pn (slotInstances slot) why
 
-    -- | Every source instance of a package: any version, no flags pinned. The
-    -- complement of \"is an installed unit\", on the source side.
-    anySourceRelease =
-        InstanceSet
-            { isInstalled = Set.empty
-            , isSource = [SourceCell VersionSet.fullVersionSet Map.empty]
-            }
+    -- | Every source instance of a package: any version. The complement of \"is an
+    -- installed unit\", on the source side.
+    anySourceRelease = sourceInstances VersionSet.fullVersionSet
 
     -- Committing to an installed unit fixes its whole transitive closure, so
     -- hand the solver every edge of that closure at once. Each edge names its
     -- own depender, so each is a genuine direct dependency: propagation chains
     -- through the closure in one fixpoint (rather than learning one hop per
     -- decision), and a report about any edge stays true.
-    consequencesOfUsePreInstalled pip =
-            pure
-                [ fromDependency
-                    fromName
-                    (singletonUsePreInstalled fromPip)
-                    toName
-                    (singletonUsePreInstalled toPip)
-                | InstalledEdge (fromName, fromPip) (toName, toPip) <-
-                    closureEdges installedDb (pipUnitId pip)
-                ]
-
-    -- Why a dependency of @p@ on @p@ itself is dropped rather than stated (the
-    -- @depPkgName dep /= pn@ filter in 'expand'' above).
     --
-    -- It is not a version constraint. @lens 1.7@ depends on @lens ==1.7@ because
-    -- one of its components (an executable) is built against its own library: an
+    -- A dependency of @p@ on @p@ itself is dropped rather than stated, here
+    -- ('Bridge.Installed.closureEdges' emits no edge for one) and on the source
+    -- side (the @depPkgName dep /= pn@ filter above). It is not a version
+    -- constraint. @lens 1.7@ depends on @lens ==1.7@ because one of its
+    -- components (an executable) is built against its own library: an
     -- /intra-package/ edge, resolved inside the package. Stated as a fact it says
     -- something much stronger and false: that every instance of @lens@ must be
     -- @1.7@.
@@ -606,20 +573,30 @@ mkExpand installedDb source = expand'
     -- this rule: a library dependency inherits its depender\'s qualifier
     -- (@qualifyDeps@\'s @inheritedQ@), so an executable\'s dependency on its own
     -- library is a self-dependency under any qualifier scheme.
-    --
-    -- The installed side drops it too: 'Bridge.Installed.closureEdges' emits no
-    -- edge for a self-dependency.
-    -- | One guarded dependency occurrence of the decided release, as an
-    -- incompatibility whose depender starts from that release\'s __slot__, the
-    -- half-open range up to the next release in the index ('withSlots').
+    consequencesOfUsePreInstalled pip =
+            pure
+                [ fromDependency
+                    fromName
+                    (singletonInstance (UsePreInstalled fromPip))
+                    Map.empty
+                    toName
+                    (singletonInstance (UsePreInstalled toPip))
+                | InstalledEdge (fromName, fromPip) (toName, toPip) <-
+                    closureEdges installedDb (pipUnitId pip)
+                ]
+
+    -- | One guarded dependency occurrence of the decided release, under one
+    -- disjunct of its guard, as an incompatibility whose depender starts from that
+    -- release\'s __slot__, the half-open range up to the next release in the index
+    -- ('withSlots').
     --
     -- @references\/pubgrub.md:456@ asks for identical dependencies of adjacent
     -- versions of the depender to be /one/ incompatibility. Two mechanisms deliver
     -- that, and both run. 'spanningOccurrence', below, reads the decided release\'s
     -- neighbours and widens the slot while the occurrence is identical.
     -- 'PubGrub.Store' unions the depender terms of two facts that agree about the
-    -- dependee as they arrive; adjacent slots /touch/, so the union is one interval
-    -- with no hole.
+    -- dependee and the guard as they arrive; adjacent slots /touch/, so the union is
+    -- one interval with no hole.
     --
     -- The walk is affordable only because a neighbour read is a CBOR decode rather
     -- than a parse (2.007 ms to 0.073 ms). As a parse it took @pandoc@, a problem
@@ -627,15 +604,33 @@ mkExpand installedDb source = expand'
     -- residency; as a decode it costs that problem 22.6 MB to 33.1 MB of residency
     -- and under 1% of allocation. @docs\/collapsing.md@ has the trade, and five ways
     -- to walk less if read-dominated problems ever matter more.
-    dependencyInc pn v slot guard assignment dep = do
-        dependers <- spanningOccurrence pn v slot guard dep
-        pure
-            ( fromDependency
-                pn
-                (slotInstances dependers assignment)
-                (depPkgName dep)
-                (widen (depPkgName dep) (VersionSet.fromVersionRange (depVerRange dep)))
-            )
+    --
+    -- The guard\'s pins name flags; each is looked up among the release\'s automatic
+    -- flags to recover its declaration. A pin naming a flag the release does not
+    -- declare as automatic cannot occur, since manual and undeclared flags are
+    -- resolved before a guard reaches here. If one did, the disjunct is dropped
+    -- rather than stated with a widened antecedent, which would be unsound.
+    guardedInc pn v slot flags guard pins dep =
+        case traverse asFlag (Map.toList pins) of
+            Nothing -> pure Nothing
+            Just g -> do
+                dependers <- spanningOccurrenceWith (sameFlags guard flags) pn v slot guard dep
+                pure . Just $
+                    fromDependency
+                        pn
+                        (slotInstances dependers)
+                        (Map.fromList g)
+                        (depPkgName dep)
+                        (widen (depPkgName dep) (VersionSet.fromVersionRange (depVerRange dep)))
+      where
+        asFlag (name, b) = (\f -> (f, b)) <$> find ((== name) . flagName) flags
+
+    -- A neighbour spanned under a guard must declare the same automatic flags with
+    -- the same defaults: the flag variables are named by both, so a neighbour that
+    -- changed a default has different variables and must not be spanned. An
+    -- unconditional occurrence does not care.
+    sameFlags (Lit True) _ _ = True
+    sameFlags _ flags neighbour = relAutomatic neighbour == flags
 
     -- | The range to name a release's neighbours by: walk out from @v@ in both
     -- directions while each neighbour carries this same occurrence, then take the
@@ -646,7 +641,7 @@ mkExpand installedDb source = expand'
     --
     -- \"The same occurrence\" is compared per /dependency/, not per group: a neighbour
     -- qualifies when any of its guarded groups has this guard and contains this exact
-    -- 'Dependency', whatever else it declares (@docs\/flags-semantics.md@ §4.2).
+    -- 'Dependency', whatever else it declares.
     -- Comparing whole groups would refuse to merge two releases that differ in
     -- something unrelated.
     --
@@ -660,7 +655,7 @@ mkExpand installedDb source = expand'
     -- (@docs\/collapsing.md@). It is affordable because a read is now a 0.073 ms
     -- decode from 'Bridge.Hackage.Store', which is keyed by __package__, so a walk
     -- stays inside one slice that is already in hand.
-    spanningOccurrence pn v slot guard dep = do
+    spanningOccurrenceWith admit pn v slot guard dep = do
         lo <- walk Set.lookupLT v
         hi <- walk Set.lookupGT v
         pure $ case (lo, hi) of
@@ -679,7 +674,7 @@ mkExpand installedDb source = expand'
                     -- An unparseable neighbour stops the walk rather than being
                     -- stepped over: we cannot claim a fact about a release we cannot
                     -- read, and widening across it would do exactly that.
-                    Right neighbour | carries neighbour -> walk step w
+                    Right neighbour | carries neighbour, admit neighbour -> walk step w
                     _ -> pure from
 
         carries neighbour =
@@ -708,7 +703,7 @@ widenTo installedDb d vs =
                 | UsePreInstalled pip <- installedInstancesOf installedDb d
                 , contains vs (version pip)
                 ]
-        , isSource = [SourceCell vs Map.empty]
+        , isSource = vs
         }
 
 -- | Pair each release with its __version slot__: the half-open range from it up
@@ -758,13 +753,6 @@ slotRange releases lo hi
 -- has\". 'slotInstances' is the only way back out.
 newtype Slot = Slot VersionSet
 
--- | Every instance of a slot that satisfies one of the given pin sets — the depender
--- term of a dependency fact, and the term an unbuildable fact bans.
---
--- The pin sets are __not assignments__: they need not mention every declared flag,
--- and how much the result denotes follows from how much they pin (see 'pinnedCell').
--- 'NonEmpty' because an empty union is the empty set, and a guard that no assignment
--- satisfies is dropped before it gets here.
 -- | A slot spanning a __run of adjacent releases__ that all carry the same
 -- dependency occurrence, which is the collapsed form @references\/pubgrub.md:456@
 -- asks for.
@@ -777,9 +765,7 @@ newtype Slot = Slot VersionSet
 spanSlot :: VersionSet -> Slot
 spanSlot = Slot
 
-slotInstances :: Slot -> NE.NonEmpty (Map.Map FlagName Bool) -> InstanceSet
-slotInstances (Slot vs) pinSets =
-    InstanceSet
-        { isInstalled = Set.empty
-        , isSource = [pinnedCell vs pins | pins <- NE.toList pinSets]
-        }
+-- | Every source instance of a slot: the depender term of a dependency fact, and
+-- the term an unbuildable fact bans.
+slotInstances :: Slot -> InstanceSet
+slotInstances (Slot vs) = sourceInstances vs

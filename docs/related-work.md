@@ -5,6 +5,11 @@
 > Every entry is anchored to a file or section here, so it is usable as a pointer
 > rather than a bibliography.
 >
+> **Dated.** Written when a package's value carried its flags and `InstanceSet` was a
+> DNF of cells. That model was retired on 2026-10-08 ([flags-as-variables.md](flags-as-variables.md));
+> the entries below that speak to `FlagPin`, `pruneCells` and one-sided emptiness
+> now describe [attic/flags-semantics.md](attic/flags-semantics.md), not the code.
+>
 > **What this is not.** Not authoritative on anything. It cites no rule and creates
 > none. In particular it **does not reopen the ASP decision** — see
 > [`attic/README.md`](attic/README.md) §1, which still stands: there is no ASP
@@ -38,10 +43,10 @@ Ranked by how much each one bears on live work:
 | depender collapsing, and what it cost | [`collapsing.md`](collapsing.md) | §1.3 |
 | narrowing the universe before/while solving | `Bridge.Hackage`, and `collapsing.md`'s read cost | §1.2, §2.4 |
 | no lawful `Eq`, order-dependent pruning | `InstanceSet`, `SetOps.equivalent` | §2.1 |
-| one-sided `isEmpty`, `Relation.Inconclusive` | [`flags-semantics.md`](flags-semantics.md) O3/O4 | §2.2 |
-| three-state `FlagPin` | [`flags-semantics.md`](flags-semantics.md) §2. Specified and tested, but no pin is created while flags take their defaults | §2.3 (analogy only) |
+| one-sided `isEmpty`, `Relation.Inconclusive` | [`attic/flags-semantics.md`](attic/flags-semantics.md) O3/O4 (retired: the set is exact since 2026-10-08) | §2.2 |
+| three-state `FlagPin` | [`attic/flags-semantics.md`](attic/flags-semantics.md) §2. Retired with the cell DNF on 2026-10-08 | §2.3 (analogy only) |
 | correctness of conflict resolution | stated in prose only; nothing in the repo proves it | §3 |
-| over-specific learned clauses (the old "2^k") | [`flags-semantics.md`](flags-semantics.md) §4.2 — **landed** | §8 |
+| over-specific learned clauses (the old "2^k") | one fact per guarded occurrence, [`collapsing.md`](collapsing.md) — **landed** | §8 |
 | prefer-installed / prefer-defaults / prefer-newest | `Bridge.Provider.preferDefaults`, rung 3. It never runs on real input while flags take their defaults | §5 |
 | explaining failure | `PubGrub.Report` | §6 |
 
@@ -147,7 +152,7 @@ hold"). Two differences worth noticing:
   canonical by construction.
 
 The `:` connective is also the closest thing in their language to a flag guard, which
-makes this the nearest published relative of [`flags-semantics.md`](flags-semantics.md)
+makes this the nearest published relative of [`attic/flags-semantics.md`](attic/flags-semantics.md)
 §4.2's guarded emission. It is not the same thing: their guard ranges over versions,
 §4.2's over flag conditions.
 
@@ -207,7 +212,7 @@ and, on §5:
 > are better suited for on-the-fly grounding along an instantiation sequence."
 
 Give up precision to be able to work incrementally, then prove the approximation is
-*safe*. That is [`flags-semantics.md`](flags-semantics.md) O3/O4 — never claim
+*safe*. That was [`attic/flags-semantics.md`](attic/flags-semantics.md) O3/O4 — never claim
 emptiness wrongly, may fail to notice it — as a general principle, with the proof
 obligations named. Useful for any formal statement about `isEmpty`: the obligation
 is one-directional (`isEmpty ⟹ denotation empty`), which is what the test suite
@@ -218,7 +223,7 @@ already asserts and what the theory says is the correct shape.
 To keep the operators monotone they "resort to concepts borrowed from ID-logic", and
 work with two- and four-valued contextual interpretations. We needed three `FlagPin`
 states because a two-valued pin is not closed under negation
-([`flags-semantics.md`](flags-semantics.md) §2).
+([`attic/flags-semantics.md`](attic/flags-semantics.md) §2).
 
 **Flagged as an analogy.** The mechanisms are not the same and nothing here transfers
 formally. It is worth one line only because "we tried two values and the operator
@@ -246,7 +251,7 @@ Algorithm 1 closure is an ad-hoc instance of exactly this bottom-up evaluation.
 Grounding here is still *full* grounding with on-the-fly simplification. What the
 paper gives you is the vocabulary for saying which instances you are entitled to skip
 and what you must prove about it — which is the argument
-[`flags-semantics.md`](flags-semantics.md) §4.2 makes informally when it says use the
+[`attic/flags-semantics.md`](attic/flags-semantics.md) §4.2 made informally when it says use the
 guard `C` verbatim rather than enumerating assignments. It does not hand you the
 algorithm. See §8.
 
@@ -388,7 +393,7 @@ answer is to write more ASP, and we want Haskell emitting cabal-syntax sentences
 ## 8. The defect we called "2^k", and what it is actually called
 
 Worth a section because the internal name was misleading, and because it is now
-**fixed** — [`flags-semantics.md`](flags-semantics.md) §4.2's flag axis landed
+**fixed** — [`flags-semantics.md`](attic/flags-semantics.md) §4.2's flag axis landed
 2026-08-05 and `Bridge.Provider.dependencyInc` pins only the flags the guard mentions.
 
 **The defect was not really exponential arithmetic. It was an over-specific learned
@@ -398,7 +403,7 @@ the solver rediscovered the same conflict once per irrelevant assignment. Stated
 way it is a standard CDCL failure mode — a learned constraint that does not cover the
 symmetric branches — and "2^k" was only the worst-case count it produced. The residue
 after §4.2 is bounded by the number of **guard regions**, not by 2^k over every
-declared flag ([`decision-semantics.md`](decision-semantics.md) §0 lists the three
+declared flag ([`decision-semantics.md`](attic/decision-semantics.md) §0 lists the three
 costs that survive, all from a decision still being a point instance).
 
 **The Potassco paper on exactly this mechanism** — generalising a learned constraint
@@ -408,7 +413,7 @@ past the ground instance that produced it, so it is not relearned per variant:
 Answer Set Solving with Generalized Learned Constraints.** ICLP'16 Technical
 Communications, OASIcs 52, 9:1–9:15. *(unread — title and venue verified, contents
 not.)* Worth opening before anyone designs the next generalisation step, i.e. before
-[`decision-semantics.md`](decision-semantics.md) is implemented, since condition
+[`decision-semantics.md`](attic/decision-semantics.md) is implemented, since condition
 decisions are the same move applied to decisions rather than clauses.
 
 **What still has no literature here**, as far as this sweep found:

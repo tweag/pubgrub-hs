@@ -23,7 +23,6 @@ library
         PubGrub.Incompatibility
         PubGrub.Index.PreInstalled
         PubGrub.InstanceSet
-        PubGrub.InstanceSet.SourceCell
         PubGrub.Pretty
         PubGrub.Provider
         PubGrub.Relation
@@ -36,6 +35,8 @@ library
         PubGrub.Solver
         PubGrub.Store
         PubGrub.Term
+        PubGrub.Value
+        PubGrub.Variable
         PubGrub.Version
         PubGrub.VersionSet
     build-depends:

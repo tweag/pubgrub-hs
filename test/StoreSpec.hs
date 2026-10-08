@@ -31,8 +31,9 @@ import           PubGrub.Incompatibility        (IncompatCause (..),
                                                  fromDependency, noInstances,
                                                  unbuildable)
 import           PubGrub.InstanceSet            (InstanceSet (..))
-import           PubGrub.InstanceSet.SourceCell (FlagPin (..), SourceCell (..))
-import           PubGrub.SetOps                 (equivalent)
+import           PubGrub.SetOps                 (SetOps (isEmpty), equivalent)
+import           PubGrub.Value                  (ValueSet (..))
+import           PubGrub.Variable               (Flag (..), Var (..))
 import           PubGrub.Term                   (Term (..))
 import           PubGrub.Store                  (emptyStore, insertClause,
                                                  insertClauses, storeClauses)
@@ -76,11 +77,26 @@ range lo hi =
         )
 
 sourceOnly :: VersionSet.VersionSet -> InstanceSet
-sourceOnly vs = InstanceSet{isInstalled = Set.empty, isSource = [SourceCell vs Map.empty]}
+sourceOnly vs = InstanceSet{isInstalled = Set.empty, isSource = vs}
+
+-- | An unconditional dependency fact.
+dependency :: PackageName -> InstanceSet -> PackageName -> InstanceSet -> Incompatibility
+dependency p s q r = fromDependency p s Map.empty q r
+
+-- | A ban on a range of a package, as the solver mints one.
+ban :: PackageName -> InstanceSet -> Incompatibility
+ban p s = noInstances (PackageVar p) (PackageSet s)
 
 -- | @a@ over some range depends on @q@ in @1..3@.
 dependsOnQ :: InstanceSet -> Incompatibility
-dependsOnQ dependers = fromDependency pkgA dependers pkgQ (range 1 3)
+dependsOnQ dependers = dependency pkgA dependers pkgQ (range 1 3)
+
+-- | The same, under a flag guard.
+dependsOnQWhen :: Flag -> Bool -> InstanceSet -> Incompatibility
+dependsOnQWhen f b dependers = fromDependency pkgA dependers (Map.singleton f b) pkgQ (range 1 3)
+
+fast :: Flag
+fast = Flag (mkFlagName "fast") True
 
 -- | Why a release cannot be built: a @pkg-config@ module this machine lacks.
 missing :: String -> UnbuildableReason
@@ -142,13 +158,13 @@ mergeTests =
       testCase "the merged fact is a dependency leaf, not a derived node" $ do
         let store = insertClauses [dependsOnQ (slot 1 2), dependsOnQ (slot 2 3)] emptyStore
         case map incompCause (storeClauses store) of
-            [CauseDependency p _ (q, _)] -> (p, q) @?= (pkgA, pkgQ)
+            [CauseDependency p _ _ (q, _)] -> (p, q) @?= (pkgA, pkgQ)
             _ -> assertFailure "expected a single CauseDependency leaf"
     , -- Clause position dominates propagation cost, so a merge must not move the
       -- clause it merges into: the store here is [newest … oldest] and the merged
       -- fact stays where the fact it absorbed was.
       testCase "merging leaves the scan order alone" $ do
-        let other = noInstances pkgB (sourceOnly (halfOpen 1 2))
+        let other = ban pkgB (sourceOnly (halfOpen 1 2))
             store =
                 insertClause (dependsOnQ (slot 2 3)) $
                     insertClause other $
@@ -156,7 +172,7 @@ mergeTests =
         case storeClauses store of
             [b, a] -> do
                 case incompCause b of
-                    CauseNoInstances p _ -> p @?= pkgB
+                    CauseNoInstances p _ -> p @?= PackageVar pkgB
                     _ -> assertFailure "the newest clause should still be the ban"
                 dependerOf a `shouldDenote` sourceOnly (halfOpen 1 3)
             cs -> assertFailure ("expected two clauses, got " ++ show (length cs))
@@ -171,8 +187,8 @@ separateTests =
     [ testCase "different dependees stay separate" $ do
         let store =
                 insertClauses
-                    [ fromDependency pkgA (slot 1 2) pkgQ (range 1 3)
-                    , fromDependency pkgA (slot 2 3) pkgB (range 1 3)
+                    [ dependency pkgA (slot 1 2) pkgQ (range 1 3)
+                    , dependency pkgA (slot 2 3) pkgB (range 1 3)
                     ]
                     emptyStore
         length (storeClauses store) @?= 2
@@ -183,16 +199,16 @@ separateTests =
       testCase "the same dependee at a different range stays separate" $ do
         let store =
                 insertClauses
-                    [ fromDependency pkgA (slot 1 2) pkgQ (range 1 3)
-                    , fromDependency pkgA (slot 2 3) pkgQ (range 1 4)
+                    [ dependency pkgA (slot 1 2) pkgQ (range 1 3)
+                    , dependency pkgA (slot 2 3) pkgQ (range 1 4)
                     ]
                     emptyStore
         length (storeClauses store) @?= 2
     , testCase "different dependers stay separate" $ do
         let store =
                 insertClauses
-                    [ fromDependency pkgA (slot 1 2) pkgQ (range 1 3)
-                    , fromDependency pkgB (slot 1 2) pkgQ (range 1 3)
+                    [ dependency pkgA (slot 1 2) pkgQ (range 1 3)
+                    , dependency pkgB (slot 1 2) pkgQ (range 1 3)
                     ]
                     emptyStore
         length (storeClauses store) @?= 2
@@ -206,29 +222,47 @@ separateTests =
       testCase "bans are never merged, even for the same package" $ do
         let store =
                 insertClauses
-                    [ noInstances pkgA (sourceOnly (halfOpen 1 2))
-                    , noInstances pkgA (sourceOnly (halfOpen 1 2))
+                    [ ban pkgA (sourceOnly (halfOpen 1 2))
+                    , ban pkgA (sourceOnly (halfOpen 1 2))
                     ]
                     emptyStore
         length (storeClauses store) @?= 2
-    , -- A pinned depender cell and an unpinned one over the same range are
-      -- A pinned depender cell and an unpinned one over the same range are
-      -- different facts about different instances, but only the *dependee* side
-      -- is keyed on, so they merge into one fact whose depender is the union.
-      -- That is sound, and it is the intended behaviour.
-      testCase "dependers differing in flags merge, because only the dependee is keyed" $ do
-        let pinned =
-                InstanceSet
-                    { isInstalled = Set.empty
-                    , isSource = [SourceCell (halfOpen 1 2) (Map.singleton (mkFlagName "fast") (PinnedTo True))]
-                    }
-            store =
+    , -- The guard is part of the fact. A dependency that holds only with @fast@ on
+      -- and one that holds unconditionally say different things about the same
+      -- releases, and merging them would drop the condition from one of them.
+      testCase "a guarded fact and an unguarded one stay separate" $ do
+        let store =
                 insertClauses
-                    [ fromDependency pkgA pinned pkgQ (range 1 3)
-                    , fromDependency pkgA (slot 2 3) pkgQ (range 1 3)
+                    [ dependsOnQWhen fast True (slot 1 2)
+                    , dependsOnQ (slot 2 3)
                     ]
                     emptyStore
-        length (storeClauses store) @?= 1
+        length (storeClauses store) @?= 2
+    , testCase "the same guard at the opposite value stays separate" $ do
+        let store =
+                insertClauses
+                    [ dependsOnQWhen fast True (slot 1 2)
+                    , dependsOnQWhen fast False (slot 2 3)
+                    ]
+                    emptyStore
+        length (storeClauses store) @?= 2
+    , -- Two adjacent releases carrying the same guarded occurrence are one fact,
+      -- exactly as unguarded ones are: the guard's terms are identical on both
+      -- sides, so the union argument holds term for term.
+      testCase "two adjacent slots under the same guard become one fact" $ do
+        let store =
+                insertClauses
+                    [ dependsOnQWhen fast True (slot 1 2)
+                    , dependsOnQWhen fast True (slot 2 3)
+                    ]
+                    emptyStore
+        case storeClauses store of
+            [only] -> do
+                dependerOf only `shouldDenote` sourceOnly (halfOpen 1 3)
+                case incompCause only of
+                    CauseDependency _ _ g _ -> g @?= Map.singleton fast True
+                    _ -> assertFailure "expected a dependency leaf"
+            cs -> assertFailure ("expected one clause, got " ++ show (length cs))
     ]
 
 -- --------------------------------------------------------------------------
@@ -321,11 +355,11 @@ halfOpen lo hi = VersionSet.halfOpenVersionSet (v lo) (Just (v hi))
 -- | The depender's instance set, read off the clause's cause.
 dependerOf :: Incompatibility -> InstanceSet
 dependerOf i = case incompCause i of
-    CauseDependency _ s _ -> s
-    _                     -> error "not a dependency clause"
+    CauseDependency _ s _ _ -> s
+    _                       -> error "not a dependency clause"
 
--- | Semantic equality: 'InstanceSet' has no lawful 'Eq', so compare by mutual
--- containment ('PubGrub.SetOps.equivalent').
+-- | Semantic equality, by mutual containment; with a canonical 'InstanceSet'
+-- this is '==', and keeping the semantic form says what is being asked.
 shouldDenote :: InstanceSet -> InstanceSet -> IO ()
 shouldDenote actual expected =
     assertBool "instance sets denote different things" (equivalent actual expected)
@@ -334,7 +368,7 @@ shouldDenote actual expected =
 -- exists in no index, to check the merged range has no hole where the two slots
 -- met.
 denotesVersion :: InstanceSet -> Version -> Bool
-denotesVersion s ver = any (\vs -> VersionSet.contains vs ver) (map scVersionSet (isSource s))
+denotesVersion s ver = VersionSet.contains (isSource s) ver
 
 -- --------------------------------------------------------------------------
 -- Self-dependencies
@@ -353,9 +387,9 @@ selfDepTests =
     [ testCase "the depender term survives, and the clause stays positive" $ do
         -- p in [1,2) requires p in [2,3): impossible for every instance of p in
         -- [1,2), and says nothing whatever about the rest of p.
-        case Map.toList (incompTerms (fromDependency pkgA (slot 1 2) pkgA (range 2 3))) of
-            [(p, Positive s)] -> do
-                p @?= pkgA
+        case Map.toList (incompTerms (dependency pkgA (slot 1 2) pkgA (range 2 3))) of
+            [(p, Positive (PackageSet s))] -> do
+                p @?= PackageVar pkgA
                 s `shouldDenote` sourceOnly (halfOpen 1 2)
             ts ->
                 assertFailure
@@ -370,7 +404,7 @@ selfDepTests =
       -- ones the depender term named. On @lens@ that forces @lens ==1.7@ across a
       -- whole solve.
       testCase "it is never a bare requirement on the whole package" $ do
-        let inc = fromDependency pkgA (slot 1 2) pkgA (range 2 3)
+        let inc = dependency pkgA (slot 1 2) pkgA (range 2 3)
         assertBool
             "a self-dependency must not become a Negative unit clause"
             (not (any negativeTerm (Map.elems (incompTerms inc))))
@@ -378,11 +412,9 @@ selfDepTests =
         -- The ordinary case: a component built against its own library, at its own
         -- version. The difference is empty, so the clause is unsatisfiable — it
         -- forbids nothing and constrains nothing.
-        case Map.toList (incompTerms (fromDependency pkgA (slot 1 2) pkgA (range 1 3))) of
+        case Map.toList (incompTerms (dependency pkgA (slot 1 2) pkgA (range 1 3))) of
             [(_, Positive s)] ->
-                assertBool
-                    "expected an empty positive term"
-                    (s `equivalent` InstanceSet{isInstalled = Set.empty, isSource = []})
+                assertBool "expected an empty positive term" (isEmpty s)
             ts -> assertFailure ("expected one term, got " ++ show (length ts))
     ]
   where

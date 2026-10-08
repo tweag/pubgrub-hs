@@ -43,13 +43,14 @@ import qualified Data.Text                      as T
 import qualified Data.Text.Encoding             as T
 import           Distribution.Types.Condition   (Condition (Lit))
 import           Distribution.Types.Dependency  (mainLibSet, mkDependency)
-import           Distribution.Types.Flag        (mkFlagAssignment)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Version           (VersionRange,
                                                  earlierVersion,
                                                  intersectVersionRanges,
                                                  mkVersion, orLaterVersion)
 import           PubGrub.InstanceSet            (Instance (BuildSource))
+import           PubGrub.Value                  (Value (..))
+import           PubGrub.Variable               (Var (..))
 import           PubGrub.Version                (Version)
 import qualified PubGrub.Version                as V
 import           PubGrub.Provider               (Provider (Provider))
@@ -99,7 +100,7 @@ lt v = earlierVersion (mkVersion v)
 -- stay in the world and the provider looks them up — exactly as the real bridge
 -- reads them from the index.
 releaseInstance :: Release -> Instance
-releaseInstance r = BuildSource (V.mkVersion (relVersion r)) (mkFlagAssignment [])
+releaseInstance r = BuildSource (V.mkVersion (relVersion r))
 
 -- | The instance for a specific package version in the world (for asserting
 -- expected solutions). Errors only if the test names a version not in @world@.
@@ -145,7 +146,7 @@ mkProvider world = Provider (BP.mkExpand (mkInstalledDb []) source)
         Map.fromList
             [ ( (p, V.mkVersion (relVersion r))
               , BP.Release
-                    { BP.relFlags = []
+                    { BP.relAutomatic = []
                     , BP.relGuarded =
                         [(Lit True, [mkDependency d vr mainLibSet | (d, vr) <- relDeps r])]
                     , BP.relUnbuildable = []
@@ -196,14 +197,14 @@ instance HasLog LogEnv SolverMsg PureM where
 runSolve
     :: Provider PureM
     -> [Incompatibility]
-    -> Either SolveError (Map PackageName Instance)
+    -> Either SolveError (Map Var Value)
 runSolve provider seeds =
     runIdentity (runReaderT (unPureM (solve provider seeds)) (LogEnv mempty mempty))
 
 -- | Run the solver against a world, seeded with the paper's top-level dependencies.
 -- A failure is kept as its rendered report rather than 'show'n, because the
 -- derived 'Show' would expand the whole derivation DAG as a tree.
-solveWorld :: [(PackageName, VersionRange)] -> World -> Either Text (Map PackageName Instance)
+solveWorld :: [(PackageName, VersionRange)] -> World -> Either Text (Map Var Value)
 solveWorld rootDeps world =
     either (Left . renderFailure) Right $
         runSolve (mkProvider world) [request p (BP.widenTo (mkInstalledDb []) p (VersionSet.fromVersionRange vr)) | (p, vr) <- rootDeps]
@@ -234,9 +235,9 @@ proofGolden name file rootDeps world =
     utf8 = BL.fromStrict . T.encodeUtf8
 
 -- | The expected solution as a map, from (name, version) pairs.
-expected :: World -> [(String, [Int])] -> Map PackageName Instance
+expected :: World -> [(String, [Int])] -> Map Var Value
 expected world entries =
-    Map.fromList [(mkPackageName n, instanceOf world (mkPackageName n) v) | (n, v) <- entries]
+    Map.fromList [(PackageVar (mkPackageName n), PackageValue (instanceOf world (mkPackageName n) v)) | (n, v) <- entries]
 
 pkg :: String -> PackageName
 pkg = mkPackageName

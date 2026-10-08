@@ -16,11 +16,15 @@
 -- unbuildable release \"needs pkg-config package libpq\" rather than \"cannot be
 -- built because …\".
 module PubGrub.Report.Wording
-    ( -- * A package with its range
+    ( -- * A variable with its set
       named
     , bare
+      -- * A package with its range
+    , namedP
+    , bareP
       -- * Facts
     , dep
+    , guardedDep
     , requires
     , leaf
       -- * Conclusions
@@ -40,39 +44,71 @@ import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Pretty            (prettyShow)
 import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Incompatibility        (IncompatCause (..),
+import           PubGrub.Incompatibility        (Guard, IncompatCause (..),
                                                  Incompatibility (..),
                                                  UnbuildableReason (..))
 import           PubGrub.InstanceSet            (InstanceSet, isEveryVersion)
 import           PubGrub.Pretty                 (Pretty (..))
-import           PubGrub.Report.Rule            (asDependency)
 import           PubGrub.Term                   (Term (..))
+import           PubGrub.Value                  (BoolSet (..), ValueSet (..))
+import           PubGrub.Variable               (Flag, Var (..))
 
--- | A package with the set it is constrained to, as words. A set admitting every
--- version reads \"every version of foo\" where the sentence calls for it — as
--- the subject of \"depends on\" or \"requires\" — and the bare name where it
--- does not: \"foo is forbidden\", not \"every version of foo is forbidden\", and
--- \"depends on bar\" rather than \"depends on every version of bar\".
-named :: PackageName -> InstanceSet -> Text
-named p s
+-- | A variable with the set it is constrained to, as words. A package set
+-- admitting every version reads \"every version of foo\" where the sentence
+-- calls for it — as the subject of \"depends on\" or \"requires\" — and the bare
+-- name where it does not: \"foo is forbidden\", not \"every version of foo is
+-- forbidden\", and \"depends on bar\" rather than \"depends on every version of
+-- bar\". A flag reads as its owner with a sign: @foo +fast@, @foo -fast@, or
+-- @foo flag fast@ when both values are in.
+named :: Var -> ValueSet -> Text
+named (PackageVar p) (PackageSet s) = namedP p s
+named v s                           = bare v s
+
+bare :: Var -> ValueSet -> Text
+bare (PackageVar p) (PackageSet s) = bareP p s
+bare (FlagVar p f) (FlagSet bs)    = pretty p <> " " <> flagText f bs
+bare v s                           = pretty v <> " " <> pretty s
+
+namedP :: PackageName -> InstanceSet -> Text
+namedP p s
     | isEveryVersion s = "every version of " <> pretty p
     | otherwise        = pretty p <> " " <> pretty s
 
-bare :: PackageName -> InstanceSet -> Text
-bare p s
+bareP :: PackageName -> InstanceSet -> Text
+bareP p s
     | isEveryVersion s = pretty p
     | otherwise        = pretty p <> " " <> pretty s
+
+-- | What a set of a flag's values says: @+fast@, @-fast@, or the flag by name
+-- when both values are in.
+flagText :: Flag -> BoolSet -> Text
+flagText f bs = case (allowsTrue bs, allowsFalse bs) of
+    (True, False)  -> "+" <> pretty f
+    (False, True)  -> "-" <> pretty f
+    (True, True)   -> "flag " <> pretty f
+    (False, False) -> "no value of " <> pretty f
+
+-- | A guard as its flags with their required values: @+fast -tidy@.
+guardText :: Guard -> Text
+guardText g = T.unwords [(if b then "+" else "-") <> pretty f | (f, b) <- Map.toList g]
 
 -- | A dependency fact. The depender's range is kept so distinct derivation
 -- steps stay distinct (\"assoc ==1.0.2 depends on …\" vs \"assoc >=1.0.2 && <1.1
 -- depends on …\").
 dep :: PackageName -> InstanceSet -> PackageName -> InstanceSet -> Text
-dep p1 r1 p2 r2 = named p1 r1 <> " depends on " <> bare p2 r2
+dep p1 r1 p2 r2 = namedP p1 r1 <> " depends on " <> bareP p2 r2
+
+-- | A dependency fact under a flag guard: \"foo >=1 && <2 with +fast depends on
+-- bar\". With an empty guard it is 'dep'.
+guardedDep :: PackageName -> InstanceSet -> Guard -> PackageName -> InstanceSet -> Text
+guardedDep p1 r1 g p2 r2
+    | Map.null g = dep p1 r1 p2 r2
+    | otherwise = namedP p1 r1 <> " with " <> guardText g <> " depends on " <> bareP p2 r2
 
 -- | A /derived/ two-term incompatibility. It says \"requires\", and keeps
 -- \"depends on\" for the external fact: a dependency is declared in a @.cabal@
 -- file, a requirement is what the solver worked out from one.
-requires :: PackageName -> InstanceSet -> PackageName -> InstanceSet -> Text
+requires :: Var -> ValueSet -> Var -> ValueSet -> Text
 requires p1 r1 p2 r2 = named p1 r1 <> " requires " <> bare p2 r2
 
 -- | An external fact at a leaf of the proof. Rendered from the cause rather
@@ -84,15 +120,19 @@ requires p1 r1 p2 r2 = named p1 r1 <> " requires " <> bare p2 r2
 -- cannot be built here says so, and why, rather than looking absent.
 leaf :: Incompatibility -> Text
 leaf c = case incompCause c of
-    CauseRequest p s -> bare p s <> " is requested"
-    CauseNoInstances p s -> "no version for " <> pretty p <> " in " <> pretty s
+    CauseRequest p s -> bareP p s <> " is requested"
+    CauseNoInstances v s -> "no version for " <> pretty v <> " in " <> pretty s
     CauseOnlyInstalled p [] -> pretty p <> " is not installed and cannot be built from source"
     CauseOnlyInstalled p vs ->
         pretty p <> " is pinned to " <> T.intercalate " or " (map pretty vs) <> " (installed)"
-    CauseUnbuildable p s why -> named p s <> " " <> reasons why
-    _ -> case asDependency c of
-        Just (p, s, q, r) -> dep p s q r
-        Nothing           -> summary c
+    CauseUnbuildable p s why -> namedP p s <> " " <> reasons why
+    CauseDeclaresFlag p s f -> namedP p s <> " declares flag " <> pretty f
+    -- 'PubGrub.Incompatibility.fromDependency' drops the dependee's term when the
+    -- dependency is unsatisfiable, and then there is no \"depends on\" left: the
+    -- clause is a bare ban on the depender and reads as one.
+    CauseDependency p s g (q, r)
+        | Map.member (PackageVar q) (incompTerms c) -> guardedDep p s g q r
+    _ -> summary c
 
 -- | Why a release cannot be built, as the predicate of its sentence: \"needs
 -- pkg-config package libpq, which is not found\", and \"is marked buildable:
@@ -114,14 +154,14 @@ reasons why =
         ms  -> ["needs pkg-config packages " <> listing ms <> ", which are not found"]
 
 -- | What an incompatibility says. A negative term is never written as
--- \"not …\": it says the package /must/ be in that set, and the sentence carries
+-- \"not …\": it says the variable /must/ be in that set, and the sentence carries
 -- the negation — \"foo requires bar >=2\", \"if foo and bar then baz <3\",
 -- \"either foo <2 or bar <3\". The empty incompatibility reads \"version solving
 -- failed\".
 summary :: Incompatibility -> Text
 summary c = summaryTerms (incompTerms c)
 
-summaryTerms :: Map PackageName (Term InstanceSet) -> Text
+summaryTerms :: Map Var (Term ValueSet) -> Text
 summaryTerms ts = case Map.toList ts of
     [] -> "version solving failed"
     [(p, Positive r)] -> bare p r <> " is forbidden"

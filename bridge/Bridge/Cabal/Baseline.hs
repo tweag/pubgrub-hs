@@ -38,7 +38,9 @@ module Bridge.Cabal.Baseline
     , preferences
     ) where
 
-import           Bridge.Hackage                   (IndexHandle (..), ParseError)
+import           Bridge.Cabal.Flatten             (FlagModel (..))
+import           Bridge.Hackage                   (IndexHandle (..), ParseError,
+                                                   markFlagsManual)
 import           Data.Word                        (Word32)
 import           Bridge.Installed                 (nonReinstallablePackages)
 import qualified Data.Map.Strict                  as Map
@@ -148,8 +150,8 @@ outcome = foldProgress (\_ (n, r) -> (n + 1, r)) (\e -> (0, Left e)) (\a -> (0, 
 -- (@docs\/flags-semantics.md@ §1.5); a @SourcePackage@ has no way to say "not
 -- really here", so in that one case the two solvers disagree about the
 -- universe, loudly rather than silently.
-sourcePackageIndex :: IndexHandle -> IO (PackageIndex (SourcePackage ()))
-sourcePackageIndex handle =
+sourcePackageIndex :: FlagModel -> IndexHandle -> IO (PackageIndex (SourcePackage ()))
+sourcePackageIndex model handle =
     SolverIndex.fromList
         <$> sequence
             [ sourcePackage pn v blk
@@ -177,8 +179,15 @@ sourcePackageIndex handle =
     -- handle it came from; capturing the handle is capturing the map.
     readBlock = ihReadBlock handle
 
+    -- Under 'FixedFlags' every flag is marked manual, so that cabal's
+    -- @enforceManualFlags@ pins it to its default exactly as our provider does
+    -- (@Bridge.Hackage.markFlagsManual@). Under 'FlagPackages' both solvers search
+    -- the automatic flags, so the description is left as written.
     parsed :: PackageName -> Version -> Word32 -> IO GenericPackageDescription
-    parsed pn v blk = either (fail . unparseable pn v) pure =<< readBlock pn v blk
+    parsed pn v blk = either (fail . unparseable pn v) (pure . adjust) =<< readBlock pn v blk
+    adjust = case model of
+        FixedFlags   -> markFlagsManual
+        FlagPackages -> id
 
     unparseable :: PackageName -> Version -> ParseError -> String
     unparseable pn v err =

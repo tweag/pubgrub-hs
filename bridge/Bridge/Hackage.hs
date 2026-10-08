@@ -357,24 +357,33 @@ solverVersionsFrom vs blks =
 -- By block and not by name: hackage-security's own lookup by name answers with
 -- the last revision in the whole tar, which is the right one only at the head.
 --
--- Every flag is marked __manual__ on the way out, so that flags are applied but
--- fixed at their declared defaults rather than searched. This is the half of
--- that rule which reaches /cabal's/ solver; our own goes through
--- 'Bridge.Cabal.Flatten.componentDepsAtDefaults'.
+-- Each flag keeps its declared manual bit, which the derived index needs; under
+-- fixed flags the baseline marks every flag manual itself ('markFlagsManual').
+lookupGPD
+    :: Sec.IndexCallbacks
+    -> PackageName
+    -> Version
+    -> Word32
+    -> IO (Either ParseError GenericPackageDescription)
+lookupGPD cbs pn v blk =
+    parseGPD . Sec.indexEntryContent
+        <$> Sec.indexLookupFileEntry cbs (Sec.DirectoryEntry blk) (Sec.IndexPkgCabal (PackageIdentifier pn v))
+
+-- | Every flag marked __manual__, for the baseline under fixed flags. The read
+-- itself ('lookupGPD') keeps each flag's declared manual bit, because the derived
+-- index needs it; the baseline applies this when the driver's flag model asks for
+-- it (@Bridge.Cabal.Baseline.sourcePackageIndex@).
 --
 -- It works because @Distribution.Solver.Modular.IndexConversion.flagInfo@ reads
 -- 'flagManual' off each 'PackageFlag', and
 -- @Distribution.Solver.Modular.Preference.enforceManualFlags@ (wired in at
 -- cabal's @Solver.hs@\'s validation phase) then prunes every branch of a manual
 -- flag whose value is neither the default nor named by a user flag constraint. We
--- pass no flag constraints, so each flag is pinned to 'flagDefault', the same
--- value 'Bridge.Cabal.Flatten.defaultFlags' gives our provider.
+-- pass no flag constraints, so each flag is pinned to 'flagDefault', the value
+-- our own provider fixes it at.
 --
--- Doing it here, at the single shared read, keeps the comparison structural:
--- both solvers are fed one index, so neither can be handed a different universe
--- by accident.
---
--- Two consequences to keep in mind when reading benchmark numbers:
+-- Two consequences to keep in mind when reading benchmark numbers under fixed
+-- flags:
 --
 -- * cabal's @weak m = not (strfl || m)@ makes a manual flag /non-weak/, so
 --   @deferWeakFlagChoices@ stops deferring the flags that influence dependencies
@@ -385,18 +394,9 @@ solverVersionsFrom vs blks =
 --   do not resolve here. Both solvers fail together, which keeps the comparison
 --   fair, but it is a restriction of the problem, and any published explanation
 --   has to say so.
-lookupGPD
-    :: Sec.IndexCallbacks
-    -> PackageName
-    -> Version
-    -> Word32
-    -> IO (Either ParseError GenericPackageDescription)
-lookupGPD cbs pn v blk =
-    fmap allFlagsManual . parseGPD . Sec.indexEntryContent
-        <$> Sec.indexLookupFileEntry cbs (Sec.DirectoryEntry blk) (Sec.IndexPkgCabal (PackageIdentifier pn v))
-  where
-    allFlagsManual gpd =
-        gpd{genPackageFlags = [f{flagManual = True} | f <- genPackageFlags gpd]}
+markFlagsManual :: GenericPackageDescription -> GenericPackageDescription
+markFlagsManual gpd =
+    gpd{genPackageFlags = [f{flagManual = True} | f <- genPackageFlags gpd]}
 
 -- --------------------------------------------------------------------------
 -- The version cache

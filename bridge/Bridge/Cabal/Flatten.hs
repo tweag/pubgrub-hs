@@ -106,6 +106,8 @@ module Bridge.Cabal.Flatten (
     LibNode (..),
     toStored,
     componentDepsAtDefaultsStored,
+    FlagModel (..),
+    componentDepsStored,
     unbuildableAtDefaultsStored,
 ) where
 
@@ -547,6 +549,9 @@ data LibNode = LibNode
 -- 'condTreeConstraints' and never the node data.
 data StoredRelease = StoredRelease
     { srFlags   :: [(FlagName, Bool)]
+    , srManual  :: [FlagName]
+    -- ^ the flags declared @manual: True@, which stay at their defaults even
+    -- when automatic flags are searched
     , srLibrary :: Maybe (CondTree ConfVar [Dependency] LibNode)
     , srOthers  :: [CondTree ConfVar [Dependency] ()]
     }
@@ -557,6 +562,7 @@ toStored :: GenericPackageDescription -> StoredRelease
 toStored gpd =
     StoredRelease
         { srFlags = [(flagName f, flagDefault f) | f <- genPackageFlags gpd]
+        , srManual = [flagName f | f <- genPackageFlags gpd, flagManual f]
         , srLibrary = fmap (fmap libNode) (condLibrary gpd)
         , srOthers =
             [void (gateOnBuildable libBuildInfo t) | (_, t) <- condSubLibraries gpd]
@@ -577,6 +583,35 @@ componentDepsAtDefaultsStored platform compiler sr =
   where
     defaults = Map.fromList (srFlags sr)
     env = envConfVar (\f -> Right (Map.findWithDefault False f defaults)) platform compiler
+
+-- | Which flags the solver searches.
+data FlagModel
+    = FixedFlags
+      -- ^ every flag at its declared default ('componentDepsAtDefaultsStored')
+    | FlagPackages
+      -- ^ each automatic flag is a solver variable of its own
+      -- ('PubGrub.Variable.FlagVar'); manual flags stay at their defaults
+    deriving (Eq, Show)
+
+-- | The guarded dependencies of a stored release under a flag model. Under
+-- 'FlagPackages' the manual flags are resolved to their defaults and only
+-- automatic flags remain symbolic in the guards.
+componentDepsStored :: FlagModel -> Platform -> CompilerInfo -> StoredRelease -> GuardedDeps
+componentDepsStored FixedFlags platform compiler sr = componentDepsAtDefaultsStored platform compiler sr
+componentDepsStored FlagPackages platform compiler sr =
+    concat $
+        [flattenComponent env t | t <- maybeToList (srLibrary sr)]
+            ++ [flattenComponent env t | t <- srOthers sr]
+  where
+    defaults = Map.fromList (srFlags sr)
+    -- A manual flag is its default; a flag the release does not declare is
+    -- 'False', the convention 'evalCond' documents; only an automatic flag stays
+    -- symbolic, so a guard reaching the provider names automatic flags only.
+    flagEnv f
+        | f `elem` srManual sr = Right (Map.findWithDefault False f defaults)
+        | Map.member f defaults = Left f
+        | otherwise = Right False
+    env = envConfVar flagEnv platform compiler
 
 -- | 'unbuildableAtDefaults' over a stored release.
 unbuildableAtDefaultsStored

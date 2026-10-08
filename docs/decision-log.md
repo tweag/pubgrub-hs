@@ -7,7 +7,7 @@
 > right the first time.
 >
 > **What this is not.** Not a specification and not authoritative on anything. If
-> this file and [flags-semantics.md](flags-semantics.md) or
+> this file and [flags-semantics.md](attic/flags-semantics.md) or
 > [references/pubgrub.md](../references/pubgrub.md) disagree, they win. This is
 > narrative only.
 >
@@ -314,7 +314,7 @@ from Era 3.
 
 ### Condition decisions specified — UNBUILT AT THE TIME, specified and not implemented
 
-*Aug 4.* [decision-semantics.md](decision-semantics.md), 26 KB, and the most
+*Aug 4.* [decision-semantics.md](attic/decision-semantics.md), 26 KB, and the most
 consequential unimplemented thing in the project. **This is the revisit that
 `flags-semantics.md` §1.4 explicitly reserved** ("if the retry cost ever dominates,
 this is the decision to revisit").
@@ -397,7 +397,7 @@ cabal's is told at the shared index read (`lookupGPD` marks every flag manual, s
 
 Three things worth having on the record, because each is easy to misread later:
 
-- **It is a scope cut, not a retraction.** [flags-semantics.md](flags-semantics.md) is
+- **It is a scope cut, not a retraction.** [flags-semantics.md](attic/flags-semantics.md) is
   unchanged as a specification and its property suite still exercises the full
   three-state algebra. Only the degenerate case runs. The machinery stays, and the
   `flags` jj bookmark marks where the axis stands.
@@ -1337,6 +1337,37 @@ haddock on each rule is its name), a shape type for the three spec cases (it wou
 have made the "not reached" fallback disappear at the cost of a second set of
 constructors), and putting the branching case in the table (it mints the line
 number, which is the walker's business, not a way of saying a step).
+
+---
+
+## Era 20 — Flags as variables (Oct 8)
+
+### A flag is a solver variable keyed by its declaration, and the cell DNF is gone — HELD
+
+Four references were read fresh — the Spack ASP paper, the clingo tutorial, "ASP
+Made Easy" and "Package Managers à la Carte" — and the last two said the same thing
+from two sides: a guarded dependency is a conjunction of literals over variables, and
+a feature or flag is a variable of its own that reduces to the core calculus by a
+synthetic package. A spike did exactly that, as a string-named package `p:+f` with
+versions 0 and 1 and no change to the solver, and the gate agreed with cabal 26/26
+under both flag models with two corpus cases becoming solvable for both solvers.
+
+The removal then made the spike's encoding a type: `Var = PackageVar PackageName |
+FlagVar PackageName Flag` with `Flag = Flag { flagName, flagDefault }`, `Value` and
+`ValueSet` as sums, one `CauseDependency` carrying a `Guard`, and `declaresFlag` as
+the clause that makes a flag a goal. `InstanceSet` lost its cell list and became an
+installed set plus one `VersionSet`, lawful `Eq` and exact emptiness included;
+`SourceCell`, `FlagPin`, `pruneCells`, `usableAssignments` and the three-state
+property suite were deleted; `flags-semantics.md` and `decision-semantics.md` went
+to the attic. The fixed-flags gate came out identical to the recorded baseline. The
+default rides in the flag's identity so the provider offers it first statelessly,
+which also means a release that changed a default declares a different flag.
+
+What was rejected: keeping the flag in the value with a single `{range, flags}`
+cell under an invariant (worked out in a note since deleted: sound, but a second
+term algebra for one lossy resolution step), a `(package, flag)` identity
+without the default (the provider would need state or an index read to prefer it),
+and the string-encoded package name itself (a spike convenience, not a type).
 
 ---
 

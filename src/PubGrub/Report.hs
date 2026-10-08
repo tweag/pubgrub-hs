@@ -69,12 +69,14 @@ import           PubGrub.Incompatibility        (IncompatCause (..),
                                                  priorCauseTerms)
 import           PubGrub.InstanceSet            (InstanceSet)
 import           PubGrub.Report.Headline        (headline)
+import           PubGrub.Value                  (ValueSet (..), packageSet)
+import           PubGrub.Variable               (Var (..))
 import           PubGrub.Report.Layout          (rangeToken, styleProof,
                                                  wrapProof)
 import           PubGrub.Report.Rule
-import           PubGrub.Report.Wording         (bare, dep, leaf, named,
+import           PubGrub.Report.Wording         (bareP, dep, leaf, namedP,
                                                  summary, summaryTerms)
-import           PubGrub.SetOps                 (equivalent, isSubsetOf)
+import           PubGrub.SetOps                 (isSubsetOf)
 import           PubGrub.Term                   (Term (..))
 
 -- | Render an incompatibility and its derivation as a human-readable proof.
@@ -255,9 +257,9 @@ samePairRun step = do
 -- to a claim it does not support.
 concludesRequires :: PackageName -> PackageName -> Rule Incompatibility InstanceSet
 concludesRequires p q step = case Map.toList (incompTerms step) of
-    [(a, Positive s), (b, Negative _)] | (a, b) == (p, q) -> Just s
-    [(b, Negative _), (a, Positive s)] | (a, b) == (p, q) -> Just s
-    _                                                     -> Nothing
+    [(a, Positive (PackageSet s)), (b, Negative _)] | (a, b) == (PackageVar p, PackageVar q) -> Just s
+    [(b, Negative _), (a, Positive (PackageSet s))] | (a, b) == (PackageVar p, PackageVar q) -> Just s
+    _ -> Nothing
 
 -- | __The widening run.__ The same-pair run needs every fact in the run to name
 -- the same dependee, and needs the step's conclusion to be the two-term \"p
@@ -298,7 +300,7 @@ wideningRun step = do
     let (rest, more) = runWhile (dependencyOf p) d
     guard (length more >= 2)
     merged <- mergeFacts (e : more)
-    guard (sameTerms (priorCauseTerms p (incompTerms rest) merged) (incompTerms step))
+    guard (sameTerms (priorCauseTerms (PackageVar p) (incompTerms rest) merged) (incompTerms step))
     pure (Line (runFact p merged) (Just rest))
   where
     -- A fact with this depender, whatever it depends on.
@@ -313,8 +315,9 @@ wideningRun step = do
     -- and "requires" rather than "depends on" because a union of declared
     -- dependencies is something the solver worked out, not something an author
     -- wrote (references/pubgrub.md:1005).
-    runFact p terms = case Map.toList (Map.delete p terms) of
-        [(q, Negative r)] | Just (Positive sp) <- Map.lookup p terms -> dep p sp q r
+    runFact p terms = case Map.toList (Map.delete (PackageVar p) terms) of
+        [(PackageVar q, Negative (PackageSet r))]
+            | Just (Positive (PackageSet sp)) <- Map.lookup (PackageVar p) terms -> dep p sp q r
         _ -> summaryTerms terms
 
 -- --------------------------------------------------------------------------
@@ -326,10 +329,7 @@ wideningRun step = do
 clause :: Incompatibility -> Incompatibility -> Text
 clause c1 c2 = fromMaybe (leaf c1 <> " and " <> leaf c2) (firstOf clauseRules (c1, c2))
 
--- | Each fusion is guarded so that it cannot say more than the facts do, and
--- 'PubGrub.SetOps.isEmpty' on an 'InstanceSet' is one-sided — it may fail to
--- notice that a set is empty — so a guard can only fail to fuse where it could
--- have, never fuse where it should not.
+-- | Each fusion is guarded so that it cannot say more than the facts do.
 clauseRules :: [Rule (Incompatibility, Incompatibility) Text]
 clauseRules =
     [ twoRequests
@@ -346,7 +346,7 @@ twoRequests :: Rule (Incompatibility, Incompatibility) Text
 twoRequests (c1, c2) = do
     (p1, r1) <- asRequest c1
     (p2, r2) <- asRequest c2
-    pure (bare p1 r1 <> " and " <> bare p2 r2 <> " are requested")
+    pure (bareP p1 r1 <> " and " <> bareP p2 r2 <> " are requested")
 
 -- | A dependency whose dependee range the solver has already found empty.
 -- Naming both facts would print that range /twice/ in one sentence, and on a
@@ -369,7 +369,7 @@ requestsNothing (fact, hole) = do
     (p', empty) <- asHole hole
     (p, r) <- asRequest fact
     guard (p == p' && r `isSubsetOf` empty)
-    pure (bare p r <> " is requested, which has no versions")
+    pure (bareP p r <> " is requested, which has no versions")
 
 -- | A __chain__ — the first fact's dependee is the second's depender — reads
 -- \"a depends on b which depends on c\". That is only true if every instance the
@@ -380,7 +380,7 @@ chainOfTwo (c1, c2) = do
     (p1, s1, q1, r1) <- asDependency c1
     (p2, s2, q2, r2) <- asDependency c2
     guard (q1 == p2 && r1 `isSubsetOf` s2)
-    pure (dep p1 s1 q1 r1 <> " which depends on " <> bare q2 r2)
+    pure (dep p1 s1 q1 r1 <> " which depends on " <> bareP q2 r2)
 
 -- | __One depender, two dependees__ reads \"a depends on both b and c\", for
 -- which the two facts must be about the same instances of @a@.
@@ -388,8 +388,8 @@ sharedDepender :: Rule (Incompatibility, Incompatibility) Text
 sharedDepender (c1, c2) = do
     (p1, s1, q1, r1) <- asDependency c1
     (p2, s2, q2, r2) <- asDependency c2
-    guard (p1 == p2 && s1 `equivalent` s2)
-    pure (named p1 s1 <> " depends on both " <> bare q1 r1 <> " and " <> bare q2 r2)
+    guard (p1 == p2 && s1 == s2)
+    pure (namedP p1 s1 <> " depends on both " <> bareP q1 r1 <> " and " <> bareP q2 r2)
 
 -- --------------------------------------------------------------------------
 -- The pre-pass
@@ -442,10 +442,10 @@ collapseNoInstances inc = case incompCause inc of
         (p1, q) <- dependencyPackages other
         guard (p == p1 || p == q)
         guard (Map.size (incompTerms node) == 2)
-        s1 <- positive =<< Map.lookup p1 (incompTerms node)
-        r2 <- negative =<< Map.lookup q (incompTerms node)
-        pure (Incompatibility (incompTerms node) (CauseDependency p1 s1 (q, r2)))
+        s1 <- packageSet =<< positive =<< Map.lookup (PackageVar p1) (incompTerms node)
+        r2 <- packageSet =<< negative =<< Map.lookup (PackageVar q) (incompTerms node)
+        pure (Incompatibility (incompTerms node) (CauseDependency p1 s1 Map.empty (q, r2)))
 
     dependencyPackages c = case incompCause c of
-        CauseDependency p1 _ (q, _) | p1 /= q -> Just (p1, q)
-        _                                     -> Nothing
+        CauseDependency p1 _ g (q, _) | p1 /= q, Map.null g -> Just (p1, q)
+        _                                                   -> Nothing

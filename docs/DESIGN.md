@@ -26,52 +26,27 @@ candidate's `.cabal` file, including the ones the search discards.
 ## 2. Version sets are intensional
 
 A dependency's declared range becomes **one** set, not one entry per matching
-release. `InstanceSet` is a disjunctive normal form: a list of cells, each a version
-range crossed with pinned flags.
+release. The source half of an `InstanceSet` is a single `VersionSet`: canonical
+intervals over all of version space, tagged with the spelling the author used.
 
 This is not a local preference. `references/pubgrub.md:1172` makes it one of the four
 things that separate PubGrub from CDCL and from answer-set solving. Expanding a range
 into concrete versions costs work, and the result has to be turned back into a range
 to talk to a user.
 
-The invoice for that choice:
+The invoice for that choice is smaller than it used to be, because the flag axis no
+longer lives in the set (§3):
 
-- **No lawful `Eq`.** Two different cell lists can denote the same set. Use
-  `SetOps.equivalent` when you need semantic equality.
-- **No enumeration.** `widen` admits versions the index does not have. Only
-  `Bridge.Provider.expand'` consults reality, and it enumerates from the index and
-  filters by `memberInstance`.
-- **Emptiness is one-sided.** `isEmpty` can answer "not empty" for a set that is
-  empty in fact. Claiming emptiness wrongly is forbidden. Failing to notice emptiness
-  is allowed. The slack lands on `Relation.Inconclusive`, which costs work and never
-  a wrong verdict.
-
-**Size control is load-bearing.** `union` appends, `intersect` cross-products, and
-`difference` multiplies one cell into up to `1 + 2·|pins|`. Three prunings run:
-`differenceCell` drops null cells, `union` merges cells with identical pins, and
-`pruneCells` drops cells that another cell subsumes.
-
-Measured over 24 successive instance bans across 4 flags: **28,293 cells with
-null-dropping alone, and 41 once `pruneCells` runs too**, for a denotation of 56
-instances. Those figures were 1797 and 21 while a pin was a plain `Bool`. Three states
-per flag doubled the split factor, so pruning went from useful to the only thing
-keeping this tractable.
-
-Pruning **between** operations is what bounds the growth. Pruning at the end is too
-late. `test/InstanceSetSpec.hs` is the guard, and it gates the maximum at 48 cells
-to leave headroom.
-
-Three things about this that a plausible edit gets wrong:
-
-- **`SourceCell` has no `SetOps` instance on purpose.** Cells are closed under
-  intersection but not under union or difference, so `SetOps` lives one layer up.
-- **`pruneCells` gives determinism only.** It is not a preference order. Flag
-  preference is `Bridge.Provider.preferDefaults`, which ranks completed assignments
-  by how many flags deviate from the declared defaults.
-- **`test/InstanceSetSpec.hs` needs its universe non-uniform.** Releases must differ
-  in which flags they declare, including one declaring none. A uniform universe hid
-  a wrong `difference` for weeks. Keep its adapter pointed at the intensional
-  constructor.
+- **`Eq` and `Ord` are lawful.** Both halves are canonical — a `Data.Set` of
+  installed units and an interval list — so two sets denote the same thing iff they
+  are equal. `SetOps.equivalent` is kept where a test wants to say what it is asking.
+- **Every operation is exact, and `isEmpty` answers both ways.** The one-sidedness
+  the earlier cell representation carried came from pins over flags a release might
+  not declare; with flags elsewhere, difference is interval arithmetic.
+- **No enumeration, still.** A range admits versions the index does not have. Only
+  `Bridge.Provider` consults reality, and it enumerates from the index and filters by
+  `memberInstance`. So "non-empty" means non-empty in version space, which is why a
+  test over a finite sample of versions can check the predicates only one way.
 
 **A version set remembers how it was spelled.** `VersionSet` carries the declared
 `VersionRange` it was built from beside its canonical intervals. Only
@@ -83,25 +58,62 @@ rebuilds `==v` and nothing else. This is pub_semver's caret class, a plain range
 knows its own spelling; there too the sugar survives exactly as far as the declared
 constraint is passed along unchanged. The solver's algebra still runs on intervals.
 
-## 3. A decision is a whole instance
+**What was here before.** Until 2026-10-08 the source half was a disjunctive normal
+form: a list of cells, each a version range crossed with pinned flags, with three
+states per pin and subsumption pruning between operations, measured at 28,293 cells
+without pruning against 41 with. That representation, its non-canonicity and its
+one-sided emptiness are recorded in [attic/flags-semantics.md](attic/flags-semantics.md)
+and [attic/README.md](attic/README.md) §9. It was removed when flags became variables.
 
-The solver's variables are package names. Its values are instances. An instance is
-one concrete way of having a package: a pre-installed unit, or a source release under
-a total flag assignment.
+## 3. A flag is a variable, and a decision is one variable's value
 
-The flag component needs **three** states per flag, not two: pinned on, pinned off,
-and not declared by this release. A two-state pin is not closed under negation.
+The solver's variables are `Var`: a package name, or an automatic flag of a package.
+A package takes an `Instance` — a pre-installed unit or a source release — and a flag
+takes a `Bool`. A decision on a package is a release; the flags that release declares
+are decided after it, each on its own.
 
-Two releases show why. `parser 1.0` declares a `simd` flag and `parser 1.1` declares
-no flags. Take `A` = "any parser in `>=1.0 && <2`" and `B` = "the same range with
-`simd` on". What is in `A` and not in `B`? Two things: `1.0` with `simd` off, and
-`1.1`. With only on and off you can say the first and not the second, so `1.1`
-silently disappears. The solver then rules out a release that is not ruled out, and
-reports "no solution" for a problem that has one.
+**A flag's identity is its declaration.** `Flag` is a name together with its declared
+default. Two releases that declare `fast` with the same default share the variable,
+so a guarded dependency they both carry is one clause over both
+(`references/pubgrub.md:456` applied to the flag axis); a release that changed the
+default declares a different flag and gets a variable of its own. At most one
+release of a package is ever in a plan, so the shared variable is always that
+release's flag. The default rides in the identity so that the provider can offer it
+first without knowing which release was decided: `expand (FlagVar _ (Flag _ d))`
+reads the variable and nothing else.
 
-The rule is: **two states are enough where you decide, three are needed where you
-collapse.** A decision fixes one release, so whether the flag exists is already
-known. A collapsed term spans releases that disagree about whether the flag exists.
+**How a flag becomes a goal.** When a release is decided the provider emits, per
+automatic flag, `declaresFlag`: `{p: Positive slot, p:f: Negative {False, True}}`.
+Propagation derives a positive term for the flag the moment its owner is decided,
+and the solver then asks for it. Nothing else ever derives a positive term for a
+flag, so a flag is only decided while a release declaring it is decided, and a
+learned clause that mentions it under a wider term about the owner is inert for the
+owner's other releases. No clause tying the flag back to the versions declaring it
+is needed.
+
+**How a guard is stated.** A dependency that holds under a flag condition is
+`fromDependency` with a `Guard`: `{p: Positive slot, p:f₁: Positive {b₁}, …, q:
+Negative range}`, one clause per disjunct of the `.cabal` condition. The guard's
+terms are positive because they are antecedents. With the depender decided and the
+dependee out of range, propagation derives `Negative {b}` for the one open flag
+("absent or the other value"), and the owner's `declaresFlag` narrows that to the
+other value; with the flags in place it derives the dependee's range, as an
+unguarded dependency would. A learned clause that widens the flag's two values back
+to `{False, True}` is still positive, so "the owning release is in the plan" is never
+lost: a flag has no value when its owner is absent, and a representation that dropped
+the widened term as universal would forget that the owner is required.
+
+**Manual flags are not variables.** They are resolved at their defaults when the
+release is flattened, which is what every flag was before the axis was searched;
+`--flags fixed` treats every flag that way and is the default.
+
+**Why not the flag inside the value.** The earlier design put a total flag
+assignment into each instance and the pins into each set, so that one variable per
+package sufficed. It bought that with the DNF of §2 and with three states per pin,
+and conflict resolution had to learn "this release with this flag" one assignment
+at a time unless facts were collapsed per guard. [attic/flags-semantics.md](attic/flags-semantics.md)
+§1.4 records the argument for it and the price; [flags-as-variables.md](flags-as-variables.md)
+records the measurement that moved it.
 
 ## 4. A release owns a slot, not a point
 
@@ -522,11 +534,6 @@ with "Because". The module is spelled as Cabal-syntax prints the field, `libpq` 
 not cabal's `libpq-any`. And byte-parity with pub's output is not a goal: `^1.0.0`
 is Dart syntax and cabal writes `>=1.0.0 && <2`, so the target is the same sentences
 and information in cabal's range syntax.
-
-**One item is dormant, not closed.** Where cells share a version set and their pins
-for one flag exhaust all three states, that flag must drop out of the pin map. No
-cell is pinned while flags take their defaults, so no proof can show this. It
-returns with the flag axis.
 
 The linear example matches `:1005` sentence for sentence. The branching one differs
 from `:1150` only in which facts the derivation happened to pair.

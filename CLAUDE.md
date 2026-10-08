@@ -32,10 +32,10 @@ design decision per section, with the evidence that earned it.
   *the* authority. Is some behaviour fundamental to PubGrub, or a choice of ours?
   Answer that by citing `references/pubgrub.md` with a line number. Do not answer it
   from our haddocks, and do not answer it from CLAUDE.md.
-- **Flags** are [`docs/flags-semantics.md`](docs/flags-semantics.md): what must be
-  *true*, with no types in it. It overrules this file.
-- **Decisions** are [`docs/decision-semantics.md`](docs/decision-semantics.md).
-  Nothing in its §2–§9 is implemented.
+- **Flags** are [`docs/flags-as-variables.md`](docs/flags-as-variables.md): an
+  automatic flag is a solver variable of its own, keyed by its declaration. The two
+  earlier specifications that put the flag inside a package's value are in
+  [`docs/attic/`](docs/attic/).
 - **Cabal's build model** (components, scopes, Backpack) is
   [`docs/cabal-build-model.md`](docs/cabal-build-model.md), the reference for rungs 4
   and 5.
@@ -54,12 +54,13 @@ design decision per section, with the evidence that earned it.
 
 ```sh
 cabal build
-cabal test                           # 233 tests, ~0.3 s
+cabal test                           # 229 tests, ~0.3 s
 cabal run pubgrub -- aeson              # the driver; add -v for the search trace
 cabal run pubgrub -- 'aeson <2'         # a target is ONE argument: package and range
 cabal run pubgrub -- hlint 'aeson <2'   # several targets, solved together
 cabal run pubgrub -- --stats aeson      # + search counts and phase timings, no trace
 cabal run pubgrub -- --cabal aeson      # cabal's solver, same index (the baseline)
+cabal run pubgrub -- --flags search aeson   # search the automatic flags, either solver (default: fixed at defaults)
 cabal run pubgrub -- --index-state 2026-09-03T00:00:00Z aeson   # the index as it was then, either solver
 cabal run pubgrub-index              # build the derived index (~120 s, once per refresh)
 scripts/gate.sh                      # every check that must not regress
@@ -131,7 +132,7 @@ app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solv
 
 | component | what it is |
 | --- | --- |
-| library `pubgrub-hs` | `src/` — the solver. `PubGrub.hs` plus `PubGrub/{Version,VersionSet,Term,SetOps,Relation,Incompatibility,Solver,Store,Provider,Report,Pretty}.hs`, `PubGrub/Report/{Rule,Wording,Headline,Layout}.hs`, `PubGrub/Index/PreInstalled.hs`, `PubGrub/InstanceSet{,/SourceCell}.hs` |
+| library `pubgrub-hs` | `src/` — the solver. `PubGrub.hs` plus `PubGrub/{Version,VersionSet,Variable,InstanceSet,Value,Term,SetOps,Relation,Incompatibility,Solver,Store,Provider,Report,Pretty}.hs`, `PubGrub/Report/{Rule,Wording,Headline,Layout}.hs`, `PubGrub/Index/PreInstalled.hs` |
 | library `bridge` | `bridge/` — `Bridge/{Hackage,Installed,Provider}.hs`, `Bridge/Hackage/{HttpClient,Store,Unlifted}.hs`, `Bridge/Cabal/{Baseline,Flatten,InstalledPkg}.hs` |
 | executable `pubgrub` | `app/Main.hs` — the CLI driver |
 | executable `pubgrub-index` | `app/BuildIndex.hs` — builds the derived index |
@@ -142,8 +143,8 @@ app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solv
 
 - `Bridge.Hackage` — bootstraps and refreshes the index through `hackage-security`,
   keeps a disk-cached package-to-versions map, and reads one release's `.cabal`
-  through `indexLookupCabal` plus `parseGenericPackageDescription`. It marks every
-  flag manual on the way out.
+  through `indexLookupCabal` plus `parseGenericPackageDescription`. Under
+  `--flags fixed` the baseline marks every flag manual before cabal sees it.
 - `Bridge.Hackage.Store` — the derived index. Every release parsed once, ahead of
   time, into the pre-environment form.
 - `Bridge.Cabal.Flatten` — reads two things off one walk of a conditional tree
@@ -194,9 +195,11 @@ Each of these is a design decision whose argument and evidence are in
 [`docs/DESIGN.md`](docs/DESIGN.md). The line here is a reminder of what the plausible
 wrong edit is, not the argument. Read the section before you touch the code.
 
-- **`InstanceSet` is intensional and non-canonical** — DESIGN §2 and §3. No `Eq` or
-  `Ord`; `isEmpty` is one-sided; three pin states, not two; prune *between*
-  operations, not at the end.
+- **A flag is a solver variable, and the value carries no flags** — DESIGN §2 and
+  §3. `InstanceSet` is an installed set plus one version range, canonical and
+  exact; `Var` is a package name or a `(package, Flag)` pair, and `Flag` is a name
+  *with its declared default*. Do not put flags back into the value, and do not key
+  a flag variable by release.
 - **`PubGrub.Store` merges on insert and keeps scan position** — DESIGN §5. A merge
   replaces the clause where it sits, and the merged clause stays a leaf.
 - **The derived index is a cache that follows the index by block** — DESIGN §6. It
@@ -208,6 +211,8 @@ wrong edit is, not the argument. Read the section before you touch the code.
 - **Boot packages are installed-only** — DESIGN §7.
 - **A depender term names a slot, not a version**, and the first slot has no lower
   bound — DESIGN §4.
+- **A guarded dependency's flag terms are positive and name the depender's own
+  flags**, and a fact merges only with one under the same guard — DESIGN §3 and §5.
 - **Versions compare with trailing zeros insignificant**, and Cabal's type stops at
   the bridge — DESIGN §14.
 - **The request is a list of seeds**: the terminal test, the level-0 backtrack floor
@@ -217,10 +222,10 @@ wrong edit is, not the argument. Read the section before you touch the code.
 ## Current scope limits
 
 [`docs/STATUS.md`](docs/STATUS.md) §3 states each one and why: flags fixed at their
-declared defaults (§4.1; the search machinery is intact, unfed and tested) and one
-version per package name (§4.2, where the shelved qualified-goals design is). Setup
-and build-tool dependencies, public sublibraries, `preferred-versions`, user flag
-constraints and flag search are not built; [`docs/TODO.md`](docs/TODO.md) says what
+declared defaults unless `--flags search` is given (§3.1), and one version per
+package name (§3.2, where the shelved qualified-goals design is). Setup and
+build-tool dependencies, public sublibraries, `preferred-versions`, user flag
+constraints and buildability under a flag are not built; [`docs/TODO.md`](docs/TODO.md) says what
 each owes, and its last two sections list what is settled or was measured and
 rejected. The rung ladder is STATUS.md §1.
 

@@ -46,25 +46,22 @@ exists in the code.**
 
 | thing | specification | note |
 | --- | --- | --- |
-| **Condition decisions** (rules D1, D2, D3) | [decision-semantics.md](decision-semantics.md) §2–§9 | a kernel-level change to what a decision is. Dormant: the cost it removes is currently zero |
-| **`buildable:` as a condition** | [flags-semantics.md](flags-semantics.md) §1.5 | half built. `buildableCondition` returns the condition and `buildableAtDefaults` evaluates it. Satisfying it rather than evaluating it is the flag-axis half |
-| **User flag constraints** (`--flag`) | [flags-semantics.md](flags-semantics.md) §1.6 | do not exist. While every flag is manual, they are the only thing that can move one |
-| **The verdict oracle** (test) | [flags-semantics.md](flags-semantics.md) §6 | owed. It blocks condition decisions, and it is what would discharge O4's whole-loop claim |
+| **`buildable:` under a flag** | [flags-as-variables.md](flags-as-variables.md) §6 | half built. `buildableCondition` returns the condition and `buildableAtDefaults` evaluates it. A release unbuildable only under some assignment needs the guard carried into its unbuildable clause |
+| **User flag constraints** (`--flag`) | [flags-as-variables.md](flags-as-variables.md) §6 | do not exist. A level-0 request on the flag variable is the shape |
 | **`preferred-versions`** | — | the index reader does not read it. Its entries are in the tar with timestamps, so an index-state would apply to it unchanged |
 
 ---
 
 ## 3. Flag search
 
-Flags are applied at their declared defaults and not searched
-([STATUS.md §3.1](STATUS.md#31-flags-are-fixed-at-their-declared-defaults)). The
-machinery is kept and still tested, and one trap is armed there: the provider tries
-one flag completion per candidate region, so with more than one completion a valid
-instance can be missed and the verdict is a confident, wrong "no solution", which
-[flags-semantics.md](flags-semantics.md)'s O6 forbids. **Whoever restores flag search
-owns the O6-complete search and the verdict oracle** (§2), and cannot treat
-buildability as already done. `--flag` constraints (§2) are the only thing that can
-move a manual flag, so they come with it.
+Built, behind `--flags search` ([STATUS.md §3.1](STATUS.md#31-flags-are-fixed-at-their-declared-defaults-unless-asked),
+[flags-as-variables.md](flags-as-variables.md)): every automatic flag is a solver
+variable, both solvers search them, and the gate agrees 26/26 under either model.
+What is left is in [flags-as-variables.md §6](flags-as-variables.md): buildability
+under a flag, user flag constraints, a dedicated sentence for a derived step that
+names a flag, and a measured answer to whether flags should be decided right after
+their owner. The gate's recorded baselines are for `fixed`; moving them to `search`
+means re-measuring the corpus, where two problems become solvable.
 
 ---
 
@@ -74,18 +71,15 @@ move a manual flag, so they come with it.
    because the memory claim is the strongest one the project has and the floor is most
    of it. See [STATUS.md §2.3](STATUS.md#23-what-these-numbers-do-not-establish).
 2. **Should `expand` split back into "pick" then "consequences"?**
-   ([flags-semantics.md](flags-semantics.md) §8.) A design item, not a decision.
-   [decision-semantics.md](decision-semantics.md) §10 says the condition-decision model
-   inherits all three benefits of the split, so schedule the two as one item.
-3. **Should the set algebra be allowed to read flag declarations?** It would make
-   emptiness exact and remove the one-sided slack. It costs the core-bridge boundary.
-   A cost question, not a correctness one.
+   ([attic/flags-semantics.md](attic/flags-semantics.md) §8.) A design item, not a
+   decision; the flag-variable model made it cheaper to leave as is, since a
+   release's consequences no longer depend on an assignment.
 4. **Decision order is chosen by discovery, and on `yesod` that costs 4.4× the
    decisions.** Diagnosed, not fixed — see
    [DESIGN.md §12](DESIGN.md#12-decision-order-is-discovery-order-and-yesod-is-the-bill).
 5. **How far can the walk go?** It is unbounded today, so widening reads the whole
-   version list in the worst case. A cap stays sound, because flags-semantics.md §4.2
-   makes maximality policy rather than a requirement. Nothing has chosen one.
+   version list in the worst case. A cap stays sound, because maximality of the span
+   is policy rather than a requirement. Nothing has chosen one.
 
 ## 5. Settled — not planned, do not reopen
 
@@ -95,20 +89,17 @@ time.
 - **No complement in the value algebra.** Four operations plus emptiness. Negation
   lives in `Term` as a polarity flip. A complement needs a universe of values that
   nothing in the algorithm ever asks for.
-- **No `Eq` or `Ord` on `InstanceSet`.** The representation is not canonical, so
-  structural equality would be unlawful. Use mutual containment.
 - **Sets stay intensional.** An extensional `Set Instance` is not a cheaper PubGrub. It
   is the encoding PubGrub exists to avoid.
-- **Emptiness stays one-sided.** Missing an empty set costs time. Claiming emptiness
-  wrongly gives wrong answers. Test `isEmpty ⟹ empty`, never `⟺`.
-- **Flags live in the value, not as solver variables.** A flag variable would need
-  conditional existence, which PubGrub has no notion of. The price is the 2^k re-offer,
-  and the answer to that price is condition decisions, not a change of model. While
-  flags take their defaults the price is not being paid, because the search is not
-  being done. That is a scope cut, not a third answer.
-- **The property suite's universe must be non-uniform.** Releases must differ in which
-  flags they declare, including one declaring none. A uniform universe cannot tell the
-  three flag readings apart, which is exactly how a wrong `difference` passed for weeks.
+- **A flag is a variable keyed by its declaration, and the value carries no flags.**
+  Decided 2026-10-08, reversing the earlier "flags live in the value". The
+  conditional existence a flag variable needs is one clause from its owner
+  (`declaresFlag`), not machinery; what the earlier model bought with a DNF of cells
+  and three pin states, this gets from `VersionSet` and a `Bool`. Do not key a flag
+  variable by release: that loses the cross-release merge for nothing.
+- **Emptiness over a finite sample is one-sided.** A range is non-empty in version
+  space while holding none of a test universe's versions, so a sampled property can
+  only check `isEmpty ⟹ empty`. The algebra itself is exact.
 - **Do not chase byte-parity with pub's output.** `^1.0.0` is Dart. cabal writes
   `>=1.0.0 && <2`. Same sentences, cabal's syntax.
 

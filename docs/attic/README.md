@@ -189,7 +189,29 @@ supplied, which is the *evidence* for a boundary decision that `../../CLAUDE.md`
 merely asserts. Everything else live in it is stated better, and currently, in
 `../../CLAUDE.md`'s Architecture section.
 
-## 9. Two representations that were replaced
+## 9. `flags-semantics.md` and `decision-semantics.md` — the flag in the value
+
+**Files:** [`flags-semantics.md`](flags-semantics.md), [`decision-semantics.md`](decision-semantics.md).
+Retired 2026-10-08.
+
+The second serious design for flags, and the one that shipped for a while: a
+package's value is an instance *with* a total flag assignment, a set of instances is
+a DNF of cells (a version range crossed with pins, three states per pin), and a
+decision settles version and every flag at once. `decision-semantics.md` then
+specified how to decide only the flags a guard made relevant, to undo the price of
+that.
+
+**Why dropped:** the price was the machinery. Keeping flags inside the value cost a
+non-canonical set type with no lawful `Eq`, one-sided emptiness, subsumption
+pruning between every operation, three states per pin, and a provider that completed
+assignments per cell — all so that one variable per package would suffice. Making
+each automatic flag a variable of its own, keyed by its declaration, gets conditional
+existence from one clause per flag and leaves `InstanceSet` an installed set plus one
+range. See [`../flags-as-variables.md`](../flags-as-variables.md) and
+[`../DESIGN.md`](../DESIGN.md) §2–§3. The earlier attic entries §4, §5 and §7 are
+about this model's own history.
+
+## 10. Two representations that were replaced
 
 Not in this directory, but abandoned, and easy to propose again:
 
@@ -207,11 +229,12 @@ Not in this directory, but abandoned, and easy to propose again:
      names as one of the four things separating it from CDCL (conflict-driven clause
      learning, the standard SAT-solver algorithm) and answer-set solving
      (`../../references/pubgrub.md:1172`).
-  2. **The swap was not invisible.** The real `PubGrub.InstanceSet` has **no lawful
-     `Eq`** (there is more than one way to write the same set, so use mutual
-     containment instead of structural equality), **cannot be enumerated at all** (so
-     a provider must enumerate from its own index and filter by membership), and
-     answers emptiness only **one-sidedly**. Every one of those changed callers.
+  2. **The swap was not invisible.** The `PubGrub.InstanceSet` of the time had **no
+     lawful `Eq`** (there was more than one way to write the same set), **could not be
+     enumerated** (so a provider must enumerate from its own index and filter by
+     membership — still true), and answered emptiness only **one-sidedly**. Every one
+     of those changed callers. The first and third went away with the cell DNF (§9);
+     the second is the point.
 
      *(The reason there is more than one way to write the same set: it is stored in
      **disjunctive normal form** — DNF, an OR of ANDs — as a list of cells, each a

@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 
--- | The PubGrub solving loop, over whole package instances.
+-- | The PubGrub solving loop, over variables: package names, each taking an
+-- instance, and automatic flags, each taking a Boolean.
 --
 -- Two layers: the storage layer — 'Assignment', 'PackageAssignments',
 -- 'PartialSolution' and their queries — and the algorithm on top
@@ -51,19 +52,18 @@ import qualified Data.Map.Strict                as Map
 import           Data.Maybe                     (fromMaybe, mapMaybe)
 import           Data.Sequence                  (Seq)
 import qualified Data.Sequence                  as Seq
-import           Distribution.Types.PackageName
 import           Data.List.NonEmpty             (nonEmpty)
 import qualified Data.List.NonEmpty             as NE
 import           PubGrub.Incompatibility        (IncompatRelation (..),
                                                  Incompatibility (..),
-                                                 PackageTerm (..), anyTerm,
+                                                 VarTerm (..), anyTermFor,
                                                  incompGet, incompRelation,
                                                  isRequest, noInstances,
                                                  priorCause)
-import           PubGrub.InstanceSet            (Instance, InstanceSet,
-                                                 emptyInstanceSet,
-                                                 singletonInstance)
 import           PubGrub.Provider               (Provider (..))
+import           PubGrub.Value                  (Value, ValueSet,
+                                                 singletonValue)
+import           PubGrub.Variable               (Var)
 import           PubGrub.SetOps                 (SetOps (..))
 import           PubGrub.Store                  (Store, emptyStore,
                                                  insertClause, insertClauses,
@@ -81,7 +81,7 @@ import           PubGrub.Term                   (Term (..), intersectTerm,
 data Assignment = Assignment
     { aIndex   :: !Int
     , aLevel   :: !Int
-    , aPackage :: PackageName
+    , aPackage :: Var
     , aKind    :: AssignmentKind
     }
 
@@ -95,25 +95,25 @@ data Assignment = Assignment
 -- partial selectors, and a partial selector is a crash waiting for the wrong
 -- constructor.
 data AssignmentKind
-    = Decided Instance
-    | Derived (Term InstanceSet) Incompatibility
+    = Decided Value
+    | Derived (Term ValueSet) Incompatibility
 
 -- | The term contributed by an assignment; for a decision, @Positive@ of the
 -- singleton.
-assignmentTerm :: Assignment -> Term InstanceSet
+assignmentTerm :: Assignment -> Term ValueSet
 assignmentTerm a = case aKind a of
-    Decided i   -> Positive (singletonInstance i)
+    Decided i   -> Positive (singletonValue i)
     Derived t _ -> t
 
 -- | The instance a decision decides; 'Nothing' for a derivation.
-decidedInstance :: Assignment -> Maybe Instance
+decidedInstance :: Assignment -> Maybe Value
 decidedInstance a = case aKind a of
     Decided i -> Just i
     Derived{} -> Nothing
 
 -- | The assignment as "one term about one package".
-assignmentPackageTerm :: Assignment -> PackageTerm
-assignmentPackageTerm a = PackageTerm (aPackage a) (assignmentTerm a)
+assignmentPackageTerm :: Assignment -> VarTerm
+assignmentPackageTerm a = VarTerm (aPackage a) (assignmentTerm a)
 
 -- | Everything recorded about one package: its own assignments oldest-first,
 -- the intersection of their terms, and the instance it was decided to be if it
@@ -126,8 +126,8 @@ assignmentPackageTerm a = PackageTerm (aPackage a) (assignmentTerm a)
 -- non-empty history.
 data PackageAssignments = PackageAssignments
     { paHistory  :: Seq Assignment
-    , paTerm     :: Term InstanceSet
-    , paDecision :: Maybe Instance
+    , paTerm     :: Term ValueSet
+    , paDecision :: Maybe Value
     }
 
 -- | Assignments are indexed by package, and within a package stored
@@ -135,7 +135,7 @@ data PackageAssignments = PackageAssignments
 -- without reversing; @psLevel@ is the current decision level; @psNextIndex@ is
 -- a monotone counter giving chronological order /across/ packages.
 data PartialSolution = PartialSolution
-    { psPackages  :: Map PackageName PackageAssignments
+    { psPackages  :: Map Var PackageAssignments
     , psLevel     :: !Int
     , psNextIndex :: !Int
     }
@@ -174,7 +174,7 @@ recordAssignment a ps@PartialSolution{psPackages, psNextIndex} =
         }
 
 -- | Record a decision (a guess); increments the decision level.
-addDecision :: PackageName -> Instance -> PartialSolution -> PartialSolution
+addDecision :: Var -> Value -> PartialSolution -> PartialSolution
 addDecision p i ps@PartialSolution{psLevel, psNextIndex} =
     recordAssignment
         (Assignment psNextIndex (psLevel + 1) p (Decided i))
@@ -182,9 +182,9 @@ addDecision p i ps@PartialSolution{psLevel, psNextIndex} =
 
 -- | Record a derivation: the negation of @cause@'s term for @p@, at the
 -- current level.
-addDerivation :: PackageName -> Incompatibility -> PartialSolution -> PartialSolution
+addDerivation :: Var -> Incompatibility -> PartialSolution -> PartialSolution
 addDerivation p cause ps@PartialSolution{psLevel, psNextIndex} =
-    let term = maybe anyTerm negateTerm (incompGet p cause)
+    let term = maybe (anyTermFor p) negateTerm (incompGet p cause)
      in recordAssignment (Assignment psNextIndex psLevel p (Derived term cause)) ps
 
 -- | Backtrack: drop every assignment strictly above the target level.
@@ -213,7 +213,7 @@ backtrack level ps@PartialSolution{psPackages} =
 
 -- | Intersection of all terms recorded for a package ('Nothing' if the
 -- package is unmentioned, which judges as 'anyTerm' = ⊤).
-termIntersectionForPackage :: PartialSolution -> PackageName -> Maybe (Term InstanceSet)
+termIntersectionForPackage :: PartialSolution -> Var -> Maybe (Term ValueSet)
 termIntersectionForPackage PartialSolution{psPackages} p =
     paTerm <$> Map.lookup p psPackages
 
@@ -222,13 +222,13 @@ psRelation :: PartialSolution -> Incompatibility -> IncompatRelation
 psRelation ps = incompRelation (termIntersectionForPackage ps)
 
 -- | The decisions, as a solution map.
-extractSolution :: PartialSolution -> Map PackageName Instance
+extractSolution :: PartialSolution -> Map Var Value
 extractSolution PartialSolution{psPackages} = Map.mapMaybe paDecision psPackages
 
 -- | Packages that have a positive accumulated term but no decision yet, with
 -- that positive instance set. Ordered by first mention (oldest first) for
 -- determinism.
-undecidedPositive :: PartialSolution -> [(PackageName, InstanceSet)]
+undecidedPositive :: PartialSolution -> [(Var, ValueSet)]
 undecidedPositive PartialSolution{psPackages} =
     map snd (sortOn fst (mapMaybe candidate (Map.toList psPackages)))
   where
@@ -241,7 +241,7 @@ undecidedPositive PartialSolution{psPackages} =
 
 -- | All assignments for a package, oldest first. The satisfier search walks
 -- this list.
-packageHistory :: PartialSolution -> PackageName -> [Assignment]
+packageHistory :: PartialSolution -> Var -> [Assignment]
 packageHistory PartialSolution{psPackages} p =
     maybe [] (toList . paHistory) (Map.lookup p psPackages)
 
@@ -260,10 +260,10 @@ data SatisfierSearch
 -- from @startTerm@, or 'Nothing' if none does.
 satisfierOf
     :: PartialSolution
-    -> PackageName
-    -> Term InstanceSet
+    -> Var
+    -> Term ValueSet
     -> Maybe Assignment
-satisfierOf ps p startTerm = go anyTerm (packageHistory ps p)
+satisfierOf ps p startTerm = go (anyTermFor p) (packageHistory ps p)
   where
     go _ [] = Nothing
     go acc (a : as)
@@ -294,12 +294,12 @@ maximumOn f = foldl' pick Nothing
 satisfierSearch
     :: PartialSolution
     -> Incompatibility
-    -> Either SolveError (PackageName, SatisfierSearch)
+    -> Either SolveError (Var, SatisfierSearch)
 satisfierSearch ps i = do
     satMap <- traverse satisfierForTerm (Map.toList (incompTerms i))
     (satPkg, satAssign) <- latestSatisfier satMap
     let satLevel = aLevel satAssign
-        it_s = fromMaybe anyTerm (incompGet satPkg i)
+        it_s = fromMaybe (anyTermFor satPkg) (incompGet satPkg i)
         startTerm' = intersect (assignmentTerm satAssign) (negateTerm it_s)
     prevForSat <- require satPkg (satisfierOf ps satPkg startTerm')
     let satMap' = [(p, if p == satPkg then prevForSat else a) | (p, a) <- satMap]
@@ -325,7 +325,7 @@ satisfierSearch ps i = do
 -- | The assignments the seeds made: the level-0 derivations whose cause is a
 -- 'PubGrub.Incompatibility.request'. They are the oldest assignments of all,
 -- and they are never backtracked.
-seedAssignments :: PartialSolution -> PackageName -> [Assignment]
+seedAssignments :: PartialSolution -> Var -> [Assignment]
 seedAssignments ps p = [a | a <- packageHistory ps p, isSeed a]
   where
     isSeed a = case aKind a of
@@ -429,7 +429,7 @@ conflictResolution
     :: (Monad m, WithLog env SolverMsg m)
     => Incompatibility
     -> PartialSolution
-    -> m (Either SolveError (PackageName, Incompatibility, PartialSolution))
+    -> m (Either SolveError (Var, Incompatibility, PartialSolution))
 conflictResolution = loop
   where
     loop current ps
@@ -455,16 +455,16 @@ data SolveError
       NoSolution Incompatibility
     | -- | conflict resolution found a term of a satisfied incompatibility
       -- whose package has no satisfier in the partial solution
-      NoSatisfier PackageName Incompatibility
+      NoSatisfier Var Incompatibility
 
 -- | Structured progress events emitted during resolution.
 data SolverMsg
     = -- | about to choose an element for p within this range
-      Deciding PackageName InstanceSet
+      Deciding Var ValueSet
     | -- | picked this element for p
-      Chose PackageName Instance
+      Chose Var Value
     | -- | no element available in range (forces a conflict next)
-      NoVersionFor PackageName InstanceSet
+      NoVersionFor Var ValueSet
     | -- | this incompatibility is satisfied (a conflict)
       Conflict Incompatibility
     | -- | one step of conflict resolution: the satisfier it located, and the
@@ -472,7 +472,7 @@ data SolverMsg
       -- satisfier and the previous satisfier share a decision level, so the
       -- count of these between a 'Conflict' and its 'Backtracked' /is/ the depth
       -- of that resolution — which nothing else reports.
-      Resolving PackageName Incompatibility
+      Resolving Var Incompatibility
     | -- | the root cause conflict resolution settled on, about to be added to
       -- the store. Distinct from the 'Conflict' that started it: that one was
       -- already known, this one is what was learned.
@@ -491,7 +491,7 @@ solve
     :: (Monad m, WithLog env SolverMsg m)
     => Provider m
     -> [Incompatibility]
-    -> m (Either SolveError (Map PackageName Instance))
+    -> m (Either SolveError (Map Var Value))
 solve provider seeds =
     go (insertClauses seeds emptyStore) emptyPS
     where
@@ -522,15 +522,17 @@ solve provider seeds =
         -- says, this bans all of @range@ between them: the facts cover part, the
         -- @noInstances@ clause covers the remainder. So @p@ cannot be offered the
         -- same set twice, which is the property termination rests on. 'isEmpty' is
-        -- one-sided on an 'InstanceSet' — it may miss that a set is empty — and it
+        -- one-sided on a 'ValueSet' — it may miss that a set is empty — and it
         -- errs in the safe direction here: a redundant clause, never a missing one.
         banRest p range facts
             -- Said nothing: the range itself, untouched. A @difference@ against the
             -- empty set would give an equivalent but differently shaped DNF, and so
             -- change the search for every provider that states no facts.
-            | null stated = insertClause (noInstances p range)
+            | [] <- stated = insertClause (noInstances p range)
             | isEmpty leftover = id
             | otherwise = insertClause (noInstances p leftover)
           where
-            leftover = range `difference` foldr union emptyInstanceSet stated
+            leftover = case stated of
+                []       -> range
+                (s : ss) -> range `difference` foldr union s ss
             stated = [s | inc <- facts, Just (Positive s) <- [incompGet p inc]]

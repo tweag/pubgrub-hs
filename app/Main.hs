@@ -25,6 +25,13 @@ import           Bridge.Cabal.Baseline                     (defaultSolverConfig,
                                                             outcome,
                                                             solveWithCabal,
                                                             sourcePackageIndex)
+import           Bridge.Cabal.Flatten                      (FlagModel (..))
+import           PubGrub.Value                             (Resolved (..),
+                                                            Value, foldFlags,
+                                                            resolvedInstance,
+                                                            singletonValue)
+import           PubGrub.Value                             (Value (..))
+import           PubGrub.Variable                           (Var (..))
 import           Bridge.Hackage                            (IndexState (..),
                                                             IndexStateTooNew (..),
                                                             mkCache,
@@ -167,7 +174,7 @@ renderSolverMsg (Learned incompatibility) =
     T.pack "Learned " <> prettyIncompat incompatibility
 renderSolverMsg (Backtracked level) = T.pack ("Backtracked to level " <> show level)
 renderSolverMsg (NoVersionFor pn is) =
-    T.pack "No version available for " <> pretty pn <> T.pack " in " <> pretty is
+    T.pack "No value available for " <> pretty pn <> T.pack " in " <> pretty is
 
 -- | An incompatibility on one line, as its terms. Deliberately not
 -- 'PubGrub.Report.reportConflict', which renders a whole numbered proof — that is
@@ -312,6 +319,10 @@ data Options = Options
     -- ^ which moment of the index both solvers see; 'IndexHead' unless
     -- @--index-state@ says otherwise. It is the one thing that makes a run
     -- repeatable across the weekly refresh.
+    , optFlags      :: FlagModel
+    -- ^ whether automatic flags are searched (@--flags search@) or fixed at
+    -- their defaults (the default, @--flags fixed@). Applied to both solvers:
+    -- under @fixed@ the baseline's flags are marked manual too.
     , optTargets   :: [(PackageName, VersionRange)]
     -- ^ what to solve for: one or more packages, each with the range it is
     -- constrained to. Ranges stay 'VersionRange' because cabal's solver takes
@@ -346,6 +357,11 @@ renderTargets = intercalate " and " . map one
         | isAnyVersion vr = prettyShow pn
         | otherwise = prettyShow (PackageVersionConstraint pn vr)
 
+parseFlags :: String -> Either String FlagModel
+parseFlags "fixed"  = Right FixedFlags
+parseFlags "search" = Right FlagPackages
+parseFlags other    = Left ("expected 'fixed' or 'search', got '" ++ other ++ "'")
+
 parsePlan :: String -> Either String PlanShape
 parsePlan "tree"  = Right Tree
 parsePlan "lines" = Right Lines
@@ -359,6 +375,7 @@ optionsParser =
         <*> option (eitherReader parsePlan) (long "plan" <> metavar "tree|lines" <> value Tree <> help "Render a plan as a dependency tree (default) or as one 'plan:' line per package")
         <*> flag Ours Cabal (long "cabal" <> help "Run cabal's solver instead of the native solver")
         <*> option (eitherReader parseIndexState) (long "index-state" <> metavar "TIMESTAMP" <> value IndexHead <> help "Solve against the index as it was at this time, e.g. 2016-09-24T17:47:48Z, as cabal's --index-state does (default: everything the local index holds, refreshed at most weekly)")
+        <*> option (eitherReader parseFlags) (long "flags" <> metavar "fixed|search" <> value FixedFlags <> help "Fix every flag at its declared default (default), or search the automatic flags, in both solvers (spike)")
         <*> some (argument (eitherReader parseTarget) (metavar "TARGET..." <> help "A package to solve for, with an optional version range, as one argument: 'aeson' or 'aeson <2'. Repeat for more than one."))
 
 -- --------------------------------------------------------------------------
@@ -390,7 +407,7 @@ main = do
                 -- widening a range to instances (installed units included) is its
                 -- business, not the driver's.
                 Ours ->
-                    withProvider cache manager (optIndexState opts) [(pn, fromVersionRange vr) | (pn, vr) <- optTargets opts] $ \provider seeds ->
+                    withProvider cache manager (optIndexState opts) (optFlags opts) [(pn, fromVersionRange vr) | (pn, vr) <- optTargets opts] $ \provider seeds ->
                         runOurs opts t0 counters provider seeds
                 Cabal ->
                     withWorld cache manager (optIndexState opts) $ \world ->
@@ -452,7 +469,7 @@ runBaseline opts t0 world = do
     t1 <- liftIO getMonotonicTime
     logMsg (T.pack ("Solving for " ++ renderTargets (optTargets opts) ++ " (cabal's solver)"))
     tIndex <- liftIO getMonotonicTime
-    sourceIdx <- liftIO (sourcePackageIndex (wIndex world))
+    sourceIdx <- liftIO (sourcePackageIndex (optFlags opts) (wIndex world))
     tSolve <- liftIO getMonotonicTime
     let progress =
             solveWithCabal
@@ -538,7 +555,7 @@ runBaseline opts t0 world = do
     component (CD.ComponentExe n) = "exe:" ++ prettyShow n
     component c                   = show c
 
-report :: PlanShape -> [PackageName] -> Provider App -> Either SolveError (Map PackageName Instance) -> App ()
+report :: PlanShape -> [PackageName] -> Provider App -> Either SolveError (Map Var Value) -> App ()
 report _ _ _ (Left (NoSolution incompat)) = do
     width <- liftIO proofWidth
     style <- liftIO proofStyle
@@ -546,14 +563,19 @@ report _ _ _ (Left (NoSolution incompat)) = do
     logMsg T.empty
     logMsg (style (wrapProof width (reportConflict incompat)))
 report _ _ _ (Left (NoSatisfier p _)) =
-    logMsg (T.pack ("internal error: no satisfier for " ++ prettyShow p))
-report shape targets provider (Right solution) = do
+    logMsg (T.pack "internal error: no satisfier for " <> pretty p)
+report shape targets provider (Right decided) = do
     logMsg (T.pack "Solution:")
+    -- The solver's answer has a decision per variable: the flags it decided are
+    -- folded into the release they configure, so the plan has one entry per
+    -- package and a source release reads with the flags it is built under.
+    let solution = foldFlags decided
     case shape of
         Tree -> do
             children <- dependencyMap provider solution
             mapM_ logMsg (renderTree targets solution children)
         Lines -> mapM_ logMsg (planLines solution)
+
 
 -- | The width a proof is wrapped to. The terminal's own, from @COLUMNS@, when
 -- stdout is one; 80 otherwise, so a proof in a log or in the showcase is wrapped
@@ -578,14 +600,14 @@ proofStyle = do
     pure $ if tty && noColor == Nothing && term /= Just "dumb" then styleProof else id
 
 -- | One resolved package per line, sorted by name — the 'Map' already is.
-planLines :: Map PackageName Instance -> [Text]
+planLines :: Map PackageName Resolved -> [Text]
 planLines solution =
-    [ T.pack (unwords ["plan:", prettyShow pn, T.unpack (pretty (version inst)), kind inst])
-    | (pn, inst) <- Map.toList solution
+    [ T.pack (unwords ["plan:", prettyShow pn, T.unpack (pretty (version (resolvedInstance r))), kind r])
+    | (pn, r) <- Map.toList solution
     ]
   where
-    kind (UsePreInstalled _) = "installed"
-    kind (BuildSource _ _)   = "source"
+    kind (Installed _) = "installed"
+    kind (Built _ _)   = "source"
 
 -- | Who does @pn@'s decided instance depend on, per the solution? Re-asks the
 -- provider for the exact instance the solver already committed to — 'expand'
@@ -597,16 +619,16 @@ planLines solution =
 -- returns every edge of the unit's /transitive/ closure at once, and those
 -- deeper edges belong under their own depender, which the same walk reaches on
 -- its own turn.
-dependencyMap :: Provider App -> Map PackageName Instance -> App (Map PackageName [PackageName])
+dependencyMap :: Provider App -> Map PackageName Resolved -> App (Map PackageName [PackageName])
 dependencyMap provider solution =
     Map.fromList <$> mapM childrenOf (Map.toList solution)
   where
-    childrenOf (pn, inst) = do
-        (_, incs) <- expand provider pn (singletonInstance inst)
+    childrenOf (pn, r) = do
+        (_, incs) <- expand provider (PackageVar pn) (singletonValue (PackageValue (resolvedInstance r)))
         let deps =
                 [ d
                 | inc <- incs
-                , CauseDependency p _ (d, _) <- [incompCause inc]
+                , CauseDependency p _ _ (d, _) <- [incompCause inc]
                 , p == pn
                 ]
         pure (pn, deps)
@@ -617,7 +639,7 @@ dependencyMap provider solution =
 -- would blow up the output. So a subtree is printed once, and @(*)@ marks every
 -- later occurrence of its package. The targets are the roots, in the order they
 -- were asked for, and @seen@ runs across all of them.
-renderTree :: [PackageName] -> Map PackageName Instance -> Map PackageName [PackageName] -> [Text]
+renderTree :: [PackageName] -> Map PackageName Resolved -> Map PackageName [PackageName] -> [Text]
 renderTree targets solution children = goRoots Set.empty targets
   where
     goRoots _ [] = []
@@ -652,10 +674,9 @@ renderTree targets solution children = goRoots Set.empty targets
         connector = T.pack (if isLast then "└─ " else "├─ ")
         line alreadySeen = prefix <> connector <> label pn <> (if alreadySeen then T.pack " (*)" else T.empty)
 
--- | One node's label. A source release is shown with the flag assignment it
--- was decided under, because a different assignment is a different build. A
--- pre-installed unit is shown as such: it is already built, with no flags to
--- choose.
-renderChoice :: PackageName -> Instance -> Text
-renderChoice p (UsePreInstalled i) = T.pack $ unwords [prettyShow p, T.unpack (pretty (version i)), "(installed)"]
-renderChoice p (BuildSource v fa) = T.pack $ unwords ([prettyShow p, T.unpack (pretty v)] ++ [showFlagAssignment fa | not (null (showFlagAssignment fa))])
+-- | One node's label. A source release is shown with the flags it was decided
+-- under, because a different assignment is a different build. A pre-installed
+-- unit is shown as such: it is already built, with no flags to choose.
+renderChoice :: PackageName -> Resolved -> Text
+renderChoice p (Installed i) = T.pack $ unwords [prettyShow p, T.unpack (pretty (version i)), "(installed)"]
+renderChoice p (Built v fa) = T.pack $ unwords ([prettyShow p, T.unpack (pretty v)] ++ [showFlagAssignment fa | not (null (showFlagAssignment fa))])

@@ -1,5 +1,16 @@
 # Specification: flag semantics
 
+> **Retired 2026-10-08.** This specification describes a model in which a package's
+> value carried a total flag assignment and its sets were a DNF of cells with
+> three-state pins. That model was replaced by flags as solver variables
+> ([../flags-as-variables.md](../flags-as-variables.md), [../DESIGN.md §3](../DESIGN.md)),
+> and the machinery it specifies (`SourceCell`, `FlagPin`, `pruneCells`,
+> `usableAssignments`) was deleted. It is kept for its arguments, in particular §1.4,
+> which records why the flag was put in the value and what it cost, and §2.3, which
+> is the correctness argument the three-state pin existed for. Links below point at
+> files as they were.
+>
+
 > **Status:** specification. It says what must be *true*, not how to represent
 > anything. No types, no data structures, no functions — those are derived work.
 >
@@ -12,12 +23,12 @@
 > any of them.
 >
 > **Authority:** on the questions it answers, this file wins over
-> [flags-design.md](attic/flags-design.md) (which chose a different rule — see §2.3)
+> [flags-design.md](flags-design.md) (which chose a different rule — see §2.3)
 > and over `CLAUDE.md`. It does not overrule
 > [references/pubgrub.md](../references/pubgrub.md). Where PubGrub already
 > decides something, this file cites it.
 >
-> **Reviewed** by [attic/flags-semantics-review.md](attic/flags-semantics-review.md).
+> **Reviewed** by [attic/flags-semantics-review.md](flags-semantics-review.md).
 > Its four findings are folded in: §1.5 and §1.6 (who owns the manual-flag rule),
 > §2.5 (a project decision, not a PubGrub requirement), §5 (the recipe must consume
 > an O6-complete search), and O4 (a local result, not a whole-solver one). The review
@@ -144,7 +155,7 @@ that generalisation cheap.
 Nothing in §2 or §3 depends on this choice being the right one. If the retry cost
 ever dominates, this is the decision to revisit, and §2.3 largely dissolves when it
 is. It is recorded here as a decision with a price, because the previous record of
-it (see [flags-design.md](attic/flags-design.md) §1) gave a reason that does not
+it (see [flags-design.md](flags-design.md) §1) gave a reason that does not
 hold — invasiveness of a type substitution — and omitted the price entirely.
 
 **Consequence for the rest of this document.** A constraint that mentions `f` is
@@ -210,7 +221,7 @@ that flag is **not** an error and excludes nothing. `--flag=+fast` against a
 version with no `fast` flag simply says nothing about it. Only versions that
 declare `fast` and set it `False` are excluded. This is a deliberate
 input-handling decision, inherited from
-[flags-design.md](attic/flags-design.md) §5, and this specification does not change it.
+[flags-design.md](flags-design.md) §5, and this specification does not change it.
 
 What it *does* change is where the leniency comes from. It is a property of how
 user input is **translated**, not of how a constraint is interpreted: for a user
@@ -322,7 +333,7 @@ each of them:
   observable — a version declaring no flags vanished from `A ∖ B` while being in
   `A` and not in `B`.
 - **Lenient** — "undeclared makes the atom vacuously true", the rule
-  [flags-design.md §2 "Domain-freedom principle"](attic/flags-design.md) chose. Then
+  [flags-design.md §2 "Domain-freedom principle"](flags-design.md) chose. Then
   the atom `f is on` also covers instances lacking `f`, and its negation covers
   them again. Difference comes out **too big**. That is the safe direction
   (§3, O4) but it is still not exact, and it makes two different constraints
@@ -549,7 +560,7 @@ genuinely to be done is the **version** axis, and it splits in two:
   guard.
 
   The walk is affordable because a read is a CBOR decode rather than a parse. See
-  [collapsing.md](collapsing.md) for the cost, and for the five ways to walk less.
+  [collapsing.md](../collapsing.md) for the cost, and for the five ways to walk less.
 
 ### 4.3 Reports
 
@@ -909,7 +920,7 @@ moves.
 > guards are genuine conditions — including §9's worked trace. That coverage is the
 > only reason it is safe to leave the machinery in place. What changes is which rows below are *exercised*
 > rather than merely *held*, and the table now says so. This is a scope cut for a
-> first release, recorded in [STATUS.md](STATUS.md) §3.1. The flag axis
+> first release, recorded in [STATUS.md](../STATUS.md) §3.1. The flag axis
 > is expected back, and §10's couplings are written for whoever brings it back.
 
 | obligation | status |
@@ -928,7 +939,7 @@ moves.
 | §1.5 manual flags | **implemented in the degenerate case** (2026-08-17): every flag is manual and no user values exist, so the translation is "take the default" and it is applied at input rather than as a solver constraint. The general rule — some flags manual, some values user-supplied — is untouched |
 | §1.6 lenient user constraints | not implemented (no user flag constraints yet), and while every flag is manual they are the only thing that could move one |
 | §4.1 dependencies at the decided assignment | holds. Currently trivial, since there is one assignment per release |
-| §4.2 per-fact collapsing | **implemented, both axes.** The flag axis makes the guard the depender's flag component. The version axis runs in two places: `spanningOccurrence` walks adjacent releases carrying the same occurrence, and `PubGrub.Store` merges facts that agree about the dependee as they arrive. See [collapsing.md](collapsing.md) |
+| §4.2 per-fact collapsing | **implemented, both axes.** The flag axis makes the guard the depender's flag component. The version axis runs in two places: `spanningOccurrence` walks adjacent releases carrying the same occurrence, and `PubGrub.Store` merges facts that agree about the dependee as they arrive. See [collapsing.md](../collapsing.md) |
 | §4.3 report wording | partial: constraints render, the not-applicable wording is not aligned |
 | §5 choice policy | implemented as release-major then fewest deviations, but over a **one-completion-per-cell** search — correct only while admissibility is assignment-independent (below). Currently vacuous: one completion exists, so "fewest deviations" ranks a single candidate |
 | §6 non-uniform universe, one-sided properties | in place |
