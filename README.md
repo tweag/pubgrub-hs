@@ -26,9 +26,8 @@ message on `aeson <2` is shorter than our proof.
 
 The reports in [`docs/reports/`](docs/reports/) are the deliverables in their current
 form, each dated in its header. [`docs/STATUS.md`](docs/STATUS.md) is what the
-repository contains now, [`docs/DESIGN.md`](docs/DESIGN.md) why it is built that way,
-[`docs/TODO.md`](docs/TODO.md) what is planned, and [`CLAUDE.md`](CLAUDE.md) the
-architecture.
+repository contains now and what is planned, [`docs/DESIGN.md`](docs/DESIGN.md) why
+it is built that way, and [`CLAUDE.md`](CLAUDE.md) the architecture.
 
 [PubGrub]: https://github.com/dart-lang/pub/blob/master/doc/solver.md
 
@@ -122,7 +121,7 @@ sentences against cabal's 193.
 ## Test
 
 ```sh
-cabal test                  # 233 tests
+cabal test                  # 229 tests
 scripts/gate.sh             # every check that must not regress, over 26 real problems
 cabal run pubgrub-harness   # both solvers over both problem sets; writes bench/output/
 ```
@@ -148,7 +147,7 @@ bridge/Bridge/      the Cabal bridge (private library): reads the Hackage index,
                     over the same index as the baseline.
 app/                the `pubgrub`, `pubgrub-index` and `pubgrub-harness` executables.
 test/               the test suite, plus test/golden/.
-docs/               STATUS.md first. See docs/STATUS.md §4 for what each file decides.
+docs/               STATUS.md first. See docs/STATUS.md §6 for what each file decides.
 ```
 
 ## Caveats

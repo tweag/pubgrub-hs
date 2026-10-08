@@ -8,11 +8,12 @@
 > **Dated.** Written when a package's value carried its flags and `InstanceSet` was a
 > DNF of cells. That model was retired on 2026-10-08 ([flags-as-variables.md](flags-as-variables.md));
 > the entries below that speak to `FlagPin`, `pruneCells` and one-sided emptiness
-> now describe [attic/flags-semantics.md](attic/flags-semantics.md), not the code.
+> now describe a retired model ([decision-log.md](decision-log.md) Eras 5, 6 and 20),
+> not the code.
 >
 > **What this is not.** Not authoritative on anything. It cites no rule and creates
 > none. In particular it **does not reopen the ASP decision** — see
-> [`attic/README.md`](attic/README.md) §1, which still stands: there is no ASP
+> [STATUS.md](STATUS.md) §5.1, which still stands: there is no ASP
 > component, there never was one, and none of this argues for adding one. What
 > changed is that we now know some of our design problems have a formal literature,
 > and where it is.
@@ -39,15 +40,15 @@ Ranked by how much each one bears on live work:
 
 | our problem | where it lives here | paper |
 |---|---|---|
-| extensional vs intensional version ranges | [`DESIGN.md`](DESIGN.md) §2, [`attic/README.md`](attic/README.md) §7 | §1 aspcud |
+| extensional vs intensional version ranges | [`DESIGN.md`](DESIGN.md) §2, [`STATUS.md`](STATUS.md) §5.1 | §1 aspcud |
 | depender collapsing, and what it cost | [`collapsing.md`](collapsing.md) | §1.3 |
 | narrowing the universe before/while solving | `Bridge.Hackage`, and `collapsing.md`'s read cost | §1.2, §2.4 |
-| no lawful `Eq`, order-dependent pruning | `InstanceSet`, `SetOps.equivalent` | §2.1 |
-| one-sided `isEmpty`, `Relation.Inconclusive` | [`attic/flags-semantics.md`](attic/flags-semantics.md) O3/O4 (retired: the set is exact since 2026-10-08) | §2.2 |
-| three-state `FlagPin` | [`attic/flags-semantics.md`](attic/flags-semantics.md) §2. Retired with the cell DNF on 2026-10-08 | §2.3 (analogy only) |
+| no lawful `Eq`, order-dependent pruning | the retired cell DNF ([`decision-log.md`](decision-log.md) Era 20); `InstanceSet` has had a lawful `Eq` since 2026-10-08 | §2.1 |
+| one-sided `isEmpty`, `Relation.Inconclusive` | the retired specification's O3/O4; the set is exact since 2026-10-08 | §2.2 |
+| three-state `FlagPin` | retired with the cell DNF on 2026-10-08 | §2.3 (analogy only) |
 | correctness of conflict resolution | stated in prose only; nothing in the repo proves it | §3 |
 | over-specific learned clauses (the old "2^k") | one fact per guarded occurrence, [`collapsing.md`](collapsing.md) — **landed** | §8 |
-| prefer-installed / prefer-defaults / prefer-newest | `Bridge.Provider.preferDefaults`, rung 3. It never runs on real input while flags take their defaults | §5 |
+| prefer-installed / prefer-defaults / prefer-newest | `Bridge.Provider`'s decision order: installed first, then newest; a flag's default rides in its identity, so it is offered first ([`flags-as-variables.md`](flags-as-variables.md) §1) | §5 |
 | explaining failure | `PubGrub.Report` | §6 |
 
 ---
@@ -84,8 +85,8 @@ That is exactly the O(#versions-on-Hackage)-per-dependency cost that
 `references/pubgrub.md:1172` names as one of the four things separating PubGrub from
 CDCL and answer-set solving, and that our `InstanceSet` exists to avoid.
 
-**Why this matters to us.** [`attic/README.md`](attic/README.md) §7 argues against the
-extensional `Set Instance` from first principles. This paper is the empirical
+**Why this matters to us.** [`decision-log.md`](decision-log.md)'s dropped directions
+argue against the extensional `Set Instance` from first principles. This paper is the empirical
 counterpart: people who chose extensional, on real distribution data, at scale. Cite
 it when the question is "was intensionality really necessary, or were we being
 fancy?" — and note *what they had to build to survive it*, next.
@@ -152,9 +153,9 @@ hold"). Two differences worth noticing:
   canonical by construction.
 
 The `:` connective is also the closest thing in their language to a flag guard, which
-makes this the nearest published relative of [`attic/flags-semantics.md`](attic/flags-semantics.md)
-§4.2's guarded emission. It is not the same thing: their guard ranges over versions,
-§4.2's over flag conditions.
+makes this the nearest published relative of our guarded emission
+([`flags-as-variables.md`](flags-as-variables.md) §2). It is not the same thing: their
+guard ranges over versions, ours over flag conditions.
 
 ---
 
@@ -172,6 +173,10 @@ admits versions the index does not have, and an `InstanceSet` that denotes a set
 never enumerate.
 
 ### 2.1 "No canonical form" is a known phenomenon with a known remedy
+
+**Retired.** This entry described the cell DNF. Since 2026-10-08 `InstanceSet` is
+canonical and has a lawful `Eq` ([`DESIGN.md`](DESIGN.md) §2); the entry is kept as
+the account of why the earlier representation could not have one.
 
 Their §1 example:
 
@@ -198,8 +203,8 @@ anything is ever stated formally about pruning, this is the shape it must take:
 a normal form*.
 It is also, from the general theory, why `SetOps.equivalent` (mutual containment) is
 the right notion of equality and why `Eq` cannot be: there is no normal form to
-compare. `../CLAUDE.md` already forbids adding `Eq`. This is the principled version of
-the reason.
+compare. `../CLAUDE.md` forbade adding `Eq` while that representation stood. This is
+the principled version of the reason.
 
 ### 2.2 One-sided emptiness is their trade too, made deliberately
 
@@ -212,7 +217,7 @@ and, on §5:
 > are better suited for on-the-fly grounding along an instantiation sequence."
 
 Give up precision to be able to work incrementally, then prove the approximation is
-*safe*. That was [`attic/flags-semantics.md`](attic/flags-semantics.md) O3/O4 — never claim
+*safe*. That was the retired specification's O3/O4 — never claim
 emptiness wrongly, may fail to notice it — as a general principle, with the proof
 obligations named. Useful for any formal statement about `isEmpty`: the obligation
 is one-directional (`isEmpty ⟹ denotation empty`), which is what the test suite
@@ -223,7 +228,7 @@ already asserts and what the theory says is the correct shape.
 To keep the operators monotone they "resort to concepts borrowed from ID-logic", and
 work with two- and four-valued contextual interpretations. We needed three `FlagPin`
 states because a two-valued pin is not closed under negation
-([`attic/flags-semantics.md`](attic/flags-semantics.md) §2).
+(retired with the cell DNF, [`decision-log.md`](decision-log.md) Era 20).
 
 **Flagged as an analogy.** The mechanisms are not the same and nothing here transfers
 formally. It is worth one line only because "we tried two values and the operator
@@ -250,9 +255,9 @@ Algorithm 1 closure is an ad-hoc instance of exactly this bottom-up evaluation.
 
 Grounding here is still *full* grounding with on-the-fly simplification. What the
 paper gives you is the vocabulary for saying which instances you are entitled to skip
-and what you must prove about it — which is the argument
-[`attic/flags-semantics.md`](attic/flags-semantics.md) §4.2 made informally when it says use the
-guard `C` verbatim rather than enumerating assignments. It does not hand you the
+and what you must prove about it — which is the argument the guarded emission makes
+informally ([`flags-as-variables.md`](flags-as-variables.md) §2): use the guard
+verbatim rather than enumerating assignments. It does not hand you the
 algorithm. See §8.
 
 **Sections to read:** §2.5 (program simplification) and §5 (approximate models along
@@ -329,7 +334,7 @@ itself published:
 **Gebser, M., Kaufmann, B., Otero, R., Romero, J., Schaub, T., & Wanko, P. (2013).
 Domain-Specific Heuristics in Answer Set Programming.** AAAI'13 *(unread)* —
 declarative decision heuristics as a first-class construct. The direct analogue of
-`Bridge.Provider.preferDefaults`.
+our prefer-installed, prefer-default, prefer-newest decision order.
 
 For the general theory of preference, if it is ever wanted: **asprin** (Brewka,
 Delgrande, Romero & Schaub, AAAI'15:1467–1474, and *A general framework for
@@ -345,7 +350,7 @@ language.
 Technique for Debugging Answer-Set Programs.** AAAI'08:448–453.
 [PDF](https://cdn.aaai.org/AAAI/2008/AAAI08-071.pdf)
 
-Read this as *support* for [`attic/README.md`](attic/README.md) §1 rather than as a
+Read this as *support* for [STATUS.md](STATUS.md) §5.1 rather than as a
 technique to borrow. Explaining "no answer set" in ASP requires a separate
 meta-encoding layer bolted on top of the solver, and what it produces is a diagnosis
 of a *logic program*, not a proof about packages and versions in cabal's range syntax.
@@ -367,9 +372,8 @@ space:
 
 - **Theory propagators.** The concrete route to an oracle that does *not* pay §1.1's
   expansion: keep versions and flags symbolic, reuse our own `VersionSet` logic as the
-  theory, let clingo supply CDCL. If [`attic/README.md`](attic/README.md) §1's
-  "SAT/UNSAT oracle for differential testing" is ever built, build it this way, not as
-  a plain encoding.
+  theory, let clingo supply CDCL. If a SAT/UNSAT oracle for differential testing is
+  ever built, build it this way, not as a plain encoding.
 - **ASPIF, as boundary discipline.** Their split is grounder | solver. Ours is
   `bridge` | `pubgrub-hs`, and the mapping is closer than it looks — our `Provider` is
   playing the grounder's role, being the only component that consults the index
@@ -393,8 +397,9 @@ answer is to write more ASP, and we want Haskell emitting cabal-syntax sentences
 ## 8. The defect we called "2^k", and what it is actually called
 
 Worth a section because the internal name was misleading, and because it is now
-**fixed** — [`flags-semantics.md`](attic/flags-semantics.md) §4.2's flag axis landed
-2026-08-05 and `Bridge.Provider.dependencyInc` pins only the flags the guard mentions.
+**fixed** — the flag axis landed 2026-08-05 ([`decision-log.md`](decision-log.md)
+Era 7), and since 2026-10-08 a guarded dependency's terms name only the flags the
+guard mentions ([`flags-as-variables.md`](flags-as-variables.md)).
 
 **The defect was not really exponential arithmetic. It was an over-specific learned
 clause.** The depender term named a single point in the version × assignment space, so
@@ -402,9 +407,9 @@ refuting it failed to *generalise* to the sibling assignments of the same versio
 the solver rediscovered the same conflict once per irrelevant assignment. Stated that
 way it is a standard CDCL failure mode — a learned constraint that does not cover the
 symmetric branches — and "2^k" was only the worst-case count it produced. The residue
-after §4.2 is bounded by the number of **guard regions**, not by 2^k over every
-declared flag ([`decision-semantics.md`](attic/decision-semantics.md) §0 lists the three
-costs that survive, all from a decision still being a point instance).
+after that is bounded by the number of **guard regions**, not by 2^k over every
+declared flag; the costs that remained because a decision was still a point instance
+went with the flag-in-value model on 2026-10-08.
 
 **The Potassco paper on exactly this mechanism** — generalising a learned constraint
 past the ground instance that produced it, so it is not relearned per variant:
@@ -412,9 +417,9 @@ past the ground instance that produced it, so it is not relearned per variant:
 **Gebser, M., Kaminski, R., Kaufmann, B., Lühne, P., Romero, J., & Schaub, T. (2016).
 Answer Set Solving with Generalized Learned Constraints.** ICLP'16 Technical
 Communications, OASIcs 52, 9:1–9:15. *(unread — title and venue verified, contents
-not.)* Worth opening before anyone designs the next generalisation step, i.e. before
-[`decision-semantics.md`](attic/decision-semantics.md) is implemented, since condition
-decisions are the same move applied to decisions rather than clauses.
+not.)* Worth opening before anyone designs the next generalisation step: the retired
+condition-decision specification was the same move applied to decisions rather than
+clauses, and the flag-variable model made it moot.
 
 **What still has no literature here**, as far as this sweep found:
 

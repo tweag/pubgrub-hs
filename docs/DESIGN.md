@@ -86,8 +86,9 @@ constraint is passed along unchanged. The solver's algebra still runs on interva
 form: a list of cells, each a version range crossed with pinned flags, with three
 states per pin and subsumption pruning between operations, measured at 28,293 cells
 without pruning against 41 with. That representation, its non-canonicity and its
-one-sided emptiness are recorded in [attic/flags-semantics.md](attic/flags-semantics.md)
-and [attic/README.md](attic/README.md) §9. It was removed when flags became variables.
+one-sided emptiness are recorded in [decision-log.md](decision-log.md), Eras 5, 6 and
+20 and its [dropped directions](decision-log.md#dropped-directions). It was removed
+when flags became variables.
 
 ## 3. A flag is a variable, and a decision is one variable's value
 
@@ -147,9 +148,10 @@ release is flattened, which is what every flag was before the axis was searched;
 assignment into each instance and the pins into each set, so that one variable per
 package sufficed. It bought that with the DNF of §2 and with three states per pin,
 and conflict resolution had to learn "this release with this flag" one assignment
-at a time unless facts were collapsed per guard. [attic/flags-semantics.md](attic/flags-semantics.md)
-§1.4 records the argument for it and the price; [flags-as-variables.md](flags-as-variables.md)
-records the measurement that moved it.
+at a time unless facts were collapsed per guard. The retired specification's §1.4
+recorded the argument for it and the price ([decision-log.md](decision-log.md) Era 6
+and its [dropped directions](decision-log.md#dropped-directions));
+[flags-as-variables.md](flags-as-variables.md) records the measurement that moved it.
 
 ## 4. A release owns a slot, not a point
 
@@ -845,7 +847,7 @@ incompatibilities are gone, and the sixteen real ones are untouched:
 | `matterhorn ==90000.1.1` | 584 → **581** | 30 → 30 | 2 → **1** |
 
 `aeson <2` is the same 400 to 320 that narrowing declared ranges to published
-versions produced on 2026-09-03 ([TODO.md §6](TODO.md#6-measured-and-rejected)),
+versions produced on 2026-09-03 ([STATUS.md §5.2](STATUS.md#52-measured-and-rejected)),
 now for free: the user's own `<2` and the slot bound `2.0.0.0` are one cut. `yesod`
 pays twelve decisions and three conflicts, the search-path luck
 [§4](#4-a-release-owns-a-slot-not-a-point) records for a wider depender term, and

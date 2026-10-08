@@ -191,7 +191,7 @@ headline it prints is "shorter on 16 of 16 comparable problems", by sentences; b
 screen lines at 80 columns it is shorter on 15 and equal on the `hlint` pair.
 `scripts/gate.sh`
 does the deciding half: it fails on any regression in verdict agreement or proof
-length. See [STATUS.md](STATUS.md) §5 and [harness-plan.md](harness-plan.md).
+length. See [STATUS.md](STATUS.md) §7 and [benchmarking.md](benchmarking.md).
 
 One habit worth keeping in any tool over this corpus: read a child's output as
 bytes and pass `-a` to `grep`. A tool that reads a proof as text and meets a byte

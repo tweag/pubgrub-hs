@@ -2,7 +2,8 @@
 #
 # Check that the counters `pubgrub --stats` keeps in-process agree, number for
 # number, with the ones bench/summarise.awk derives by counting a `-v` trace
-# (docs/harness-plan.md §3, step 1). The awk can be retired only once they do.
+# (docs/benchmarking.md, "Quiet and counted"). The awk can be retired only once
+# they do.
 #
 #   scripts/check-stats.sh                # every problem in both sets
 #   OUT=/tmp/stats scripts/check-stats.sh # keep the per-problem outputs

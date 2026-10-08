@@ -7,13 +7,13 @@
 > right the first time.
 >
 > **What this is not.** Not a specification and not authoritative on anything. If
-> this file and [flags-semantics.md](attic/flags-semantics.md) or
+> this file and [DESIGN.md](DESIGN.md), [flags-as-variables.md](flags-as-variables.md) or
 > [references/pubgrub.md](../references/pubgrub.md) disagree, they win. This is
 > narrative only.
 >
 > **Siblings.** [STATUS.md](STATUS.md) is the current state (what works, what is
-> open, which file wins). [attic/](attic/) holds the abandoned directions and the
-> documents that described them. This file is the *history* only.
+> open, which file wins). The abandoned directions are the last section of this file,
+> [Dropped directions](#dropped-directions). This file is the *history* only.
 >
 > **Dates** are author dates. The repo is `jj`, and history rewrites have reset
 > committer dates in bulk — several rounds of them landed on 2026-07-28 and
@@ -82,7 +82,7 @@ was in range.
 
 Note the date: this is **pre-reboot**. `expand` is one of the few pieces of Era 2
 that survived the rewrite intact, which is why it can feel older than the code
-around it. Splitting it *back* is still an open question — [TODO.md](TODO.md) §4.
+around it. Splitting it *back* is still an open question — [STATUS.md](STATUS.md) §4.5.
 
 ---
 
@@ -253,7 +253,7 @@ The fix was to separate them: three-case atoms make both readings expressible, s
 each boundary states which it means. Leniency survives, but only for **user
 input**, translated once, at one boundary.
 
-`flags-design.md` is kept, in [attic/](attic/), and is still wrong on this point.
+`flags-design.md` was kept, in the attic until 2026-10-12 ([Dropped directions](#dropped-directions)), and is still wrong on this point.
 It is superseded on semantics, not deleted — `flags-semantics.md` cites it four
 times as the position it argues against.
 
@@ -287,7 +287,7 @@ bigger, because ~170 retained parse trees each pin their slice of the index and
 every major garbage collection copies the lot. If you ever think "why not just cache the
 descriptions" — that was measured, and it was much worse.
 
-### A Lean specification — HELD (as an artifact)
+### A Lean specification — HELD (as an artifact), then dropped (Era 18)
 
 `specification/` — a Lean formalisation. Unrelated to the abandoned Alloy model
 from Era 3.
@@ -306,15 +306,15 @@ from Era 3.
 
   Recorded so it is not proposed a third time. The file is a good *historical* read
   and its lesson is worth keeping, so the lesson now lives in prose —
-  [attic/](attic/) §7 — rather than in compilable code that competes with `src/`.
+  [Dropped directions](#dropped-directions) — rather than in compilable code that competes with `src/`.
   Recover the file with `git show bedf1210:Small.hs` when you want it.
 - **Docs reorganised** (Aug 5): [STATUS.md](STATUS.md) is now the single
-  current-state entry point, abandoned directions moved to [attic/](attic/), and the
+  current-state entry point, abandoned directions moved to `docs/attic/`, and the
   three competing flag documents reduced to one live authority.
 
 ### Condition decisions specified — UNBUILT AT THE TIME, specified and not implemented
 
-*Aug 4.* [decision-semantics.md](attic/decision-semantics.md), 26 KB, and the most
+*Aug 4.* `decision-semantics.md` (retired; [Dropped directions](#dropped-directions)), 26 KB, and the most
 consequential unimplemented thing in the project. **This is the revisit that
 `flags-semantics.md` §1.4 explicitly reserved** ("if the retry cost ever dominates,
 this is the decision to revisit").
@@ -397,7 +397,7 @@ cabal's is told at the shared index read (`lookupGPD` marks every flag manual, s
 
 Three things worth having on the record, because each is easy to misread later:
 
-- **It is a scope cut, not a retraction.** [flags-semantics.md](attic/flags-semantics.md) is
+- **It is a scope cut, not a retraction.** `flags-semantics.md` is
   unchanged as a specification and its property suite still exercises the full
   three-state algebra. Only the degenerate case runs. The machinery stays, and the
   `flags` jj bookmark marks where the axis stands.
@@ -758,8 +758,9 @@ exactly why the solver had to derive along them.
 
 ### One command produces both deliverables — HELD
 
-*Sep 3.* [harness-plan.md](harness-plan.md) was written in the morning and built in
-the afternoon. `pubgrub --stats` counted the search in-process and printed the phase
+*Sep 3.* A plan for the harness, `harness-plan.md`, was written in the morning and
+built in the afternoon; the file was removed on 2026-10-12 (Era 21), every step in it
+having been built. `pubgrub --stats` counted the search in-process and printed the phase
 timings; `--plan lines` printed a plan one package per line; `app/Harness.hs` became
 `pubgrub-harness`, which ran the driver over both problem sets, three times per solver
 per problem, took medians, asserted that every deterministic value agreed across the
@@ -773,6 +774,14 @@ solvers. Peak residency and peak RSS are per-process numbers, so that could not 
 literal. What the sentence protected — both solvers see one world — was already
 guaranteed by `withWorld`, so the harness drove the `pubgrub` executable as a child
 process and read what it printed.
+
+**The decisions made that morning.** A separate executable rather than a subcommand,
+so the measuring code did not sit inside the thing being measured. Three repetitions:
+enough for a median and for the deterministic counts to be seen agreeing across runs,
+not enough for a spread, so the report quoted none. Reports written to
+`bench/output/`, ignored by git, with a run meant to be quoted copied into `docs/` on
+purpose. And the reason-mismatched corpus problems left out of the showcase while
+staying in the corpus and the gate, so that every rendered pair was like for like.
 
 **Three places the build differed from the plan.** cabal's plan lines carried no
 `lib`/`setup` qualifier, because a `ResolverPackage` has none by then; a package
@@ -1298,6 +1307,14 @@ Measured on the 26 gate problems: every verdict the same, every proof the same
 length, 76 sentences, and every problem one decision fewer. The driver renders a
 forest, one tree per target. The `-a` in the scripts stayed as a precaution.
 
+### The Lean specification left the gate — ABANDONED
+
+*Sep 22.* `specification/`, the Lean formalisation of Era 6, had never been tracked,
+and the gate that ran it was removed from `scripts/gate.sh` in the change that removed
+what was not current. The directory is gone from the tree. With the Alloy model of
+Era 3 that makes two formal models the project tried, and neither left an artifact in
+the repository.
+
 ---
 
 ## Era 19 — The reporter's rules in one language (Sep 25)
@@ -1411,9 +1428,117 @@ above rejected as an encoding.
 
 ---
 
+## Era 21 — The documentation consolidated (Oct 12)
+
+### STATUS.md absorbs TODO.md, and the attic is removed — HELD
+
+*Oct 12.* `TODO.md` became §4 and §5 of [STATUS.md](STATUS.md), so the planned, the
+settled and the rejected sit next to what works and what is out of scope.
+`harness-plan.md` was removed, every step in it having been built on 2026-09-03 and
+Era 12 carrying what the plan decided and where the build differed. `docs/attic/` was
+removed with its seven documents, the spike and the fifteen pre-reboot plans and
+specs; what each was and why it was dropped is [Dropped directions](#dropped-directions)
+below, and the files are in history at the parent of the change (`kzwrulnu`, git
+`0da85c36`). The test count had been quoted three ways across the tree (229, 232 and
+233) and reads 229 everywhere, which is what the gate printed that day.
+
+---
+
 ## What is open, and what is settled
 
-Not here. [TODO.md](TODO.md) §5 and §6 carry both lists, where they are re-read.
+Not here. [STATUS.md](STATUS.md) §4 and §5 carry both lists, where they are re-read.
+
+---
+
+## Dropped directions
+
+Approaches the project pursued and then walked away from, with why. Nothing here
+describes the current system. Read it when a decision looks arbitrary, and before
+proposing something that was already tried. Abandoned is not unfinished: what is
+merely not built yet is [STATUS.md](STATUS.md) §4. Until 2026-10-12 this list was
+`docs/attic/`, with the documents themselves; they are in history at git `0da85c36`
+(`jj file show -r kzwrulnu docs/attic/<file>`).
+
+1. **Answer Set Programming (Clingo).** Dropped before any code existed (Era 1). The
+   original framing encoded dependency solving as ASP; no `.lp` file was ever
+   committed and no solver was ever invoked. Superseded by implementing PubGrub
+   natively, because a generic solver's explanations are not PubGrub's explanations
+   and explanation quality is half the point. Nothing was removed: there was never
+   anything there.
+2. **A Heyting / Boolean set algebra** (Era 3). A `Lattice` / `Boolean` / `Sets`
+   class hierarchy, a `Pow` powerset type, and `Choice` / `ChoiceSet` modelling a
+   package's value as a product of sets with flags folded into the source component.
+   Built, then thrown away in the reboot: the value domain needs intersection, union,
+   difference and emptiness, and specifically not a complement, which needs a
+   universe of values nothing in the algorithm asks for. Replaced by `SetOps`. The
+   clearest "more general was the wrong direction" turn in the project.
+3. **An Alloy model of Cabal build-plan structure.** Added 2026-06-26, dropped by
+   2026-07-03, left no artifact (Era 3). The instinct outlived it as
+   [cabal-build-model.md](cabal-build-model.md) and as the Lean specification below.
+4. **A Lean specification of the PubGrub kernel** (Era 6, dropped in Era 18). Never
+   tracked; its gate was removed on 2026-09-22 and the directory is gone.
+5. **`flags-design.md`, the lenient flag rule** (Era 6). The first serious design for
+   flags chose the lenient reading, under which a constraint mentioning a flag a
+   version does not declare is vacuously true, and implemented it as a global rule in
+   membership, where it also applied to the solver's own derived constraints, which
+   need the strict reading. The fix was three-state flag atoms, with leniency kept for
+   user input only, translated once at one boundary. Its declarations named types
+   from before the reboot.
+6. **`flags-spike.hs`.** An executable spike for the flag set algebra that validated
+   its laws on a universe where every version declared the same two flags. A uniform
+   universe cannot distinguish the three readings of a flag statement, so the
+   properties passed while the semantics underneath was wrong, and the gap survived a
+   second validation in the property suite. That is why the later specification made
+   a non-uniform test universe a written obligation.
+7. **The pre-reboot plans and specs** (`superpowers/`, eight plans and seven design
+   specs, 2026-06-10 to 2026-06-24). They described the first implementation, which
+   worked end to end on real Hackage data and was restarted in the July reboot for
+   modelling reasons, not correctness ones (Era 4). What became of each: the native
+   solver's idea survived and its code did not; reading a cached `01-index.tar`
+   ourselves survived, through `hackage-security`; parse-on-demand survived, and the
+   memoisation question was settled by measurement (cache the reduced form, never the
+   parse tree); `co-log` tracing survived; `--with-compiler` went; installed packages
+   survived as `PreInstalled` instances in one provider rather than as two providers
+   combined; the lattice generalisation is item 2.
+8. **`flags-semantics-review.md`.** An independent review of a draft whose four
+   findings were folded into the draft the same day, so it argued against text that
+   no longer existed. Two things it said better than the specification: why the local
+   emptiness result was local only, and what the "false `None`" failure mode was, the
+   provider reporting nothing available when something was.
+9. **`bridge-and-problem-model.md`** (2026-07-23). Planned the bridge before it
+   existed, and three of its decisions were reversed: it chose to reuse `convPIs` and
+   derive both solvers from one `PInfo` (the bridge does its own flattening without
+   `finalizePD`, and `modularResolver` runs `convPIs` itself); it described the
+   bridge as an executable with a `tar` dependency (it is a private library with
+   none); and it enumerated flag assignments into instances. Its three-way analysis
+   of what `cabal-install` would have supplied was rescued into `CLAUDE.md`.
+10. **`flags-semantics.md` and `decision-semantics.md`, the flag in the value**
+    (Eras 6 and 7, retired in Era 20). The second design for flags, and the one that
+    shipped for a while: a package's value was an instance with a total flag
+    assignment, a set of instances a DNF of cells with three states per pin, and a
+    decision settled version and every flag at once; `decision-semantics.md` then
+    specified deciding only the flags a guard made relevant. The price was the
+    machinery: a non-canonical set type with no lawful `Eq`, one-sided emptiness,
+    subsumption pruning between every operation, and a provider that completed
+    assignments per cell, all so that one variable per package would suffice. Making
+    each automatic flag a variable of its own got conditional existence from one
+    clause per flag ([flags-as-variables.md](flags-as-variables.md), [DESIGN.md](DESIGN.md)
+    §2 and §3). Their obligation letters O1–O7 and D1–D3 appear in the eras above;
+    the one that survived as a live requirement is O6, [STATUS.md](STATUS.md) §5.1.
+11. **An extensional `Set Instance`** (Era 5). `Small.hs` stored instance sets
+    literally, with a comment that a symbolic representation could replace it
+    "without the algorithm noticing". Wrong twice over: the swap was not optional,
+    because a declared range must cost one entry and not one per matching version on
+    Hackage (`references/pubgrub.md:1172` names that as what separates PubGrub from
+    CDCL and answer-set solving); and it was not invisible, because the symbolic set
+    could not be enumerated, so a provider enumerates from its own index and filters
+    by membership, which is still true. "It is behind an interface, so we can swap it
+    later" was false in both directions at once.
+12. **Two-state flag pins** (Era 5). On and off only. The negation of "flag is on"
+    collapsed to "flag is off", silently dropping every version that lacked the flag,
+    so set difference came out too small, and too small a difference lets the solver
+    report failure for a solvable problem. Shipped twice, replaced by three states,
+    and then retired with the pins themselves.
 
 ---
 

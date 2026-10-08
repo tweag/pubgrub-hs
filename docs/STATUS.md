@@ -1,18 +1,17 @@
-# Status — where the project is
+# Status — where the project is, and what is planned
 
 > **What this is.** What the repository contains now: what works, what is out of
-> scope, and which document decides a question. Why the solver is built the way it
-> is, with the evidence, is [DESIGN.md](DESIGN.md). What is planned is
-> [TODO.md](TODO.md).
+> scope, what is planned, what is settled, and which document decides a question. Why
+> the solver is built the way it is, with the evidence, is [DESIGN.md](DESIGN.md).
 >
 > **What this is not.** Not a specification. The table in
-> [Which document decides](#4-which-document-decides) names the file that owns each
+> [Which document decides](#6-which-document-decides) names the file that owns each
 > question. If this file disagrees with one of those files, that file is right.
 >
 > **History is not here.** [decision-log.md](decision-log.md) records how the project
-> got here, in order. [attic/](attic/) holds the directions we dropped.
+> got here, in order, and its last section lists the directions that were dropped.
 >
-> **Checked against the tree on 2026-09-22.** 233 tests pass and
+> **Checked against the tree on 2026-10-12.** 229 tests pass and
 > [`scripts/gate.sh`](../scripts/gate.sh) passes, at the index-state pinned in
 > [`bench/index-state`](../bench/index-state), `2026-09-09T02:42:09Z`.
 
@@ -45,8 +44,8 @@ is added one rung at a time; each rung leaves a runnable solver.
 | 2 — flags and conditional dependencies | built, behind `--flags search` ([§3.1](#31-flags-are-fixed-at-their-declared-defaults-unless-asked)) |
 | 3 — `base` and GHC pinning, boot packages installed-only | built |
 | — buildability (not a rung) | built |
-| 4 — setup and build-tool dependencies | not started ([TODO.md §1.1](TODO.md#11-setup-and-build-tool-dependencies-rung-4)) |
-| 5 — public sublibraries | not started ([TODO.md §1.2](TODO.md#12-public-sublibraries-rung-5)) |
+| 4 — setup and build-tool dependencies | not started ([§4.1](#41-setup-and-build-tool-dependencies-rung-4)) |
+| 5 — public sublibraries | not started ([§4.2](#42-public-sublibraries-rung-5)) |
 
 ---
 
@@ -181,7 +180,8 @@ a completeness column before it can render such a problem fairly.
   ([DESIGN.md §13](DESIGN.md#13-the-index-is-read-at-an-index-state)). The package-to-versions map
   was long assumed to dominate that floor. Doubling the map's per-element overhead
   moved peak residency by 0.5%. The memory claim is the strongest one the project
-  has, and most of it is a number nobody can account for. Settle this first.
+  has, and most of it is a number nobody can account for. Settle this first
+  ([§4.5](#45-open-questions)).
 
   What sits *above* the floor is understood: the memoised reduced forms, so residency
   tracks how many releases a solve read. That is why `pandoc` and `yesod` sit at
@@ -235,10 +235,7 @@ unsatisfiable dependency, so some problems that resolve under `search` do not un
 Both solvers fail together, which is what makes the comparison fair. It is still a
 restriction of the problem, and any published result must say which model it ran.
 
-**What the search still owes.** Buildability is judged at the declared defaults, so a
-release unbuildable only under some assignment is treated as buildable; user flag
-constraints (`--flag`) do not exist; and the gate's recorded baselines are for
-`fixed` ([TODO.md §3](TODO.md#3-flag-search)).
+**What the search still owes** is [§4.4](#44-what-flag-search-still-owes).
 
 ### 3.2 One version per package name
 
@@ -265,11 +262,146 @@ Qualified goals were designed and then shelved. The design is in
   dependency its depender's qualifier, so `qpn == qpn'` under any qualifier scheme.
 
 Setup and build-tool dependencies (rung 4) and public sublibraries (rung 5) are not
-built. What each owes is [TODO.md §1](TODO.md#1-the-next-rungs).
+built. What each owes is [§4](#4-what-is-planned).
 
 ---
 
-## 4. Which document decides
+## 4. What is planned
+
+The rungs not yet built, what has a specification and no code, and the questions
+still open. **Do not assume any of it exists in the code.**
+
+### 4.1 Setup and build-tool dependencies (rung 4)
+
+Not started. `Bridge.Cabal.Flatten.componentDeps` merges library,
+sublibraries and executables into one `GuardedDeps` and discards which component each
+occurrence came from. It reads neither `setup-depends` nor `build-tool-depends`.
+
+Each component is gated on its own buildability first, which is what removed the
+plan divergence the merge used to cause
+([DESIGN.md §15](DESIGN.md#15-a-component-that-is-not-buildable-contributes-no-dependencies)).
+
+Recovering the component label is the bulk of the work, and it touches no solver code.
+
+Two things are owed on the way. Qualified goals, designed and shelved: the design and
+why it does not fix self-dependencies are in [§3.2](#32-one-version-per-package-name).
+And the setup self-dependency exception: cabal keeps a reverse-dependency edge for a
+*setup* self-dependency, so the cycle forces a different setup script
+([DESIGN.md §8](DESIGN.md#8-a-dependency-of-p-on-p-is-dropped)).
+
+### 4.2 Public sublibraries (rung 5)
+
+Not started. [cabal-build-model.md](cabal-build-model.md) is the reference, and
+[solving-problem.md](solving-problem.md) §2 states the problem.
+
+### 4.3 Specified, not built
+
+| thing | specification | note |
+| --- | --- | --- |
+| **`buildable:` under a flag** | [flags-as-variables.md](flags-as-variables.md) §6 | half built. `buildableCondition` returns the condition and `buildableAtDefaults` evaluates it. A release unbuildable only under some assignment needs the guard carried into its unbuildable clause |
+| **User flag constraints** (`--flag`) | [flags-as-variables.md](flags-as-variables.md) §6 | do not exist. A level-0 request on the flag variable is the shape |
+| **`preferred-versions`** | — | the index reader does not read it. Its entries are in the tar with timestamps, so an index-state would apply to it unchanged |
+
+### 4.4 What flag search still owes
+
+Flag search is built, behind `--flags search` ([§3.1](#31-flags-are-fixed-at-their-declared-defaults-unless-asked),
+[flags-as-variables.md](flags-as-variables.md)): every automatic flag is a solver
+variable, both solvers search them, and the gate agrees 26/26 under either model.
+What is left is in [flags-as-variables.md §6](flags-as-variables.md): buildability
+under a flag, user flag constraints, a dedicated sentence for a derived step that
+names a flag, and a measured answer to whether flags should be decided right after
+their owner. The gate's recorded baselines are for `fixed`; moving them to `search`
+means re-measuring the corpus, where two problems become solvable.
+
+### 4.5 Open questions
+
+1. **What does the 27 MB memory floor consist of?** It is the first thing to settle,
+   because the memory claim is the strongest one the project has and the floor is most
+   of it. See [§2.3](#23-what-these-numbers-do-not-establish).
+2. **Should `expand` split back into "pick" then "consequences"?** The reference Rust
+   implementation keeps them as two methods. A design item, not a decision; the
+   flag-variable model made it cheaper to leave as is, since a release's consequences
+   no longer depend on an assignment.
+3. **Decision order is chosen by discovery, and on `yesod` that costs 4.4× the
+   decisions.** Diagnosed, not fixed — see
+   [DESIGN.md §12](DESIGN.md#12-decision-order-is-discovery-order-and-yesod-is-the-bill).
+4. **How far can the walk go?** It is unbounded today, so widening reads the whole
+   version list in the worst case. A cap stays sound, because maximality of the span
+   is policy rather than a requirement. Nothing has chosen one
+   ([collapsing.md](collapsing.md)).
+
+Still owed on the documentation side: vendor the Rust checkout properly, or extract
+the cited functions into a note ([§6](#6-which-document-decides)).
+
+---
+
+## 5. Settled and rejected
+
+A list of what not to do only works where it is re-read, so both lists live here.
+
+### 5.1 Settled — not planned, do not reopen
+
+Each of these was decided with reasons recorded, and revisiting it has already cost
+time.
+
+- **No complement in the value algebra.** Four operations plus emptiness. Negation
+  lives in `Term` as a polarity flip. A complement needs a universe of values that
+  nothing in the algorithm ever asks for.
+- **Sets stay intensional.** An extensional `Set Instance` is not a cheaper PubGrub. It
+  is the encoding PubGrub exists to avoid.
+- **A flag is a variable keyed by its declaration, and the value carries no flags.**
+  Decided 2026-10-08, reversing the earlier "flags live in the value". The
+  conditional existence a flag variable needs is one clause from its owner
+  (`declaresFlag`), not machinery; what the earlier model bought with a DNF of cells
+  and three pin states, this gets from `VersionSet` and a `Bool`. Do not key a flag
+  variable by release: that loses the cross-release merge for nothing.
+- **The provider never answers "nothing available" for a set that admits a value.**
+  The one obligation of the retired flag-in-value specification that survives as a
+  live requirement. Under the variable model a release has exactly one instance, so
+  the completeness it asked for holds by construction.
+- **Emptiness over a finite sample is one-sided.** A range is non-empty in version
+  space while holding none of a test universe's versions, so a sampled property can
+  only check `isEmpty ⟹ empty`. The algebra itself is exact.
+- **Do not chase byte-parity with pub's output.** `^1.0.0` is Dart. cabal writes
+  `>=1.0.0 && <2`. Same sentences, cabal's syntax.
+- **No ASP component.** An early plan to encode solving for Clingo was dropped before
+  any code existed. A generic solver's explanations are not PubGrub's explanations,
+  and explanation quality is half the point ([related-work.md](related-work.md) §6).
+
+### 5.2 Measured and rejected
+
+Both are recorded so nobody re-derives them.
+
+**Narrowing declared ranges to published versions.** `Bridge.Provider.widen` puts a
+declared range into a term verbatim, so version space no release occupies survives.
+Narrowing it with `snapToVersions` was tried twice in August, reverted twice on cost,
+and re-measured on 2026-09-03 on the current tree, where the cost argument no longer
+applies: it moves the search in both directions (`aeson <2` 400 to 320 decisions and
+11.6% less allocation, `yesod` 827 to 839 decisions and 11.7% more) and it rewrites
+every quoted range in a closed form nobody wrote, down to the user's own `lens <4`
+printing as `lens >=0.1 && <=3.10.3` on the proof's last line. The second is the
+objection, and it holds at any price. Pub never narrows; pubgrub-rs offers
+`Ranges::simplify` and applies it only in the report. `snapToVersions` is kept, tested
+and unused.
+
+Its interior half, `PubGrub.VersionSet.fillGaps`, merges the holes between a range's
+intervals that hold no published release and never moves an outer bound. Measured the
+same day: every search counter identical on eight problems, allocation within noise,
+one proof line changed (`haddock`'s seven `^>=` windows into `>=4.13.0.0 && <4.20`; since [DESIGN.md §14](DESIGN.md#14-versions-compare-with-trailing-zeros-insignificant) those windows coalesce on construction, and the declared spelling is what prints).
+It is kept in reserve for *derived* terms, which nobody wrote. Applying it to a
+declared range would discard the author's spelling, which [DESIGN.md](DESIGN.md) §2 now keeps.
+
+**The fewest-versions decision heuristic.** `references/pubgrub.md:446` suggests
+deciding the package with the fewest versions first. It cuts `futhark` decisions by
+5.2× and lengthens proofs from 66 to 95 sentences. Measured and reverted.
+
+**Reopened by `yesod`**, which is satisfiable and therefore prints no proof at all, so
+the reason for reverting does not apply to it. See
+[DESIGN.md §12](DESIGN.md#12-decision-order-is-discovery-order-and-yesod-is-the-bill).
+
+---
+
+## 6. Which document decides
 
 **Each row is authoritative on its own subject.** The list is not a ranking. The
 specifications mostly do not overlap.
@@ -283,39 +415,25 @@ specifications mostly do not overlap.
 | [collapsing.md](collapsing.md) | **depender collapsing**: what runs, what it costs, and the five ways to make it cheaper | current |
 | [benchmarking.md](benchmarking.md) | **how to run the tests and benchmarks**, and which numbers to trust | current |
 | [failure-cases.md](failure-cases.md) | **the failure corpus**: where it came from and what is in it | current |
-| [harness-plan.md](harness-plan.md) | **the harness**: why it is shaped that way, and where the build differed | current |
 | [reports/](reports/) | the two reports **as generated** by `pubgrub-harness`, each dated in its header | generated. Regenerate with `cabal run pubgrub-harness` and copy; do not edit |
+| [solving-problem.md](solving-problem.md) | **cabal's dependency solving problem**, stated: inputs, solutions, validity, and the three extensions | specification of cabal's problem, not of our code. Reference for rungs 4 and 5 |
 | [cabal-build-model.md](cabal-build-model.md) | Cabal's **build model** — components, qualifiers, Backpack | reference for rungs 4 and 5. Nothing implemented |
 | [pubgrub-intro.md](pubgrub-intro.md) | a tutorial introduction to PubGrub | current |
 | [related-work.md](related-work.md) | external literature mapped onto our problems | a reading map. Authoritative on nothing |
-| [TODO.md](TODO.md) | **what is planned**, and what is settled or rejected and is not | current |
-| [decision-log.md](decision-log.md) | project history | narrative. Authoritative on nothing |
-| this file | current state | a summary. The rows above decide |
-
-### The two retired specifications
-
-[attic/flags-semantics.md](attic/flags-semantics.md) and
-[attic/decision-semantics.md](attic/decision-semantics.md) specified the earlier
-model, in which a package's value carried a total flag assignment and its sets were
-a DNF of cells. They were retired on 2026-10-08 when flags became variables
-([flags-as-variables.md](flags-as-variables.md), [DESIGN.md §3](DESIGN.md#3-a-flag-is-a-variable-and-a-decision-is-one-variables-value)).
-Their obligation letters (O1–O7, D1–D3) are still cited in older text; the one that
-survives as a live requirement is O6, which now reads: the provider must never answer
-"nothing available" for a set that admits a value, and under the variable model a
-release has exactly one instance, so the completeness it asked for holds by
-construction.
+| [decision-log.md](decision-log.md) | project history, and the directions that were dropped | narrative. Authoritative on nothing |
+| this file | current state, what is planned, what is settled | a summary. The rows above decide |
 
 ### How much of the authority is in the repo
 
-**Only `references/pubgrub.md` is tracked.** `git ls-files references/` returns that
+**Only `references/pubgrub.md` is tracked.** `jj file list references` returns that
 one path. `references/` sits in `.git/info/exclude`, which is a local and unshared
 exclude, so the spec was force-added and nothing else under `references/` was.
 
 | under `references/` | tracked? | citations |
 | --- | --- | --- |
 | `pubgrub.md` — pub's spec | ✅ tracked | the original 13 line numbers are exact |
-| two ASP papers (PDF) | ❌ | prose only |
-| `pubgrub/` — the Rust implementation | ❌ a nested git repo | 8 of 9 exact at revision `4dbe916` |
+| six papers on answer-set solving and package management (PDF, each with a `.md` transcription) | ❌ | prose only, from [related-work.md](related-work.md) and [flags-as-variables.md](flags-as-variables.md) |
+| `pubgrub/` — the Rust implementation | ❌ a nested git repo | by function name |
 | `pubgrub-guide/` — the internals guide | ❌ a nested git repo | not cited by line |
 | `pub/` — Dart's pub itself | ❌ a nested git repo | not cited |
 
@@ -331,12 +449,9 @@ anchors are `:595` (reporting case 1), `:651` (case 2.ii), `:668` and `:671` (ca
 3), and `:673`–`:675` (the numbering rule). Every citation in the tree was checked on
 2026-09-03, and none lands on a blank line.
 
-Still owed: vendor the Rust checkout properly, or extract the cited functions into a
-note.
-
 ---
 
-## 5. Deliverable status
+## 7. Deliverable status
 
 | deliverable | state |
 | --- | --- |
@@ -350,11 +465,14 @@ apples-to-apples rather than arranged.
 The gate decides and the harness measures, and neither replaces the other.
 `scripts/gate.sh` runs both solvers over all 26 problems once and fails on any
 regression in verdict agreement or proof length. `pubgrub-harness` runs them three
-times, diffs the plans, separates the phases, and writes the two reports.
+times, diffs the plans, separates the phases, and writes the two reports. The harness
+drives the `pubgrub` executable as a child process, once per solver, problem and
+repetition, because peak residency is a per-process number and two solvers in one
+process could not be compared on memory; how it was planned and where the build
+differed is [decision-log.md](decision-log.md) Era 12.
 
 **One thing both deliverables must state outright.** The recorded numbers were taken
 with every flag pinned to its declared default (`--flags fixed`). That makes the
 comparison fair, because neither side can flip a flag to escape. It also makes some
 real failures unreachable. A benchmark or a showcase that does not say which flag
 model it ran is misleading, however honest its numbers are.
-

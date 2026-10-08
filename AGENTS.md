@@ -22,20 +22,20 @@ Haskell. There is no ASP component and there never was.
 ## Where to look first
 
 **[`docs/STATUS.md`](docs/STATUS.md) is the current-state document.** What works,
-what is out of scope, and which file decides a question. Before you change anything,
-read it. **Why it is built that way is [`docs/DESIGN.md`](docs/DESIGN.md)**: one
+what is out of scope, what is planned, what is settled, and which file decides a
+question. Before you change anything, read it. **Why it is built that way is [`docs/DESIGN.md`](docs/DESIGN.md)**: one
 design decision per section, with the evidence that earned it.
 
-- **History** is [`docs/decision-log.md`](docs/decision-log.md). **Abandoned
-  directions** are [`docs/attic/`](docs/attic/).
+- **History** is [`docs/decision-log.md`](docs/decision-log.md), and its last
+  section lists the **abandoned directions**.
 - **The algorithm** is `references/pubgrub.md`, a vendored copy of pub's spec. This is
   *the* authority. Is some behaviour fundamental to PubGrub, or a choice of ours?
   Answer that by citing `references/pubgrub.md` with a line number. Do not answer it
   from our haddocks, and do not answer it from CLAUDE.md.
 - **Flags** are [`docs/flags-as-variables.md`](docs/flags-as-variables.md): an
   automatic flag is a solver variable of its own, keyed by its declaration. The two
-  earlier specifications that put the flag inside a package's value are in
-  [`docs/attic/`](docs/attic/).
+  earlier specifications that put the flag inside a package's value are retired
+  (`docs/decision-log.md`, "Dropped directions").
 - **Cabal's build model** (components, scopes, Backpack) is
   [`docs/cabal-build-model.md`](docs/cabal-build-model.md), the reference for rungs 4
   and 5.
@@ -226,9 +226,9 @@ wrong edit is, not the argument. Read the section before you touch the code.
 declared defaults unless `--flags search` is given (§3.1), and one version per
 package name (§3.2, where the shelved qualified-goals design is). Setup and
 build-tool dependencies, public sublibraries, `preferred-versions`, user flag
-constraints and buildability under a flag are not built; [`docs/TODO.md`](docs/TODO.md) says what
-each owes, and its last two sections list what is settled or was measured and
-rejected. The rung ladder is STATUS.md §1.
+constraints and buildability under a flag are not built; §4 says what each owes, and
+§5 lists what is settled or was measured and rejected. The rung ladder is STATUS.md
+§1.
 
 ## Reporting
 

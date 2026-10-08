@@ -7,10 +7,8 @@
 > this file and the spec disagree, the spec is right. This file exists to make the spec
 > readable, not to replace it.
 >
-> **What it does not cover.** Flags and the instance model, which are the parts that
-> took the most work. Those are [attic/flags-semantics.md](attic/flags-semantics.md) and
-> [attic/decision-semantics.md](attic/decision-semantics.md), both retired on
-> 2026-10-08 in favour of [flags-as-variables.md](flags-as-variables.md). For the current state of the code,
+> **What it does not cover.** Flags, which are the part that took the most work. That
+> is [flags-as-variables.md](flags-as-variables.md). For the current state of the code,
 > see [STATUS.md](STATUS.md).
 
 This document introduces the PubGrub version-solving algorithm and how this project implements it. All examples use Cabal package names and PVP version syntax. The goal is enough precision to drive implementation, not a formal proof.
@@ -91,7 +89,7 @@ Four points about it:
 
 The choice and its consequences always travel together, so the solver never holds one
 without the other. The reference Rust implementation keeps them as two methods, and
-splitting ours back is an open question ([attic/flags-semantics.md](attic/flags-semantics.md) §8).
+splitting ours back is an open question ([STATUS.md](STATUS.md) §4.5).
 
 > **PVP vs SemVer.** Cabal uses the [Package Versioning Policy](https://pvp.haskell.org/). In PVP, `^>=1.2` means `>= 1.2 && < 1.3` — the two *leftmost* version components form the major version. This differs from SemVer's `^1.2`, which means `>= 1.2.0 && < 2.0.0`. Be careful when reading Cargo or npm documentation: their version range semantics differ.
 
@@ -408,7 +406,7 @@ lists them. Each one is a reason not to reach for an off-the-shelf solver.
 
 > **There is no ASP component in this project, and there never was.** An early plan to
 > encode solving for Clingo was dropped before any code was written. See
-> [attic/README.md](attic/README.md) §1.
+> [STATUS.md](STATUS.md) §5.1.
 
 ---
 
@@ -485,9 +483,9 @@ The modular solver handles two features of the Cabal dependency problem that the
 
 **Boolean flags.** Cabal `.cabal` files can declare conditional dependencies gated on boolean flags (for example, `flag use-bytestring-builder`). The modular solver interleaves flag decisions with package decisions.
 
-PubGrub as specified treats dependencies as unconditional. Handling flags needs either a pre-expansion of every flag combination, a richer value domain, or more variables. This project took the second option for a while — a solver variable's value was a version together with a total flag assignment ([attic/flags-semantics.md](attic/flags-semantics.md)) — and now takes the third: an automatic flag is a solver variable of its own, decided after the release that declares it, and a guarded dependency is an incompatibility whose terms name the flags it holds under ([flags-as-variables.md](flags-as-variables.md)).
+PubGrub as specified treats dependencies as unconditional. Handling flags needs either a pre-expansion of every flag combination, a richer value domain, or more variables. This project took the second option for a while — a solver variable's value was a version together with a total flag assignment ([decision-log.md](decision-log.md) Era 6) — and now takes the third: an automatic flag is a solver variable of its own, decided after the release that declares it, and a guarded dependency is an incompatibility whose terms name the flags it holds under ([flags-as-variables.md](flags-as-variables.md)).
 
-Note that flags are **not currently searched**. Every flag takes its declared default, so a release has exactly one instance. See [STATUS.md](STATUS.md) §3.1.
+Note that flags are **fixed at their declared defaults unless `--flags search` is given**, on both sides of the comparison, and every recorded number was taken that way. See [STATUS.md](STATUS.md) §3.1.
 
 **Installed against new instances.** The modular solver distinguishes packages already installed in the GHC package database from new packages to be downloaded, and it prefers installed instances. Our provider does the same, in `expand`. The distinction is not built into the algorithm: it lives entirely in the provider, which is where an `Instance` can be a pre-installed unit.
 

@@ -3,7 +3,7 @@
 How to reproduce every number in [STATUS.md](STATUS.md), and what each one is worth.
 
 ```sh
-cabal test                    # 232 unit, property and golden tests, ~0.3 s
+cabal test                    # 229 unit, property and golden tests, ~0.3 s
 scripts/gate.sh               # the eight gates that decide whether a change is kept
 cabal run pubgrub-harness     # both solvers over both problem sets; writes the two reports
 scripts/check-stats.sh        # --stats against bench/summarise.awk, on every problem
@@ -144,7 +144,7 @@ Options: `--exe PATH` (default `$PUBGRUB_EXE`, else `cabal list-bin pubgrub`),
 `--set bench|corpus|both`, and positional problems.
 
 It measures; it does not decide. `scripts/gate.sh` decides, and neither replaces the
-other. [harness-plan.md](harness-plan.md) has why it is shaped this way.
+other. [decision-log.md](decision-log.md) Era 12 has why it is shaped this way.
 
 **There are two problem sets, and they answer different questions.**
 
@@ -233,7 +233,7 @@ varies between runs, and it caught a 3.9% regression that wall-clock could not r
 `maximum residency` from `+RTS -s` is the live heap as the garbage collector saw it.
 STATUS.md quotes the second.
 
-**The ~25 MB floor is unexplained**, and it is the weakest link in the strongest claim
+**The ~27 MB floor is unexplained**, and it is the weakest link in the strongest claim
 the project has. Doubling the per-element overhead of the package-to-versions map, long
 assumed to dominate it, moved the floor by 0.5%. A ratio whose numerator nobody can
 account for is not evidence, however reproducible it is.
