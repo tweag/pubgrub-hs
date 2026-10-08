@@ -54,8 +54,9 @@ import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Data.Ord                       (comparing)
 import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Incompatibility        (IncompatCause (..),
-                                                 Incompatibility (..))
+import           PubGrub.Cabal                  (Cabal,
+                                                 IncompatCause (..))
+import           PubGrub.Incompatibility        (Incompatibility (..))
 import           PubGrub.InstanceSet            (InstanceSet)
 import           PubGrub.SetOps                 (SetOps (union))
 import           PubGrub.Term                   (Term (..))
@@ -77,27 +78,27 @@ symmetric rule (x, y) = rule (x, y) <|> rule (y, x)
 -- Views of the derivation tree
 -- --------------------------------------------------------------------------
 
-isDerived :: Incompatibility -> Bool
+isDerived :: Incompatibility Cabal -> Bool
 isDerived c = case incompCause c of
     CauseDerivedFrom _ _ -> True
     _                    -> False
 
 -- | The two causes of a derived step, in the order the solver joined them.
-derivedFrom :: Rule Incompatibility (Incompatibility, Incompatibility)
+derivedFrom :: Rule (Incompatibility Cabal) (Incompatibility Cabal, Incompatibility Cabal)
 derivedFrom inc = case incompCause inc of
     CauseDerivedFrom a b -> Just (a, b)
     _                    -> Nothing
 
 -- | A step whose causes are both external facts: the only kind of step that
 -- opens a line of derivation.
-bothExternal :: Rule Incompatibility (Incompatibility, Incompatibility)
+bothExternal :: Rule (Incompatibility Cabal) (Incompatibility Cabal, Incompatibility Cabal)
 bothExternal inc = do
     (a, b) <- derivedFrom inc
     guard (not (isDerived a) && not (isDerived b))
     pure (a, b)
 
 -- | A step whose causes are both derived, where the derivation branches.
-bothDerived :: Rule Incompatibility (Incompatibility, Incompatibility)
+bothDerived :: Rule (Incompatibility Cabal) (Incompatibility Cabal, Incompatibility Cabal)
 bothDerived inc = do
     (a, b) <- derivedFrom inc
     guard (isDerived a && isDerived b)
@@ -105,7 +106,7 @@ bothDerived inc = do
 
 -- | A step with one derived cause and one external fact, the derived cause
 -- first: the step a linear chain is made of and the step every run walks.
-chainStep :: Rule Incompatibility (Incompatibility, Incompatibility)
+chainStep :: Rule (Incompatibility Cabal) (Incompatibility Cabal, Incompatibility Cabal)
 chainStep inc = do
     (a, b) <- derivedFrom inc
     case (isDerived a, isDerived b) of
@@ -114,14 +115,14 @@ chainStep inc = do
         _             -> Nothing
 
 -- | The external facts at the leaves, in proof order.
-externals :: Incompatibility -> [Incompatibility]
+externals :: Incompatibility Cabal -> [Incompatibility Cabal]
 externals inc = case derivedFrom inc of
     Just (a, b) -> externals a ++ externals b
     Nothing     -> [inc]
 
 -- | Every node of the tree the rule fires on, with its depth below the root, in
 -- proof order.
-everywhere :: Rule Incompatibility a -> Incompatibility -> [(Int, a)]
+everywhere :: Rule (Incompatibility Cabal) a -> Incompatibility Cabal -> [(Int, a)]
 everywhere rule = go 0
   where
     go depth n =
@@ -139,7 +140,7 @@ nearestRoot cs = Just (snd (minimumBy (comparing fst) cs))
 -- external fact. Answers where the run bottoms out — a derived node, since the
 -- walk only ever descends into a chain step's derived cause — and what the rule
 -- read off each fact, deepest first. An empty collection means there was no run.
-runWhile :: Rule Incompatibility a -> Incompatibility -> (Incompatibility, [a])
+runWhile :: Rule (Incompatibility Cabal) a -> Incompatibility Cabal -> (Incompatibility Cabal, [a])
 runWhile rule = go []
   where
     go acc node = case chainStep node of
@@ -151,13 +152,13 @@ runWhile rule = go []
 -- --------------------------------------------------------------------------
 
 -- | A seed: the package and the range it was requested in.
-asRequest :: Rule Incompatibility (PackageName, InstanceSet)
+asRequest :: Rule (Incompatibility Cabal) (PackageName, InstanceSet)
 asRequest c = case incompCause c of
     CauseRequest p s -> Just (p, s)
     _                -> Nothing
 
 -- | A hole: a range the solver found to hold no releases.
-asHole :: Rule Incompatibility (PackageName, InstanceSet)
+asHole :: Rule (Incompatibility Cabal) (PackageName, InstanceSet)
 asHole c = case incompCause c of
     CauseNoInstances (PackageVar p) (PackageSet s) -> Just (p, s)
     _                                              -> Nothing
@@ -169,7 +170,7 @@ asHole c = case incompCause c of
 -- cause instead. 'PubGrub.Incompatibility.fromDependency' drops the dependee
 -- term when the dependency is unsatisfiable, and then there is no \"depends on\"
 -- left to render: the clause is a bare ban on the depender and reads as one.
-asDependency :: Rule Incompatibility (PackageName, InstanceSet, PackageName, InstanceSet)
+asDependency :: Rule (Incompatibility Cabal) (PackageName, InstanceSet, PackageName, InstanceSet)
 asDependency c = case incompCause c of
     CauseDependency p s g (q, r)
         | q /= p, Map.null g, Map.member (PackageVar q) (incompTerms c) -> Just (p, s, q, r)
@@ -211,7 +212,7 @@ sameTerms = (==)
 -- merged term, and refusing to merge those is what keeps the union argument of
 -- the widening rule honest — it holds for a run with /one/ depender and nothing
 -- else.
-mergeFacts :: [Incompatibility] -> Maybe (Map Var (Term ValueSet))
+mergeFacts :: [Incompatibility Cabal] -> Maybe (Map Var (Term ValueSet))
 mergeFacts = foldr step (Just Map.empty)
   where
     step f acc = acc >>= combineWith sameWay (incompTerms f)

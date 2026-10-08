@@ -23,6 +23,30 @@ that decision entails.
 There is no neutral problem type handed over up front. Building one means reading every
 candidate's `.cabal` file, including the ones the search discards.
 
+**The algorithm is written once, over a domain it reads through a class.**
+`PubGrub.Incompatibility.Domain` fixes four types together — the variables, their
+values, the sets a term ranges over, and the causes a clause carries — and the solver
+uses variables only through `Ord`, sets only through `SetOps`, and causes only through
+the operations the class names: the cause of a resolvent, the cause of a ban, whether a
+clause is a seed, and which clauses the store may merge. This is the shape of
+pubgrub-rs's `DependencyProvider`, where one type fixes the package, version-set and
+metadata types. The cabal instantiation is `PubGrub.Cabal`: a type `Cabal` with no
+values, so a clause of ours is an `Incompatibility Cabal`, and the module holds the
+cause type, the five constructors a `.cabal` fact is stated through, and the merge rule.
+`Solver`, `Store`, `Provider` and `Incompatibility` mention nothing of it; `Report` is
+the cabal renderer and is written over `Cabal` on purpose.
+
+The variable type is declared injective — a variable type belongs to one domain — so
+that a variable alone tells the compiler its domain, and the two operations that need
+only a variable, the empty set of its kind and the singleton of a value, take nothing
+else. The empty set has a kind at all because the cabal domain has two: a term about a
+flag is combined with sets of Booleans, a term about a package with sets of instances.
+
+Nothing observable changed when this was done: the gate came out identical, the
+goldens unchanged, and the suite at the same count. What it buys is that the solver
+module states its own assumptions, and can be read or tested against a toy domain
+without `Cabal-syntax` in sight.
+
 ## 2. Version sets are intensional
 
 A dependency's declared range becomes **one** set, not one entry per matching
@@ -170,7 +194,9 @@ terms of two facts that agree about the dependee, as they arrive. Unbuildable fa
 about one package that give the same reasons merge the same way, which is
 `references/pubgrub.md:476`'s half of the rule. Two runs ruled out for different
 reasons stay two facts, so a proof never puts one release's missing module on the
-other's range.
+other's range. Which facts qualify, and what the merged clause is, is the cabal
+domain's `mergeRule` in [`PubGrub.Cabal`](../src/PubGrub/Cabal.hs); the store only
+compares keys.
 
 Merging is sound because the two clauses `¬(p ∈ A ∧ q ∉ R)` and `¬(p ∈ B ∧ q ∉ R)`
 together give `¬(p ∈ A∪B ∧ q ∉ R)`. Each half was established separately, so the
@@ -631,7 +657,7 @@ package.
 
 | | time | allocation |
 | --- | --- | --- |
-| propagation and term intersection (`intersectTerm`, `termIntersectionForPackage`, `incompRelation`, `isEmptyTerm`) | 27.7% | 23.1% |
+| propagation and term intersection (`intersectTerm`, `termIntersectionFor`, `incompRelation`, `isEmptyTerm`) | 27.7% | 23.1% |
 | the clause store (`insertClause`) | 7.0% | 16.3% |
 | the cell algebra | 6.8% | 5.2% |
 | derived-index decode, which is the walk's reads | 8.0% | 8.4% |

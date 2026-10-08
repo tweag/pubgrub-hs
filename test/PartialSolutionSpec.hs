@@ -21,10 +21,13 @@ import           Distribution.Types.Version      (mkVersion)
 import qualified PubGrub.Version                 as V
 import           Distribution.Types.VersionRange (earlierVersion,
                                                   orLaterVersion, thisVersion)
-import           PubGrub.Incompatibility         (Incompatibility,
-                                                  anyTermFor, fromDependency,
-                                                  incompGet, noInstances,
+import           PubGrub.Cabal                   (Cabal,
+                                                  fromDependency,
                                                   request)
+import           PubGrub.Incompatibility         (Incompatibility,
+                                                  anyTermFor,
+                                                  incompGet,
+                                                  noInstances)
 import           PubGrub.InstanceSet             (Instance (..),
                                                   InstanceSet (..),
                                                   singletonInstance)
@@ -36,10 +39,10 @@ import           PubGrub.Solver                  (Assignment (..),
                                                   PartialSolution (..),
                                                   addDecision, addDerivation,
                                                   assignmentTerm, backtrack,
-                                                  decidedInstance, emptyPS,
+                                                  decidedValue, emptyPS,
                                                   extractSolution,
-                                                  packageHistory,
-                                                  termIntersectionForPackage,
+                                                  varHistory,
+                                                  termIntersectionFor,
                                                   undecidedPositive)
 import           PubGrub.Term                    (Term (..), intersectTerm,
                                                   negateTerm)
@@ -80,7 +83,7 @@ sets =
 -- derive a negative term), \"no instances\" (positive), and real two-package
 -- dependencies — so that deriving for a package the incompatibility does /not/
 -- mention (⊤, the term-absent case) is reachable too.
-incompatibilities :: [Incompatibility]
+incompatibilities :: [Incompatibility Cabal]
 incompatibilities =
     [request p (singletonInstance i) | PackageVar p <- packages, PackageValue i <- instances]
         ++ [noInstances p (PackageSet s) | p <- packages, s <- sets]
@@ -127,7 +130,7 @@ instance Arbitrary Op where
 
 -- | The model: one flat chronological list of assignments.
 data Model = Model
-    { mAssignments :: [Assignment]
+    { mAssignments :: [Assignment Cabal]
     , mLevel       :: Int
     , mNextIndex   :: Int
     }
@@ -139,7 +142,7 @@ mDecide :: Var -> Value -> Model -> Model
 mDecide p i (Model as l n) =
     Model (as ++ [Assignment n (l + 1) p (Decided i)]) (l + 1) (n + 1)
 
-mDerive :: Var -> Incompatibility -> Model -> Model
+mDerive :: Var -> Incompatibility Cabal -> Model -> Model
 mDerive p cause (Model as l n) =
     Model (as ++ [Assignment n l p (Derived term cause)]) l (n + 1)
   where
@@ -148,8 +151,8 @@ mDerive p cause (Model as l n) =
 mBacktrack :: Int -> Model -> Model
 mBacktrack level (Model as _ n) = Model (filter ((<= level) . aLevel) as) level n
 
-mHistory :: Model -> Var -> [Assignment]
-mHistory m p = filter ((== p) . aPackage) (mAssignments m)
+mHistory :: Model -> Var -> [Assignment Cabal]
+mHistory m p = filter ((== p) . aVar) (mAssignments m)
 
 mTerm :: Model -> Var -> Maybe (Term ValueSet)
 mTerm m p = case map assignmentTerm (mHistory m p) of
@@ -159,14 +162,14 @@ mTerm m p = case map assignmentTerm (mHistory m p) of
 mSolution :: Model -> Map.Map Var Value
 mSolution m =
     Map.fromList
-        [(aPackage a, i) | a <- mAssignments m, Just i <- [decidedInstance a]]
+        [(aVar a, i) | a <- mAssignments m, Just i <- [decidedValue a]]
 
 mUndecidedPositive :: Model -> [(Var, ValueSet)]
 mUndecidedPositive m =
     mapMaybe positive (filter (`notElem` decided) pkgs)
   where
-    decided = [aPackage a | a <- mAssignments m, Just _ <- [decidedInstance a]]
-    pkgs = uniqueOldestFirst [aPackage a | a <- mAssignments m]
+    decided = [aVar a | a <- mAssignments m, Just _ <- [decidedValue a]]
+    pkgs = uniqueOldestFirst [aVar a | a <- mAssignments m]
     positive p = case mTerm m p of
         Just (Positive r) -> Just (p, r)
         _                 -> Nothing
@@ -178,7 +181,7 @@ mUndecidedPositive m =
             | otherwise = go (x : seen) xs
 
 -- | Apply one op to both, so a script drives them in lockstep.
-step :: Op -> (PartialSolution, Model) -> (PartialSolution, Model)
+step :: Op -> (PartialSolution Cabal, Model) -> (PartialSolution Cabal, Model)
 step op (ps, m) = case op of
     OpDecide pi_ ii -> case (atIndex packages pi_, atIndex instances ii) of
         (Just p, Just i) -> (addDecision p i ps, mDecide p i m)
@@ -208,14 +211,14 @@ maybeTermEquiv _ _               = False
 
 -- | An assignment's identity, ignoring the term (compared separately, by
 -- equivalence).
-key :: Assignment -> (Int, Int, Var, Maybe Value)
-key a = (aIndex a, aLevel a, aPackage a, decidedInstance a)
+key :: Assignment Cabal -> (Int, Int, Var, Maybe Value)
+key a = (aIndex a, aLevel a, aVar a, decidedValue a)
 
 check :: String -> Bool -> Property
 check what = counterexample ("mismatch: " ++ what)
 
 -- | Every query, on both, for every probe package.
-agree :: PartialSolution -> Model -> Property
+agree :: PartialSolution Cabal -> Model -> Property
 agree ps m =
     conjoin $
         [ check "psLevel" (psLevel ps == mLevel m)
@@ -235,18 +238,18 @@ agree ps m =
   where
     perPackage p =
         [ check
-            ("packageHistory " ++ show p)
-            (map key (packageHistory ps p) == map key (mHistory m p))
+            ("varHistory " ++ show p)
+            (map key (varHistory ps p) == map key (mHistory m p))
         , check
-            ("packageHistory terms " ++ show p)
+            ("varHistory terms " ++ show p)
             ( and
                 [ termEquiv (assignmentTerm x) (assignmentTerm y)
-                | (x, y) <- zip (packageHistory ps p) (mHistory m p)
+                | (x, y) <- zip (varHistory ps p) (mHistory m p)
                 ]
             )
         , check
-            ("termIntersectionForPackage " ++ show p)
-            (maybeTermEquiv (termIntersectionForPackage ps p) (mTerm m p))
+            ("termIntersectionFor " ++ show p)
+            (maybeTermEquiv (termIntersectionFor ps p) (mTerm m p))
         ]
 
 -- | Run a script, checking after every op — so the first divergence is

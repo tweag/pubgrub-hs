@@ -1,7 +1,9 @@
 -- | The incompatibility store: what the solver has learned, in the order
 -- propagation scans it, with facts that say the same thing __merged as they
--- arrive__ — dependency facts about the same pair of packages, declarations of
--- the same flag, and unbuildable facts about the same package.
+-- arrive__. Which facts those are is the domain's 'mergeRule'; for cabal,
+-- dependency facts about the same pair of packages under the same guard, flag
+-- declarations of the same flag, and unbuildable facts about the same package
+-- for the same reasons ('PubGrub.Cabal').
 --
 -- == Why this is not just a list
 --
@@ -41,13 +43,13 @@
 --
 -- == The merged clause is a leaf, and that is the point for reports
 --
--- It is rebuilt with its own constructor — 'fromDependency',
--- 'PubGrub.Incompatibility.declaresFlag' or 'PubGrub.Incompatibility.unbuildable'
--- — so its cause stays a leaf cause with the unioned term. The alternative — letting conflict resolution reach
--- the same range by resolving the narrow facts against each other — produces
--- 'CauseDerivedFrom' nodes, and those derived nodes /are/ the proof lines this
--- exists to remove. Merging at insert does not shorten those lines; it stops
--- them existing.
+-- It is rebuilt with its own constructor — 'PubGrub.Cabal.fromDependency',
+-- 'PubGrub.Cabal.declaresFlag' or 'PubGrub.Cabal.unbuildable' — so its cause
+-- stays a leaf cause with the unioned term. The alternative — letting conflict
+-- resolution reach the same range by resolving the narrow facts against each
+-- other — produces derived nodes, and those derived nodes /are/ the proof
+-- lines this exists to remove. Merging at insert does not shorten those lines;
+-- it stops them existing.
 --
 -- == Scan position is preserved, deliberately
 --
@@ -63,104 +65,55 @@ module PubGrub.Store
     , insertClauses
     ) where
 
-import qualified Data.List.NonEmpty             as NE
-import           Data.Set                       (Set)
-import qualified Data.Set                       as Set
-import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Incompatibility        (Guard, IncompatCause (..),
-                                                 Incompatibility (..),
-                                                 UnbuildableReason,
-                                                 declaresFlag, fromDependency,
-                                                 unbuildable)
-import           PubGrub.InstanceSet            (InstanceSet)
-import           PubGrub.SetOps                 (SetOps (..))
-import           PubGrub.Variable               (Flag)
+import           Data.Set                (Set)
+import qualified Data.Set                as Set
+import           PubGrub.Incompatibility (Domain (..), Incompatibility,
+                                          MergeRule (..))
 
--- | The clauses, newest first, plus an index of which of them a new dependency
--- fact could merge with.
+-- | The clauses, newest first, plus an index of which of them a new fact could
+-- merge with, and the rule that says so.
 --
 -- The clauses are held as plain values in scan order, so propagation walks them
 -- with no lookup per clause. Locating a merge target is instead an
 -- @O(position)@ rebuild of the list's prefix, paid only when a merge actually
--- happens, and @stMergeable@ is what keeps that walk from happening when it
+-- happens, and the key set is what keeps that walk from happening when it
 -- would find nothing — the common case by far, since most dependency facts are
 -- the first of their kind.
-data Store = Store
-    { stClauses   :: [Incompatibility]
-    , stMergeable :: !(Set MergeKey)
+--
+-- The key type is the rule's own and existential, as in t'MergeRule': the
+-- store only ever asks whether a key is present.
+data Store d = forall k. Ord k => Store
+    { stClauses   :: [Incompatibility d]
+    , stMergeable :: !(Set k)
+    , stKey       :: Incompatibility d -> Maybe k
+    , stMerge     :: Incompatibility d -> Incompatibility d -> Incompatibility d
     }
 
--- | What has to match for two clauses to be merged.
---
--- Three shapes qualify. A dependency fact ('MergeDep') matches on the depender
--- package, the dependee package, its guard, and the __dependee instance set__,
--- which must be identical rather than merely overlapping. A flag declaration
--- ('MergeDeclares') matches on the package and the flag. An unbuildable fact
--- ('MergeUnbuildable') matches on the package and the __reasons__: it is a unit
--- clause, so there is no second term to agree about, and two of them giving the
--- same reasons are the same fact about two runs of releases. PubGrub asks for
--- adjacent versions that cannot be selected to be stated as one incompatibility.
--- Two runs ruled out for different reasons are two facts, and merging them
--- would put one release's missing module on the other's range in the proof. The
--- reasons compare as a set, so their order in the @.cabal@ does not keep two
--- identical facts apart.
---
--- On the dependency side the dependee set is compared with 'Eq', which
--- 'InstanceSet' has lawfully: both of its halves are canonical.
---
--- The accumulated depender term of a merged clause is /not/ part of any key:
--- it is what the merge grows.
-data MergeKey
-    = MergeDep PackageName PackageName Guard InstanceSet
-      -- ^ a dependency fact merges only with one under the /same/ guard: the
-      -- union argument above holds term for term, and the guard's terms are
-      -- identical on both sides
-    | MergeDeclares PackageName Flag
-      -- ^ two releases declaring the same flag: one clause over both
-    | MergeUnbuildable PackageName (Set UnbuildableReason)
-    deriving (Eq, Ord)
-
--- | The key of a clause that may take part in a merge: a dependency fact, a flag
--- declaration, or an unbuildable fact.
---
--- A clause is judged by its /cause/ rather than by its term map, because the term
--- map has already lost what is needed: 'fromDependency' drops the dependee entry
--- when the dependency is unsatisfiable, leaving a unit ban that says nothing about
--- which dependee it came from. The cause still names it, so those clauses merge
--- with each other rather than being excluded.
-mergeKey :: Incompatibility -> Maybe MergeKey
-mergeKey i = case incompCause i of
-    CauseDependency p _ g (q, depSet) -> Just (MergeDep p q g depSet)
-    CauseDeclaresFlag p _ f           -> Just (MergeDeclares p f)
-    CauseUnbuildable p _ why          -> Just (MergeUnbuildable p (Set.fromList (NE.toList why)))
-    _                                 -> Nothing
-
-emptyStore :: Store
-emptyStore = Store{stClauses = [], stMergeable = Set.empty}
+-- | The empty store, under the domain's 'mergeRule'.
+emptyStore :: Domain d => Store d
+emptyStore = case mergeRule of
+    MergeRule{mergeKey, mergeWith} ->
+        Store{stClauses = [], stMergeable = Set.empty, stKey = mergeKey, stMerge = mergeWith}
 
 -- | The clauses in scan order, newest first.
-storeClauses :: Store -> [Incompatibility]
+storeClauses :: Store d -> [Incompatibility d]
 storeClauses = stClauses
 
--- | Add a clause: merge it into the dependency fact it agrees with, or prepend
--- it.
-insertClause :: Incompatibility -> Store -> Store
-insertClause i store = case mergeKey i of
-    Nothing -> prepend
+-- | Add a clause: merge it into the fact it agrees with, or prepend it.
+insertClause :: Incompatibility d -> Store d -> Store d
+insertClause i (Store clauses mergeable key merge) = case key i of
+    Nothing -> Store (i : clauses) mergeable key merge
     Just k
-        | k `Set.member` stMergeable store ->
-            store{stClauses = mergeInto k i (stClauses store)}
-        | otherwise -> prepend{stMergeable = Set.insert k (stMergeable store)}
-  where
-    prepend = store{stClauses = i : stClauses store}
+        | k `Set.member` mergeable -> Store (mergeInto key merge k i clauses) mergeable key merge
+        | otherwise -> Store (i : clauses) (Set.insert k mergeable) key merge
 
 -- | Insert several clauses, preserving their order at the front: @insertClauses
 -- [a,b,c]@ leaves the store scanning @a@, @b@, @c@, then what was there before,
 -- except that a clause merged into an older one keeps that one's place.
-insertClauses :: [Incompatibility] -> Store -> Store
+insertClauses :: [Incompatibility d] -> Store d -> Store d
 insertClauses is store = foldr insertClause store is
 
--- | Replace the first clause carrying @k@ with the union of it and @new@, in
+-- | Replace the first clause carrying @k@ with the merge of it and @new@, in
 -- place. The tail beyond the match is shared, so the cost is the position of the
 -- match, and every other clause keeps the position it had.
 --
@@ -168,28 +121,17 @@ insertClauses is store = foldr insertClause store is
 -- 'insertClause'. If it ever did, the clause is kept — at the back, which is a bad
 -- scan position and a correct store; losing a fact would be a wrong answer, and
 -- rescanning one extra clause is not.
-mergeInto :: MergeKey -> Incompatibility -> [Incompatibility] -> [Incompatibility]
-mergeInto k new = go
+mergeInto
+    :: Eq k
+    => (Incompatibility d -> Maybe k)
+    -> (Incompatibility d -> Incompatibility d -> Incompatibility d)
+    -> k
+    -> Incompatibility d
+    -> [Incompatibility d]
+    -> [Incompatibility d]
+mergeInto key merge k new = go
   where
     go [] = [new]
     go (c : cs)
-        | mergeKey c == Just k = merged c : cs
+        | key c == Just k = merge c new : cs
         | otherwise = c : go cs
-
-    merged c = case (incompCause c, incompCause new) of
-        (CauseDependency p aSet g (q, depSet), CauseDependency _ bSet _ _) ->
-            fromDependency p (aSet `union` bSet) g q depSet
-        (CauseDeclaresFlag p aSet f, CauseDeclaresFlag _ bSet _) ->
-            declaresFlag p (aSet `union` bSet) f
-        -- Two unit clauses banning instances of the same package: ¬(p ∈ A) and
-        -- ¬(p ∈ B) is ¬(p ∈ A∪B), so the union claims nothing new. Slots touch, so
-        -- for runs of adjacent unbuildable releases the union is one contiguous
-        -- range — which is what @references\/pubgrub.md:476@ asks to be stated.
-        -- The key made the two reason sets equal, so the existing clause's
-        -- reasons are the merged clause's.
-        (CauseUnbuildable p aSet why, CauseUnbuildable _ bSet _) ->
-            unbuildable p (aSet `union` bSet) why
-        -- Unreachable: the two clauses answered 'mergeKey' with the same @Just k@,
-        -- and each key shape pins the cause. Were it reached, the newer fact would
-        -- be lost, not kept as 'mergeInto' promises for a missing match.
-        _ -> c

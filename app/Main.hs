@@ -83,8 +83,9 @@ import           Options.Applicative                       (Parser, argument,
                                                             option, progDesc,
                                                             short, switch,
                                                             value)
-import           PubGrub.Incompatibility                   (IncompatCause (..),
-                                                            Incompatibility,
+import           PubGrub.Cabal                             (Cabal,
+                                                            IncompatCause (..))
+import           PubGrub.Incompatibility                   (Incompatibility,
                                                             incompCause,
                                                             incompTerms)
 import           PubGrub.InstanceSet                       (HasVersion (version),
@@ -128,7 +129,7 @@ data Verbosity = Normal | Verbose
 
 data Env = Env
     { envText   :: LogAction App Text
-    , envSolver :: LogAction App SolverMsg
+    , envSolver :: LogAction App (SolverMsg Cabal)
     }
 
 newtype App a = App {unApp :: ReaderT Env IO a}
@@ -138,14 +139,14 @@ instance HasLog Env Text App where
     getLogAction = envText
     setLogAction a e = e {envText = a}
 
-instance HasLog Env SolverMsg App where
+instance HasLog Env (SolverMsg Cabal) App where
     getLogAction = envSolver
     setLogAction a e = e {envSolver = a}
 
 toStdout :: LogAction App Text
 toStdout = LogAction (liftIO . TIO.putStrLn)
 
-runApp :: LogAction App SolverMsg -> App a -> IO a
+runApp :: LogAction App (SolverMsg Cabal) -> App a -> IO a
 runApp solverLog app = runReaderT (unApp app) Env {envText = toStdout, envSolver = solverLog}
 
 -- | What to do with each 'SolverMsg'. The two switches are independent, so
@@ -156,14 +157,14 @@ runApp solverLog app = runReaderT (unApp app) Env {envText = toStdout, envSolver
 -- 'SolverMsg' (one constructor application, with unforced fields) but nothing
 -- renders it, so the cost that matters for a timed run — pretty-printing an
 -- 'Incompatibility' and writing a line — is gone.
-solverLogAction :: Verbosity -> Maybe (IORef Stats) -> LogAction App SolverMsg
+solverLogAction :: Verbosity -> Maybe (IORef Stats) -> LogAction App (SolverMsg Cabal)
 solverLogAction verbosity counters = trace <> maybe mempty countInto counters
   where
     trace = case verbosity of
         Verbose -> cmap renderSolverMsg toStdout
         Normal  -> mempty
 
-renderSolverMsg :: SolverMsg -> Text
+renderSolverMsg :: SolverMsg Cabal -> Text
 renderSolverMsg (Deciding pn is) = T.pack "Deciding " <> pretty pn <> T.pack " among " <> pretty is
 renderSolverMsg (Chose pn i) = T.pack "Chose " <> pretty pn <> T.pack " as " <> pretty i
 renderSolverMsg (Conflict incompatibility) =
@@ -179,7 +180,7 @@ renderSolverMsg (NoVersionFor pn is) =
 -- | An incompatibility on one line, as its terms. Deliberately not
 -- 'PubGrub.Report.reportConflict', which renders a whole numbered proof — that is
 -- the right thing for a failure and far too much for a trace event.
-prettyIncompat :: Incompatibility -> Text
+prettyIncompat :: Incompatibility Cabal -> Text
 prettyIncompat i =
     T.pack "{"
         <> T.intercalate
@@ -231,7 +232,7 @@ emptyStats =
         , stHistogram = Map.empty
         }
 
-count :: SolverMsg -> Stats -> Stats
+count :: SolverMsg Cabal -> Stats -> Stats
 count msg st = case msg of
     Deciding {} -> st {stDeciding = stDeciding st + 1}
     Chose {} -> st {stChose = stChose st + 1}
@@ -253,7 +254,7 @@ count msg st = case msg of
 -- | Fold every message into the counters. The 'IORef' is the seam: the solver
 -- already hands each 'SolverMsg' to a 'LogAction', and updating a strict record
 -- is the cheapest thing such an action can do with it.
-countInto :: IORef Stats -> LogAction App SolverMsg
+countInto :: IORef Stats -> LogAction App (SolverMsg Cabal)
 countInto ref = LogAction (\msg -> liftIO (atomicModifyIORef' ref (\st -> (count msg st, ()))))
 
 -- | One line, all integers, read by the harness field by name. The read
@@ -417,7 +418,7 @@ main = do
 -- the counters and the phase timings after it. Those two lines come before the
 -- provider's closing read-counter line, which 'withProvider' prints on the way
 -- out.
-runOurs :: Options -> Double -> Maybe (IORef Stats) -> Provider App -> [Incompatibility] -> App ()
+runOurs :: Options -> Double -> Maybe (IORef Stats) -> Provider Cabal App -> [Incompatibility Cabal] -> App ()
 runOurs opts t0 counters provider seeds = do
     t1 <- liftIO getMonotonicTime
     logMsg (T.pack ("Solving for " ++ renderTargets (optTargets opts)))
@@ -555,7 +556,7 @@ runBaseline opts t0 world = do
     component (CD.ComponentExe n) = "exe:" ++ prettyShow n
     component c                   = show c
 
-report :: PlanShape -> [PackageName] -> Provider App -> Either SolveError (Map Var Value) -> App ()
+report :: PlanShape -> [PackageName] -> Provider Cabal App -> Either (SolveError Cabal) (Map Var Value) -> App ()
 report _ _ _ (Left (NoSolution incompat)) = do
     width <- liftIO proofWidth
     style <- liftIO proofStyle
@@ -619,7 +620,7 @@ planLines solution =
 -- returns every edge of the unit's /transitive/ closure at once, and those
 -- deeper edges belong under their own depender, which the same walk reaches on
 -- its own turn.
-dependencyMap :: Provider App -> Map PackageName Resolved -> App (Map PackageName [PackageName])
+dependencyMap :: Provider Cabal App -> Map PackageName Resolved -> App (Map PackageName [PackageName])
 dependencyMap provider solution =
     Map.fromList <$> mapM childrenOf (Map.toList solution)
   where

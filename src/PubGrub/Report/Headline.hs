@@ -36,8 +36,9 @@ import qualified Data.Map.Strict                as Map
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Incompatibility        (IncompatCause (..),
-                                                 Incompatibility (..))
+import           PubGrub.Cabal                  (Cabal,
+                                                 IncompatCause (..))
+import           PubGrub.Incompatibility        (Incompatibility (..))
 import           PubGrub.InstanceSet            (InstanceSet)
 import           PubGrub.Pretty                 (Pretty (..))
 import           PubGrub.Report.Rule
@@ -52,7 +53,7 @@ import           PubGrub.Version                (Version)
 
 -- | The headline of a proof whose holes have been absorbed
 -- ('PubGrub.Report.collapseNoInstances').
-headline :: Incompatibility -> Text
+headline :: Incompatibility Cabal -> Text
 headline root = T.concat ["No solution", forWhat, walls, ".", culprit]
   where
     forWhat = case requests of
@@ -77,26 +78,26 @@ headline root = T.concat ["No solution", forWhat, walls, ".", culprit]
 -- --------------------------------------------------------------------------
 
 -- | The seeds the proof rests on, with their ranges, in proof order.
-seedRanges :: Incompatibility -> [(PackageName, InstanceSet)]
+seedRanges :: Incompatibility Cabal -> [(PackageName, InstanceSet)]
 seedRanges root = [(p, r) | c <- externals root, Just (p, r) <- [asRequest c]]
 
-seeds :: Incompatibility -> [PackageName]
+seeds :: Incompatibility Cabal -> [PackageName]
 seeds = nub . map fst . seedRanges
 
 -- | The pinned packages the proof rests on, with their installed versions.
-pinnedWalls :: Incompatibility -> [(PackageName, [Version])]
+pinnedWalls :: Incompatibility Cabal -> [(PackageName, [Version])]
 pinnedWalls root = nub [(p, vs) | c <- externals root, CauseOnlyInstalled p vs@(_ : _) <- [incompCause c]]
 
 -- | A pinned package as \"base 4.21.0.0 (installed)\": the installed version is
 -- what a reader can act on, and a step's own term for the wall may be its
 -- whole source side, which would print as the bare name.
-wallText :: Incompatibility -> PackageName -> Text
+wallText :: Incompatibility Cabal -> PackageName -> Text
 wallText root p = case lookup p (pinnedWalls root) of
     Just vs -> pretty p <> " " <> T.intercalate " or " (map pretty vs) <> " (installed)"
     Nothing -> pretty p
 
 -- | The packages the headline already names as walls, pinned or unbuildable.
-walled :: Incompatibility -> [PackageName]
+walled :: Incompatibility Cabal -> [PackageName]
 walled root = nub (concat [wallPackage c | c <- externals root])
   where
     wallPackage c = case incompCause c of
@@ -123,7 +124,7 @@ walled root = nub (concat [wallPackage c | c <- externals root])
 -- when that window lies inside the union of the ranges the wall steps refute,
 -- so \"no x there builds\" is exactly what those steps say. 'isSubsetOf' is
 -- one-sided the safe way.
-wallStory :: Rule Incompatibility Text
+wallStory :: Rule (Incompatibility Cabal) Text
 wallStory root = do
     let steps = everywhere (wallStep root) root
     (x, wallTexts) <- nearestRoot [(depth, (x, ws)) | (depth, (x, _, ws)) <- steps]
@@ -143,7 +144,7 @@ wallStory root = do
 -- | A derived step of the wall shape: the package refuted, the range refuted,
 -- and the walls it was refuted against, as text. A seed is never the package:
 -- the headline has said it already, and the proof's last line says it again.
-wallStep :: Incompatibility -> Rule Incompatibility (PackageName, InstanceSet, [Text])
+wallStep :: Incompatibility Cabal -> Rule (Incompatibility Cabal) (PackageName, InstanceSet, [Text])
 wallStep root n = do
     guard (isDerived n)
     let ps = [(p, s) | (PackageVar p, Positive (PackageSet s)) <- Map.toList (incompTerms n)]
@@ -163,7 +164,7 @@ wallStep root n = do
 -- its range). A leaf is in play when its depender's range covers a seed's, or
 -- covers the dependee range of a leaf already in play; the chain from the
 -- request is then forced. A fixed point.
-inPlay :: Incompatibility -> [(PackageName, InstanceSet, PackageName, InstanceSet)]
+inPlay :: Incompatibility Cabal -> [(PackageName, InstanceSet, PackageName, InstanceSet)]
 inPlay root = grow [l | l@(d, s, _, _) <- allDeps, or [r `isSubsetOf` s | (p, r) <- seedRanges root, p == d]]
   where
     allDeps = [l | c <- externals root, Just l <- [asDependency c]]
@@ -191,7 +192,7 @@ inPlay root = grow [l | l@(d, s, _, _) <- allDeps, or [r `isSubsetOf` s | (p, r)
 -- piece at a time: a step below narrowed its term before a step above dropped
 -- it ('droppedStep'). Of those, the one dropped nearest the root is the last
 -- thing the solver had to give up on.
-pivotStory :: Rule Incompatibility Text
+pivotStory :: Rule (Incompatibility Cabal) Text
 pivotStory root = do
     (p, node) <- nearestRoot (everywhere (droppedStep root) root)
     pure (gaveUpOn p node)
@@ -199,7 +200,7 @@ pivotStory root = do
 -- | A step that dropped a package a step below had narrowed. A seed is never
 -- the package, nor is one the headline already names as a wall: it is pinned
 -- or unbuildable, and the wall says so in fewer words.
-droppedStep :: Incompatibility -> Rule Incompatibility (PackageName, Incompatibility)
+droppedStep :: Incompatibility Cabal -> Rule (Incompatibility Cabal) (PackageName, Incompatibility Cabal)
 droppedStep root n = do
     (a, b) <- derivedFrom n
     v <- dropped n a b
@@ -214,7 +215,7 @@ droppedStep root n = do
 -- | The pivot of a step that dropped it: the one package both causes name and
 -- the step does not. Every other package the causes share survives the step,
 -- intersected, so at most one is missing.
-dropped :: Incompatibility -> Incompatibility -> Incompatibility -> Maybe Var
+dropped :: Incompatibility Cabal -> Incompatibility Cabal -> Incompatibility Cabal -> Maybe Var
 dropped n a b =
     case [p | p <- Map.keys (Map.intersectionWith const (incompTerms a) (incompTerms b)), Map.notMember p (incompTerms n)] of
         [p] -> Just p
@@ -225,12 +226,12 @@ dropped n a b =
 -- from both; a package the causes merely share is intersected instead, and a
 -- pivot whose union equals one side learnt nothing. 'equivalent' is one-sided
 -- the safe way: doubt means no candidate.
-narrowedBelow :: Var -> Incompatibility -> Bool
+narrowedBelow :: Var -> Incompatibility Cabal -> Bool
 narrowedBelow p n = case derivedFrom n of
     Just (a, b) -> narrowedAt p n a b || narrowedBelow p a || narrowedBelow p b
     Nothing     -> False
 
-narrowedAt :: Var -> Incompatibility -> Incompatibility -> Incompatibility -> Bool
+narrowedAt :: Var -> Incompatibility Cabal -> Incompatibility Cabal -> Incompatibility Cabal -> Bool
 narrowedAt p n a b
     | Just ta <- Map.lookup p (incompTerms a)
     , Just tb <- Map.lookup p (incompTerms b)
@@ -245,7 +246,7 @@ narrowedAt p n a b
 -- only things present are the dependers themselves, \"needs regex, and …
 -- compatible with lsp-types\" would say the same thing twice, and the shape is
 -- \"no version of p suits d\", where \"suits\" carries the dependency.
-gaveUpOn :: PackageName -> Incompatibility -> Text
+gaveUpOn :: PackageName -> Incompatibility Cabal -> Text
 gaveUpOn p node
     | not (null positives)
     , all ((`elem` dependers) . fst) positives =

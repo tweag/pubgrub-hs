@@ -1,15 +1,16 @@
 {-# LANGUAGE LambdaCase #-}
 
--- | The PubGrub solving loop, over variables: package names, each taking an
--- instance, and automatic flags, each taking a Boolean.
+-- | The PubGrub solving loop, over the variables of a 'Domain': for cabal,
+-- package names, each taking an instance, and automatic flags, each taking a
+-- Boolean.
 --
--- Two layers: the storage layer — 'Assignment', 'PackageAssignments',
+-- Two layers: the storage layer — 'Assignment', 'VarAssignments',
 -- 'PartialSolution' and their queries — and the algorithm on top
 -- ('unitPropagation', 'conflictResolution', 'solve').
 --
 -- The storage layer exists to make the algorithm's questions cheap. Every one
--- of them is about a single package, so assignments are indexed by package and
--- each package's accumulated term is cached: propagation judges an
+-- of them is about a single variable, so assignments are indexed by variable and
+-- each variable's accumulated term is cached: propagation judges an
 -- incompatibility with a lookup per term instead of a scan of the whole
 -- partial solution.
 module PubGrub.Solver
@@ -20,19 +21,19 @@ module PubGrub.Solver
     , Assignment (..)
     , AssignmentKind (..)
     , assignmentTerm
-    , decidedInstance
-    , assignmentPackageTerm
-    , PackageAssignments (..)
+    , decidedValue
+    , assignmentVarTerm
+    , VarAssignments (..)
     , PartialSolution (..)
     , emptyPS
     , addDecision
     , addDerivation
     , backtrack
-    , termIntersectionForPackage
+    , termIntersectionFor
     , psRelation
     , extractSolution
     , undecidedPositive
-    , packageHistory
+    , varHistory
 
       -- * The algorithm
     , unitPropagation
@@ -54,16 +55,13 @@ import           Data.Sequence                  (Seq)
 import qualified Data.Sequence                  as Seq
 import           Data.List.NonEmpty             (nonEmpty)
 import qualified Data.List.NonEmpty             as NE
-import           PubGrub.Incompatibility        (IncompatRelation (..),
+import           PubGrub.Incompatibility        (Domain (..),
+                                                 IncompatRelation (..),
                                                  Incompatibility (..),
                                                  VarTerm (..), anyTermFor,
                                                  incompGet, incompRelation,
-                                                 isRequest, noInstances,
-                                                 priorCause)
+                                                 noInstances, priorCause)
 import           PubGrub.Provider               (Provider (..))
-import           PubGrub.Value                  (Value, ValueSet,
-                                                 singletonValue)
-import           PubGrub.Variable               (Var)
 import           PubGrub.SetOps                 (SetOps (..))
 import           PubGrub.Store                  (Store, emptyStore,
                                                  insertClause, insertClauses,
@@ -76,105 +74,105 @@ import           PubGrub.Term                   (Term (..), intersectTerm,
 -- Partial solution
 -- --------------------------------------------------------------------------
 
--- | A single entry in the partial solution: one package, at one decision
+-- | A single entry in the partial solution: one variable, at one decision
 -- level, with the reason it is there.
-data Assignment = Assignment
+data Assignment d = Assignment
     { aIndex   :: !Int
     , aLevel   :: !Int
-    , aPackage :: Var
-    , aKind    :: AssignmentKind
+    , aVar :: VarOf d
+    , aKind    :: AssignmentKind d
     }
 
 -- | Why an assignment is in the partial solution, and what it asserts: a
--- decision (a freely chosen singleton instance) or a derivation (a term forced
--- by unit propagation, with the incompatibility that forced it).
+-- decision (a freely chosen value) or a derivation (a term forced by unit
+-- propagation, with the incompatibility that forced it).
 --
 -- The two shapes are a sum /inside/ the record rather than two constructors of
 -- it because they carry different payloads: sharing @aIndex@, @aLevel@ and
--- @aPackage@ across two constructors is what would make the payload fields
+-- @aVar@ across two constructors is what would make the payload fields
 -- partial selectors, and a partial selector is a crash waiting for the wrong
 -- constructor.
-data AssignmentKind
-    = Decided Value
-    | Derived (Term ValueSet) Incompatibility
+data AssignmentKind d
+    = Decided (ValueOf d)
+    | Derived (Term (SetOf d)) (Incompatibility d)
 
 -- | The term contributed by an assignment; for a decision, @Positive@ of the
 -- singleton.
-assignmentTerm :: Assignment -> Term ValueSet
+assignmentTerm :: Domain d => Assignment d -> Term (SetOf d)
 assignmentTerm a = case aKind a of
-    Decided i   -> Positive (singletonValue i)
+    Decided i   -> Positive (singleton (aVar a) i)
     Derived t _ -> t
 
--- | The instance a decision decides; 'Nothing' for a derivation.
-decidedInstance :: Assignment -> Maybe Value
-decidedInstance a = case aKind a of
+-- | The value a decision decides; 'Nothing' for a derivation.
+decidedValue :: Assignment d -> Maybe (ValueOf d)
+decidedValue a = case aKind a of
     Decided i -> Just i
     Derived{} -> Nothing
 
--- | The assignment as "one term about one package".
-assignmentPackageTerm :: Assignment -> VarTerm
-assignmentPackageTerm a = VarTerm (aPackage a) (assignmentTerm a)
+-- | The assignment as "one term about one variable".
+assignmentVarTerm :: Domain d => Assignment d -> VarTerm d
+assignmentVarTerm a = VarTerm (aVar a) (assignmentTerm a)
 
--- | Everything recorded about one package: its own assignments oldest-first,
--- the intersection of their terms, and the instance it was decided to be if it
+-- | Everything recorded about one variable: its own assignments oldest-first,
+-- the intersection of their terms, and the value it was decided to be if it
 -- has been decided.
 --
--- @paTerm@ is a cache of @foldl1 intersectTerm (assignmentTerm <$> paHistory)@
--- and @paDecision@ a cache of the (at most one) decision in @paHistory@;
--- keeping them is what lets propagation ask about a package without scanning
--- the partial solution. Invariant: a record exists only for a package with a
+-- @vaTerm@ is a cache of @foldl1 intersectTerm (assignmentTerm <$> vaHistory)@
+-- and @vaDecision@ a cache of the (at most one) decision in @vaHistory@;
+-- keeping them is what lets propagation ask about a variable without scanning
+-- the partial solution. Invariant: a record exists only for a variable with a
 -- non-empty history.
-data PackageAssignments = PackageAssignments
-    { paHistory  :: Seq Assignment
-    , paTerm     :: Term ValueSet
-    , paDecision :: Maybe Value
+data VarAssignments d = VarAssignments
+    { vaHistory  :: Seq (Assignment d)
+    , vaTerm     :: Term (SetOf d)
+    , vaDecision :: Maybe (ValueOf d)
     }
 
--- | Assignments are indexed by package, and within a package stored
+-- | Assignments are indexed by variable, and within a variable stored
 -- oldest-first (chronological), so the satisfier search reads them in order
 -- without reversing; @psLevel@ is the current decision level; @psNextIndex@ is
--- a monotone counter giving chronological order /across/ packages.
-data PartialSolution = PartialSolution
-    { psPackages  :: Map Var PackageAssignments
+-- a monotone counter giving chronological order /across/ variables.
+data PartialSolution d = PartialSolution
+    { psVariables  :: Map (VarOf d) (VarAssignments d)
     , psLevel     :: !Int
     , psNextIndex :: !Int
     }
 
-emptyPS :: PartialSolution
-emptyPS = PartialSolution{psPackages = Map.empty, psLevel = 0, psNextIndex = 0}
+emptyPS :: PartialSolution d
+emptyPS = PartialSolution{psVariables = Map.empty, psLevel = 0, psNextIndex = 0}
 
--- | Add one assignment to a package's record, creating the record if this is
--- the package's first assignment. The caches move with it: the term folds in
+-- | Add one assignment to a variable's record, creating the record if this is
+-- the variable's first assignment. The caches move with it: the term folds in
 -- by intersection, the decision is remembered.
-extendPackage :: Assignment -> Maybe PackageAssignments -> PackageAssignments
-extendPackage a Nothing =
-    PackageAssignments
-        { paHistory = Seq.singleton a
-        , paTerm = assignmentTerm a
-        , paDecision = decidedInstance a
+extendVar :: Domain d => Assignment d -> Maybe (VarAssignments d) -> VarAssignments d
+extendVar a Nothing =
+    VarAssignments
+        { vaHistory = Seq.singleton a
+        , vaTerm = assignmentTerm a
+        , vaDecision = decidedValue a
         }
-extendPackage a (Just pa) =
+extendVar a (Just pa) =
     pa
-        { paHistory = paHistory pa Seq.|> a
-        , paTerm = intersectTerm (paTerm pa) (assignmentTerm a)
-        , paDecision = decidedInstance a <|> paDecision pa
+        { vaHistory = vaHistory pa Seq.|> a
+        , vaTerm = intersectTerm (vaTerm pa) (assignmentTerm a)
+        , vaDecision = decidedValue a <|> vaDecision pa
         }
 
 -- | Rebuild a record from a history, recomputing both caches. 'Nothing' for an
 -- empty history, which has no record.
-fromHistory :: Seq Assignment -> Maybe PackageAssignments
-fromHistory = foldl' (\acc a -> Just (extendPackage a acc)) Nothing
+fromHistory :: Domain d => Seq (Assignment d) -> Maybe (VarAssignments d)
+fromHistory = foldl' (\acc a -> Just (extendVar a acc)) Nothing
 
--- | File an assignment under its package and consume its index.
-recordAssignment :: Assignment -> PartialSolution -> PartialSolution
-recordAssignment a ps@PartialSolution{psPackages, psNextIndex} =
+-- | File an assignment under its variable and consume its index.
+recordAssignment :: Domain d => Assignment d -> PartialSolution d -> PartialSolution d
+recordAssignment a ps@PartialSolution{psVariables, psNextIndex} =
     ps
-        { psPackages = Map.alter (Just . extendPackage a) (aPackage a) psPackages
+        { psVariables = Map.alter (Just . extendVar a) (aVar a) psVariables
         , psNextIndex = psNextIndex + 1
         }
 
 -- | Record a decision (a guess); increments the decision level.
-addDecision :: Var -> Value -> PartialSolution -> PartialSolution
+addDecision :: Domain d => VarOf d -> ValueOf d -> PartialSolution d -> PartialSolution d
 addDecision p i ps@PartialSolution{psLevel, psNextIndex} =
     recordAssignment
         (Assignment psNextIndex (psLevel + 1) p (Decided i))
@@ -182,7 +180,7 @@ addDecision p i ps@PartialSolution{psLevel, psNextIndex} =
 
 -- | Record a derivation: the negation of @cause@'s term for @p@, at the
 -- current level.
-addDerivation :: Var -> Incompatibility -> PartialSolution -> PartialSolution
+addDerivation :: Domain d => VarOf d -> Incompatibility d -> PartialSolution d -> PartialSolution d
 addDerivation p cause ps@PartialSolution{psLevel, psNextIndex} =
     let term = maybe (anyTermFor p) negateTerm (incompGet p cause)
      in recordAssignment (Assignment psNextIndex psLevel p (Derived term cause)) ps
@@ -192,78 +190,79 @@ addDerivation p cause ps@PartialSolution{psLevel, psNextIndex} =
 -- Levels are non-decreasing along a history (a derivation takes the current
 -- level, a decision the next, and backtracking only lowers it), so what is
 -- dropped is always a suffix — which is why this splits the history from the
--- right instead of filtering it: a package that drops nothing keeps its history
+-- right instead of filtering it: a variable that drops nothing keeps its history
 -- as it stands, rather than paying to rebuild an identical one.
 --
--- A package that does lose assignments must have both its caches rebuilt from
+-- A variable that does lose assignments must have both its caches rebuilt from
 -- the survivors — @intersectTerm@ cannot be undone, so the accumulated term is
--- recomputed, and a dropped decision must stop being remembered. A package that
+-- recomputed, and a dropped decision must stop being remembered. A variable that
 -- loses all of them loses its record.
-backtrack :: Int -> PartialSolution -> PartialSolution
-backtrack level ps@PartialSolution{psPackages} =
+backtrack :: Domain d => Int -> PartialSolution d -> PartialSolution d
+backtrack level ps@PartialSolution{psVariables} =
     ps
-        { psPackages = Map.mapMaybe prune psPackages
+        { psVariables = Map.mapMaybe prune psVariables
         , psLevel = level
         }
   where
-    prune pa = case Seq.spanr ((> level) . aLevel) (paHistory pa) of
+    prune pa = case Seq.spanr ((> level) . aLevel) (vaHistory pa) of
         (dropped, kept)
             | Seq.null dropped -> Just pa
             | otherwise -> fromHistory kept
 
--- | Intersection of all terms recorded for a package ('Nothing' if the
--- package is unmentioned, which judges as 'anyTerm' = ⊤).
-termIntersectionForPackage :: PartialSolution -> Var -> Maybe (Term ValueSet)
-termIntersectionForPackage PartialSolution{psPackages} p =
-    paTerm <$> Map.lookup p psPackages
+-- | Intersection of all terms recorded for a variable ('Nothing' if the
+-- variable is unmentioned, which judges as 'anyTerm' = ⊤).
+termIntersectionFor :: Domain d => PartialSolution d -> VarOf d -> Maybe (Term (SetOf d))
+termIntersectionFor PartialSolution{psVariables} p =
+    vaTerm <$> Map.lookup p psVariables
 
 -- | Relation of the whole partial solution to an incompatibility.
-psRelation :: PartialSolution -> Incompatibility -> IncompatRelation
-psRelation ps = incompRelation (termIntersectionForPackage ps)
+psRelation :: Domain d => PartialSolution d -> Incompatibility d -> IncompatRelation (VarOf d)
+psRelation ps = incompRelation (termIntersectionFor ps)
 
 -- | The decisions, as a solution map.
-extractSolution :: PartialSolution -> Map Var Value
-extractSolution PartialSolution{psPackages} = Map.mapMaybe paDecision psPackages
+extractSolution :: PartialSolution d -> Map (VarOf d) (ValueOf d)
+extractSolution PartialSolution{psVariables} = Map.mapMaybe vaDecision psVariables
 
--- | Packages that have a positive accumulated term but no decision yet, with
--- that positive instance set. Ordered by first mention (oldest first) for
+-- | Variables that have a positive accumulated term but no decision yet, with
+-- that positive set. Ordered by first mention (oldest first) for
 -- determinism.
-undecidedPositive :: PartialSolution -> [(Var, ValueSet)]
-undecidedPositive PartialSolution{psPackages} =
-    map snd (sortOn fst (mapMaybe candidate (Map.toList psPackages)))
+undecidedPositive :: PartialSolution d -> [(VarOf d, SetOf d)]
+undecidedPositive PartialSolution{psVariables} =
+    map snd (sortOn fst (mapMaybe candidate (Map.toList psVariables)))
   where
-    candidate (p, pa) = case (paDecision pa, paTerm pa) of
+    candidate (p, pa) = case (vaDecision pa, vaTerm pa) of
         (Nothing, Positive r) -> Just (firstIndex pa, (p, r))
         _                     -> Nothing
-    -- The package's first mention, which is what the order is keyed on. A
+    -- The variable's first mention, which is what the order is keyed on. A
     -- record always has a non-empty history, so the fallback is unreachable.
-    firstIndex pa = maybe maxBound aIndex (Seq.lookup 0 (paHistory pa))
+    firstIndex pa = maybe maxBound aIndex (Seq.lookup 0 (vaHistory pa))
 
--- | All assignments for a package, oldest first. The satisfier search walks
+-- | All assignments for a variable, oldest first. The satisfier search walks
 -- this list.
-packageHistory :: PartialSolution -> Var -> [Assignment]
-packageHistory PartialSolution{psPackages} p =
-    maybe [] (toList . paHistory) (Map.lookup p psPackages)
+varHistory :: Domain d => PartialSolution d -> VarOf d -> [Assignment d]
+varHistory PartialSolution{psVariables} p =
+    maybe [] (toList . vaHistory) (Map.lookup p psVariables)
 
 -- --------------------------------------------------------------------------
 -- The algorithm
 -- --------------------------------------------------------------------------
 
 -- | Result of searching for the satisfier of a conflict incompatibility.
-data SatisfierSearch
+data SatisfierSearch d
     = DifferentDecisionLevels !Int
       -- ^ backtrack to this level
-    | SameDecisionLevels Incompatibility
+    | SameDecisionLevels (Incompatibility d)
       -- ^ satisfier's cause
 
 -- | Earliest assignment of @p@ whose running accumulated term becomes disjoint
 -- from @startTerm@, or 'Nothing' if none does.
 satisfierOf
-    :: PartialSolution
-    -> Var
-    -> Term ValueSet
-    -> Maybe Assignment
-satisfierOf ps p startTerm = go (anyTermFor p) (packageHistory ps p)
+    :: Domain d
+    => PartialSolution d
+    -> VarOf d
+    -> Term (SetOf d)
+    -> Maybe (Assignment d)
+satisfierOf ps p startTerm = go (anyTermFor p) (varHistory ps p)
   where
     go _ [] = Nothing
     go acc (a : as)
@@ -292,17 +291,18 @@ maximumOn f = foldl' pick Nothing
 -- That is reported as a 'NoSatisfier' failure rather than thrown, so a bug
 -- there is something the caller can print, not a crash inside a pure fold.
 satisfierSearch
-    :: PartialSolution
-    -> Incompatibility
-    -> Either SolveError (Var, SatisfierSearch)
+    :: Domain d
+    => PartialSolution d
+    -> Incompatibility d
+    -> Either (SolveError d) (VarOf d, SatisfierSearch d)
 satisfierSearch ps i = do
     satMap <- traverse satisfierForTerm (Map.toList (incompTerms i))
-    (satPkg, satAssign) <- latestSatisfier satMap
+    (satVar, satAssign) <- latestSatisfier satMap
     let satLevel = aLevel satAssign
-        it_s = fromMaybe (anyTermFor satPkg) (incompGet satPkg i)
+        it_s = fromMaybe (anyTermFor satVar) (incompGet satVar i)
         startTerm' = intersect (assignmentTerm satAssign) (negateTerm it_s)
-    prevForSat <- require satPkg (satisfierOf ps satPkg startTerm')
-    let satMap' = [(p, if p == satPkg then prevForSat else a) | (p, a) <- satMap]
+    prevForSat <- require satVar (satisfierOf ps satVar startTerm')
+    let satMap' = [(p, if p == satVar then prevForSat else a) | (p, a) <- satMap]
     (_, prevAssign) <- latestSatisfier satMap'
     -- No floor. The requests are derivations at level 0, so the first decision
     -- at level 1 is an ordinary one that a conflict may have to undo. The spec
@@ -311,8 +311,8 @@ satisfierSearch ps i = do
     let prevLevel = aLevel prevAssign
     pure $ case aKind satAssign of
         Derived _ cause
-            | prevLevel >= satLevel -> (satPkg, SameDecisionLevels cause)
-        _ -> (satPkg, DifferentDecisionLevels prevLevel)
+            | prevLevel >= satLevel -> (satVar, SameDecisionLevels cause)
+        _ -> (satVar, DifferentDecisionLevels prevLevel)
   where
     satisfierForTerm (p, it) = (,) p <$> require p (satisfierOf ps p (negateTerm it))
     require p = maybe (Left (NoSatisfier p i)) Right
@@ -325,8 +325,8 @@ satisfierSearch ps i = do
 -- | The assignments the seeds made: the level-0 derivations whose cause is a
 -- 'PubGrub.Incompatibility.request'. They are the oldest assignments of all,
 -- and they are never backtracked.
-seedAssignments :: PartialSolution -> Var -> [Assignment]
-seedAssignments ps p = [a | a <- packageHistory ps p, isSeed a]
+seedAssignments :: Domain d => PartialSolution d -> VarOf d -> [Assignment d]
+seedAssignments ps p = [a | a <- varHistory ps p, isSeed a]
   where
     isSeed a = case aKind a of
         Derived _ cause -> isRequest cause
@@ -343,7 +343,7 @@ seedAssignments ps p = [a | a <- packageHistory ps p, isSeed a]
 -- Checked before the satisfier search, which is what keeps a seed from ever being
 -- a satisfier's cause: the seeds are the oldest assignments, so a seed derivation
 -- is the latest satisfier only when it is the only one.
-satisfiedBySeeds :: PartialSolution -> Incompatibility -> Bool
+satisfiedBySeeds :: Domain d => PartialSolution d -> Incompatibility d -> Bool
 satisfiedBySeeds ps inc = incompRelation seedTerm inc == ISatisfied
   where
     seedTerm p = foldr1 intersectTerm . NE.map assignmentTerm <$> nonEmpty (seedAssignments ps p)
@@ -361,12 +361,12 @@ satisfiedBySeeds ps inc = incompRelation seedTerm inc == ISatisfied
 -- as it is: the verdict is decided, and the report prints the closing line as
 -- failure whatever the terms say.
 closeWithSeeds
-    :: (Monad m, WithLog env SolverMsg m)
-    => PartialSolution -> Incompatibility -> m Incompatibility
+    :: (Domain d, Monad m, WithLog env (SolverMsg d) m)
+    => PartialSolution d -> Incompatibility d -> m (Incompatibility d)
 closeWithSeeds ps = go
   where
-    -- One pass over the seeds of every package still named; another pass while
-    -- a pass removed something. Two seeds on one package need the second pass:
+    -- One pass over the seeds of every variable still named; another pass while
+    -- a pass removed something. Two seeds on one variable need the second pass:
     -- the first alone leaves the part of its range the other seed excludes.
     go inc = do
         inc' <- foldM step inc [(p, cause) | p <- Map.keys (incompTerms inc), a <- seedAssignments ps p, Derived _ cause <- [aKind a]]
@@ -389,10 +389,10 @@ closeWithSeeds ps = go
 -- on, which is what gives dependency facts about one pair of packages the chance
 -- to merge ('PubGrub.Store').
 unitPropagation
-    :: (Monad m, WithLog env SolverMsg m)
-    => Store
-    -> PartialSolution
-    -> m (Either SolveError (Store, PartialSolution))
+    :: forall d m env. (Domain d, Monad m, WithLog env (SolverMsg d) m)
+    => Store d
+    -> PartialSolution d
+    -> m (Either (SolveError d) (Store d, PartialSolution d))
 unitPropagation = scan
   where
     scan store ps = step store ps (storeClauses store)
@@ -410,26 +410,28 @@ unitPropagation = scan
                 conflictResolution i ps >>= \case
                     Left err ->
                         pure (Left err)
-                    Right (almostPkg, rootCause, ps') -> do
+                    Right (almostVar, rootCause, ps') -> do
                         logMsg (Learned rootCause)
-                        logMsg (Backtracked (psLevel ps'))
-                        scan (insertClause rootCause incompats) (addDerivation almostPkg rootCause ps')
+                        -- 'Backtracked' carries only a level, which does not
+                        -- determine @d@, so the message's type is annotated.
+                        logMsg (Backtracked (psLevel ps') :: SolverMsg d)
+                        scan (insertClause rootCause incompats) (addDerivation almostVar rootCause ps')
             IAlmostSatisfied q ->
                 scan incompats (addDerivation q i ps)
             _ -> step incompats ps rest
 
 
--- | Conflict resolution: satisfier search over 'packageHistory', 'priorCause'
+-- | Conflict resolution: satisfier search over 'varHistory', 'priorCause'
 -- while satisfier and previous satisfier share a decision level, then
 -- 'backtrack'. Returns the failure (no solution, or a violated invariant), or
--- the pivot package, the learned root cause, and the backtracked solution.
+-- the pivot variable, the learned root cause, and the backtracked solution.
 -- It is monadic only to log 'Resolving': the outcome depends on the partial
 -- solution alone.
 conflictResolution
-    :: (Monad m, WithLog env SolverMsg m)
-    => Incompatibility
-    -> PartialSolution
-    -> m (Either SolveError (Var, Incompatibility, PartialSolution))
+    :: (Domain d, Monad m, WithLog env (SolverMsg d) m)
+    => Incompatibility d
+    -> PartialSolution d
+    -> m (Either (SolveError d) (VarOf d, Incompatibility d, PartialSolution d))
 conflictResolution = loop
   where
     loop current ps
@@ -437,11 +439,11 @@ conflictResolution = loop
         | otherwise =
             case satisfierSearch ps current of
                 Left err -> pure (Left err)
-                Right (satPkg, DifferentDecisionLevels prevLevel) ->
-                    pure (Right (satPkg, current, backtrack prevLevel ps))
-                Right (satPkg, SameDecisionLevels satCause) -> do
-                    let next = priorCause current satCause satPkg
-                    logMsg (Resolving satPkg next)
+                Right (satVar, DifferentDecisionLevels prevLevel) ->
+                    pure (Right (satVar, current, backtrack prevLevel ps))
+                Right (satVar, SameDecisionLevels satCause) -> do
+                    let next = priorCause current satCause satVar
+                    logMsg (Resolving satVar next)
                     loop next ps
 
 
@@ -449,49 +451,49 @@ conflictResolution = loop
 -- relies on did not hold — the latter cannot happen for a consistent partial
 -- solution, and exists so that if it ever does, it arrives as a value to
 -- report instead of an exception from inside a pure function.
-data SolveError
+data SolveError d
     = -- | no solution; carries the terminal incompatibility (the root of the
       -- derivation tree, for reporting)
-      NoSolution Incompatibility
+      NoSolution (Incompatibility d)
     | -- | conflict resolution found a term of a satisfied incompatibility
-      -- whose package has no satisfier in the partial solution
-      NoSatisfier Var Incompatibility
+      -- whose variable has no satisfier in the partial solution
+      NoSatisfier (VarOf d) (Incompatibility d)
 
 -- | Structured progress events emitted during resolution.
-data SolverMsg
+data SolverMsg d
     = -- | about to choose an element for p within this range
-      Deciding Var ValueSet
+      Deciding (VarOf d) (SetOf d)
     | -- | picked this element for p
-      Chose Var Value
+      Chose (VarOf d) (ValueOf d)
     | -- | no element available in range (forces a conflict next)
-      NoVersionFor Var ValueSet
+      NoVersionFor (VarOf d) (SetOf d)
     | -- | this incompatibility is satisfied (a conflict)
-      Conflict Incompatibility
+      Conflict (Incompatibility d)
     | -- | one step of conflict resolution: the satisfier it located, and the
       -- prior cause derived from it. Fires once per iteration in which the
       -- satisfier and the previous satisfier share a decision level, so the
       -- count of these between a 'Conflict' and its 'Backtracked' /is/ the depth
       -- of that resolution — which nothing else reports.
-      Resolving Var Incompatibility
+      Resolving (VarOf d) (Incompatibility d)
     | -- | the root cause conflict resolution settled on, about to be added to
       -- the store. Distinct from the 'Conflict' that started it: that one was
       -- already known, this one is what was learned.
-      Learned Incompatibility
+      Learned (Incompatibility d)
     | -- | backtracked to this decision level
       Backtracked Int
 
 -- | Solve for the seeds, one 'PubGrub.Incompatibility.request' per target, by
 -- alternating 'unitPropagation' with decisions: take the first
--- 'undecidedPositive' package and ask the 'Provider' to 'expand' its range into
--- an instance and the incompatibilities that instance entails.
+-- 'undecidedPositive' variable and ask the 'Provider' to 'expand' its range
+-- into a value and the incompatibilities that value entails.
 --
 -- The seeds go in first and in order, so their derivations are the oldest
 -- assignments and the targets are decided in the order they were asked for.
 solve
-    :: (Monad m, WithLog env SolverMsg m)
-    => Provider m
-    -> [Incompatibility]
-    -> m (Either SolveError (Map Var Value))
+    :: (Domain d, Monad m, WithLog env (SolverMsg d) m)
+    => Provider d m
+    -> [Incompatibility d]
+    -> m (Either (SolveError d) (Map (VarOf d) (ValueOf d)))
 solve provider seeds =
     go (insertClauses seeds emptyStore) emptyPS
     where
@@ -522,7 +524,7 @@ solve provider seeds =
         -- says, this bans all of @range@ between them: the facts cover part, the
         -- @noInstances@ clause covers the remainder. So @p@ cannot be offered the
         -- same set twice, which is the property termination rests on. 'isEmpty' is
-        -- one-sided on a 'ValueSet' — it may miss that a set is empty — and it
+        -- one-sided on a set — it may miss that a set is empty — and it
         -- errs in the safe direction here: a redundant clause, never a missing one.
         banRest p range facts
             -- Said nothing: the range itself, untouched. A @difference@ against the

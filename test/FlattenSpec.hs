@@ -43,7 +43,7 @@ import           Distribution.Types.PackageName               (unPackageName)
 import           Distribution.Types.PkgconfigDependency        (PkgconfigDependency (..))
 import           Distribution.Types.PkgconfigName              (mkPkgconfigName)
 import           Distribution.Types.PkgconfigVersionRange      (anyPkgconfigVersion)
-import           PubGrub.Incompatibility                      (UnbuildableReason (..))
+import           PubGrub.Cabal                                (UnbuildableReason (..))
 import           Distribution.Version                         (earlierVersion,
                                                                intersectVersionRanges,
                                                                mkVersion,

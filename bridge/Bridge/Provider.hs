@@ -90,13 +90,14 @@ import           PubGrub.Version                              (Version)
 import qualified Distribution.Verbosity                       as Verbosity
 import           Hackage.Security.Client.Repository.Cache     (Cache)
 import           Network.HTTP.Client                          (Manager)
-import           PubGrub.Incompatibility                      (Incompatibility,
+import           PubGrub.Cabal                                (Cabal,
                                                                UnbuildableReason,
                                                                declaresFlag,
                                                                fromDependency,
                                                                onlyInstalled,
                                                                request,
                                                                unbuildable)
+import           PubGrub.Incompatibility                      (Incompatibility)
 import           PubGrub.Index.PreInstalled                   (PreInstalledPackage (..))
 import           PubGrub.Pretty                               (Pretty (pretty))
 import           PubGrub.InstanceSet                          (HasVersion (..),
@@ -125,7 +126,7 @@ import           UnliftIO                                     (MonadUnliftIO,
 -- boot package has to admit its installed unit.
 withProvider
     :: (MonadUnliftIO m, WithLog env Text m)
-    => Cache -> Manager -> IndexState -> FlagModel -> [(PackageName, VersionSet)] -> (Provider m -> [Incompatibility] -> m a) -> m a
+    => Cache -> Manager -> IndexState -> FlagModel -> [(PackageName, VersionSet)] -> (Provider Cabal m -> [Incompatibility Cabal] -> m a) -> m a
 withProvider cache manager state model targets act =
     withWorld cache manager state $ \world -> do
         let handle = wIndex world
@@ -361,10 +362,10 @@ mkExpand
     -> ReleaseSource m
     -> Var
     -> ValueSet
-    -> m (Maybe Value, [Incompatibility])
+    -> m (Maybe Value, [Incompatibility Cabal])
 mkExpand installedDb source = expand'
   where
-    expand' :: Var -> ValueSet -> m (Maybe Value, [Incompatibility])
+    expand' :: Var -> ValueSet -> m (Maybe Value, [Incompatibility Cabal])
     expand' (FlagVar _ (Flag _ dflt)) (FlagSet admitted) =
         pure (listToMaybe [FlagValue b | b <- [dflt, not dflt], memberBool b admitted], [])
     expand' (PackageVar pn) (PackageSet range) = expandPackage pn range
@@ -379,7 +380,7 @@ mkExpand installedDb source = expand'
     -- first and then source releases newest first, and commit to the first the
     -- offered set admits. A source release's @.cabal@ is read only when it is
     -- tried.
-    expandPackage :: PackageName -> InstanceSet -> m (Maybe Value, [Incompatibility])
+    expandPackage :: PackageName -> InstanceSet -> m (Maybe Value, [Incompatibility Cabal])
     expandPackage pn range = do
         let installedHere = [toPreInstalled u | u <- Map.findWithDefault [] pn (idbByName installedDb)]
             admissible = sortOn (Down . version) (filter (`Set.member` isInstalled range) installedHere)

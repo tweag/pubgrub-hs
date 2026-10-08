@@ -20,6 +20,7 @@ library
     import:           warnings
     exposed-modules:
         PubGrub
+        PubGrub.Cabal
         PubGrub.Incompatibility
         PubGrub.Index.PreInstalled
         PubGrub.InstanceSet

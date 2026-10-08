@@ -13,7 +13,9 @@ import           Data.Ord                       (comparing)
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
-import           PubGrub.Incompatibility        (fromDependency, request)
+import           PubGrub.Cabal                  (Cabal,
+                                                 fromDependency,
+                                                 request)
 import           PubGrub.InstanceSet            (HasVersion (version),
                                                  Instance (..), InstanceSet,
                                                  emptyInstanceSet,
@@ -52,7 +54,7 @@ allInstances = [rootI, foo1, foo2, bar1]
 -- newest instance in @range@ (the "newest wins" preference) and turns that
 -- instance's table entry into dependency incompatibilities. These worlds have
 -- no flags, so a flag variable is never asked about.
-mkProvider :: Applicative m => (Instance -> [(PackageName, [Instance])]) -> Provider m
+mkProvider :: Applicative m => (Instance -> [(PackageName, [Instance])]) -> Provider Cabal m
 mkProvider deps = Provider expand'
   where
     expand' (PackageVar p) (PackageSet range) =
@@ -71,14 +73,14 @@ mkProvider deps = Provider expand'
 -- the solver's log trace. A failure is kept as its rendered report rather than
 -- 'show'n: the derived 'Show' would expand the whole derivation DAG as a tree.
 runSolve
-    :: Provider (LoggerT SolverMsg Identity)
+    :: Provider Cabal (LoggerT (SolverMsg Cabal) Identity)
     -> PackageName
     -> Instance
     -> Either Text (Map.Map Var Value)
 runSolve provider p i =
     either (Left . renderFailure) Right (runIdentity (usingLoggerT mempty (solve provider [request p (singletonInstance i)])))
 
-renderFailure :: SolveError -> Text
+renderFailure :: SolveError Cabal -> Text
 renderFailure (NoSolution i) = reportConflict i
 renderFailure (NoSatisfier p _) =
     T.pack ("internal error: no satisfier for " <> show p)

@@ -54,7 +54,9 @@ import           PubGrub.Variable               (Var (..))
 import           PubGrub.Version                (Version)
 import qualified PubGrub.Version                as V
 import           PubGrub.Provider               (Provider (Provider))
-import           PubGrub.Incompatibility        (Incompatibility, request)
+import           PubGrub.Cabal                  (Cabal,
+                                                 request)
+import           PubGrub.Incompatibility        (Incompatibility)
 import           PubGrub.Report                 (reportConflict)
 import qualified PubGrub.VersionSet             as VersionSet
 import           PubGrub.Solver                 (SolveError (..), SolverMsg,
@@ -129,7 +131,7 @@ instanceOf world p v =
 -- guard, not the absence of one, which 'Bridge.Cabal.Flatten.expandGuard' resolves
 -- to the single empty pin set. That is the shape every guard folds to while flags
 -- are fixed at their declared defaults.
-mkProvider :: World -> Provider PureM
+mkProvider :: World -> Provider Cabal PureM
 mkProvider world = Provider (BP.mkExpand (mkInstalledDb []) source)
   where
     source =
@@ -179,7 +181,7 @@ mkProvider world = Provider (BP.mkExpand (mkInstalledDb []) source)
 -- assertions stay a plain '@?='.
 data LogEnv = LogEnv
     { leText   :: LogAction PureM Text
-    , leSolver :: LogAction PureM SolverMsg
+    , leSolver :: LogAction PureM (SolverMsg Cabal)
     }
 
 newtype PureM a = PureM {unPureM :: ReaderT LogEnv Identity a}
@@ -189,15 +191,15 @@ instance HasLog LogEnv Text PureM where
     getLogAction = leText
     setLogAction a e = e{leText = a}
 
-instance HasLog LogEnv SolverMsg PureM where
+instance HasLog LogEnv (SolverMsg Cabal) PureM where
     getLogAction = leSolver
     setLogAction a e = e{leSolver = a}
 
 -- | Run the solver purely, discarding both log channels.
 runSolve
-    :: Provider PureM
-    -> [Incompatibility]
-    -> Either SolveError (Map Var Value)
+    :: Provider Cabal PureM
+    -> [Incompatibility Cabal]
+    -> Either (SolveError Cabal) (Map Var Value)
 runSolve provider seeds =
     runIdentity (runReaderT (unPureM (solve provider seeds)) (LogEnv mempty mempty))
 
@@ -210,7 +212,7 @@ solveWorld rootDeps world =
         runSolve (mkProvider world) [request p (BP.widenTo (mkInstalledDb []) p (VersionSet.fromVersionRange vr)) | (p, vr) <- rootDeps]
 
 -- | Render a solver failure as its explanatory proof.
-renderFailure :: SolveError -> Text
+renderFailure :: SolveError Cabal -> Text
 renderFailure (NoSolution i) = reportConflict i
 renderFailure (NoSatisfier p _) =
     T.pack ("internal error: no satisfier for " <> show p)

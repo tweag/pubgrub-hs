@@ -16,11 +16,12 @@ import           PubGrub.SetOps
 -- | A term is a proposition about one package, judged against a (possibly
 -- partial) solution.
 --
--- * @Positive s@ — the package is selected, as an instance in @s@.
--- * @Negative s@ — the package is not selected, or its instance lies outside @s@.
+--   * @Positive s@ — the package is selected, as an instance in @s@.
+--   * @Negative s@ — the package is not selected, or its instance lies outside @s@.
 --
--- The solver instantiates @a@ at 'PubGrub.InstanceSet.InstanceSet', and the
--- doctests use small @'Set' Int@ payloads. Nothing below depends on which.
+-- The solver instantiates @a@ at its domain's set type
+-- ('PubGrub.Incompatibility.SetOf'; for cabal, 'PubGrub.Value.ValueSet'), and
+-- the doctests use small @'Set' Int@ payloads. Nothing below depends on which.
 --
 -- @Negative s@ is exactly the negation of @Positive s@, so it is satisfied
 -- when the package is absent from the solution. It is /not/ the same as

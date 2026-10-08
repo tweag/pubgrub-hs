@@ -54,10 +54,11 @@ import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.UnitId      (mkUnitId)
 import           Distribution.Types.Version     (mkVersion)
 import           Distribution.Version           (anyVersion, thisVersion)
-import           PubGrub.Incompatibility        (IncompatCause (..),
-                                                 Incompatibility (..),
+import           PubGrub.Cabal                  (Cabal,
+                                                 IncompatCause (..),
                                                  UnbuildableReason (..),
                                                  request)
+import           PubGrub.Incompatibility        (Incompatibility (..))
 import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
 import           PubGrub.InstanceSet            (Instance (..),
                                                  InstanceSet (..),
@@ -108,7 +109,7 @@ type World = [(PackageName, Pkg)]
 -- guards are resolved at the declared defaults before the provider sees them,
 -- which is what 'Bridge.Cabal.Flatten.componentDepsStored' does to a real
 -- release.
-worldProviderUnder :: FlagModel -> [(PackageName, Version)] -> World -> Provider TestM
+worldProviderUnder :: FlagModel -> [(PackageName, Version)] -> World -> Provider Cabal TestM
 worldProviderUnder model unbuildableHere world =
     Provider (BP.mkExpand (mkInstalledDb []) source)
   where
@@ -154,7 +155,7 @@ atDefaults defaults = go
     go (COr a b)  = go a || go b
     go (CAnd a b) = go a && go b
 
-worldProvider :: World -> Provider TestM
+worldProvider :: World -> Provider Cabal TestM
 worldProvider = worldProviderUnder FlagPackages []
 
 -- --------------------------------------------------------------------------
@@ -163,7 +164,7 @@ worldProvider = worldProviderUnder FlagPackages []
 
 data TestEnv = TestEnv
     { teText   :: LogAction TestM Text
-    , teSolver :: LogAction TestM SolverMsg
+    , teSolver :: LogAction TestM (SolverMsg Cabal)
     }
 
 newtype TestM a = TestM {unTestM :: ReaderT TestEnv IO a}
@@ -173,7 +174,7 @@ instance HasLog TestEnv Text TestM where
     getLogAction = teText
     setLogAction a e = e {teText = a}
 
-instance HasLog TestEnv SolverMsg TestM where
+instance HasLog TestEnv (SolverMsg Cabal) TestM where
     getLogAction = teSolver
     setLogAction a e = e {teSolver = a}
 
@@ -192,12 +193,12 @@ rootInstance = BuildSource v1
 
 -- | Run the solver and fold its flag decisions into their owners, so an answer
 -- reads as a plan. A failure is kept as its rendered proof.
-runSolve :: Provider TestM -> IO (Either Text (Map PackageName Resolved))
+runSolve :: Provider Cabal TestM -> IO (Either Text (Map PackageName Resolved))
 runSolve provider =
     either (Left . renderFailure) (Right . foldFlags)
         <$> runTestM (solve provider [request root (singletonInstance rootInstance)])
 
-renderFailure :: SolveError -> Text
+renderFailure :: SolveError Cabal -> Text
 renderFailure (NoSolution i) = reportConflict i
 renderFailure (NoSatisfier p _) =
     T.pack ("internal error: no satisfier for " <> show p)
@@ -216,7 +217,7 @@ solveWorldWith unbuildableHere = runSolve . worldProviderUnder FlagPackages unbu
 -- a package asked twice was reconsidered after a conflict. Flags are not
 -- counted; they are decided with their owner and are not what these counts
 -- measure.
-countingProvider :: IORef [PackageName] -> Provider TestM -> Provider TestM
+countingProvider :: IORef [PackageName] -> Provider Cabal TestM -> Provider Cabal TestM
 countingProvider ref provider = Provider $ \v range -> do
     case v of
         PackageVar p -> liftIO (modifyIORef' ref (p :))

@@ -44,9 +44,11 @@ import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Pretty            (prettyShow)
 import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Incompatibility        (Guard, IncompatCause (..),
-                                                 Incompatibility (..),
+import           PubGrub.Cabal                  (Cabal,
+                                                 Guard,
+                                                 IncompatCause (..),
                                                  UnbuildableReason (..))
+import           PubGrub.Incompatibility        (Incompatibility (..))
 import           PubGrub.InstanceSet            (InstanceSet, isEveryVersion)
 import           PubGrub.Pretty                 (Pretty (..))
 import           PubGrub.Term                   (Term (..))
@@ -118,7 +120,7 @@ requires p1 r1 p2 r2 = named p1 r1 <> " requires " <> bare p2 r2
 -- reading \"no version\", since the bound that failed is only legible against
 -- that version and nothing else in the proof states it; and a release that
 -- cannot be built here says so, and why, rather than looking absent.
-leaf :: Incompatibility -> Text
+leaf :: Incompatibility Cabal -> Text
 leaf c = case incompCause c of
     CauseRequest p s -> bareP p s <> " is requested"
     CauseNoInstances v s -> "no version for " <> pretty v <> " in " <> pretty s
@@ -158,7 +160,7 @@ reasons why =
 -- the negation — \"foo requires bar >=2\", \"if foo and bar then baz <3\",
 -- \"either foo <2 or bar <3\". The empty incompatibility reads \"version solving
 -- failed\".
-summary :: Incompatibility -> Text
+summary :: Incompatibility Cabal -> Text
 summary c = summaryTerms (incompTerms c)
 
 summaryTerms :: Map Var (Term ValueSet) -> Text

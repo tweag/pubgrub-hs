@@ -64,8 +64,9 @@ import           Data.Maybe                     (fromMaybe)
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Incompatibility        (IncompatCause (..),
-                                                 Incompatibility (..),
+import           PubGrub.Cabal                  (Cabal,
+                                                 IncompatCause (..))
+import           PubGrub.Incompatibility        (Incompatibility (..),
                                                  priorCauseTerms)
 import           PubGrub.InstanceSet            (InstanceSet)
 import           PubGrub.Report.Headline        (headline)
@@ -80,7 +81,7 @@ import           PubGrub.SetOps                 (isSubsetOf)
 import           PubGrub.Term                   (Term (..))
 
 -- | Render an incompatibility and its derivation as a human-readable proof.
-reportConflict :: Incompatibility -> Text
+reportConflict :: Incompatibility Cabal -> Text
 reportConflict root0
     | isDerived root = render (reverse (outLines (derived True root (Out [] 1))))
     -- The terminal incompatibility is itself an external fact: nothing was
@@ -101,7 +102,7 @@ reportConflict root0
     prefix (Just n) = T.pack (show n) <> ". "
 
 -- | One or two lines to put above the proof: see "PubGrub.Report.Headline".
-reportHeadline :: Incompatibility -> Text
+reportHeadline :: Incompatibility Cabal -> Text
 reportHeadline = headline . collapseNoInstances
 
 -- --------------------------------------------------------------------------
@@ -134,7 +135,7 @@ numberLast out = case outLines out of
 -- | Explain one derived incompatibility, ending with the line that concludes it.
 -- @final@ marks the last line of the whole proof, which reads \"So, …\" and
 -- concludes failure by name.
-derived :: Bool -> Incompatibility -> Out -> Out
+derived :: Bool -> Incompatibility Cabal -> Out -> Out
 derived final inc out = case bothDerived inc of
     -- Case 1 (references/pubgrub.md:595): both causes derived — the derivation
     -- branches, and this is the only place a line number is wanted. Explain the
@@ -176,7 +177,7 @@ data Line
     = Line
         Text
         -- ^ the premise, which goes after the connective
-        (Maybe Incompatibility)
+        (Maybe (Incompatibility Cabal))
         -- ^ the sub-derivation the line continues, explained before it; a line
         -- that continues nothing opens a line of derivation
 
@@ -184,7 +185,7 @@ data Line
 -- run rules go before the ordinary skip because they collapse what the skip
 -- would print two facts at a time; 'oneFact' is the spec's case 2.iii and
 -- fires on any chain step, so the table is total over chain steps.
-lineRules :: [Rule Incompatibility Line]
+lineRules :: [Rule (Incompatibility Cabal) Line]
 lineRules =
     [ twoFacts
     , wideningRun
@@ -195,7 +196,7 @@ lineRules =
 
 -- | Case 3: both causes are external. One line, and the only case that opens a
 -- line of derivation rather than continuing one.
-twoFacts :: Rule Incompatibility Line
+twoFacts :: Rule (Incompatibility Cabal) Line
 twoFacts step = do
     (c1, c2) <- bothExternal step
     pure (Line (clause c1 c2) Nothing)
@@ -203,7 +204,7 @@ twoFacts step = do
 -- | Case 2.ii — the every-other-step skip. The derived cause's own conclusion
 -- is left unsaid and the two external facts are named together here, which is
 -- where a long linear chain loses half its lines.
-everyOtherStep :: Rule Incompatibility Line
+everyOtherStep :: Rule (Incompatibility Cabal) Line
 everyOtherStep step = do
     (d, e) <- chainStep step
     (dd, de) <- chainStep d
@@ -211,7 +212,7 @@ everyOtherStep step = do
 
 -- | Case 2.iii: the derived cause branches or bottoms out, so it gets its own
 -- lines and this one closes with the external fact alone.
-oneFact :: Rule Incompatibility Line
+oneFact :: Rule (Incompatibility Cabal) Line
 oneFact step = do
     (d, e) <- chainStep step
     pure (Line (leaf e) (Just d))
@@ -234,7 +235,7 @@ oneFact step = do
 -- last two guards are what stop it: the conclusion really is \"p requires q\",
 -- and the collapsed depender range is one it covers. 'isSubsetOf' is one-sided
 -- the safe way: it can only refuse a collapse that would have been fine.
-samePairRun :: Rule Incompatibility Line
+samePairRun :: Rule (Incompatibility Cabal) Line
 samePairRun step = do
     (d, e) <- chainStep step
     (p, s, q, r) <- asDependency e
@@ -255,7 +256,7 @@ samePairRun step = do
 -- | Is this step's conclusion of the shape \"p requires q\"? If so, the range of
 -- @p@ it speaks for. Anything else and a collapsed sentence would be attached
 -- to a claim it does not support.
-concludesRequires :: PackageName -> PackageName -> Rule Incompatibility InstanceSet
+concludesRequires :: PackageName -> PackageName -> Rule (Incompatibility Cabal) InstanceSet
 concludesRequires p q step = case Map.toList (incompTerms step) of
     [(a, Positive (PackageSet s)), (b, Negative _)] | (a, b) == (PackageVar p, PackageVar q) -> Just s
     [(b, Negative _), (a, Positive (PackageSet s))] | (a, b) == (PackageVar p, PackageVar q) -> Just s
@@ -293,7 +294,7 @@ concludesRequires p q step = case Map.toList (incompTerms step) of
 -- @\<0.8.0.1@ to @\<2.2.5.0@) or was __eliminated__ (@directory@ losing one slot
 -- per fact until nothing was left), one step over the union lands where @n@
 -- steps over the members landed, or the collapse does not happen.
-wideningRun :: Rule Incompatibility Line
+wideningRun :: Rule (Incompatibility Cabal) Line
 wideningRun step = do
     (d, e) <- chainStep step
     (p, _, _, _) <- asDependency e
@@ -326,11 +327,11 @@ wideningRun step = do
 
 -- | Two external facts, as one clause: the first of 'clauseRules' to fire, or
 -- the two facts side by side.
-clause :: Incompatibility -> Incompatibility -> Text
+clause :: Incompatibility Cabal -> Incompatibility Cabal -> Text
 clause c1 c2 = fromMaybe (leaf c1 <> " and " <> leaf c2) (firstOf clauseRules (c1, c2))
 
 -- | Each fusion is guarded so that it cannot say more than the facts do.
-clauseRules :: [Rule (Incompatibility, Incompatibility) Text]
+clauseRules :: [Rule (Incompatibility Cabal, Incompatibility Cabal) Text]
 clauseRules =
     [ twoRequests
     , symmetric dependsOnNothing
@@ -342,7 +343,7 @@ clauseRules =
 -- | Two seeds close a proof together: \"baz >=1 && <2 and foo >=1 && <2 are
 -- requested\", the spec's \"depends on both\" sentence without a depender in
 -- front of it.
-twoRequests :: Rule (Incompatibility, Incompatibility) Text
+twoRequests :: Rule (Incompatibility Cabal, Incompatibility Cabal) Text
 twoRequests (c1, c2) = do
     (p1, r1) <- asRequest c1
     (p2, r2) <- asRequest c2
@@ -356,7 +357,7 @@ twoRequests (c1, c2) = do
 -- empty one, which is what the 'isSubsetOf' checks. Where it is only partly
 -- inside, the two facts stay separate — absorbing that case means widening the
 -- term rather than dropping a clause, so it is not a rendering change.
-dependsOnNothing :: Rule (Incompatibility, Incompatibility) Text
+dependsOnNothing :: Rule (Incompatibility Cabal, Incompatibility Cabal) Text
 dependsOnNothing (fact, hole) = do
     (q', empty) <- asHole hole
     (p, s, q, r) <- asDependency fact
@@ -364,7 +365,7 @@ dependsOnNothing (fact, hole) = do
     pure (dep p s q r <> ", which has no versions")
 
 -- | A request whose whole range is empty reads the same way.
-requestsNothing :: Rule (Incompatibility, Incompatibility) Text
+requestsNothing :: Rule (Incompatibility Cabal, Incompatibility Cabal) Text
 requestsNothing (fact, hole) = do
     (p', empty) <- asHole hole
     (p, r) <- asRequest fact
@@ -375,7 +376,7 @@ requestsNothing (fact, hole) = do
 -- \"a depends on b which depends on c\". That is only true if every instance the
 -- first fact leaves open for the middle package is one the second fact speaks
 -- about, hence the 'isSubsetOf'.
-chainOfTwo :: Rule (Incompatibility, Incompatibility) Text
+chainOfTwo :: Rule (Incompatibility Cabal, Incompatibility Cabal) Text
 chainOfTwo (c1, c2) = do
     (p1, s1, q1, r1) <- asDependency c1
     (p2, s2, q2, r2) <- asDependency c2
@@ -384,7 +385,7 @@ chainOfTwo (c1, c2) = do
 
 -- | __One depender, two dependees__ reads \"a depends on both b and c\", for
 -- which the two facts must be about the same instances of @a@.
-sharedDepender :: Rule (Incompatibility, Incompatibility) Text
+sharedDepender :: Rule (Incompatibility Cabal, Incompatibility Cabal) Text
 sharedDepender (c1, c2) = do
     (p1, s1, q1, r1) <- asDependency c1
     (p2, s2, q2, r2) <- asDependency c2
@@ -425,7 +426,7 @@ sharedDepender (c1, c2) = do
 --  * __the sibling is itself derived.__ Only an external dependency fact is
 --    absorbed into; dropping the hole beside a derived sibling would print a
 --    conclusion wider than the line's two causes justify.
-collapseNoInstances :: Incompatibility -> Incompatibility
+collapseNoInstances :: Incompatibility Cabal -> Incompatibility Cabal
 collapseNoInstances inc = case incompCause inc of
     CauseDerivedFrom c1 c2 ->
         let c1' = collapseNoInstances c1

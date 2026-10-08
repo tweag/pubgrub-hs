@@ -161,7 +161,7 @@ import           Distribution.Types.PkgconfigDependency        (PkgconfigDepende
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
 import           Distribution.Types.PackageName               (PackageName)
 import           Distribution.Version                         (withinRange)
-import           PubGrub.Incompatibility                      (UnbuildableReason (..))
+import           PubGrub.Cabal                                (UnbuildableReason (..))
 import           PubGrub.VersionSet                           (VersionSet)
 import qualified PubGrub.VersionSet                           as VS
 

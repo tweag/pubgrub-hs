@@ -110,7 +110,8 @@ quarantined so the core stays lightweight.
 ```
 pubgrub-hs (library) ──── no cabal-install, no cabal-install-solver
   native PubGrub: Term, VersionSet, Incompatibility, Relation, Solver, Store, Report
-  pure algorithm and types. Of the cabal ecosystem it needs Cabal-syntax only
+  pure algorithm and types, generic over a Domain; PubGrub.Cabal is the cabal domain.
+  Of the cabal ecosystem it needs Cabal-syntax only
   (plus base, containers, text, co-log)
         ▲  one callback: Provider.expand
 bridge (private library) ──── cabal-install-solver, Cabal, Cabal-syntax,
@@ -132,7 +133,7 @@ app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solv
 
 | component | what it is |
 | --- | --- |
-| library `pubgrub-hs` | `src/` — the solver. `PubGrub.hs` plus `PubGrub/{Version,VersionSet,Variable,InstanceSet,Value,Term,SetOps,Relation,Incompatibility,Solver,Store,Provider,Report,Pretty}.hs`, `PubGrub/Report/{Rule,Wording,Headline,Layout}.hs`, `PubGrub/Index/PreInstalled.hs` |
+| library `pubgrub-hs` | `src/` — the solver. `PubGrub.hs` plus `PubGrub/{Version,VersionSet,Variable,InstanceSet,Value,Term,SetOps,Relation,Incompatibility,Cabal,Solver,Store,Provider,Report,Pretty}.hs`, `PubGrub/Report/{Rule,Wording,Headline,Layout}.hs`, `PubGrub/Index/PreInstalled.hs` |
 | library `bridge` | `bridge/` — `Bridge/{Hackage,Installed,Provider}.hs`, `Bridge/Hackage/{HttpClient,Store,Unlifted}.hs`, `Bridge/Cabal/{Baseline,Flatten,InstalledPkg}.hs` |
 | executable `pubgrub` | `app/Main.hs` — the CLI driver |
 | executable `pubgrub-index` | `app/BuildIndex.hs` — builds the derived index |

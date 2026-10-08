@@ -1,5 +1,6 @@
 -- | PubGrub native dependency solver — public surface.
 module PubGrub (
+    module PubGrub.Cabal,
     module PubGrub.InstanceSet,
     module PubGrub.VersionSet,
     module PubGrub.Term,
@@ -9,6 +10,7 @@ module PubGrub (
     module PubGrub.Report,
 ) where
 
+import           PubGrub.Cabal
 import           PubGrub.Incompatibility
 import           PubGrub.InstanceSet
 import           PubGrub.Relation

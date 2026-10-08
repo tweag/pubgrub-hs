@@ -1369,6 +1369,29 @@ term algebra for one lossy resolution step), a `(package, flag)` identity
 without the default (the provider would need state or an index read to prefer it),
 and the string-encoded package name itself (a spike convenience, not a type).
 
+### The solver is generic over a domain — HELD
+
+With the variable and the value both sums, the solver loop was already treating a
+flag variable and a package variable identically, and the only thing in the core that
+knew their shapes was the cause type and the `anyTermFor` empty set. The core was
+made polymorphic in one step: `PubGrub.Incompatibility.Domain` fixes the variable,
+value, set and cause types of a domain together, with the variable type injective,
+and `Incompatibility`, `Store`, `Provider`, the partial solution and the solver
+messages take the domain as a parameter. The cabal instantiation moved out into
+`PubGrub.Cabal` — the cause type, the five constructors and the store's merge rule,
+which had been keyed on cabal causes inside `PubGrub.Store` — and a clause of ours is
+an `Incompatibility Cabal`.
+
+Nothing was allowed to change in the output. The gate came out identical, the goldens
+unchanged, and the suite at 229. The empty set stayed a class method rather than being
+removed from the algorithm, because the partial-solution model test reaches the
+⊤-derivation case on purpose and the storage layer is held to it.
+
+What was rejected: explicit type parameters `Incompatibility v s c` as in pubgrub-rs
+(four parameters on the partial solution, and a hundred and forty cabal-side signatures
+to carry them), and same-named type aliases for the cabal instantiation (they fight the
+import system wherever a constructor is used).
+
 ---
 
 ## What is open, and what is settled
