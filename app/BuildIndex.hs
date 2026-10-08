@@ -5,7 +5,12 @@
 -- | Build the derived index: parse every release in the Hackage index once and
 -- write it out in the pre-environment form 'Bridge.Hackage.Store' reads.
 --
--- @cabal run pubgrub-index@
+-- @cabal run pubgrub-index@ builds at the head of the index;
+-- @cabal run pubgrub-index -- --index-state TIMESTAMP@ builds the index as it was
+-- then. Each entry is stored at the revision in force at the build's state and
+-- served only for that revision, so a store built at the head leaves every
+-- release revised since a pinned run's state to be parsed by that run. The gate
+-- and the harness run at the pin in @bench/index-state@, so build there.
 --
 -- This is the one place the whole index is parsed. It takes a few minutes, and
 -- afterwards a solve decodes entries instead of parsing them — measured at
@@ -21,8 +26,11 @@ module Main (main) where
 import           Bridge.Cabal.Flatten       (toStored)
 import           Bridge.Hackage             (IndexHandle (..),
                                              IndexState (..),
-                                             IndexStateInfo (..), cacheDirOf,
-                                             mkCache, showIndexState,
+                                             IndexStateInfo (..),
+                                             IndexStateTooNew (..),
+                                             cacheDirOf, mkCache,
+                                             parseIndexState,
+                                             showIndexState,
                                              withHackageIndex)
 import           Bridge.Hackage.Store       (buildStore, storePaths,
                                              StorePaths (..))
@@ -37,9 +45,16 @@ import qualified Data.Text.IO               as TIO
 import           GHC.Clock                  (getMonotonicTime)
 import           Hackage.Security.Util.Path (fromFilePath, makeAbsolute)
 import           Network.HTTP.Client        (defaultManagerSettings, newManager)
+import           Options.Applicative        (Parser, eitherReader, execParser,
+                                             fullDesc, header, help, helper,
+                                             info, long, metavar, option,
+                                             progDesc, value, (<**>))
 import           System.Directory           (getFileSize)
+import           System.Exit                (exitFailure)
+import           System.IO                  (hPutStrLn, stderr)
 import           Text.Printf                (printf)
 import           UnliftIO                   (MonadIO (liftIO), MonadUnliftIO)
+import qualified UnliftIO
 
 newtype Env = Env {envText :: LogAction App Text}
 
@@ -50,13 +65,33 @@ instance HasLog Env Text App where
     getLogAction = envText
     setLogAction a e = e {envText = a}
 
+newtype Options = Options {optIndexState :: IndexState}
+
+options :: Parser Options
+options =
+    Options
+        <$> option
+            (eitherReader parseIndexState)
+            ( long "index-state"
+                <> metavar "TIMESTAMP"
+                <> value IndexHead
+                <> help "Build the index as it was at this time, e.g. 2016-09-24T17:47:48Z, as the driver's --index-state reads it; build at the state the gate and the harness run at (bench/index-state) and no pinned run parses (default: the head of the local index)"
+            )
+
 main :: IO ()
 main = do
+    opts <-
+        execParser
+            (info (options <**> helper) (fullDesc <> progDesc "Parse every release once into the derived index" <> header "pubgrub-index - build the derived index"))
     cache <- mkCache <$> makeAbsolute (fromFilePath "_cache")
     manager <- newManager defaultManagerSettings
-    runReaderT
-        (unApp (withHackageIndex cache manager IndexHead (build (cacheDirOf cache))))
-        (Env (LogAction (liftIO . TIO.putStrLn)))
+    -- An index-state the local index cannot honour is reported, not built at.
+    UnliftIO.handle tooNew $
+        runReaderT
+            (unApp (withHackageIndex cache manager (optIndexState opts) (build (cacheDirOf cache))))
+            (Env (LogAction (liftIO . TIO.putStrLn)))
+  where
+    tooNew (IndexStateTooNew msg) = hPutStrLn stderr msg >> exitFailure
 
 build :: FilePath -> IndexHandle -> App ()
 build dir handle = do

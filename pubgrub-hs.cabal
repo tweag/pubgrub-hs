@@ -168,6 +168,7 @@ executable pubgrub-index
         , hackage-security
         , http-client
         , mtl
+        , optparse-applicative
         , pubgrub-hs:bridge
         , text
         , unliftio

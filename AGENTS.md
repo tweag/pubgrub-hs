@@ -62,7 +62,7 @@ cabal run pubgrub -- --stats aeson      # + search counts and phase timings, no 
 cabal run pubgrub -- --cabal aeson      # cabal's solver, same index (the baseline)
 cabal run pubgrub -- --flags search aeson   # search the automatic flags, either solver (default: fixed at defaults)
 cabal run pubgrub -- --index-state 2026-09-03T00:00:00Z aeson   # the index as it was then, either solver
-cabal run pubgrub-index              # build the derived index (~120 s, once per refresh)
+cabal run pubgrub-index -- --index-state "$(cat bench/index-state)"   # the derived index at the pin (~120 s, once per refresh)
 scripts/gate.sh                      # every check that must not regress
 cabal run pubgrub-harness            # both solvers, both sets; writes bench/output/{benchmark,showcase}.md
 scripts/check-stats.sh               # --stats against bench/summarise.awk, every problem

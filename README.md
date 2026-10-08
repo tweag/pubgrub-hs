@@ -45,7 +45,7 @@ architecture.
 
 ```sh
 cabal build
-cabal run pubgrub-index      # optional but recommended, ~200 s, once
+cabal run pubgrub-index -- --index-state "$(cat bench/index-state)"   # optional but recommended, ~200 s, once per refresh
 ```
 
 `pubgrub-index` parses every release on Hackage into a derived index, after which

@@ -67,25 +67,28 @@ the better of the two.
 
 | problem | verdict | ours | cabal | our world / solve | cabal world / index / solve | our residency | cabal residency | our allocation | cabal allocation | our proof | cabal's message |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `vector` | both sat | **0.47** | 0.86 | 0.44 / 0.02 | 0.41 / 0.13 / 0.30 | **27.0** | 72.3 MB | **0.56** | 1.04 GB | — | — |
-| `pandoc` | both sat | **0.79** | 1.36 | 0.32 / 0.46 | 0.37 / 0.12 / 0.84 | **43.3** | 103.3 MB | **1.85** | 1.97 GB | — | — |
-| `conduit <1.3` | both UNSAT | **0.34** | 0.72 | 0.32 / 0.01 | 0.31 / 0.10 / 0.29 | **27.0** | 72.3 MB | **0.54** | 1.50 GB | **9** | 12 |
-| `lens <4` | both UNSAT | **0.38** | 0.84 | 0.32 / 0.05 | 0.31 / 0.10 / 0.42 | **27.0** | 72.3 MB | **0.68** | 2.06 GB | **7** | 18 |
-| `aeson <2` | both UNSAT | **0.50** | 1.64 | 0.32 / 0.18 | 0.31 / 0.10 / 1.21 | **27.0** | 93.1 MB | **1.18** | 5.60 GB | 38 | **26** |
-| `yesod` | both sat | 1.82 | **1.41** | 0.35 / 1.47 | 0.31 / 0.11 / 0.84 | **44.0** | 99.5 MB | 5.11 | **2.10** GB | — | — |
+| `vector` | both sat | **0.35** | 0.69 | 0.33 / 0.02 | 0.34 / 0.10 / 0.23 | **27.0** | 72.3 MB | **0.55** | 1.04 GB | — | — |
+| `pandoc` | both sat | **0.81** | 1.14 | 0.33 / 0.47 | 0.30 / 0.10 / 0.70 | **43.8** | 103.3 MB | **1.80** | 1.97 GB | — | — |
+| `conduit <1.3` | both UNSAT | **0.37** | 1.12 | 0.35 / 0.01 | 0.45 / 0.15 / 0.49 | **27.0** | 72.3 MB | **0.54** | 1.50 GB | **9** | 12 |
+| `lens <4` | both UNSAT | **0.61** | 1.89 | 0.51 / 0.10 | 0.68 / 0.21 / 1.00 | **27.0** | 72.3 MB | **0.68** | 2.06 GB | **7** | 18 |
+| `aeson <2` | both UNSAT | **1.06** | 2.23 | 0.64 / 0.41 | 0.42 / 0.14 / 1.61 | **27.0** | 93.1 MB | **1.18** | 5.60 GB | 38 | **26** |
+| `yesod` | both sat | 2.53 | **1.61** | 0.44 / 2.06 | 0.42 / 0.13 / 1.00 | **43.5** | 100.2 MB | 5.07 | **2.10** GB | — | — |
 
 All six verdicts agree. We use **2.3–3.4× less peak memory on all six**. We are faster
-on five of six and allocate less on five of six.
+on five of six and allocate less on five of six. The host carried a load of about 2
+from `lens` onwards on this run, which is why those rows are slower on both sides
+than `vector`, `pandoc` and `conduit`, and than the same rows a quarter of an hour
+earlier; residency and allocation did not move, and they carry the comparison.
 
 **The phases say where our time goes, and it is not the solve.** Opening the world
-(the index, the installed database and the pkg-config database) costs 0.3–0.45 s on
-every run, on both sides. Our solve is under 0.2 s on four of the six problems, and
+(the index, the installed database and the pkg-config database) costs 0.3–0.35 s on
+a quiet run, on both sides. Our solve is under 0.2 s on four of the six problems, and
 `pandoc`'s half second is reads, not search. Only `yesod` has a solve phase that
 matters. cabal's `index` phase is small because the work it names is lazy and lands
 in its `solve` ([§2.3](#23-what-these-numbers-do-not-establish)).
 
 **`yesod` is where we lose, and it is the most useful row in the table.** cabal is
-1.3× faster on it and allocates 2.4× less. It is the only *satisfiable* problem in the
+1.6× faster on it and allocates 2.4× less. It is the only *satisfiable* problem in the
 set with real search in it: `vector` and `pandoc` resolve almost straight through.
 Every other row is either a walk-through or an unsatisfiable proof, so until `yesod`
 was enabled the set could not report this at all.
@@ -98,20 +101,22 @@ Our search counts on the same run:
 
 | problem | decisions | conflicts | no-version events | releases decoded | `.cabal` parses |
 | --- | --- | --- | --- | --- | --- |
-| `vector` | 38 | 0 | 0 | 100 | 2 |
-| `pandoc` | 265 | 1 | 0 | 2821 | 10 |
+| `vector` | 38 | 0 | 0 | 102 | 0 |
+| `pandoc` | 265 | 1 | 0 | 2831 | 0 |
 | `conduit <1.3` | 15 | 8 | 1 | 174 | 0 |
 | `lens <4` | 64 | 23 | 2 | 268 | 0 |
 | `aeson <2` | 319 | 58 | 0 | 367 | 0 |
-| `yesod` | 828 | 14 | 0 | 3242 | 6 |
+| `yesod` | 828 | 14 | 0 | 3248 | 0 |
 
-The derived index answers every read whose revision it holds
-([DESIGN.md §6](DESIGN.md#6-the-derived-index-makes-a-read-a-decode)), and the 18 parses on
-this run are the ones it does not: `pubgrub-index` builds at the head of the index,
-the runs are pinned a month behind it, and a release revised in between is stored at
-its head revision only. At about 2 ms a parse that is inside the noise, and the
-decoded-plus-parsed totals match the 2026-09-22 run release for release. A builder
-that takes an index-state would make the column zero again at the pin.
+Every parse count is zero because the derived index answers every read
+([DESIGN.md §6](DESIGN.md#6-the-derived-index-makes-a-read-a-decode)). That holds only
+while the store holds the revision a run wants: each entry is stored at the revision
+in force when the store was built and served only for that revision, so a store built
+at the head of the index leaves a pinned run to parse every release revised since the
+pin — 18 of them on this set, a month after the pin — and a refresh leaves every
+release published since the build to be parsed. Build with
+`pubgrub-index --index-state` at the pin in `bench/index-state`, as this run was, and
+a non-zero `parses` is the tell that it was not.
 Reading the index at an index-state costs the world phase about 0.16 GB of
 allocation and 2 MB of residency on every run
 ([DESIGN.md §13](DESIGN.md#13-the-index-is-read-at-an-index-state)), which is visible on the smallest

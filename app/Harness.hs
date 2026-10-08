@@ -470,6 +470,7 @@ data Env = Env
     { envDate      :: Text
     , envIndex     :: Text
     , envGhc       :: Text
+    , envCpu       :: Text
     , envPkgConfig :: [(Text, Maybe Bool)]
     }
 
@@ -491,6 +492,7 @@ collectEnv = do
             then T.pack . formatTime defaultTimeLocale "%Y-%m-%d %H:%M UTC" <$> getModificationTime indexPath
             else pure "unknown (no _cache/01-index.tar)"
     ghc <- either (const "unknown") (T.strip . T.pack) <$> tryIO (readProcess "ghc" ["--numeric-version"] "")
+    cpu <- either (const "unknown") (describeCpu . TE.decodeUtf8With lenientDecode) <$> tryIO (BS.readFile "/proc/cpuinfo")
     pkgs <- forM pkgConfigNames $ \name -> do
         r <- tryIO (readProcessWithExitCode "pkg-config" ["--exists", name] "")
         pure (T.pack name, either (const Nothing) (\(c, _, _) -> Just (c == ExitSuccess)) r)
@@ -498,8 +500,22 @@ collectEnv = do
         { envDate      = T.pack (formatTime defaultTimeLocale "%Y-%m-%d %H:%M %Z" now)
         , envIndex     = index
         , envGhc       = ghc
+        , envCpu       = cpu
         , envPkgConfig = pkgs
         }
+
+-- | The host CPU as @/proc/cpuinfo@ reports it: the model name and the number
+-- of logical processors. Timings are only comparable between runs on the same
+-- machine, and this is the line that says which machine. Linux only; elsewhere
+-- the file is missing and the line says unknown.
+describeCpu :: Text -> Text
+describeCpu cpuinfo = case models of
+    []          -> "unknown"
+    (model : _) -> model <> ", " <> T.pack (show processors) <> " logical processors"
+  where
+    ls = T.lines cpuinfo
+    models = [T.strip (T.drop 1 (T.dropWhile (/= ':') l)) | l <- ls, "model name" `T.isPrefixOf` l]
+    processors = length [() | l <- ls, "processor" `T.isPrefixOf` l]
 
 type Result = (Problem, Measured, Measured)   -- ^ problem, ours, cabal's
 
@@ -511,6 +527,7 @@ headerLines cfg env results =
     , "- index-state: " <> indexStateLine
     , "- Hackage index snapshot: " <> envIndex env <> " (mtime of `_cache/01-index.tar`)"
     , "- GHC: " <> envGhc env
+    , "- CPU: " <> envCpu env
     , "- pkg-config present: " <> names True <> "; absent: " <> names False
     , "- repetitions per problem and solver: " <> tshow (cfgReps cfg)
     , "- driver: `" <> T.pack (cfgExe cfg) <> "`"

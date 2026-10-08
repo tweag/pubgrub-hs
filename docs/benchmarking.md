@@ -16,7 +16,7 @@ scripts/check-stats.sh        # --stats against bench/summarise.awk, on every pr
 ## Before you measure anything: build the derived index
 
 ```sh
-cabal run pubgrub-index       # ~200 s, once
+cabal run pubgrub-index -- --index-state "$(cat bench/index-state)"   # ~200 s, once per refresh, at the pin
 ```
 
 This parses all 152,987 releases into `_cache/derived-index.cbor` (62.5 MB) plus a
@@ -273,10 +273,14 @@ refreshed, and with one newer the index is refreshed and the run then fails if t
 request is still newer. The harness and the gate each do one throwaway run (`vector`,
 not recorded) for the refresh. A `cacheFormatVersion` bump also forces one rebuild.
 
-**A refresh leaves the derived index behind.** Each stored release carries the tar
-block it was parsed from and is served only for that revision, so after a refresh every
-release published or revised since parses on demand. The answers stay right. Re-run
-`cabal run pubgrub-index` after a refresh, or the `parses` column stops being zero.
+**A refresh leaves the derived index behind, and a store built at the head is ahead
+of the pin.** Each stored release carries the tar block it was parsed from and is
+served only for that revision. After a refresh every release published or revised
+since the build parses on demand; and a store built at the head holds each release at
+its head revision, so a run pinned behind it parses every release revised in between
+(18 of them on the benchmark set on 2026-10-08, a month after the pin). The answers
+stay right either way. Re-run `pubgrub-index --index-state` at the pin in
+`bench/index-state` after a refresh, or the `parses` column stops being zero.
 
 **Reading the index at an index-state has a fixed price.** The version cache is
 decoded and filtered on every run, and that allocates about 0.15 GB inside the `world`
