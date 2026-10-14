@@ -43,7 +43,7 @@ import           Colog                                     (HasLog (..),
                                                             LogAction (..),
                                                             cmap, logMsg)
 import           Control.Monad                             (when)
-import           Control.Monad.Reader                      (MonadReader,
+import           Control.Monad.Reader                      (MonadReader, asks,
                                                             ReaderT, runReaderT)
 import           Data.IORef                                (IORef,
                                                             atomicModifyIORef',
@@ -425,7 +425,8 @@ runOurs opts t0 counters provider seeds = do
     tSolve <- liftIO getMonotonicTime
     -- 'evaluate' pins the end of the solve phase to the verdict, so the boundary
     -- does not depend on how lazily 'solve' builds its result.
-    result <- evaluate =<< solve provider seeds
+    logA <- asks envSolver
+    result <- evaluate =<< solve logA provider seeds
     tRender <- liftIO getMonotonicTime
     report (optPlan opts) (map fst (optTargets opts)) provider result
     tEnd <- liftIO getMonotonicTime

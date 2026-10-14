@@ -34,7 +34,7 @@ module PubGrub.Cabal.Provider
     , slotInstances
     ) where
 
-import           Colog                          (WithLog, logMsg)
+import           Colog.Core                     (LogAction, (<&))
 import           Control.Exception              (SomeException)
 import           Data.List                      (find, sortOn)
 import           Data.List.NonEmpty             (NonEmpty)
@@ -129,10 +129,11 @@ data ReleaseSource m = ReleaseSource
 -- | The provider's @expand@: the whole candidate-selection and emission rule, over
 -- an installed world and a source world.
 --
--- The constraint is 'Monad' plus a text log channel for its one warning (an
+-- The constraint is 'Monad' plus a text 'LogAction' for its one warning (an
 -- unparseable release), and __not__ 'MonadIO': reading a release runs in
 -- whatever @m@ the 'ReleaseSource' was built in, so an in-memory world can
--- drive the rule purely.
+-- drive the rule purely, and a tool with its own logging hands over an action
+-- rather than adopting a monad.
 --
 -- Three kinds of question arrive:
 --
@@ -148,14 +149,15 @@ data ReleaseSource m = ReleaseSource
 --    be built here, with its dependencies, each under the flags it is guarded
 --    by, and one 'declaresFlag' clause per automatic flag it declares.
 mkExpand
-    :: forall m env
-     . (WithLog env Text m)
-    => InstalledDb
+    :: forall m
+     . Monad m
+    => LogAction m Text
+    -> InstalledDb
     -> ReleaseSource m
     -> Var
     -> ValueSet
     -> m (Maybe Value, [Incompatibility Cabal])
-mkExpand installedDb source = expand'
+mkExpand logA installedDb source = expand'
   where
     expand' :: Var -> ValueSet -> m (Maybe Value, [Incompatibility Cabal])
     expand' (FlagVar _ (Flag _ dflt)) set =
@@ -222,8 +224,8 @@ mkExpand installedDb source = expand'
                             -- release is then outside the universe the solve runs
                             -- over, which is why the warning has to be visible.
                             Left err -> do
-                                logMsg
-                                    ( T.pack
+                                logA
+                                    <& T.pack
                                         ( "warning: ignoring "
                                             ++ prettyShow pn
                                             ++ "-"
@@ -232,7 +234,6 @@ mkExpand installedDb source = expand'
                                             ++ show err
                                             ++ ")"
                                         )
-                                    )
                                 scan stated rest
                             -- A release whose library cannot be built here is not a
                             -- candidate: its @pkgconfig-depends@ are unsatisfiable on

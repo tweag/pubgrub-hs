@@ -116,7 +116,7 @@ pubgrub-hs (library) ──── no cabal-install, no cabal-install-solver
   native PubGrub: Term, VersionSet, Incompatibility, Relation, Solver, Store, Report
   pure algorithm and types, generic over a Domain; PubGrub.Cabal is the cabal domain.
   Of the cabal ecosystem it needs Cabal-syntax only
-  (plus base, containers, text, co-log)
+  (plus base, containers, text, co-log-core: the solver takes its LogAction as an argument)
         ▲  one callback: Provider.expand
 cabal (public sublibrary) ──── Cabal-syntax only, like the core
   the cabal provider rule (PubGrub.Cabal.Provider.mkExpand) over an installed set

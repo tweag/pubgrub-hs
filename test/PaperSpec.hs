@@ -29,11 +29,8 @@ module PaperSpec (tests) where
 import           PubGrub.Cabal.Provider         (ParseError (..))
 import           PubGrub.Cabal.Installed        (mkInstalledDb)
 import qualified PubGrub.Cabal.Provider         as BP
-import           Colog                          (HasLog (..), LogAction)
 import qualified Data.ByteString.Lazy          as BL
 import           Control.Exception              (toException)
-import           Control.Monad.Reader           (MonadReader, ReaderT,
-                                                 runReaderT)
 import           Data.Functor.Identity          (Identity, runIdentity)
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
@@ -59,7 +56,7 @@ import           PubGrub.Cabal                  (Cabal,
 import           PubGrub.Incompatibility        (Incompatibility)
 import           PubGrub.Report                 (reportConflict)
 import qualified PubGrub.VersionSet             as VersionSet
-import           PubGrub.Solver                 (SolveError (..), SolverMsg,
+import           PubGrub.Solver                 (SolveError (..),
                                                  solve)
 import           Test.Tasty                     (TestName, TestTree, testGroup)
 import           Test.Tasty.Golden              (goldenVsString)
@@ -131,8 +128,8 @@ instanceOf world p v =
 -- guard, not the absence of one, which 'PubGrub.Cabal.Flatten.expandGuard' resolves
 -- to the single empty pin set. That is the shape every guard folds to while flags
 -- are fixed at their declared defaults.
-mkProvider :: World -> Provider Cabal PureM
-mkProvider world = Provider (BP.mkExpand (mkInstalledDb []) source)
+mkProvider :: World -> Provider Cabal Identity
+mkProvider world = Provider (BP.mkExpand mempty (mkInstalledDb []) source)
   where
     source =
         BP.ReleaseSource
@@ -172,36 +169,19 @@ mkProvider world = Provider (BP.mkExpand (mkInstalledDb []) source)
 -- The monad the worlds are solved in
 -- --------------------------------------------------------------------------
 
--- | Two log channels, because the pieces being composed want different message
--- types: 'solve' emits 'SolverMsg' and 'BP.mkExpand' emits 'Text'. A single
--- 'Colog.LoggerT' carries one message type and so cannot serve both.
+-- | Run the solver purely, discarding both log channels: 'solve' emits
+-- 'SolverMsg' and 'BP.mkExpand' emits 'Text', and each takes its action as an
+-- argument, so 'mempty' silences both.
 --
 -- Over 'Identity' rather than 'IO', which the provider rule permits: 'BP.mkExpand'
--- asks only for 'Monad' and a text channel, so these tests stay pure and their
--- assertions stay a plain '@?='.
-data LogEnv = LogEnv
-    { leText   :: LogAction PureM Text
-    , leSolver :: LogAction PureM (SolverMsg Cabal)
-    }
-
-newtype PureM a = PureM {unPureM :: ReaderT LogEnv Identity a}
-    deriving newtype (Functor, Applicative, Monad, MonadReader LogEnv)
-
-instance HasLog LogEnv Text PureM where
-    getLogAction = leText
-    setLogAction a e = e{leText = a}
-
-instance HasLog LogEnv (SolverMsg Cabal) PureM where
-    getLogAction = leSolver
-    setLogAction a e = e{leSolver = a}
-
--- | Run the solver purely, discarding both log channels.
+-- asks only for 'Monad', so these tests stay pure and their assertions stay a
+-- plain '@?='.
 runSolve
-    :: Provider Cabal PureM
+    :: Provider Cabal Identity
     -> [Incompatibility Cabal]
     -> Either (SolveError Cabal) (Map Var Value)
 runSolve provider seeds =
-    runIdentity (runReaderT (unPureM (solve provider seeds)) (LogEnv mempty mempty))
+    runIdentity (solve mempty provider seeds)
 
 -- | Run the solver against a world, seeded with the paper's top-level dependencies.
 -- A failure is kept as its rendered report rather than 'show'n, because the

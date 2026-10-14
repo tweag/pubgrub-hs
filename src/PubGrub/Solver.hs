@@ -43,7 +43,7 @@ module PubGrub.Solver
     , solve
     ) where
 
-import           Colog                          (WithLog, logMsg)
+import           Colog.Core                     (LogAction, (<&))
 import           Control.Applicative            (Alternative (..))
 import           Control.Monad                  (foldM)
 import           Data.Foldable                  (Foldable (..))
@@ -361,9 +361,9 @@ satisfiedBySeeds ps inc = incompRelation seedTerm inc == ISatisfied
 -- as it is: the verdict is decided, and the report prints the closing line as
 -- failure whatever the terms say.
 closeWithSeeds
-    :: (Domain d, Monad m, WithLog env (SolverMsg d) m)
-    => PartialSolution d -> Incompatibility d -> m (Incompatibility d)
-closeWithSeeds ps = go
+    :: (Domain d, Monad m)
+    => LogAction m (SolverMsg d) -> PartialSolution d -> Incompatibility d -> m (Incompatibility d)
+closeWithSeeds logA ps = go
   where
     -- One pass over the seeds of every variable still named; another pass while
     -- a pass removed something. Two seeds on one variable need the second pass:
@@ -374,7 +374,7 @@ closeWithSeeds ps = go
     step inc (p, cause)
         | Map.member p (incompTerms inc) = do
             let next = priorCause inc cause p
-            logMsg (Resolving p next)
+            logA <& Resolving p next
             pure next
         | otherwise = pure inc
 
@@ -389,11 +389,12 @@ closeWithSeeds ps = go
 -- on, which is what gives dependency facts about one pair of packages the chance
 -- to merge ('PubGrub.Store').
 unitPropagation
-    :: forall d m env. (Domain d, Monad m, WithLog env (SolverMsg d) m)
-    => Store d
+    :: forall d m. (Domain d, Monad m)
+    => LogAction m (SolverMsg d)
+    -> Store d
     -> PartialSolution d
     -> m (Either (SolveError d) (Store d, PartialSolution d))
-unitPropagation = scan
+unitPropagation logA = scan
   where
     scan store ps = step store ps (storeClauses store)
 
@@ -406,15 +407,15 @@ unitPropagation = scan
                 -- from here: the conflict before it runs, and the level it landed
                 -- on after. A terminal conflict logs the first and not the second,
                 -- which is the right shape — nothing was backtracked to.
-                logMsg (Conflict i)
-                conflictResolution i ps >>= \case
+                logA <& Conflict i
+                conflictResolution logA i ps >>= \case
                     Left err ->
                         pure (Left err)
                     Right (almostVar, rootCause, ps') -> do
-                        logMsg (Learned rootCause)
+                        logA <& Learned rootCause
                         -- 'Backtracked' carries only a level, which does not
                         -- determine @d@, so the message's type is annotated.
-                        logMsg (Backtracked (psLevel ps') :: SolverMsg d)
+                        logA <& (Backtracked (psLevel ps') :: SolverMsg d)
                         scan (insertClause rootCause incompats) (addDerivation almostVar rootCause ps')
             IAlmostSatisfied q ->
                 scan incompats (addDerivation q i ps)
@@ -428,14 +429,15 @@ unitPropagation = scan
 -- It is monadic only to log 'Resolving': the outcome depends on the partial
 -- solution alone.
 conflictResolution
-    :: (Domain d, Monad m, WithLog env (SolverMsg d) m)
-    => Incompatibility d
+    :: (Domain d, Monad m)
+    => LogAction m (SolverMsg d)
+    -> Incompatibility d
     -> PartialSolution d
     -> m (Either (SolveError d) (VarOf d, Incompatibility d, PartialSolution d))
-conflictResolution = loop
+conflictResolution logA = loop
   where
     loop current ps
-        | satisfiedBySeeds ps current = Left . NoSolution <$> closeWithSeeds ps current
+        | satisfiedBySeeds ps current = Left . NoSolution <$> closeWithSeeds logA ps current
         | otherwise =
             case satisfierSearch ps current of
                 Left err -> pure (Left err)
@@ -443,7 +445,7 @@ conflictResolution = loop
                     pure (Right (satVar, current, backtrack prevLevel ps))
                 Right (satVar, SameDecisionLevels satCause) -> do
                     let next = priorCause current satCause satVar
-                    logMsg (Resolving satVar next)
+                    logA <& Resolving satVar next
                     loop next ps
 
 
@@ -490,27 +492,28 @@ data SolverMsg d
 -- The seeds go in first and in order, so their derivations are the oldest
 -- assignments and the targets are decided in the order they were asked for.
 solve
-    :: (Domain d, Monad m, WithLog env (SolverMsg d) m)
-    => Provider d m
+    :: (Domain d, Monad m)
+    => LogAction m (SolverMsg d)
+    -> Provider d m
     -> [Incompatibility d]
     -> m (Either (SolveError d) (Map (VarOf d) (ValueOf d)))
-solve provider seeds =
+solve logA provider seeds =
     go (insertClauses seeds emptyStore) emptyPS
     where
         go incompats ps =
-            unitPropagation incompats ps >>= \case
+            unitPropagation logA incompats ps >>= \case
                 Left err -> pure (Left err)
                 Right (incompats', ps') ->
                     case undecidedPositive ps' of
                         [] -> pure (Right (extractSolution ps'))
                         ((p, range) : _) -> do
-                            logMsg (Deciding p range)
+                            logA <& Deciding p range
                             expand provider p range >>= \case
                                 (Just i, incs) -> do
-                                    logMsg (Chose p i)
+                                    logA <& Chose p i
                                     go (insertClauses incs incompats') (addDecision p i ps')
                                 (Nothing, facts) -> do
-                                    logMsg (NoVersionFor p range)
+                                    logA <& NoVersionFor p range
                                     go (insertClauses facts (banRest p range facts incompats')) ps'
 
         -- The provider has nothing to offer in @range@, and may have said why:

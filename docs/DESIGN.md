@@ -13,7 +13,7 @@
 
 ## 1. The core knows nothing about Cabal
 
-`pubgrub-hs` depends on `Cabal-syntax`, `base`, `containers`, `text` and `co-log`.
+`pubgrub-hs` depends on `Cabal-syntax`, `base`, `containers`, `text` and `co-log-core`.
 It does not depend on `cabal-install` or on `cabal-install-solver`. The bridge holds
 that entanglement, and the bridge is a private library.
 

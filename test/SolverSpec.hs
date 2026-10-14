@@ -4,7 +4,6 @@
 -- conflict resolution and backtracking without a Cabal index.
 module SolverSpec (tests) where
 
-import           Colog                          (LoggerT, usingLoggerT)
 import           Data.Either                    (isLeft)
 import           Data.Functor.Identity          (Identity, runIdentity)
 import           Data.List                      (maximumBy)
@@ -24,7 +23,7 @@ import           PubGrub.InstanceSet            (HasVersion (version),
 import           PubGrub.Provider               (Provider (..))
 import           PubGrub.Report                 (reportConflict)
 import           PubGrub.SetOps                 (union)
-import           PubGrub.Solver                 (SolveError (..), SolverMsg,
+import           PubGrub.Solver                 (SolveError (..),
                                                  solve)
 import           PubGrub.Value                  (Value (..), ValueSet (..))
 import           PubGrub.Variable               (Var (..))
@@ -73,12 +72,12 @@ mkProvider deps = Provider expand'
 -- the solver's log trace. A failure is kept as its rendered report rather than
 -- 'show'n: the derived 'Show' would expand the whole derivation DAG as a tree.
 runSolve
-    :: Provider Cabal (LoggerT (SolverMsg Cabal) Identity)
+    :: Provider Cabal Identity
     -> PackageName
     -> Instance
     -> Either Text (Map.Map Var Value)
 runSolve provider p i =
-    either (Left . renderFailure) Right (runIdentity (usingLoggerT mempty (solve provider [request p (singletonInstance i)])))
+    either (Left . renderFailure) Right (runIdentity (solve mempty provider [request p (singletonInstance i)]))
 
 renderFailure :: SolveError Cabal -> Text
 renderFailure (NoSolution i) = reportConflict i

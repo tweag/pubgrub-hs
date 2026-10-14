@@ -25,7 +25,8 @@ import           Bridge.Hackage                               (IndexHandle (..),
                                                                withHackageIndex)
 import           Bridge.Hackage.Store                         (StoreReader (..),
                                                                openStore)
-import           Colog                                        (WithLog, logMsg)
+import           Colog                                        (LogAction (..),
+                                                               WithLog, logMsg)
 import           Data.IORef                                   (atomicModifyIORef',
                                                                newIORef,
                                                                readIORef)
@@ -105,6 +106,7 @@ withProvider cache manager state model targets act =
             provider =
                 Provider
                     ( mkExpand
+                        (LogAction logMsg)
                         installedDb
                         ReleaseSource
                             { rsVersionsOf = ihSolverVersionsOf handle

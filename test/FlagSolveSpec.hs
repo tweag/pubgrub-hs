@@ -30,11 +30,8 @@ import           PubGrub.Cabal.Flatten          (FlagModel (..))
 import           PubGrub.Cabal.Installed        (InstalledPkg (..), mkInstalledDb)
 import qualified PubGrub.Cabal.Provider         as BP
 import           PubGrub.Cabal.Provider         (ParseError (..))
-import           Colog                          (HasLog (..), LogAction)
 import           Control.Exception              (toException)
-import           Control.Monad.IO.Class         (MonadIO, liftIO)
-import           Control.Monad.Reader           (MonadReader, ReaderT,
-                                                 runReaderT)
+import           Control.Monad.IO.Class         (liftIO)
 import           Data.Either                    (fromLeft, isLeft)
 import           Data.IORef                     (IORef, modifyIORef', newIORef,
                                                  readIORef)
@@ -65,7 +62,7 @@ import           PubGrub.InstanceSet            (Instance (..),
                                                  sourceInstances)
 import           PubGrub.Provider               (Provider (Provider, expand))
 import           PubGrub.Report                 (reportConflict)
-import           PubGrub.Solver                 (SolveError (..), SolverMsg,
+import           PubGrub.Solver                 (SolveError (..),
                                                  solve)
 import           PubGrub.Value                  (Resolved (..), Value (..),
                                                  foldFlags, instanceSet)
@@ -110,7 +107,7 @@ type World = [(PackageName, Pkg)]
 -- release.
 worldProviderUnder :: FlagModel -> [(PackageName, Version)] -> World -> Provider Cabal TestM
 worldProviderUnder model unbuildableHere world =
-    Provider (BP.mkExpand (mkInstalledDb []) source)
+    Provider (BP.mkExpand mempty (mkInstalledDb []) source)
   where
     source =
         BP.ReleaseSource
@@ -161,24 +158,12 @@ worldProvider = worldProviderUnder FlagPackages []
 -- The monad the tests solve in
 -- --------------------------------------------------------------------------
 
-data TestEnv = TestEnv
-    { teText   :: LogAction TestM Text
-    , teSolver :: LogAction TestM (SolverMsg Cabal)
-    }
-
-newtype TestM a = TestM {unTestM :: ReaderT TestEnv IO a}
-    deriving newtype (Functor, Applicative, Monad, MonadIO, MonadReader TestEnv)
-
-instance HasLog TestEnv Text TestM where
-    getLogAction = teText
-    setLogAction a e = e {teText = a}
-
-instance HasLog TestEnv (SolverMsg Cabal) TestM where
-    getLogAction = teSolver
-    setLogAction a e = e {teSolver = a}
+-- The solver and the provider rule take their log actions as arguments, so plain
+-- 'IO' with both silenced ('mempty') is the whole harness.
+type TestM = IO
 
 runTestM :: TestM a -> IO a
-runTestM m = runReaderT (unTestM m) (TestEnv mempty mempty)
+runTestM = id
 
 -- --------------------------------------------------------------------------
 -- Running a world
@@ -195,7 +180,7 @@ rootInstance = BuildSource v1
 runSolve :: Provider Cabal TestM -> IO (Either Text (Map PackageName Resolved))
 runSolve provider =
     either (Left . renderFailure) (Right . foldFlags)
-        <$> runTestM (solve provider [request root (singletonInstance rootInstance)])
+        <$> runTestM (solve mempty provider [request root (singletonInstance rootInstance)])
 
 renderFailure :: SolveError Cabal -> Text
 renderFailure (NoSolution i) = reportConflict i
@@ -534,7 +519,7 @@ bootPackageStatesItself =
     -- The real provider rule over a world with one installed unit of @name@ and no
     -- releases at all, asked about that package with @offered@ on the table.
     expandIn name offered =
-        BP.mkExpand db source (PackageVar (mkPackageName name)) (instanceSet offered)
+        BP.mkExpand mempty db source (PackageVar (mkPackageName name)) (instanceSet offered)
       where
         db =
             mkInstalledDb

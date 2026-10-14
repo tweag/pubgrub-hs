@@ -42,7 +42,7 @@ library
         PubGrub.VersionSet
     build-depends:
         , base ^>=4.21.0.0
-        , co-log
+        , co-log-core
         , containers
         , Cabal-syntax
         , text
@@ -67,7 +67,7 @@ library cabal
     build-depends:
         , base
         , Cabal-syntax
-        , co-log
+        , co-log-core
         , containers
         , pubgrub-hs
         , text
