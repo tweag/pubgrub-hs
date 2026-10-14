@@ -106,8 +106,11 @@ solveWithCabal
     -> PackageIndex (SourcePackage ())
     -> [(PackageName, VersionRange)]
     -- ^ the targets, with the range each is constrained to
+    -> [(PackageName, VersionRange)]
+    -- ^ the constraints: a range a package must be in /if/ it is chosen, as
+    -- @cabal build --constraint@ takes them
     -> Progress String String [ResolverPackage ()]
-solveWithCabal config platform cinfo installed pkgConfig source targets =
+solveWithCabal config platform cinfo installed pkgConfig source targets constraints =
     modularResolver
         config
         platform
@@ -116,7 +119,7 @@ solveWithCabal config platform cinfo installed pkgConfig source targets =
         source
         pkgConfig
         (preferences targetNames)
-        (targetConstraints targets ++ nonReinstallableConstraints)
+        (targetConstraints targets ++ userConstraints constraints ++ nonReinstallableConstraints)
         targetNames
   where
     targetNames = Set.fromList (map fst targets)
@@ -242,6 +245,18 @@ targetConstraints targets =
         (PackageConstraint (scopeToplevel pn) (PackagePropertyVersion range))
         ConstraintSourceUserTarget
     | (pn, range) <- targets
+    ]
+
+-- | A @--constraint@ as cabal takes it: the same version property as a target,
+-- but nothing makes the package a goal, so it binds only if something else
+-- brings the package in. The source is what @cabal build --constraint@ labels
+-- its own with, so cabal's message names it the same way.
+userConstraints :: [(PackageName, VersionRange)] -> [LabeledPackageConstraint]
+userConstraints constraints =
+    [ LabeledPackageConstraint
+        (PackageConstraint (scopeToplevel pn) (PackagePropertyVersion range))
+        ConstraintSourceCommandlineFlag
+    | (pn, range) <- constraints
     ]
 
 -- | Packages that may never be built from source, as constraints.

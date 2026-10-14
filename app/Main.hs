@@ -73,7 +73,7 @@ import           Hackage.Security.Util.Path                (fromFilePath,
                                                             makeAbsolute)
 import           Network.HTTP.Client                       (defaultManagerSettings,
                                                             newManager)
-import           Control.Applicative                       (some)
+import           Control.Applicative                       (many, some)
 import           Options.Applicative                       (Parser, argument,
                                                             eitherReader,
                                                             execParser, flag,
@@ -99,7 +99,8 @@ import           PubGrub.Report                            (reportConflict,
 import           PubGrub.Solver                            (SolveError (..),
                                                             SolverMsg (..),
                                                             solve)
-import           PubGrub.VersionSet                        (fromVersionRange)
+import           PubGrub.VersionSet                        (VersionSet,
+                                                            fromVersionRange)
 import           System.Environment                        (lookupEnv)
 import           System.Exit                               (exitFailure)
 import           System.IO                                 (hIsTerminalDevice,
@@ -324,6 +325,9 @@ data Options = Options
     -- ^ whether automatic flags are searched (@--flags search@) or fixed at
     -- their defaults (the default, @--flags fixed@). Applied to both solvers:
     -- under @fixed@ the baseline's flags are marked manual too.
+    , optConstraints :: [(PackageName, VersionRange)]
+    -- ^ @--constraint@, repeatable: a range a package must be in /if/ it is chosen,
+    -- for both solvers. A constraint on a package nothing depends on is vacuous.
     , optTargets   :: [(PackageName, VersionRange)]
     -- ^ what to solve for: one or more packages, each with the range it is
     -- constrained to. Ranges stay 'VersionRange' because cabal's solver takes
@@ -377,6 +381,7 @@ optionsParser =
         <*> flag Ours Cabal (long "cabal" <> help "Run cabal's solver instead of the native solver")
         <*> option (eitherReader parseIndexState) (long "index-state" <> metavar "TIMESTAMP" <> value IndexHead <> help "Solve against the index as it was at this time, e.g. 2016-09-24T17:47:48Z, as cabal's --index-state does (default: everything the local index holds, refreshed at most weekly)")
         <*> option (eitherReader parseFlags) (long "flags" <> metavar "fixed|search" <> value FixedFlags <> help "Fix every flag at its declared default (default), or search the automatic flags, in both solvers (spike)")
+        <*> many (option (eitherReader parseTarget) (long "constraint" <> metavar "'PKG RANGE'" <> help "A package with the range it must be in if it is chosen, as one argument: --constraint 'aeson <2'. Repeat for more than one. Applies to both solvers"))
         <*> some (argument (eitherReader parseTarget) (metavar "TARGET..." <> help "A package to solve for, with an optional version range, as one argument: 'aeson' or 'aeson <2'. Repeat for more than one."))
 
 -- --------------------------------------------------------------------------
@@ -408,11 +413,15 @@ main = do
                 -- widening a range to instances (installed units included) is its
                 -- business, not the driver's.
                 Ours ->
-                    withProvider cache manager (optIndexState opts) (optFlags opts) [(pn, fromVersionRange vr) | (pn, vr) <- optTargets opts] $ \provider seeds ->
+                    withProvider cache manager (optIndexState opts) (optFlags opts) (ranges (optTargets opts)) (ranges (optConstraints opts)) $ \provider seeds ->
                         runOurs opts t0 counters provider seeds
                 Cabal ->
                     withWorld cache manager (optIndexState opts) $ \world ->
                         runBaseline opts t0 world
+
+-- | The targets or constraints as the bridge takes them.
+ranges :: [(PackageName, VersionRange)] -> [(PackageName, VersionSet)]
+ranges rs = [(pn, fromVersionRange vr) | (pn, vr) <- rs]
 
 -- | Solve with the native solver, render the answer, and — under @--stats@ —
 -- the counters and the phase timings after it. Those two lines come before the
@@ -482,6 +491,7 @@ runBaseline opts t0 world = do
                 (wPkgConfig world)
                 sourceIdx
                 (optTargets opts)
+                (optConstraints opts)
         (steps, lazyResult) = outcome progress
     -- Forcing the 'Either' walks the whole 'Progress': that is the solve. The
     -- step count is a chain of increments left behind by the same walk, so it

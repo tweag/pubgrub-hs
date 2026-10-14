@@ -53,7 +53,7 @@ import           Distribution.Version           (anyVersion, thisVersion)
 import           PubGrub.Cabal                  (Cabal,
                                                  IncompatCause (..),
                                                  UnbuildableReason (..),
-                                                 request)
+                                                 flagConstraint, request)
 import           PubGrub.Incompatibility        (Incompatibility (..))
 import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
 import           PubGrub.InstanceSet            (Instance (..),
@@ -178,9 +178,13 @@ rootInstance = BuildSource v1
 -- | Run the solver and fold its flag decisions into their owners, so an answer
 -- reads as a plan. A failure is kept as its rendered proof.
 runSolve :: Provider Cabal TestM -> IO (Either Text (Map PackageName Resolved))
-runSolve provider =
+runSolve = runSolveWith []
+
+-- | The same with further seeds after the request: constraints, in these tests.
+runSolveWith :: [Incompatibility Cabal] -> Provider Cabal TestM -> IO (Either Text (Map PackageName Resolved))
+runSolveWith seeds provider =
     either (Left . renderFailure) (Right . foldFlags)
-        <$> runTestM (solve mempty provider [request root (singletonInstance rootInstance)])
+        <$> runTestM (solve mempty provider (request root (singletonInstance rootInstance) : seeds))
 
 renderFailure :: SolveError Cabal -> Text
 renderFailure (NoSolution i) = reportConflict i
@@ -263,6 +267,7 @@ tests =
         [ defaultsUsed
         , flagFlip
         , fixedFlagsDoNotFlip
+        , heldFlag
         , twoFlags
         , unsatOverFlags
         , unusedFlag
@@ -643,3 +648,37 @@ selfDependencyDropped =
         case result of
             (Just (PackageValue (BuildSource _)), incs) -> pure incs
             _ -> liftIO (assertFailure "expected p 1.0.0 to be chosen")
+
+-- | 2c. A flag held at a value by a constraint seed ('flagConstraint'), the
+-- shape a lock entry's automatic flags take, and the one a flag constraint such
+-- as @--constraint 'foo +fast'@ would take. Held at its default, @fast@ cannot
+-- flip to escape the missing @speedy@, so the world of 'flagFlip' has no solution
+-- and the proof says why; held at the other value, the solver never tries the
+-- default at all.
+heldFlag :: TestTree
+heldFlag =
+    testGroup
+        "a flag held by a constraint"
+        [ testCase "held at the default, the flip that would have rescued the world is forbidden" $ do
+            result <- runSolveWith [flagConstraint (pkg "foo") (Flag fast True) True] (worldProvider world)
+            assertBool "expected no solution" (isLeft result)
+            let proof = fromLeft T.empty result
+            assertBool ("proof names the constraint:\n" <> T.unpack proof) (T.pack "foo is constrained to +fast" `T.isInfixOf` proof)
+        , testCase "held at the other value, the default is never tried" $ do
+            result <- runSolveWith [flagConstraint (pkg "foo") (Flag fast False) False] (worldProvider world)
+            result
+                @?= Right
+                    ( solutionOf
+                        [ (pkg "root", v1, [])
+                        , (pkg "foo", v1, [(fast, False)])
+                        , (pkg "slow", v1, [])
+                        ]
+                    )
+        ]
+  where
+    fast = flg "fast"
+    world =
+        [ (pkg "root", plain [pkg "foo"])
+        , (pkg "foo", Pkg [(fast, True)] [Release v1 [whenOn fast [pkg "speedy"], whenOff fast [pkg "slow"]]])
+        , (pkg "slow", leaf)
+        ]

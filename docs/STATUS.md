@@ -26,6 +26,7 @@
 | Index-state | `--index-state T` gives both solvers the index as it was at `T`, revisions included, with cabal's semantics. A run prints the state it is really at |
 | Derived index | every release parsed once into `_cache/derived-index.cbor`. A read is a CBOR decode, served only for the revision in force |
 | Version ranges | full. The solver resolves real packages end to end |
+| Constraints | `--constraint 'p R'`, repeatable, for both solvers: a range `p` must be in if it is chosen. A second seed kind in the core (`constraint`, and `flagConstraint` for a flag held at a value), and `conflictSet` reads the variables of a failed solve's derivation ([DESIGN.md §10](DESIGN.md#10-the-request-is-a-list-of-seeds)) |
 | Version order | ours, not Cabal's: trailing zeros are insignificant, so `1.2` and `1.2.0.0` are one version. Cabal's type stops at the bridge ([DESIGN.md §14](DESIGN.md#14-versions-compare-with-trailing-zeros-insignificant)) |
 | Flags | fixed at their declared defaults by default; `--flags search` makes every automatic flag a solver variable, on both sides ([§3.1](#31-flags-are-fixed-at-their-declared-defaults-unless-asked)) |
 | Boot packages | the installed database becomes instances. A boot package offers installed units or nothing |
@@ -301,7 +302,7 @@ Not started. [cabal-build-model.md](cabal-build-model.md) is the reference, and
 | thing | specification | note |
 | --- | --- | --- |
 | **`buildable:` under a flag** | [flags-as-variables.md](flags-as-variables.md) §6 | half built. `buildableCondition` returns the condition and `buildableAtDefaults` evaluates it. A release unbuildable only under some assignment needs the guard carried into its unbuildable clause |
-| **User flag constraints** (`--flag`) | [flags-as-variables.md](flags-as-variables.md) §6 | do not exist. A level-0 request on the flag variable is the shape |
+| **User flag constraints** (`--constraint 'p +f'`) | [flags-as-variables.md](flags-as-variables.md) §6 | the seed exists, `PubGrub.Cabal.flagConstraint`, a level-0 constraint on the flag variable. No driver option parses one yet, and the baseline is passed none |
 | **`preferred-versions`** | — | the index reader does not read it. Its entries are in the tar with timestamps, so an index-state would apply to it unchanged |
 
 ### 4.4 What flag search still owes

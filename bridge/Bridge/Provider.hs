@@ -61,6 +61,7 @@ import           PubGrub.Cabal.Installed                      (mkInstalledDb)
 import           PubGrub.Cabal.Provider                       (ParseError,
                                                                Release (..),
                                                                ReleaseSource (..),
+                                                               constrainTo,
                                                                mkExpand, widenTo)
 import           PubGrub.Incompatibility                      (Incompatibility)
 import           PubGrub.Provider                             (Provider (..))
@@ -88,8 +89,8 @@ pkgConfigPresent db (PkgconfigDependency n range) =
 -- boot package has to admit its installed unit.
 withProvider
     :: (MonadUnliftIO m, WithLog env Text m)
-    => Cache -> Manager -> IndexState -> FlagModel -> [(PackageName, VersionSet)] -> (Provider Cabal m -> [Incompatibility Cabal] -> m a) -> m a
-withProvider cache manager state model targets act =
+    => Cache -> Manager -> IndexState -> FlagModel -> [(PackageName, VersionSet)] -> [(PackageName, VersionSet)] -> (Provider Cabal m -> [Incompatibility Cabal] -> m a) -> m a
+withProvider cache manager state model targets constraints act =
     withWorld cache manager state $ \world -> do
         let handle = wIndex world
             platform = wPlatform world
@@ -113,7 +114,9 @@ withProvider cache manager state model targets act =
                             , rsReadRelease = \pn v -> liftIO (readRelease pn (V.toCabalVersion v))
                             }
                     )
-            seeds = [request pn (widenTo installedDb pn vs) | (pn, vs) <- targets]
+            seeds =
+                [request pn (widenTo installedDb pn vs) | (pn, vs) <- targets]
+                    ++ [constrainTo installedDb pn (widenTo installedDb pn vs) | (pn, vs) <- constraints]
         result <- act provider seeds
         (parsed, decoded, reused) <- liftIO lookupStats
         logMsg

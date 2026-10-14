@@ -17,10 +17,14 @@ module PubGrub.Cabal
     , UnbuildableReason (..)
       -- * Constructors
     , request
+    , constraint
+    , flagConstraint
     , onlyInstalled
     , unbuildable
     , fromDependency
     , declaresFlag
+      -- * Reading a failure
+    , conflictSet
     ) where
 
 import           Data.List.NonEmpty                     (NonEmpty)
@@ -67,8 +71,9 @@ instance Domain Cabal where
     noInstancesCause = CauseNoInstances
 
     isRequest i = case incompCause i of
-        CauseRequest{} -> True
-        _              -> False
+        CauseRequest{}    -> True
+        CauseConstraint{} -> True
+        _                 -> False
 
     mergeRule = MergeRule mergeKey mergeWith
 
@@ -87,6 +92,7 @@ data IncompatCause
     | CauseUnbuildable PackageName InstanceSet (NonEmpty UnbuildableReason)  -- unbuildable
     | CauseDependency PackageName InstanceSet Guard (PackageName, InstanceSet)  -- fromDependency
     | CauseDeclaresFlag PackageName InstanceSet Flag              -- declaresFlag
+    | CauseConstraint Var ValueSet                                -- constraint: the set allowed
     | CauseDerivedFrom (Incompatibility Cabal) (Incompatibility Cabal)  -- priorCause
 
 -- | Why a release's library cannot be built on this machine: one entry per
@@ -119,6 +125,36 @@ data UnbuildableReason
 -- rests on those derivations alone as the end of the search.
 request :: PackageName -> InstanceSet -> Incompatibility Cabal
 request p s = Incompatibility (Map.singleton (PackageVar p) (Negative (instanceSet s))) (CauseRequest p s)
+
+-- | A constraint: if @v@ is in the plan at all, it is in @allowed@. It is
+-- impossible for @v@ to be in @forbidden@, the complement of @allowed@ in the
+-- variable's universe:
+--
+-- @{ v: Positive forbidden }@
+--
+-- The other seed. A 'request' forces its package /into/ the plan; a constraint
+-- says nothing about whether the package is chosen, only what it may be if it is
+-- — @cabal build --constraint@, a @constraints:@ stanza, and a lock entry a
+-- planner holds at its version. Propagation turns it into the level-0 derivation
+-- @Negative forbidden@, which is \"absent, or in @allowed@\", so a package nobody
+-- depends on is left alone; and because it is a seed, a conflict that rests on
+-- it together with the requests is terminal ('PubGrub.Solver.solve'), and the
+-- proof closes on \"@v@ is constrained to @allowed@\".
+--
+-- Both sets are taken because the core's set operations have no complement: a
+-- package's universe holds the installed units of the compiler, which only the
+-- provider side knows. 'PubGrub.Cabal.Provider.constrainTo' computes the
+-- complement from a 'PubGrub.Cabal.Installed.InstalledDb'; 'flagConstraint' is
+-- the two-valued case, which needs nothing.
+constraint :: Var -> ValueSet -> ValueSet -> Incompatibility Cabal
+constraint v allowed forbidden =
+    Incompatibility (Map.singleton v (Positive forbidden)) (CauseConstraint v allowed)
+
+-- | A flag held at a value: @p:f@ is @b@ if it is in play at all. A 'constraint'
+-- over the flag's own variable, as cabal's @--constraint 'p +f'@ is.
+flagConstraint :: PackageName -> Flag -> Bool -> Incompatibility Cabal
+flagConstraint p f b =
+    constraint (FlagVar p f) (flagSet (boolSet b)) (flagSet (boolSet (not b)))
 
 -- | A package that may not be built from source at all: only an already-installed
 -- unit of it can be selected. The term is /every source instance/ — any version
@@ -296,3 +332,21 @@ mergeWith c new = case (incompCause c, incompCause new) of
     -- Unreachable: equal keys imply the same kind of cause. If it were
     -- reached, the newer clause would be lost.
     _ -> c
+
+-- --------------------------------------------------------------------------
+-- Reading a failure
+-- --------------------------------------------------------------------------
+
+-- | Every variable a failed solve's derivation mentions: the terminal
+-- incompatibility's own terms, and the terms of every incompatibility it was
+-- derived from, down to the external facts at the leaves.
+--
+-- This is the __conflict set__ in cabal's sense — the packages on the path to the
+-- conflict as well as those in it — and it is what a planner holding a lock
+-- reads to decide which held packages to release before solving again. A held
+-- package that is not in the set took no part in the failure, and releasing it
+-- cannot help.
+conflictSet :: Incompatibility Cabal -> Set Var
+conflictSet inc = Map.keysSet (incompTerms inc) <> case incompCause inc of
+    CauseDerivedFrom a b -> conflictSet a <> conflictSet b
+    _                    -> Set.empty

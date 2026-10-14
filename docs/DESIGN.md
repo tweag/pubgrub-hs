@@ -620,6 +620,25 @@ proof the same length with "X is requested" as its last fact, the paper's two
 golden proofs changed on their last line only, and every problem has one decision
 fewer. No proof carries a NUL byte; the `-a` in the scripts is a precaution.
 
+**The other seed is a constraint** (2026-10-14): "if `p` is chosen, it is in `R`",
+the unit clause `{p: Positive ¬R}` with cause `CauseConstraint`, built by
+`PubGrub.Cabal.constraint` from the allowed set and its complement, because the core
+has no complement ([STATUS.md §5.1](STATUS.md#51-settled--not-planned-do-not-reopen))
+and a package's universe includes the compiler's installed units, which only the
+provider side knows: `PubGrub.Cabal.Provider.constrainTo` computes it from the
+`InstalledDb`. A flag held at a value is the two-valued case, `flagConstraint`, over
+the flag's own variable. A constraint forces nothing into the plan: its level-0
+derivation is `Negative ¬R`, "absent or in `R`", and `undecidedPositive` never picks
+it up on its own. It is a seed for everything above: a conflict resting on it and the
+requests is terminal, and the closing line names it as the proof's own words put it,
+"because aeson is constrained to <2 and pandoc is requested, version solving
+failed". The driver's `--constraint 'p R'` feeds the same ranges to cabal's solver as
+`PackagePropertyVersion` constraints labelled from the command line, so the two
+agree on constrained problems too. What a planner reads off a failure is
+`conflictSet`: every variable in the derivation, root to leaves, which is cabal's
+conflict set in the sense a lock needs — the held packages in it are the ones worth
+releasing before solving again.
+
 ## 11. Memoise the reduced form, never the parse tree
 
 `Bridge.Provider.releaseReader` memoises, per release, only the form the provider

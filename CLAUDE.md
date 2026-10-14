@@ -64,6 +64,7 @@ cabal run pubgrub -- hlint 'aeson <2'   # several targets, solved together
 cabal run pubgrub -- --stats aeson      # + search counts and phase timings, no trace
 cabal run pubgrub -- --cabal aeson      # cabal's solver, same index (the baseline)
 cabal run pubgrub -- --flags search aeson   # search the automatic flags, either solver (default: fixed at defaults)
+cabal run pubgrub -- --constraint 'aeson <2' pandoc   # a range aeson must be in if chosen, either solver; repeatable
 cabal run pubgrub -- --index-state 2026-09-03T00:00:00Z aeson   # the index as it was then, either solver
 cabal run pubgrub-index -- --index-state "$(cat bench/index-state)"   # the derived index at the pin (~120 s, once per refresh)
 scripts/gate.sh                      # every check that must not regress

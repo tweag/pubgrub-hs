@@ -20,6 +20,7 @@ module PubGrub.Cabal.Provider
     ( -- * The rule
       mkExpand
     , widenTo
+    , constrainTo
 
       -- * What it is given
     , ReleaseSource (..)
@@ -53,8 +54,9 @@ import           Distribution.Types.Dependency  (depPkgName, depVerRange)
 import           Distribution.Types.PackageName (PackageName)
 import qualified Distribution.Types.Version     as Cabal
 import           PubGrub.Cabal                  (Cabal, UnbuildableReason,
-                                                 declaresFlag, fromDependency,
-                                                 onlyInstalled, unbuildable)
+                                                 constraint, declaresFlag,
+                                                 fromDependency, onlyInstalled,
+                                                 unbuildable)
 import           PubGrub.Cabal.Flatten          (GuardedDeps, expandGuard)
 import           PubGrub.Cabal.Installed        (InstalledDb (..),
                                                  InstalledEdge (..),
@@ -71,7 +73,7 @@ import           PubGrub.InstanceSet            (HasVersion (..), Instance (..),
                                                  sourceInstances)
 import           PubGrub.Pretty                 (Pretty (pretty))
 import           PubGrub.Value                  (Value (..), ValueSet (..),
-                                                 memberBool)
+                                                 instanceSet, memberBool)
 import           PubGrub.Variable               (Flag (..), Var (..))
 import           PubGrub.Version                (Version)
 import           PubGrub.VersionSet             (VersionSet, contains)
@@ -476,6 +478,28 @@ widenTo installedDb d vs =
                 ]
         , isSource = vs
         }
+
+-- | A constraint seed over a package: if @p@ is in the plan, it is one of
+-- @allowed@. The complement the clause bans is computed here because only this
+-- side knows the package's universe: every installed unit of @p@ the compiler
+-- has, and every source version.
+--
+-- Two callers, two shapes of @allowed@: a range from @--constraint@ or a
+-- @constraints:@ stanza is widened with 'widenTo', so an installed unit in the
+-- range stays admissible; a lock entry held at its version is
+-- @'sourceInstances' (singleton v)@, which bans the installed units too, since
+-- the lock recorded a source package.
+constrainTo :: InstalledDb -> PackageName -> InstanceSet -> Incompatibility Cabal
+constrainTo installedDb p allowed =
+    constraint (PackageVar p) (instanceSet allowed) (instanceSet forbidden)
+  where
+    forbidden =
+        InstanceSet
+            { isInstalled =
+                Set.fromList [pip | UsePreInstalled pip <- installedInstancesOf installedDb p]
+                    `Set.difference` isInstalled allowed
+            , isSource = VersionSet.complementVersionSet (isSource allowed)
+            }
 
 -- | Pair each release with its __version slot__: the half-open range reaching from
 -- it up to the next release that exists, and unbounded for the newest. Newest

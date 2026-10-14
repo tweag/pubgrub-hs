@@ -144,6 +144,7 @@ test-suite pubgrub-hs-test
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
     other-modules:
+        ConstraintSpec
         FlagSolveSpec
         FlattenSpec
         IndexStateSpec

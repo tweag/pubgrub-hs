@@ -122,6 +122,8 @@ requires p1 r1 p2 r2 = named p1 r1 <> " requires " <> bare p2 r2
 leaf :: Incompatibility Cabal -> Text
 leaf c = case incompCause c of
     CauseRequest p s -> bareP p s <> " is requested"
+    CauseConstraint (PackageVar p) s -> pretty p <> " is constrained to " <> pretty (vsInstances s)
+    CauseConstraint (FlagVar p f) s -> pretty p <> " is constrained to " <> flagText f (vsFlags s)
     CauseNoInstances v s -> "no version for " <> pretty v <> " in " <> pretty s
     CauseOnlyInstalled p [] -> pretty p <> " is not installed and cannot be built from source"
     CauseOnlyInstalled p vs ->
