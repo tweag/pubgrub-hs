@@ -107,8 +107,9 @@ desktop), total allocation from `+RTS -s` is the stable stand-in for time, and
 
 ## Architecture
 
-Three layers with a hard dependency boundary. The cabal-install entanglement is
-quarantined so the core stays lightweight.
+Four layers with a hard dependency boundary. The cabal-install entanglement is
+quarantined so the core and the cabal provider stay lightweight, and another tool
+can drive the solver over its own index with the two public libraries alone.
 
 ```
 pubgrub-hs (library) ──── no cabal-install, no cabal-install-solver
@@ -117,9 +118,14 @@ pubgrub-hs (library) ──── no cabal-install, no cabal-install-solver
   Of the cabal ecosystem it needs Cabal-syntax only
   (plus base, containers, text, co-log)
         ▲  one callback: Provider.expand
+cabal (public sublibrary) ──── Cabal-syntax only, like the core
+  the cabal provider rule (PubGrub.Cabal.Provider.mkExpand) over an installed set
+  and a ReleaseSource; the .cabal flatten (PubGrub.Cabal.Flatten) with the machine
+  passed in as plain data: Platform, CompilerInfo, a pkg-config predicate
+        ▲  a ReleaseSource and an InstalledDb
 bridge (private library) ──── cabal-install-solver, Cabal, Cabal-syntax,
                               hackage-security, http-client
-  index acquisition, the derived index, and the translation into the solver's input
+  index acquisition, the derived index, the compiler's world on this machine
   builds a package index and feeds it to BOTH:
     ├─ cabal's modularResolver, via Bridge.Cabal.Baseline   (the baseline)
     └─ our own Provider
@@ -132,18 +138,19 @@ app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solv
                  problem and repetition; writes bench/output/benchmark.md and showcase.md
 ```
 
-**Six cabal components:**
+**Seven cabal components:**
 
 | component | what it is |
 | --- | --- |
 | library `pubgrub-hs` | `src/` — the solver. `PubGrub.hs` plus `PubGrub/{Version,VersionSet,Variable,InstanceSet,Value,Term,SetOps,Relation,Incompatibility,Cabal,Solver,Store,Provider,Report,Pretty}.hs`, `PubGrub/Report/{Rule,Wording,Headline,Layout}.hs`, `PubGrub/Index/PreInstalled.hs` |
-| library `bridge` | `bridge/` — `Bridge/{Hackage,Installed,Provider}.hs`, `Bridge/Hackage/{HttpClient,Store,Unlifted}.hs`, `Bridge/Cabal/{Baseline,Flatten,InstalledPkg}.hs` |
+| library `cabal` (public) | `cabal/` — `PubGrub/Cabal/{Flatten,Installed,Provider}.hs`. The translation from `.cabal` files and an installed set into the solver's input, and the provider rule. Cabal-syntax only |
+| library `bridge` (private) | `bridge/` — `Bridge/{Hackage,Provider}.hs`, `Bridge/Hackage/{HttpClient,Store,Unlifted}.hs`, `Bridge/Cabal/{Baseline,InstalledPkg}.hs` |
 | executable `pubgrub` | `app/Main.hs` — the CLI driver |
 | executable `pubgrub-index` | `app/BuildIndex.hs` — builds the derived index |
 | executable `pubgrub-harness` | `app/Harness.hs` — the harness. Depends on neither library: it drives the `pubgrub` executable as a child, parses its `stats:`, `phases:` and `plan:` lines, and writes the two reports |
 | test-suite | `test/` — 11 spec modules plus `test/golden/` |
 
-**What each bridge module does.**
+**What each cabal and bridge module does.**
 
 - `Bridge.Hackage` — bootstraps and refreshes the index through `hackage-security`,
   keeps a disk-cached package-to-versions map, and reads one release's `.cabal`
@@ -151,23 +158,31 @@ app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solv
   `--flags fixed` the baseline marks every flag manual before cabal sees it.
 - `Bridge.Hackage.Store` — the derived index. Every release parsed once, ahead of
   time, into the pre-environment form.
-- `Bridge.Cabal.Flatten` — reads two things off one walk of a conditional tree
+- `PubGrub.Cabal.Flatten` — reads two things off one walk of a conditional tree
   (`flattenWith`): the `build-depends`, and the `BuildInfo` that decides buildability
-  (`buildable:` plus `pkgconfig-depends` against the machine's `PkgConfigDb`, library
-  only). Dependencies come from the four components cabal includes unconditionally —
+  (`buildable:` plus `pkgconfig-depends` against a `PkgConfigPresent` predicate, library
+  only). The machine is an argument — `Platform`, `CompilerInfo`, the predicate — never
+  read here. Dependencies come from the four components cabal includes unconditionally —
   library, sublibraries, foreign libraries, executables — and the last three are gated
   on their own `buildable:` through Cabal-syntax's `addBuildableCondition`.
 - `Bridge.Cabal.Baseline` — drives `Distribution.Solver.Modular.modularResolver` over
   our index. It builds a `PackageIndex (SourcePackage ())`. `modularResolver` runs
   `convPIs` itself.
-- `Bridge.Provider` — the real `Provider`. `withWorld` opens the index, the installed
-  database and the `pkg-config` database **once**, and both solvers are fed from it.
-  That is what makes the comparison structural rather than arranged.
+- `PubGrub.Cabal.Provider` — the rule: `mkExpand` picks an instance of a package
+  (installed first, then the newest buildable source release) and states what it
+  entails, over an `InstalledDb` and a `ReleaseSource` (which versions exist, and the
+  `Release` of one). `PubGrub.Cabal.Installed` is the installed set and its unit graph.
+- `Bridge.Provider` — the world on this machine. `withWorld` opens the index, the
+  installed database and the `pkg-config` database **once**, and both solvers are fed
+  from it. That is what makes the comparison structural rather than arranged.
+  `releaseReader` turns an index entry into a `Release`, through the derived index
+  where there is one, and `pkgConfigPresent` is the predicate from cabal's own db.
 
 **Dependency boundary.** We avoid `cabal-install` entirely, including for the
 baseline. We do depend on `hackage-security`, and there is no `tar` dependency.
 `cabal-install-solver` is a dependency of `bridge`, of the `pubgrub` executable and of
-the test-suite. It is **not** a dependency of the core library.
+the test-suite. It is **not** a dependency of the core library or of the `cabal`
+sublibrary, which is what lets latti depend on those two and nothing else.
 
 **Why `cabal-install` is avoidable.** The `../cabal-solver-plan` reference depends on
 it, and tracing its imports shows three uses:

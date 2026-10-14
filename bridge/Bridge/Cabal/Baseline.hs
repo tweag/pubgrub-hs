@@ -38,11 +38,12 @@ module Bridge.Cabal.Baseline
     , preferences
     ) where
 
-import           Bridge.Cabal.Flatten             (FlagModel (..))
-import           Bridge.Hackage                   (IndexHandle (..), ParseError,
+import           PubGrub.Cabal.Flatten            (FlagModel (..))
+import           PubGrub.Cabal.Provider           (ParseError)
+import           Bridge.Hackage                   (IndexHandle (..),
                                                    markFlagsManual)
 import           Data.Word                        (Word32)
-import           Bridge.Installed                 (nonReinstallablePackages)
+import           PubGrub.Cabal.Installed          (nonReinstallablePackages)
 import qualified Data.Map.Strict                  as Map
 import           Data.Set                         (Set)
 import qualified Data.Set                         as Set
@@ -255,9 +256,9 @@ targetConstraints targets =
 -- qualified domain (the library's and @Setup.hs@'s alike), and
 -- 'PackagePropertyInstalled' means "an installed instance or nothing".
 --
--- The names come from 'Bridge.Installed.nonReinstallablePackages', which our own
--- provider reads too, so the two solvers cannot drift apart on which packages
--- are buildable.
+-- The names come from 'PubGrub.Cabal.Installed.nonReinstallablePackages', which
+-- our own provider reads too, so the two solvers cannot drift apart on which
+-- packages are buildable.
 nonReinstallableConstraints :: [LabeledPackageConstraint]
 nonReinstallableConstraints =
     [ LabeledPackageConstraint

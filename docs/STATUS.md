@@ -217,7 +217,7 @@ way. The model is [flags-as-variables.md](flags-as-variables.md).
 
 Both solvers are told, and each takes it differently:
 
-- **ours, at flatten time.** `Bridge.Cabal.Flatten.componentDepsStored` resolves
+- **ours, at flatten time.** `PubGrub.Cabal.Flatten.componentDepsStored` resolves
   every manual flag — every flag, under `fixed` — against the release's defaults, so
   a guard that reaches the provider mentions automatic flags only.
 - **cabal's, at the index build.** Under `fixed`, `Bridge.Cabal.Baseline.sourcePackageIndex`
@@ -275,7 +275,7 @@ still open. **Do not assume any of it exists in the code.**
 
 ### 4.1 Setup and build-tool dependencies (rung 4)
 
-Not started. `Bridge.Cabal.Flatten.componentDeps` merges library,
+Not started. `PubGrub.Cabal.Flatten.componentDeps` merges library,
 sublibraries and executables into one `GuardedDeps` and discards which component each
 occurrence came from. It reads neither `setup-depends` nor `build-tool-depends`.
 
@@ -374,7 +374,7 @@ time.
 
 Both are recorded so nobody re-derives them.
 
-**Narrowing declared ranges to published versions.** `Bridge.Provider.widen` puts a
+**Narrowing declared ranges to published versions.** `PubGrub.Cabal.Provider.widen` puts a
 declared range into a term verbatim, so version space no release occupies survives.
 Narrowing it with `snapToVersions` was tried twice in August, reverted twice on cost,
 and re-measured on 2026-09-03 on the current tree, where the cost argument no longer

@@ -31,7 +31,7 @@ package variable's set simply has an empty flag component. A flag's identity is 
 *declaration*, name and default together: two releases declaring `fast` the
 same way share the variable, a release that changed the default has a different
 one. Manual flags are never variables; they are resolved at their defaults when
-the release is flattened (`Bridge.Cabal.Flatten.componentDepsStored`).
+the release is flattened (`PubGrub.Cabal.Flatten.componentDepsStored`).
 
 Terms are `Term ValueSet`, keyed by `Var` in every incompatibility. A term's
 polarity supplies the states the flag axis needs: `Positive {True}` is "in play
@@ -44,7 +44,7 @@ required. Here the widened term is positive and nothing drops it.
 
 ## 2. What the provider emits
 
-When a source release `p-v` is decided (`Bridge.Provider.mkExpand`):
+When a source release `p-v` is decided (`PubGrub.Cabal.Provider.mkExpand`):
 
 - the value is `PackageValue (BuildSource v)`, with no flag assignment;
 - per automatic flag `f`: `declaresFlag p slot f`, the clause

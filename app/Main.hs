@@ -25,7 +25,7 @@ import           Bridge.Cabal.Baseline                     (defaultSolverConfig,
                                                             outcome,
                                                             solveWithCabal,
                                                             sourcePackageIndex)
-import           Bridge.Cabal.Flatten                      (FlagModel (..))
+import           PubGrub.Cabal.Flatten                     (FlagModel (..))
 import           PubGrub.Value                             (Resolved (..),
                                                             Value, foldFlags,
                                                             resolvedInstance,

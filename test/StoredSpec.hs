@@ -1,4 +1,4 @@
--- | Tests for the derived index's entry format ('Bridge.Cabal.Flatten.toStored')
+-- | Tests for the derived index's entry format ('PubGrub.Cabal.Flatten.toStored')
 -- and its CBOR codec ('Bridge.Hackage.Store').
 --
 -- The store exists to avoid re-parsing a @.cabal@, so the one property that
@@ -14,7 +14,7 @@
 -- than in a solve.
 module StoredSpec (tests) where
 
-import           Bridge.Cabal.Flatten                   (componentDepsAtDefaults,
+import           PubGrub.Cabal.Flatten                  (componentDepsAtDefaults,
                                                          componentDepsAtDefaultsStored,
                                                          toStored,
                                                          unbuildableAtDefaults,
@@ -29,6 +29,7 @@ import           Distribution.Compiler                  (AbiTag (NoAbiTag),
                                                          unknownCompilerInfo)
 import           Distribution.PackageDescription.Parsec (parseGenericPackageDescription,
                                                          runParseResult)
+import           Bridge.Provider                        (pkgConfigPresent)
 import           Distribution.Solver.Types.PkgConfigDb  (PkgConfigDb,
                                                          pkgConfigDbFromList)
 import           Distribution.System                    (Arch (X86_64),
@@ -61,7 +62,7 @@ agrees name src = testCase name $ do
     gpd <- gpdOf src
     let stored = toStored gpd
         roundTripped = deserialise (serialise stored)
-        db = Just testPkgConfigDb
+        db = pkgConfigPresent (Just testPkgConfigDb)
 
     componentDepsAtDefaultsStored testPlatform testCompiler stored
         @?= componentDepsAtDefaults testPlatform testCompiler gpd

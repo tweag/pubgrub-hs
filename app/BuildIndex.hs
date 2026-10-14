@@ -23,7 +23,7 @@
 -- falls back to parsing.
 module Main (main) where
 
-import           Bridge.Cabal.Flatten       (toStored)
+import           PubGrub.Cabal.Flatten      (toStored)
 import           Bridge.Hackage             (IndexHandle (..),
                                              IndexState (..),
                                              IndexStateInfo (..),

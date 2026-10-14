@@ -13,7 +13,7 @@ This file is about the mechanism and its cost. It is self-contained on purpose.
 
 > **Two mechanisms run, and neither replaces the other.**
 >
-> 1. **A walk, at generation time.** `Bridge.Provider.spanningOccurrence` reads the
+> 1. **A walk, at generation time.** `PubGrub.Cabal.Provider.spanningOccurrence` reads the
 >    decided release's neighbours and widens the depender's range while the occurrence
 >    is identical.
 > 2. **A merge, at insert time.** [`PubGrub.Store`](../src/PubGrub/Store.hs) unions the
@@ -27,7 +27,7 @@ This file is about the mechanism and its cost. It is self-contained on purpose.
 
 ## 1. The walk
 
-`Bridge.Provider.spanningOccurrence` walks out from the decided release in both
+`PubGrub.Cabal.Provider.spanningOccurrence` walks out from the decided release in both
 directions while each neighbour carries the *same* occurrence: the same guard, and the
 same `Dependency`. It then emits the contiguous half-open range from the lowest such
 release to the first release above the highest.
@@ -39,7 +39,7 @@ dependency, and the fact about `q` would stay one release wide for no reason.
 **An identical guard, over the same automatic flags, is what keeps the flag axis
 sound.** A flag variable is named by the owner, the flag and its declared default, so
 a neighbour that declares the guard's flags with a different default has different
-variables and is not spanned (`Bridge.Provider.sameFlags`).
+variables and is not spanned (`PubGrub.Cabal.Provider.sameFlags`).
 
 **The walk stops at an unparseable neighbour.** Spanning it would claim a fact about a
 release nobody could read.

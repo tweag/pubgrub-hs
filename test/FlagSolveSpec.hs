@@ -13,7 +13,7 @@
 -- them, and the solver learns \"not this value\" and the provider offers the
 -- other.
 --
--- These tests run the __real__ provider. 'Bridge.Provider.mkExpand' is the whole
+-- These tests run the __real__ provider. 'PubGrub.Cabal.Provider.mkExpand' is the whole
 -- rule — candidate enumeration, flag emission, incompatibility emission — and it
 -- takes its world as arguments, so 'worldProviderUnder' feeds it an in-memory
 -- index instead of Hackage. Nothing about the rule is restated here: a
@@ -21,16 +21,15 @@
 --
 -- What the worlds supply is the /data/: which packages and versions exist,
 -- which flags each declares, and its dependencies as flag-guarded groups (the toy
--- analogue of @Bridge.Cabal.Flatten.GuardedDeps@). A package absent from the world
+-- analogue of @PubGrub.Cabal.Flatten.GuardedDeps@). A package absent from the world
 -- has no versions at all, which is how these tests write an unsatisfiable
 -- dependency.
 module FlagSolveSpec (tests) where
 
-import           Bridge.Cabal.Flatten           (FlagModel (..))
-import           Bridge.Cabal.InstalledPkg      (InstalledPkg (..))
-import           Bridge.Hackage                 (ParseError (..))
-import           Bridge.Installed               (mkInstalledDb)
-import qualified Bridge.Provider                as BP
+import           PubGrub.Cabal.Flatten          (FlagModel (..))
+import           PubGrub.Cabal.Installed        (InstalledPkg (..), mkInstalledDb)
+import qualified PubGrub.Cabal.Provider         as BP
+import           PubGrub.Cabal.Provider         (ParseError (..))
 import           Colog                          (HasLog (..), LogAction)
 import           Control.Exception              (toException)
 import           Control.Monad.IO.Class         (MonadIO, liftIO)
@@ -83,7 +82,7 @@ import           Test.Tasty.HUnit               (assertBool, assertFailure,
 -- --------------------------------------------------------------------------
 
 -- | One source release: a version, and its dependencies as /flag-guarded groups/
--- — the toy stand-in for @Bridge.Cabal.Flatten.GuardedDeps@, which is what a
+-- — the toy stand-in for @PubGrub.Cabal.Flatten.GuardedDeps@, which is what a
 -- @.cabal@ file's conditional tree flattens to.
 data Release = Release
     { relVersion :: Version
@@ -107,7 +106,7 @@ type World = [(PackageName, Pkg)]
 -- driven from an in-memory index built out of the world. Under 'FlagPackages'
 -- every declared flag is automatic and a variable; under 'FixedFlags' the
 -- guards are resolved at the declared defaults before the provider sees them,
--- which is what 'Bridge.Cabal.Flatten.componentDepsStored' does to a real
+-- which is what 'PubGrub.Cabal.Flatten.componentDepsStored' does to a real
 -- release.
 worldProviderUnder :: FlagModel -> [(PackageName, Version)] -> World -> Provider Cabal TestM
 worldProviderUnder model unbuildableHere world =
@@ -145,7 +144,7 @@ worldProviderUnder model unbuildableHere world =
         ParseException (toException (userError ("not in world: " <> show (p, v))))
 
 -- | A guard at the declared defaults; an undeclared flag is 'False', as in
--- 'Bridge.Cabal.Flatten'.
+-- 'PubGrub.Cabal.Flatten'.
 atDefaults :: [(FlagName, Bool)] -> Condition FlagName -> Bool
 atDefaults defaults = go
   where
@@ -500,7 +499,7 @@ newestKeptFlagFlipped =
 -- states, once, that the package cannot be built from source.
 --
 -- The fixture is called @base@ because the rule keys on
--- 'Bridge.Installed.nonReinstallablePackages', a fixed list of the compiler's own
+-- 'PubGrub.Cabal.Installed.nonReinstallablePackages', a fixed list of the compiler's own
 -- packages; @ordinary@ is the control.
 bootPackageStatesItself :: TestTree
 bootPackageStatesItself =

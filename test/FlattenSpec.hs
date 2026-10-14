@@ -1,4 +1,4 @@
--- | Tests for 'Bridge.Cabal.Flatten': turning a @.cabal@ file's conditional
+-- | Tests for 'PubGrub.Cabal.Flatten': turning a @.cabal@ file's conditional
 -- dependency tree into flag-guarded groups, and evaluating those guards at a
 -- concrete flag assignment.
 --
@@ -12,7 +12,7 @@
 -- 'depsAt' is given an assignment.
 module FlattenSpec (tests) where
 
-import           Bridge.Cabal.Flatten                         (buildableCondition,
+import           PubGrub.Cabal.Flatten                        (buildableCondition,
                                                                componentDeps,
                                                                componentDepsAtDefaults,
                                                                defaultFlags,
@@ -20,6 +20,7 @@ import           Bridge.Cabal.Flatten                         (buildableConditio
                                                                expandGuard,
                                                                flattenDeps,
                                                                unbuildableAtDefaults)
+import           Bridge.Provider                               (pkgConfigPresent)
 import           Distribution.Solver.Types.PkgConfigDb        (pkgConfigDbFromList)
 import           Data.ByteString.Char8                        (pack)
 import           Data.List                                    (isInfixOf)
@@ -121,7 +122,7 @@ assign fs = mkFlagAssignment [(mkFlagName n, b) | (n, b) <- fs]
 tests :: TestTree
 tests =
     testGroup
-        "Bridge.Cabal.Flatten"
+        "PubGrub.Cabal.Flatten"
         [ testGroup "components" componentTests
         , testGroup "environment (resolved at flatten time)" envTests
         , testGroup "flags (resolved at depsAt time)" flagTests
@@ -147,34 +148,34 @@ buildableTests =
                     [ "library"
                     , "  build-depends: base"
                     ]
-        buildableCondition (Just testPkgConfigDb) testPlatform testCompiler gpd
+        buildableCondition testPkgConfig testPlatform testCompiler gpd
             @?= Lit True
     , testCase "a satisfied pkgconfig-depends adds no constraint" $ do
         gpd <- gpdOf zlibish
-        buildableCondition (Just testPkgConfigDb) testPlatform testCompiler gpd
+        buildableCondition testPkgConfig testPlatform testCompiler gpd
             @?= Lit True
-        unbuildableAtDefaults (Just testPkgConfigDb) testPlatform testCompiler gpd @?= []
+        unbuildableAtDefaults testPkgConfig testPlatform testCompiler gpd @?= []
     , -- The whole point of keeping a condition: the missing library does not make
       -- the release unusable, it rules out the flag values that need it.
       testCase "an unsatisfied pkgconfig-depends rules out the guard, not the release" $ do
         gpd <- gpdOf zlibish
-        buildableCondition (Just emptyPkgConfigDb) testPlatform testCompiler gpd
+        buildableCondition emptyPkgConfig testPlatform testCompiler gpd
             @?= CNot (Var (mkFlagName "pkg-config"))
     , -- ...and with flags fixed at their defaults, that condition is a verdict:
       -- the flag defaults True, so the ruled-out value is the one we would use.
       testCase "at the defaults, a needed-but-missing library makes it unbuildable, and is named" $ do
         gpd <- gpdOf zlibish
-        unbuildableAtDefaults (Just emptyPkgConfigDb) testPlatform testCompiler gpd
+        unbuildableAtDefaults emptyPkgConfig testPlatform testCompiler gpd
             @?= [MissingPkgConfig (pkgconfig "zlib")]
     , testCase "the same release is fine when the flag defaults the other way" $ do
         gpd <- gpdOf (zlibishDefaulting False)
-        unbuildableAtDefaults (Just emptyPkgConfigDb) testPlatform testCompiler gpd @?= []
+        unbuildableAtDefaults emptyPkgConfig testPlatform testCompiler gpd @?= []
     , -- Mirrors cabal: no pkg-config executable is a statement about the machine,
       -- not permission to assume the library is there. The module is still named,
       -- since it is what the reader has to install either way.
       testCase "no pkg-config db at all rejects, as cabal does" $ do
         gpd <- gpdOf zlibish
-        unbuildableAtDefaults Nothing testPlatform testCompiler gpd
+        unbuildableAtDefaults (pkgConfigPresent Nothing) testPlatform testCompiler gpd
             @?= [MissingPkgConfig (pkgconfig "zlib")]
     , -- Every missing module is a reason of its own, in the order the .cabal
       -- names them: the proof says each, and a reader fixing one should not
@@ -187,7 +188,7 @@ buildableTests =
                     , "  build-depends: base"
                     , "  pkgconfig-depends: libpq, zlib"
                     ]
-        unbuildableAtDefaults (Just emptyPkgConfigDb) testPlatform testCompiler gpd
+        unbuildableAtDefaults emptyPkgConfig testPlatform testCompiler gpd
             @?= [MissingPkgConfig (pkgconfig "libpq"), MissingPkgConfig (pkgconfig "zlib")]
     , testCase "buildable: False in the library is unconditional" $ do
         gpd <-
@@ -197,7 +198,7 @@ buildableTests =
                     , "  build-depends: base"
                     , "  buildable: False"
                     ]
-        unbuildableAtDefaults (Just testPkgConfigDb) testPlatform testCompiler gpd @?= [NotBuildable]
+        unbuildableAtDefaults testPkgConfig testPlatform testCompiler gpd @?= [NotBuildable]
     , -- Narrower than 'componentDeps' on purpose. A dependency needs the library;
       -- an unbuildable executable does not make the package unusable as one, and
       -- 'componentDeps' drops that executable's dependencies rather than the
@@ -213,7 +214,7 @@ buildableTests =
                     , "  main-is: Main.hs"
                     , "  buildable: False"
                     ]
-        unbuildableAtDefaults (Just testPkgConfigDb) testPlatform testCompiler gpd @?= []
+        unbuildableAtDefaults testPkgConfig testPlatform testCompiler gpd @?= []
     ]
   where
     zlibish = zlibishDefaulting True
@@ -237,8 +238,8 @@ buildableTests =
                 , "    build-depends: bundled-zlib"
                 ]
 
-    testPkgConfigDb = pkgConfigDbFromList [("zlib", "1.3.1")]
-    emptyPkgConfigDb = pkgConfigDbFromList []
+    testPkgConfig = pkgConfigPresent (Just (pkgConfigDbFromList [("zlib", "1.3.1")]))
+    emptyPkgConfig = pkgConfigPresent (Just (pkgConfigDbFromList []))
 
 componentTests :: [TestTree]
 componentTests =
@@ -473,7 +474,7 @@ defaultedTests =
         let guarded = componentDepsAtDefaults testPlatform testCompiler gpd
         map (unPackageName . fst) (Map.toList (depsAt (assign []) guarded))
             @?= ["speedy"]
-    , -- What 'Bridge.Provider' does with those literals, and why no other part of
+    , -- What 'PubGrub.Cabal.Provider' does with those literals, and why no other part of
       -- the pipeline has to handle them: the live group yields one candidate
       -- assignment with /no/ pins, so the dependency is emitted with its flag
       -- component unconstrained; the dead group yields none, and the provider
@@ -595,9 +596,10 @@ flagTests =
         partial @?= ["slow"]
         total @?= ["speedy"]
     , -- Nothing in 'Flatten' completes a partial assignment — the caller does
-      -- (Bridge.Provider fills a cell's unpinned flags from the declared
-      -- defaults). 'defaultFlags' is the declared-default half of that rule, so
-      -- this pins the completion every caller has to agree with.
+      -- (a flag the assignment leaves out is the caller's to decide, at its
+      -- declared default where flags are fixed). 'defaultFlags' is the
+      -- declared-default half of that rule, so this pins the completion every
+      -- caller has to agree with.
       testCase "the declared defaults select the default branch" $ do
         gpd <-
             gpdOf . pkg $

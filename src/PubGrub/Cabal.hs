@@ -137,8 +137,9 @@ request p s = Incompatibility (Map.singleton (PackageVar p) (Negative (instanceS
 -- (@base-4.21.0.0\/installed-5b43@). An empty list is a boot package with no
 -- installed unit at all, and the proof says that instead.
 --
--- Which packages it is stated for is the provider's choice; the core only needs
--- the shape.
+-- The provider states it for the non-reinstallable boot packages
+-- ('PubGrub.Cabal.Installed.nonReinstallablePackages'); the core only needs the
+-- shape.
 onlyInstalled :: PackageName -> [Version] -> InstanceSet -> Incompatibility Cabal
 onlyInstalled p installed anySource =
     Incompatibility (Map.singleton (PackageVar p) (Positive (instanceSet anySource))) (CauseOnlyInstalled p installed)

@@ -141,9 +141,12 @@ per problem, and writes the benchmark report and the explanation showcase. See
 src/PubGrub/        core library — the pure PubGrub algorithm and types.
                     Of the cabal ecosystem it depends on Cabal-syntax only:
                     no cabal-install, no cabal-install-solver.
+cabal/PubGrub/Cabal/ the cabal provider (public sublibrary): the .cabal flatten and
+                    the rule that picks an instance of a package, over any index
+                    and installed set. Cabal-syntax only, like the core.
 bridge/Bridge/      the Cabal bridge (private library): reads the Hackage index,
-                    resolves the compiler and installed packages, builds the
-                    Provider the core consumes, and drives cabal's own solver
+                    resolves the compiler and installed packages on this machine,
+                    feeds them to the provider, and drives cabal's own solver
                     over the same index as the baseline.
 app/                the `pubgrub`, `pubgrub-index` and `pubgrub-harness` executables.
 test/               the test suite, plus test/golden/.

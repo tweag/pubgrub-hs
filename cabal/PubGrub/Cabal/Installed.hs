@@ -4,8 +4,9 @@
 -- units of a package name, which become the 'UsePreInstalled' instances it may
 -- offer ('installedInstancesOf'), and the unit graph, which says what choosing
 -- one of them commits to ('closureEdges').
-module Bridge.Installed
-    ( InstalledDb(..)
+module PubGrub.Cabal.Installed
+    ( InstalledPkg (..)
+    , InstalledDb(..)
     , mkInstalledDb
     , installedInstancesOf
     , toPreInstalled
@@ -15,7 +16,7 @@ module Bridge.Installed
     , isNonReinstallable
     ) where
 
-import           Bridge.Cabal.InstalledPkg      (InstalledPkg (..))
+
 import           Data.Function                  (on)
 import           Data.List                      (nubBy)
 import           Data.Map.Strict                (Map)
@@ -24,9 +25,21 @@ import           Data.Set                       (Set)
 import qualified Data.Set                       as Set
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.UnitId      (UnitId)
+import           Distribution.Version           (Version)
 import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
 import           PubGrub.InstanceSet            (Instance (..))
 import           PubGrub.Version                (fromCabalVersion)
+
+-- | One installed unit, reduced to what the solver models: its id, name, version
+-- and direct dependencies. The compiler's own 'Version' type, since it is the
+-- db's spelling; 'toPreInstalled' converts.
+data InstalledPkg = InstalledPkg
+    { ipUnitId  :: UnitId
+    , ipName    :: PackageName
+    , ipVersion :: Version
+    , ipDepends :: [UnitId]
+    }
+    deriving (Eq, Show)
 
 data InstalledDb = InstalledDb
     { idbById   :: Map UnitId InstalledPkg

@@ -1,4 +1,4 @@
--- | Tests for 'Bridge.Installed.closureEdges': the walk over the compiler's
+-- | Tests for 'PubGrub.Cabal.Installed.closureEdges': the walk over the compiler's
 -- unit graph that turns "we chose this installed unit" into every dependency
 -- edge of its transitive closure.
 --
@@ -13,8 +13,7 @@
 -- The dbs here are hand-built, so nothing needs a compiler or an index.
 module InstalledSpec (tests) where
 
-import           Bridge.Cabal.InstalledPkg      (InstalledPkg (..))
-import           Bridge.Installed               (InstalledEdge (..),
+import           PubGrub.Cabal.Installed        (InstalledEdge (..), InstalledPkg (..),
                                                  closureEdges, mkInstalledDb)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.UnitId      (UnitId, mkUnitId)
@@ -54,7 +53,7 @@ namesOf pkgs root =
 tests :: TestTree
 tests =
     testGroup
-        "Bridge.Installed.closureEdges"
+        "PubGrub.Cabal.Installed.closureEdges"
         [ testCase "a chain reaches the far end, each edge naming its own depender" $
             -- Not a --> c edge: the second edge is b --> c, because b is what
             -- declares it. A star from the root would report a dependency that

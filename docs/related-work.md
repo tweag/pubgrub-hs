@@ -49,7 +49,7 @@ Ranked by how much each one bears on live work:
 | three-state `FlagPin` | retired with the cell DNF on 2026-10-08 | §2.3 (analogy only) |
 | correctness of conflict resolution | stated in prose only; nothing in the repo proves it | §3 |
 | over-specific learned clauses (the old "2^k") | one fact per guarded occurrence, [`collapsing.md`](collapsing.md) — **landed** | §8 |
-| prefer-installed / prefer-defaults / prefer-newest | `Bridge.Provider`'s decision order: installed first, then newest; a flag's default rides in its identity, so it is offered first ([`flags-as-variables.md`](flags-as-variables.md) §1) | §5 |
+| prefer-installed / prefer-defaults / prefer-newest | `PubGrub.Cabal.Provider`'s decision order: installed first, then newest; a flag's default rides in its identity, so it is offered first ([`flags-as-variables.md`](flags-as-variables.md) §1) | §5 |
 | explaining failure | `PubGrub.Report` | §6 |
 
 ---

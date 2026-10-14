@@ -16,7 +16,6 @@ import           Data.Binary.Get                              (Get, runGetOrFail
 import           Data.Binary.Put                              (Put, runPut)
 import qualified Data.ByteString.Lazy                         as BSL
 import           Data.Int                                     (Int64)
-import           Data.List.NonEmpty                           (NonEmpty)
 import           Data.Map.Strict                              (Map)
 import qualified Data.Map.Strict                              as Map
 import           Data.Maybe                                   (fromMaybe,
@@ -46,7 +45,7 @@ import           UnliftIO                                     (MonadIO (..),
 
 import           Distribution.PackageDescription.Parsec       (parseGenericPackageDescription,
                                                                runParseResult)
-import           Distribution.Parsec.Error                    (PError)
+import           PubGrub.Cabal.Provider                       (ParseError (..))
 import           Distribution.Pretty                          (prettyShow)
 import qualified Distribution.Types.BuildInfo.Lens            as L
 import           Distribution.Types.ComponentName             (ComponentName (..))
@@ -584,11 +583,6 @@ updateCache path Sec.IndexCallbacks{Sec.indexDirectory, Sec.indexLookupEntry} = 
 -- --------------------------------------------------------------------------
 
 type Result e a = Either (Either SomeException e) a
-
-data ParseError
-    = ParseError (Maybe Version) (NonEmpty PError)
-    | ParseException SomeException
-    deriving Show
 
 -- Not used yet: each component's conditional dependency tree, for reading
 -- dependencies under flags, operating system and architecture.

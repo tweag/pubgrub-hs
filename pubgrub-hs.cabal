@@ -50,19 +50,41 @@ library
     default-language: GHC2021
     default-extensions: ImportQualifiedPost
 
+-- The cabal provider: the translation from .cabal files and an installed package
+-- set into the solver's input, and the rule that picks an instance of a package
+-- and states what it entails. Public, and of the cabal ecosystem it needs
+-- Cabal-syntax only, so another tool can drive the solver over its own index,
+-- installed world and pkg-config without this repository's index reader (the
+-- private `bridge` below) or cabal-install-solver.
+library cabal
+    import:             warnings
+    visibility:         public
+    hs-source-dirs:     cabal
+    exposed-modules:
+        PubGrub.Cabal.Flatten
+        PubGrub.Cabal.Installed
+        PubGrub.Cabal.Provider
+    build-depends:
+        , base
+        , Cabal-syntax
+        , co-log
+        , containers
+        , pubgrub-hs
+        , text
+    default-language:   GHC2021
+    default-extensions: ImportQualifiedPost
+
 library bridge
     import:             warnings
     visibility:         private
     hs-source-dirs:     bridge
     exposed-modules:
         Bridge.Cabal.Baseline
-        Bridge.Cabal.Flatten
         Bridge.Cabal.InstalledPkg
         Bridge.Hackage
         Bridge.Hackage.HttpClient
         Bridge.Hackage.Store
         Bridge.Hackage.Unlifted
-        Bridge.Installed
         Bridge.Provider
     build-depends:
         , array
@@ -81,6 +103,7 @@ library bridge
         , http-types
         , network-uri
         , pubgrub-hs
+        , pubgrub-hs:cabal
         , process
         , serialise
         , text
@@ -110,6 +133,7 @@ executable pubgrub
         , optparse-applicative
         , pubgrub-hs
         , pubgrub-hs:bridge
+        , pubgrub-hs:cabal
         , text
         , unliftio
     default-language:   GHC2021
@@ -135,6 +159,7 @@ test-suite pubgrub-hs-test
     build-depends:
         , pubgrub-hs
         , pubgrub-hs:bridge
+        , pubgrub-hs:cabal
         , base
         , binary
         , bytestring
@@ -170,6 +195,7 @@ executable pubgrub-index
         , mtl
         , optparse-applicative
         , pubgrub-hs:bridge
+        , pubgrub-hs:cabal
         , text
         , unliftio
     default-language:   GHC2021

@@ -60,7 +60,7 @@ v n = V.mkVersion [n]
 cv :: Int -> Cabal.Version
 cv n = Cabal.mkVersion [n]
 
--- | A release's slot, as 'Bridge.Provider.withSlots' mints it: from this release
+-- | A release's slot, as 'PubGrub.Cabal.Provider.withSlots' mints it: from this release
 -- up to the next one that exists.
 slot :: Int -> Int -> InstanceSet
 slot lo next = sourceOnly (VersionSet.halfOpenVersionSet (v lo) (Just (v next)))

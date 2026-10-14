@@ -75,11 +75,12 @@
 -- The same package may appear under several guards (an unconditional @q >=1@ and
 -- a guarded @q <3@). 'depsAt' intersects those into one range, where §4.2 wants
 -- them kept as separate facts.
-module Bridge.Cabal.Flatten (
+module PubGrub.Cabal.Flatten (
     GuardedDeps,
     componentDeps,
     componentDepsAtDefaults,
     buildableCondition,
+    PkgConfigPresent,
     unbuildableAtDefaults,
     depsAt,
     flattenDeps,
@@ -115,7 +116,7 @@ import           Control.Applicative                          (Alternative (..))
 import           Control.Monad                                 (void)
 import           GHC.Generics                                 (Generic)
 import           Data.Bool                                    (bool)
-import           Data.Char                                    (isAlphaNum)
+import           Data.Char                                    (isAlphaNum, toLower)
 import qualified Data.Map.Merge.Strict                        as Map
 import           Data.Map.Strict                              (Map)
 import qualified Data.Map.Strict                              as Map
@@ -132,13 +133,10 @@ import           Distribution.Compiler                        (CompilerId (..),
                                                                compilerInfoId)
 import           Distribution.Parsec                          (CabalParsing,
                                                                Parsec (..))
-import           Distribution.Simple.Utils                    (lowercase)
 import           Distribution.System                          (Platform (..))
 import           Distribution.Types.Condition                 (Condition (..),
                                                                cAnd, cNot,
                                                                simplifyCondition)
-import           Distribution.Solver.Types.PkgConfigDb        (PkgConfigDb,
-                                                               pkgConfigPkgIsPresent)
 import           Distribution.PackageDescription.Configuration (addBuildableCondition)
 import           Distribution.Types.Executable                (Executable (buildInfo))
 import           Distribution.Types.ForeignLib                (ForeignLib (foreignLibBuildInfo))
@@ -171,6 +169,17 @@ type Guard = Condition FlagName
 -- active exactly when its 'Condition' over flag names holds. The environment
 -- (OS, arch, compiler) is already resolved away, so guards mention only flags.
 type GuardedDeps = [(Guard, [Dependency])]
+
+-- | What this machine's @pkg-config@ answers for a @pkgconfig-depends@: whether a
+-- module of that name is present in a version the range admits.
+--
+-- A predicate rather than a database so that the caller decides where the answer
+-- comes from (a @pkg-config@ database, a list in a test) and this module needs
+-- nothing but @Cabal-syntax@. __No @pkg-config@ executable is @const False@__,
+-- not @const True@: cabal reads the same situation that way, rejecting every
+-- @pkgconfig-depends@ when the database is absent, and a missing module still
+-- has to be named in the proof.
+type PkgConfigPresent = PkgconfigDependency -> Bool
 
 -- | Resolve the fixed environment: OS, arch and compiler conditions become
 -- concrete @Right@ booleans.
@@ -363,11 +372,11 @@ defaultFlags gpd = Map.fromList [(flagName f, flagDefault f) | f <- genPackageFl
 -- > if flag(pkg-config)
 -- >   pkgconfig-depends: zlib-any
 --
--- With flags fixed at their defaults there is one assignment and
--- 'unbuildableAtDefaults' collapses this to a verdict with its reasons. Keeping
--- the condition lets flag search come back without redoing the analysis: a
--- search over flags has to /satisfy/ this condition rather than evaluate it
--- (@docs\/flags-semantics.md@ O6).
+-- 'unbuildableAtDefaults' evaluates this at the declared defaults, keeping the
+-- reasons, and that is what decides buildability even when flags are searched.
+-- Keeping the condition is what lets buildability under a flag be added without
+-- redoing the analysis: it has to /satisfy/ this condition rather than evaluate
+-- it.
 --
 -- == Why the library only
 --
@@ -377,15 +386,12 @@ defaultFlags gpd = Map.fromList [(flagName f, flagDefault f) | f <- genPackageFl
 -- over-approximates, and over-approximating /buildability/ would exclude releases
 -- rather than merely constrain them.
 --
--- == 'Nothing' means no @pkg-config@ executable
+-- == No @pkg-config@ executable means @const False@
 --
--- Not "assume satisfied". That is cabal's reading of the same value
--- (@Distribution.Solver.Modular.Validate@ rejects every @pkgconfig-depends@ when
--- the db is absent), and taking the db and the predicate from cabal rather than
--- restating them is what keeps the two solvers on one environment — the same
--- argument that makes the shared index reader load-bearing.
+-- Not "assume satisfied". See 'PkgConfigPresent': that is cabal's reading of the
+-- same situation.
 buildableCondition
-    :: Maybe PkgConfigDb
+    :: PkgConfigPresent
     -> Platform
     -> CompilerInfo
     -> GenericPackageDescription
@@ -406,7 +412,7 @@ buildableCondition db platform compiler gpd =
 -- condition's value at the defaults, since a node is unusable when and only when
 -- it gives a reason.
 unbuildableAtDefaults
-    :: Maybe PkgConfigDb
+    :: PkgConfigPresent
     -> Platform
     -> CompilerInfo
     -> GenericPackageDescription
@@ -434,7 +440,7 @@ libraryNodes platform compiler gpd =
 
 -- | The reasons the nodes in force at @flags@ give, in tree order.
 unbuildableNodes
-    :: Maybe PkgConfigDb
+    :: PkgConfigPresent
     -> FlagAssignment
     -> [(Guard, Bool, [PkgconfigDependency])]
     -> [UnbuildableReason]
@@ -448,17 +454,12 @@ unbuildableNodes db flags nodes =
 -- | What makes one node unusable: @buildable: False@, and each @pkgconfig-depends@
 -- the machine's @pkg-config@ cannot satisfy. Empty when the node is usable.
 --
--- A 'Nothing' db fails every @pkgconfig-depends@ — no @pkg-config@ executable is
--- a statement about the machine, not permission to assume the module is there —
--- and the reason still names the module, which is what the reader has to
--- install either way.
-unusable :: Maybe PkgConfigDb -> Bool -> [PkgconfigDependency] -> [UnbuildableReason]
-unusable db isBuildable pcs =
+-- The reason names the module, which is what the reader has to install either
+-- way, whether the machine lacks it or lacks @pkg-config@ itself.
+unusable :: PkgConfigPresent -> Bool -> [PkgconfigDependency] -> [UnbuildableReason]
+unusable present isBuildable pcs =
     [NotBuildable | not isBuildable]
         ++ [MissingPkgConfig d | d <- pcs, not (present d)]
-  where
-    present (PkgconfigDependency n range) =
-        maybe False (\d -> pkgConfigPkgIsPresent d n range) db
 
 -- | Dependencies of a package version at its /default/ flag values, as a
 -- version-set map. (Convenience: 'depsAt' the defaults over 'componentDeps'.)
@@ -501,7 +502,7 @@ parseCondition = condOr
     notCond = CNot <$> (P.char '!' >> sp >> cond)
     flagCond = Var <$> (string "flag" >> sp >> inparens flagIdent)
     boolLiteral = Lit <$> parsec
-    flagIdent = mkFlagName . lowercase <$> munch1 isIdentChar
+    flagIdent = mkFlagName . map toLower <$> munch1 isIdentChar
     isIdentChar c = isAlphaNum c || c == '_' || c == '-'
     oper s = sp >> string s >> sp
     sp = spaces
@@ -615,7 +616,7 @@ componentDepsStored FlagPackages platform compiler sr =
 
 -- | 'unbuildableAtDefaults' over a stored release.
 unbuildableAtDefaultsStored
-    :: Maybe PkgConfigDb -> Platform -> CompilerInfo -> StoredRelease -> [UnbuildableReason]
+    :: PkgConfigPresent -> Platform -> CompilerInfo -> StoredRelease -> [UnbuildableReason]
 unbuildableAtDefaultsStored db platform compiler sr =
     unbuildableNodes
         db

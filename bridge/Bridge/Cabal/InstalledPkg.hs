@@ -16,18 +16,9 @@ import           Distribution.Simple.PackageIndex        (InstalledPackageIndex,
 import           Distribution.Simple.Program.Db          (ProgramDb)
 import           Distribution.Types.InstalledPackageInfo (InstalledPackageInfo (..))
 import           Distribution.Types.PackageId            (PackageIdentifier (..))
-import           Distribution.Types.PackageName          (PackageName)
-import           Distribution.Types.UnitId               (UnitId)
+import           PubGrub.Cabal.Installed                 (InstalledPkg (..))
 import           Distribution.Verbosity                  (Verbosity)
-import           Distribution.Version                    (Version)
 
-data InstalledPkg = InstalledPkg
-    { ipUnitId  :: UnitId
-    , ipName    :: PackageName
-    , ipVersion :: Version
-    , ipDepends :: [UnitId]
-    }
-    deriving (Eq, Show)
 
 getInstalledPackages :: Verbosity -> Compiler -> ProgramDb -> IO [InstalledPkg]
 getInstalledPackages verbosity compiler programDb =

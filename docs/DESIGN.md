@@ -69,7 +69,7 @@ longer lives in the set (§3):
   the earlier cell representation carried came from pins over flags a release might
   not declare; with flags elsewhere, difference is interval arithmetic.
 - **No enumeration, still.** A range admits versions the index does not have. Only
-  `Bridge.Provider` consults reality, and it enumerates from the index and filters by
+  `PubGrub.Cabal.Provider` consults reality, and it enumerates from the index and filters by
   `memberInstance`. So "non-empty" means non-empty in version space, which is why a
   test over a finite sample of versions can check the predicates only one way.
 
@@ -157,7 +157,7 @@ recorded the argument for it and the price (decision records `decision-0013` to
 
 ## 4. A release owns a slot, not a point
 
-`Bridge.Provider.withSlots` gives each release the half-open range up to the next
+`PubGrub.Cabal.Provider.withSlots` gives each release the half-open range up to the next
 release **present in the index**. A dependency fact names that slot as its depender
 term, not the single version.
 
@@ -169,7 +169,7 @@ The point is that adjacent slots **touch**. `unionVersionSet` coalesces them, so
 
 **The first release's slot has no lower bound.** `references/pubgrub.md:467` omits
 the lower bound when the first published version has the dependency, and
-`Bridge.Provider.slotRange` does the same for the first release's slot and for a
+`PubGrub.Cabal.Provider.slotRange` does the same for the first release's slot and for a
 walk that reaches it. Nothing is published below it, so the range holds the same
 releases. What changes is the complement: banning `lens <2.4` leaves nothing, where
 banning `lens >=0.1 && <2.4` left `lens <0.1` for the solver to discover empty and
@@ -200,7 +200,7 @@ the depender to be one incompatibility. It asks for
 `{foo >=1.0 && <1.3, not bar >=1.0 && <2}`, not one fact per release of `foo`. Two
 mechanisms deliver that, and both run.
 
-**At generation time.** `Bridge.Provider.spanningOccurrence` walks out from the
+**At generation time.** `PubGrub.Cabal.Provider.spanningOccurrence` walks out from the
 decided release and reads its neighbours. It extends the depender's range while the
 *guarded occurrence* is identical — same guard and same dependency, not the whole
 dependency set.
@@ -308,7 +308,7 @@ it inspects.
 
 `base`, `ghc-bignum`, `ghc-internal`, `ghc-prim`, `ghc`, `integer-gmp`,
 `integer-simple` and `template-haskell` are non-reinstallable.
-`Bridge.Installed.nonReinstallablePackages` is the single list both solvers read: our
+`PubGrub.Cabal.Installed.nonReinstallablePackages` is the single list both solvers read: our
 provider takes it as a rule in `expand'`, and the baseline takes it as constraints.
 
 It is **a list of names, not a derivation**, and copied verbatim from cabal. How cabal
@@ -346,7 +346,7 @@ The rule is cabal's. `Builder.extendOpen` adds no goal and no edge when
 
 Two changes were needed and both are load-bearing:
 
-- `Bridge.Provider` filters the occurrence out, so no such clause is minted.
+- `PubGrub.Cabal.Provider` filters the occurrence out, so no such clause is minted.
 - `fromDependency` uses `Map.fromListWith intersectTerm`, so two entries about one
   variable are intersected rather than overwritten.
 
@@ -828,7 +828,7 @@ baseline, and converts once, lazily per package, into `pkgSolverVersions`: where
 spellings name one version, the later tar entry, which is the later upload, is the
 release the solver is offered, and its spelling is kept so the conversion back finds
 its `.cabal`. `Bridge.Provider` reads that set and converts back on every release
-read. The `impl(ghc …)` guard in `Bridge.Cabal.Flatten` keeps Cabal's `withinRange`:
+read. The `impl(ghc …)` guard in `PubGrub.Cabal.Flatten` keeps Cabal's `withinRange`:
 that is cabal's rule for the compiler guard and the baseline uses the same one.
 
 **What it did to the search, same machine, same index-state, either side of the
@@ -860,7 +860,7 @@ route through `aeson` at the same length.
 
 ## 15. A component that is not buildable contributes no dependencies
 
-`Bridge.Cabal.Flatten.componentDeps` puts each sub-library's, each foreign
+`PubGrub.Cabal.Flatten.componentDeps` puts each sub-library's, each foreign
 library's and each executable's dependencies under the condition that the component
 is buildable, using Cabal-syntax's own `addBuildableCondition`. That is the function
 `Distribution.Solver.Modular.IndexConversion.convGPD` pipes **every** component

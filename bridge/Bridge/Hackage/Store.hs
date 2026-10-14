@@ -8,7 +8,7 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 -- | A derived index: every release's @.cabal@, parsed once and kept in the
--- __pre-environment__ form ('Bridge.Cabal.Flatten.StoredRelease').
+-- __pre-environment__ form ('PubGrub.Cabal.Flatten.StoredRelease').
 --
 -- == Why this exists
 --
@@ -25,12 +25,12 @@
 -- == Why the /pre-environment/ form
 --
 -- Flattening resolves @os@, @arch@ and @impl@ against this machine
--- ('Bridge.Cabal.Flatten.envConfVar'), and buildability also resolves
+-- ('PubGrub.Cabal.Flatten.envConfVar'), and buildability also resolves
 -- @pkgconfig-depends@ against its @pkg-config@ database. A store of /flattened/
 -- dependencies would be silently wrong the day someone upgrades GHC or installs
 -- @libpq@. Flattening is 0.5% of the cost, so it stays live and only the parse
--- is cached. One store then survives toolchain changes, and flags becoming
--- solver variables.
+-- is cached. One store then survives toolchain changes, and serves either
+-- flag model.
 --
 -- == Layout
 --
@@ -61,7 +61,7 @@ module Bridge.Hackage.Store
     , storeFormatVersion
     ) where
 
-import           Bridge.Cabal.Flatten                   (LibNode (..),
+import           PubGrub.Cabal.Flatten                  (LibNode (..),
                                                          StoredRelease (..))
 import           Codec.Serialise                        (Serialise (..),
                                                          deserialiseOrFail,

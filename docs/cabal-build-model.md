@@ -22,7 +22,7 @@ The following Cabal features are intentionally simplified or ignored:
 * package revisions are ignored.
 * Cabal command-line target selectors are ignored.
 * the detailed semantics of `buildable: false` are ignored here. The solver does
-  implement it: `Bridge.Cabal.Flatten`'s `buildableCondition` and
+  implement it: `PubGrub.Cabal.Flatten`'s `buildableCondition` and
   `buildableAtDefaults`, plus `pkgconfig-depends` against the machine's real
   `pkg-config` database.
 * custom setup scripts are treated as opaque package-level build procedures.

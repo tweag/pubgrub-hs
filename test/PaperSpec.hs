@@ -5,9 +5,9 @@
 -- | The worked examples from the PubGrub paper (references/pubgrub.md,
 -- "Examples" section), as end-to-end solver tests.
 --
--- These tests run the __real__ provider: 'Bridge.Provider.mkExpand' takes its world
--- as arguments, so 'mkProvider' feeds it the paper's universe out of memory instead
--- of Hackage, as @test\/FlagSolveSpec.hs@ does. Nothing about the rule —
+-- These tests run the __real__ provider: 'PubGrub.Cabal.Provider.mkExpand' takes its
+-- world as arguments, so 'mkProvider' feeds it the paper's universe out of memory
+-- instead of Hackage, as @test\/FlagSolveSpec.hs@ does. Nothing about the rule —
 -- candidate enumeration, version slots, the newest-first preference, range widening,
 -- incompatibility emission — is restated here. A copy of the rule would test only
 -- the copy, and a golden file would not notice it drifting, because a golden
@@ -26,9 +26,9 @@
 -- for the differences that remain and which known gap each belongs to.
 module PaperSpec (tests) where
 
-import           Bridge.Hackage                 (ParseError (..))
-import           Bridge.Installed               (mkInstalledDb)
-import qualified Bridge.Provider                as BP
+import           PubGrub.Cabal.Provider         (ParseError (..))
+import           PubGrub.Cabal.Installed        (mkInstalledDb)
+import qualified PubGrub.Cabal.Provider         as BP
 import           Colog                          (HasLog (..), LogAction)
 import qualified Data.ByteString.Lazy          as BL
 import           Control.Exception              (toException)
@@ -97,10 +97,10 @@ gte v = orLaterVersion (mkVersion v)
 lt :: [Int] -> VersionRange -- <1.2.3
 lt v = earlierVersion (mkVersion v)
 
--- | A release as a solver 'Instance': its version under the default (empty)
--- flag assignment. An 'Instance' only identifies a release, so the dependencies
--- stay in the world and the provider looks them up — exactly as the real bridge
--- reads them from the index.
+-- | A release as a solver 'Instance': a source build of its version. An
+-- 'Instance' only identifies a release, so the dependencies stay in the world
+-- and the provider looks them up — exactly as the real bridge reads them from
+-- the index.
 releaseInstance :: Release -> Instance
 releaseInstance r = BuildSource (V.mkVersion (relVersion r))
 
@@ -128,7 +128,7 @@ instanceOf world p v =
 --    prefer-installed and non-reinstallable branches never run.
 --
 -- The paper\'s releases have no flags, so every guard is @'Lit' True@ — a real
--- guard, not the absence of one, which 'Bridge.Cabal.Flatten.expandGuard' resolves
+-- guard, not the absence of one, which 'PubGrub.Cabal.Flatten.expandGuard' resolves
 -- to the single empty pin set. That is the shape every guard folds to while flags
 -- are fixed at their declared defaults.
 mkProvider :: World -> Provider Cabal PureM
