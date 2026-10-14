@@ -8,7 +8,8 @@
 > **Dated.** Written when a package's value carried its flags and `InstanceSet` was a
 > DNF of cells. That model was retired on 2026-10-08 ([flags-as-variables.md](flags-as-variables.md));
 > the entries below that speak to `FlagPin`, `pruneCells` and one-sided emptiness
-> now describe a retired model ([decision-log.md](decision-log.md) Eras 5, 6 and 20),
+> now describe a retired model (decision records `decision-0010` to `decision-0019` and
+> `decision-0054` to `decision-0056` in the project's Hindsight bank),
 > not the code.
 >
 > **What this is not.** Not authoritative on anything. It cites no rule and creates
@@ -43,7 +44,7 @@ Ranked by how much each one bears on live work:
 | extensional vs intensional version ranges | [`DESIGN.md`](DESIGN.md) §2, [`STATUS.md`](STATUS.md) §5.1 | §1 aspcud |
 | depender collapsing, and what it cost | [`collapsing.md`](collapsing.md) | §1.3 |
 | narrowing the universe before/while solving | `Bridge.Hackage`, and `collapsing.md`'s read cost | §1.2, §2.4 |
-| no lawful `Eq`, order-dependent pruning | the retired cell DNF ([`decision-log.md`](decision-log.md) Era 20); `InstanceSet` has had a lawful `Eq` since 2026-10-08 | §2.1 |
+| no lawful `Eq`, order-dependent pruning | the retired cell DNF (decision record `decision-0054-a-flag-is-a-solver-variable-keyed-by-its-declaration`); `InstanceSet` has had a lawful `Eq` since 2026-10-08 | §2.1 |
 | one-sided `isEmpty`, `Relation.Inconclusive` | the retired specification's O3/O4; the set is exact since 2026-10-08 | §2.2 |
 | three-state `FlagPin` | retired with the cell DNF on 2026-10-08 | §2.3 (analogy only) |
 | correctness of conflict resolution | stated in prose only; nothing in the repo proves it | §3 |
@@ -85,8 +86,8 @@ That is exactly the O(#versions-on-Hackage)-per-dependency cost that
 `references/pubgrub.md:1172` names as one of the four things separating PubGrub from
 CDCL and answer-set solving, and that our `InstanceSet` exists to avoid.
 
-**Why this matters to us.** [`decision-log.md`](decision-log.md)'s dropped directions
-argue against the extensional `Set Instance` from first principles. This paper is the empirical
+**Why this matters to us.** The dropped directions (Hindsight document
+`decision-log-dropped-directions`) argue against the extensional `Set Instance` from first principles. This paper is the empirical
 counterpart: people who chose extensional, on real distribution data, at scale. Cite
 it when the question is "was intensionality really necessary, or were we being
 fancy?" — and note *what they had to build to survive it*, next.
@@ -228,7 +229,8 @@ already asserts and what the theory says is the correct shape.
 To keep the operators monotone they "resort to concepts borrowed from ID-logic", and
 work with two- and four-valued contextual interpretations. We needed three `FlagPin`
 states because a two-valued pin is not closed under negation
-(retired with the cell DNF, [`decision-log.md`](decision-log.md) Era 20).
+(retired with the cell DNF, decision record
+`decision-0054-a-flag-is-a-solver-variable-keyed-by-its-declaration`).
 
 **Flagged as an analogy.** The mechanisms are not the same and nothing here transfers
 formally. It is worth one line only because "we tried two values and the operator
@@ -397,8 +399,7 @@ answer is to write more ASP, and we want Haskell emitting cabal-syntax sentences
 ## 8. The defect we called "2^k", and what it is actually called
 
 Worth a section because the internal name was misleading, and because it is now
-**fixed** — the flag axis landed 2026-08-05 ([`decision-log.md`](decision-log.md)
-Era 7), and since 2026-10-08 a guarded dependency's terms name only the flags the
+**fixed** — the flag axis landed 2026-08-05 (`decision-log-index`, Era 7), and since 2026-10-08 a guarded dependency's terms name only the flags the
 guard mentions ([`flags-as-variables.md`](flags-as-variables.md)).
 
 **The defect was not really exponential arithmetic. It was an over-specific learned
@@ -445,6 +446,6 @@ clauses, and the flag-variable model made it moot.
 2. **The page is the group's, not one author's.** Author lists are given in full.
    Clingcon and asprin have no Gebser.
 3. **Nothing here changes a decision, a rule, or a line of code.** If a future change
-   is made *because* of something in this file, it belongs in
-   [`decision-log.md`](decision-log.md), and the authority for it belongs in the spec
+   is made *because* of something in this file, it belongs in a decision record in the
+   project's Hindsight bank (the `hindsight-decisions` skill), and the authority for it belongs in the spec
    that owns the subject — not here.

@@ -6,7 +6,7 @@
 > for both solvers. The argument and the evidence are [DESIGN.md §3](DESIGN.md#3-a-flag-is-a-variable-and-a-decision-is-one-variables-value);
 > this file is the model, what the provider emits, and the measurements. The
 > two specifications it replaced are retired
-> ([decision-log.md](decision-log.md#dropped-directions)).
+> (Hindsight document `decision-log-dropped-directions`).
 > Background: `references/Package Managers à la Carte.md` §4.4 and
 > `references/What is Answer Set Programming.md`.
 

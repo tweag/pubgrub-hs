@@ -8,8 +8,9 @@
 > [Which document decides](#6-which-document-decides) names the file that owns each
 > question. If this file disagrees with one of those files, that file is right.
 >
-> **History is not here.** [decision-log.md](decision-log.md) records how the project
-> got here, in order, and its last section lists the directions that were dropped.
+> **History is not here, and not in the tree.** The decision log is in the project's
+> Hindsight bank, one document per decision: `decision-log-index` lists the records in
+> order, and `decision-log-dropped-directions` lists the directions that were dropped.
 >
 > **Checked against the tree on 2026-10-12.** 229 tests pass and
 > [`scripts/gate.sh`](../scripts/gate.sh) passes, at the index-state pinned in
@@ -250,8 +251,9 @@ and once to be built. That is the two domains showing through after `convCP` str
 the qualifiers from the identities. **Read a cabal plan by component**, or a flat list
 will look like a contradiction.
 
-Qualified goals were designed and then shelved. The design is in
-[decision-log.md](decision-log.md). Three points from it survive:
+Qualified goals were designed and then shelved. The finding that shelved it is
+the decision record `decision-0029-a-package-depending-on-itself-pinned-a-whole-solve`.
+Three points from the design survive:
 
 - the scope belongs on the **variable**, not on the instance. A release of `mtl` is
   the same release in either scope, so `incompTerms` becomes `Map QPN (Term
@@ -420,7 +422,7 @@ specifications mostly do not overlap.
 | [cabal-build-model.md](cabal-build-model.md) | Cabal's **build model** — components, qualifiers, Backpack | reference for rungs 4 and 5. Nothing implemented |
 | [pubgrub-intro.md](pubgrub-intro.md) | a tutorial introduction to PubGrub | current |
 | [related-work.md](related-work.md) | external literature mapped onto our problems | a reading map. Authoritative on nothing |
-| [decision-log.md](decision-log.md) | project history, and the directions that were dropped | narrative. Authoritative on nothing |
+| the decision records in the Hindsight bank (`decision-log-index`) | project history, and the directions that were dropped | narrative. Authoritative on nothing |
 | this file | current state, what is planned, what is settled | a summary. The rows above decide |
 
 ### How much of the authority is in the repo
@@ -469,7 +471,7 @@ times, diffs the plans, separates the phases, and writes the two reports. The ha
 drives the `pubgrub` executable as a child process, once per solver, problem and
 repetition, because peak residency is a per-process number and two solvers in one
 process could not be compared on memory; how it was planned and where the build
-differed is [decision-log.md](decision-log.md) Era 12.
+differed is the decision record `decision-0035-one-command-produces-both-deliverables`.
 
 **One thing both deliverables must state outright.** The recorded numbers were taken
 with every flag pinned to its declared default (`--flags fixed`). That makes the

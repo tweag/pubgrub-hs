@@ -6,7 +6,8 @@
 >
 > **What this is not.** Not a status and not a specification. What the repository
 > contains now is [STATUS.md](STATUS.md); the specifications it names overrule this
-> file; how the project got here is [decision-log.md](decision-log.md).
+> file; how the project got here is the decision log in the project's
+> Hindsight bank, one document per decision, indexed by `decision-log-index`.
 
 ---
 
@@ -86,8 +87,9 @@ constraint is passed along unchanged. The solver's algebra still runs on interva
 form: a list of cells, each a version range crossed with pinned flags, with three
 states per pin and subsumption pruning between operations, measured at 28,293 cells
 without pruning against 41 with. That representation, its non-canonicity and its
-one-sided emptiness are recorded in [decision-log.md](decision-log.md), Eras 5, 6 and
-20 and its [dropped directions](decision-log.md#dropped-directions). It was removed
+one-sided emptiness are recorded in the decision records `decision-0010` to
+`decision-0019` and `decision-0054` to `decision-0056`, and in
+`decision-log-dropped-directions`. It was removed
 when flags became variables.
 
 ## 3. A flag is a variable, and a decision is one variable's value
@@ -149,8 +151,8 @@ assignment into each instance and the pins into each set, so that one variable p
 package sufficed. It bought that with the DNF of §2 and with three states per pin,
 and conflict resolution had to learn "this release with this flag" one assignment
 at a time unless facts were collapsed per guard. The retired specification's §1.4
-recorded the argument for it and the price ([decision-log.md](decision-log.md) Era 6
-and its [dropped directions](decision-log.md#dropped-directions));
+recorded the argument for it and the price (decision records `decision-0013` to
+`decision-0019`, and `decision-log-dropped-directions`);
 [flags-as-variables.md](flags-as-variables.md) records the measurement that moved it.
 
 ## 4. A release owns a slot, not a point
@@ -586,7 +588,8 @@ from `:1150` only in which facts the derivation happened to pair.
 installed db. They are the spec's opening incompatibility
 (`references/pubgrub.md:252`) with the request stated directly, so no package stands
 in front of the targets to be decided, printed or filtered out of a plan. Decided on
-2026-07-30, built on 2026-09-22 ([decision-log.md](decision-log.md), era 18).
+2026-07-30, built on 2026-09-22 (decision record
+`decision-0051-the-request-is-a-list-of-incompatibilities`).
 
 The seeds propagate to derivations at decision level 0 before anything is decided,
 and three things follow:

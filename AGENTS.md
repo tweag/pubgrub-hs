@@ -26,8 +26,11 @@ what is out of scope, what is planned, what is settled, and which file decides a
 question. Before you change anything, read it. **Why it is built that way is [`docs/DESIGN.md`](docs/DESIGN.md)**: one
 design decision per section, with the evidence that earned it.
 
-- **History** is [`docs/decision-log.md`](docs/decision-log.md), and its last
-  section lists the **abandoned directions**.
+- **History** is not in the tree. The decision log is in the project's Hindsight bank
+  (`coding-agent::pubgrub-hs`), one document per decision: `decision-log-index` lists
+  the records in order with each era's introduction, `decision-NNNN-<slug>` is one
+  record, and `decision-log-dropped-directions` lists the **abandoned directions**.
+  Read one with the `hindsight-decisions` skill, and record a new decision the same way.
 - **The algorithm** is `references/pubgrub.md`, a vendored copy of pub's spec. This is
   *the* authority. Is some behaviour fundamental to PubGrub, or a choice of ours?
   Answer that by citing `references/pubgrub.md` with a line number. Do not answer it
@@ -35,7 +38,7 @@ design decision per section, with the evidence that earned it.
 - **Flags** are [`docs/flags-as-variables.md`](docs/flags-as-variables.md): an
   automatic flag is a solver variable of its own, keyed by its declaration. The two
   earlier specifications that put the flag inside a package's value are retired
-  (`docs/decision-log.md`, "Dropped directions").
+  (Hindsight document `decision-log-dropped-directions`).
 - **Cabal's build model** (components, scopes, Backpack) is
   [`docs/cabal-build-model.md`](docs/cabal-build-model.md), the reference for rungs 4
   and 5.

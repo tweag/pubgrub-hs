@@ -483,7 +483,7 @@ The modular solver handles two features of the Cabal dependency problem that the
 
 **Boolean flags.** Cabal `.cabal` files can declare conditional dependencies gated on boolean flags (for example, `flag use-bytestring-builder`). The modular solver interleaves flag decisions with package decisions.
 
-PubGrub as specified treats dependencies as unconditional. Handling flags needs either a pre-expansion of every flag combination, a richer value domain, or more variables. This project took the second option for a while — a solver variable's value was a version together with a total flag assignment ([decision-log.md](decision-log.md) Era 6) — and now takes the third: an automatic flag is a solver variable of its own, decided after the release that declares it, and a guarded dependency is an incompatibility whose terms name the flags it holds under ([flags-as-variables.md](flags-as-variables.md)).
+PubGrub as specified treats dependencies as unconditional. Handling flags needs either a pre-expansion of every flag combination, a richer value domain, or more variables. This project took the second option for a while — a solver variable's value was a version together with a total flag assignment (decision records `decision-0013` to `decision-0019`) — and now takes the third: an automatic flag is a solver variable of its own, decided after the release that declares it, and a guarded dependency is an incompatibility whose terms name the flags it holds under ([flags-as-variables.md](flags-as-variables.md)).
 
 Note that flags are **fixed at their declared defaults unless `--flags search` is given**, on both sides of the comparison, and every recorded number was taken that way. See [STATUS.md](STATUS.md) §3.1.
 

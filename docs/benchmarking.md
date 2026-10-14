@@ -144,7 +144,8 @@ Options: `--exe PATH` (default `$PUBGRUB_EXE`, else `cabal list-bin pubgrub`),
 `--set bench|corpus|both`, and positional problems.
 
 It measures; it does not decide. `scripts/gate.sh` decides, and neither replaces the
-other. [decision-log.md](decision-log.md) Era 12 has why it is shaped this way.
+other. The decision record `decision-0035-one-command-produces-both-deliverables`, in the
+project's Hindsight bank, has why it is shaped this way.
 
 **There are two problem sets, and they answer different questions.**
 
