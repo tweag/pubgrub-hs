@@ -62,6 +62,7 @@ module Bridge.Hackage.Store
     ) where
 
 import           PubGrub.Cabal.Flatten                  (LibNode (..),
+                                                         Node (..),
                                                          StoredRelease (..))
 import           Codec.Serialise                        (Serialise (..),
                                                          deserialiseOrFail,
@@ -89,6 +90,7 @@ import           Distribution.Types.CondTree             (CondBranch (..),
                                                           CondTree (..))
 import           Distribution.Types.ConfVar              (ConfVar (..))
 import           Distribution.Types.Dependency           (Dependency (..))
+import           Distribution.Types.ExeDependency        (ExeDependency)
 import           Distribution.Types.Flag                 (FlagName, mkFlagName,
                                                           unFlagName)
 import           Distribution.Types.LibraryName          (LibraryName (..))
@@ -123,7 +125,7 @@ import           System.IO                               (IOMode (..), hClose,
 -- 'Bridge.Hackage.readVersionCache' does: a generic encoding is positional, so
 -- reordering a constructor silently changes its meaning.
 storeFormatVersion :: Int
-storeFormatVersion = 5
+storeFormatVersion = 6
 
 -- These are orphans. They belong here rather than in Cabal-syntax, and wrapping
 -- every type in a newtype to avoid the orphan would cost more clarity than it
@@ -178,7 +180,9 @@ instance Serialise ConfVar
 instance Serialise a => Serialise (Condition a)
 instance (Serialise v, Serialise c, Serialise a) => Serialise (CondBranch v c a)
 instance (Serialise v, Serialise c, Serialise a) => Serialise (CondTree v c a)
+instance Serialise ExeDependency
 instance Serialise LibNode
+instance Serialise Node
 instance Serialise StoredRelease
 
 -- --------------------------------------------------------------------------

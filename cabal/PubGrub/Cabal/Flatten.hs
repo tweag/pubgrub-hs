@@ -105,15 +105,24 @@ module PubGrub.Cabal.Flatten (
     -- @test\/StoredSpec.hs@ asserts it anyway, on hand-written @.cabal@ sources.
     StoredRelease (..),
     LibNode (..),
+    Node (..),
     toStored,
     componentDepsAtDefaultsStored,
     FlagModel (..),
     componentDepsStored,
+    componentToolsStored,
     unbuildableAtDefaultsStored,
+
+    -- * Build tools and setup dependencies
+    GuardedTools,
+    componentTools,
+    componentToolsAtDefaults,
+    toolsAt,
+    desugarBuildTool,
+    setupDeps,
 ) where
 
 import           Control.Applicative                          (Alternative (..))
-import           Control.Monad                                 (void)
 import           GHC.Generics                                 (Generic)
 import           Data.Bool                                    (bool)
 import           Data.Char                                    (isAlphaNum, toLower)
@@ -122,6 +131,7 @@ import           Data.Map.Strict                              (Map)
 import qualified Data.Map.Strict                              as Map
 import           Data.Maybe                                   (catMaybes,
                                                                fromMaybe,
+                                                               mapMaybe,
                                                                maybeToList)
 import           Distribution.Compat.CharParsing              (CharParsing (..),
                                                                between, munch1,
@@ -139,6 +149,13 @@ import           Distribution.Types.Condition                 (Condition (..),
                                                                simplifyCondition)
 import           Distribution.PackageDescription.Configuration (addBuildableCondition)
 import           Distribution.Types.Executable                (Executable (buildInfo))
+import           Distribution.Types.ExeDependency              (ExeDependency (..))
+import           Distribution.Types.LegacyExeDependency        (LegacyExeDependency (..))
+import           Distribution.Types.PackageDescription         (PackageDescription (..))
+import           Distribution.Types.PackageId                  (PackageIdentifier (..))
+import           Distribution.Types.SetupBuildInfo             (SetupBuildInfo (..))
+import           Distribution.Types.UnqualComponentName        (UnqualComponentName,
+                                                               mkUnqualComponentName)
 import           Distribution.Types.ForeignLib                (ForeignLib (foreignLibBuildInfo))
 import           Distribution.Types.BuildInfo                 (BuildInfo (..))
 import           Distribution.Types.CondTree                  (CondBranch (..),
@@ -157,7 +174,8 @@ import           Distribution.Types.Flag                      (FlagAssignment,
 import           Distribution.Types.Library                   (Library (..))
 import           Distribution.Types.PkgconfigDependency        (PkgconfigDependency (..))
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
-import           Distribution.Types.PackageName               (PackageName)
+import           Distribution.Types.PackageName               (PackageName,
+                                                               mkPackageName)
 import           Distribution.Version                         (withinRange)
 import           PubGrub.Cabal                                (UnbuildableReason (..))
 import           PubGrub.VersionSet                           (VersionSet)
@@ -534,27 +552,127 @@ prettyMap = unwords . map (\m -> "{" ++ unwords [ bool "-" "+" b ++ unFlagName f
 -- The pre-environment form
 -- --------------------------------------------------------------------------
 
--- | The bits of a library node's @BuildInfo@ that decide buildability. Nothing
--- else from a 'BuildInfo' is ever consulted, so nothing else is kept.
+-- --------------------------------------------------------------------------
+-- Build tools and setup dependencies
+-- --------------------------------------------------------------------------
+
+-- | A release's build-tool dependencies as flag-guarded groups, the shape of
+-- 'GuardedDeps': each 'ExeDependency' names the package, the executable and the
+-- range, as @build-tool-depends@ writes it.
+--
+-- __Not a dependency of the release in this solver's eyes__, and kept out of
+-- 'GuardedDeps' on purpose. A build tool runs at build time and its dependencies
+-- never reach the code it generates, so cabal solves it in a namespace of its
+-- own, and a planner over this solver does the same with a solve of its own,
+-- seeded from this list and preferring the main plan's choices
+-- ('PubGrub.Cabal.Provider.Preference'). The main solve reads nothing here.
+--
+-- What is in the list is what cabal's own solver keeps: @build-tool-depends@ as
+-- written, plus the legacy @build-tools@ names cabal knows how to translate
+-- ('desugarBuildTool'), minus a dependency on one of the release's own
+-- executables, which is internal and no solver's business.
+type GuardedTools = [(Guard, [ExeDependency])]
+
+-- | Cabal's @Distribution.Simple.BuildToolDepends.desugarBuildToolSimple@,
+-- restated because that module is in @Cabal@ and this component is Cabal-syntax
+-- only. A legacy @build-tools@ name is one of the release's own executables, or
+-- one of nine tools known to be the executable of a package of the same name, or
+-- nothing a solver can act on: a program found on the @PATH@ at configure time.
+desugarBuildTool :: PackageName -> [UnqualComponentName] -> LegacyExeDependency -> Maybe ExeDependency
+desugarBuildTool self exes (LegacyExeDependency name range)
+    | tool `elem` exes = Just (ExeDependency self tool range)
+    | name `elem` allowlist = Just (ExeDependency (mkPackageName name) tool range)
+    | otherwise = Nothing
+  where
+    tool = mkUnqualComponentName name
+    allowlist = ["hscolour", "haddock", "happy", "alex", "hsc2hs", "c2hs", "cpphs", "greencard", "hspec-discover"]
+
+-- | The build tools one node declares that are another package's.
+toolsOf :: PackageName -> [UnqualComponentName] -> BuildInfo -> [ExeDependency]
+toolsOf self exes bi =
+    [ d
+    | d@(ExeDependency p _ _) <- buildToolDepends bi ++ mapMaybe (desugarBuildTool self exes) (buildTools bi)
+    , p /= self
+    ]
+
+-- | The release's build tools, flag-guarded, read off the same four component
+-- trees as 'componentDeps' and gated on buildability the same way.
+componentTools :: Platform -> CompilerInfo -> GenericPackageDescription -> GuardedTools
+componentTools = componentToolsWith Left
+
+-- | 'componentTools' with every flag at its declared default.
+componentToolsAtDefaults :: Platform -> CompilerInfo -> GenericPackageDescription -> GuardedTools
+componentToolsAtDefaults platform compiler gpd =
+    componentToolsWith (\f -> Right (Map.findWithDefault False f (defaultFlags gpd))) platform compiler gpd
+
+componentToolsWith
+    :: (FlagName -> Either FlagName Bool)
+    -> Platform
+    -> CompilerInfo
+    -> GenericPackageDescription
+    -> GuardedTools
+componentToolsWith flagEnv platform compiler gpd =
+    concat $
+        [flattenWith env (tools libBuildInfo) t | t <- maybeToList (condLibrary gpd)]
+            ++ [flattenWith env (tools libBuildInfo) (gateOnBuildable libBuildInfo t) | (_, t) <- condSubLibraries gpd]
+            ++ [flattenWith env (tools foreignLibBuildInfo) (gateOnBuildable foreignLibBuildInfo t) | (_, t) <- condForeignLibs gpd]
+            ++ [flattenWith env (tools buildInfo) (gateOnBuildable buildInfo t) | (_, t) <- condExecutables gpd]
+  where
+    env = envConfVar flagEnv platform compiler
+    tools bi = toolsOf (ownName gpd) (ownExecutables gpd) . bi . condTreeData
+
+-- | The build tools in force at a flag assignment: 'depsAt' for 'GuardedTools',
+-- without the merge, since a tool is named rather than ranged over. A dead
+-- branch (a guard that folded to @Lit False@) is dropped here, as 'depsAt' and
+-- 'expandGuard' drop it for dependencies.
+toolsAt :: FlagAssignment -> GuardedTools -> [ExeDependency]
+toolsAt flags guarded = [d | (guard, ds) <- guarded, evalCond flags guard, d <- ds]
+
+-- | The release's @setup-depends@: the dependencies of its @Setup.hs@, which is
+-- never linked against the release's library and is solved in a namespace of its
+-- own, like a build tool. Unconditional, as Cabal-syntax keeps it. Empty for a
+-- @build-type@ that is not @Custom@ or @Hooks@, or that declares none.
+setupDeps :: GenericPackageDescription -> [Dependency]
+setupDeps gpd = maybe [] setupDepends (setupBuildInfo (packageDescription gpd))
+
+ownName :: GenericPackageDescription -> PackageName
+ownName = pkgName . package . packageDescription
+
+ownExecutables :: GenericPackageDescription -> [UnqualComponentName]
+ownExecutables gpd = [n | (n, _) <- condExecutables gpd]
+
+-- --------------------------------------------------------------------------
+-- The pre-environment form
+-- --------------------------------------------------------------------------
+
+-- | The bits of a library node's @BuildInfo@ that are ever consulted: what
+-- decides buildability, and the build tools. Nothing else is kept.
 data LibNode = LibNode
     { lnBuildable :: Bool
     , lnPkgConfig :: [PkgconfigDependency]
+    , lnTools     :: [ExeDependency]
+    }
+    deriving (Eq, Show, Generic)
+
+-- | What is kept of any other component's node: its build tools. Dependencies
+-- are the tree's constraints, and buildability is already in the guards
+-- ('gateOnBuildable').
+newtype Node = Node
+    { nodeTools :: [ExeDependency]
     }
     deriving (Eq, Show, Generic)
 
 -- | One release, parsed and no further. The trees are Cabal-syntax's own, so the
 -- resolvers below are the existing walk rather than a paraphrase of it.
---
--- The library tree keeps a 'LibNode' because buildability is read off the library
--- only; the others keep @()@, since 'flattenComponent' reads
--- 'condTreeConstraints' and never the node data.
 data StoredRelease = StoredRelease
     { srFlags   :: [(FlagName, Bool)]
     , srManual  :: [FlagName]
     -- ^ the flags declared @manual: True@, which stay at their defaults even
     -- when automatic flags are searched
     , srLibrary :: Maybe (CondTree ConfVar [Dependency] LibNode)
-    , srOthers  :: [CondTree ConfVar [Dependency] ()]
+    , srOthers  :: [CondTree ConfVar [Dependency] Node]
+    , srSetup   :: [Dependency]
+    -- ^ 'setupDeps'
     }
     deriving (Eq, Show, Generic)
 
@@ -566,24 +684,21 @@ toStored gpd =
         , srManual = [flagName f | f <- genPackageFlags gpd, flagManual f]
         , srLibrary = fmap (fmap libNode) (condLibrary gpd)
         , srOthers =
-            [void (gateOnBuildable libBuildInfo t) | (_, t) <- condSubLibraries gpd]
-                ++ [void (gateOnBuildable foreignLibBuildInfo t) | (_, t) <- condForeignLibs gpd]
-                ++ [void (gateOnBuildable buildInfo t) | (_, t) <- condExecutables gpd]
+            [fmap (node libBuildInfo) (gateOnBuildable libBuildInfo t) | (_, t) <- condSubLibraries gpd]
+                ++ [fmap (node foreignLibBuildInfo) (gateOnBuildable foreignLibBuildInfo t) | (_, t) <- condForeignLibs gpd]
+                ++ [fmap (node buildInfo) (gateOnBuildable buildInfo t) | (_, t) <- condExecutables gpd]
+        , srSetup = setupDeps gpd
         }
   where
+    tools = toolsOf (ownName gpd) (ownExecutables gpd)
     libNode lib =
         let bi = libBuildInfo lib
-         in LibNode{lnBuildable = buildable bi, lnPkgConfig = pkgconfigDepends bi}
+         in LibNode{lnBuildable = buildable bi, lnPkgConfig = pkgconfigDepends bi, lnTools = tools bi}
+    node bi x = Node{nodeTools = tools (bi x)}
 
 -- | 'componentDepsAtDefaults' over a stored release.
 componentDepsAtDefaultsStored :: Platform -> CompilerInfo -> StoredRelease -> GuardedDeps
-componentDepsAtDefaultsStored platform compiler sr =
-    concat $
-        [flattenComponent env t | t <- maybeToList (srLibrary sr)]
-            ++ [flattenComponent env t | t <- srOthers sr]
-  where
-    defaults = Map.fromList (srFlags sr)
-    env = envConfVar (\f -> Right (Map.findWithDefault False f defaults)) platform compiler
+componentDepsAtDefaultsStored = componentDepsStored FixedFlags
 
 -- | Which flags the solver searches.
 data FlagModel
@@ -594,25 +709,36 @@ data FlagModel
       -- ('PubGrub.Variable.FlagVar'); manual flags stay at their defaults
     deriving (Eq, Show)
 
--- | The guarded dependencies of a stored release under a flag model. Under
--- 'FlagPackages' the manual flags are resolved to their defaults and only
--- automatic flags remain symbolic in the guards.
+-- | What a flag resolves to under a model. Under 'FixedFlags' every flag is its
+-- default. Under 'FlagPackages' a manual flag is its default and only an
+-- automatic flag stays symbolic, so a guard reaching the provider names
+-- automatic flags only. A flag the release does not declare is 'False' under
+-- either, the convention 'evalCond' documents.
+storedFlagEnv :: FlagModel -> StoredRelease -> FlagName -> Either FlagName Bool
+storedFlagEnv model sr f
+    | model == FlagPackages, Map.member f defaults, f `notElem` srManual sr = Left f
+    | otherwise = Right (Map.findWithDefault False f defaults)
+  where
+    defaults = Map.fromList (srFlags sr)
+
+-- | The guarded dependencies of a stored release under a flag model.
 componentDepsStored :: FlagModel -> Platform -> CompilerInfo -> StoredRelease -> GuardedDeps
-componentDepsStored FixedFlags platform compiler sr = componentDepsAtDefaultsStored platform compiler sr
-componentDepsStored FlagPackages platform compiler sr =
+componentDepsStored model platform compiler sr =
     concat $
         [flattenComponent env t | t <- maybeToList (srLibrary sr)]
             ++ [flattenComponent env t | t <- srOthers sr]
   where
-    defaults = Map.fromList (srFlags sr)
-    -- A manual flag is its default; a flag the release does not declare is
-    -- 'False', the convention 'evalCond' documents; only an automatic flag stays
-    -- symbolic, so a guard reaching the provider names automatic flags only.
-    flagEnv f
-        | f `elem` srManual sr = Right (Map.findWithDefault False f defaults)
-        | Map.member f defaults = Left f
-        | otherwise = Right False
-    env = envConfVar flagEnv platform compiler
+    env = envConfVar (storedFlagEnv model sr) platform compiler
+
+-- | The guarded build tools of a stored release under a flag model
+-- ('componentTools').
+componentToolsStored :: FlagModel -> Platform -> CompilerInfo -> StoredRelease -> GuardedTools
+componentToolsStored model platform compiler sr =
+    concat $
+        [flattenWith env (lnTools . condTreeData) t | t <- maybeToList (srLibrary sr)]
+            ++ [flattenWith env (nodeTools . condTreeData) t | t <- srOthers sr]
+  where
+    env = envConfVar (storedFlagEnv model sr) platform compiler
 
 -- | 'unbuildableAtDefaults' over a stored release.
 unbuildableAtDefaultsStored

@@ -54,7 +54,9 @@ import           PubGrub.Cabal                                (Cabal, request)
 import           PubGrub.Cabal.Flatten                        (FlagModel (..),
                                                                PkgConfigPresent,
                                                                componentDepsStored,
+                                                               componentToolsStored,
                                                                srFlags, srManual,
+                                                               srSetup,
                                                                toStored,
                                                                unbuildableAtDefaultsStored)
 import           PubGrub.Cabal.Installed                      (mkInstalledDb)
@@ -62,7 +64,9 @@ import           PubGrub.Cabal.Provider                       (ParseError,
                                                                Release (..),
                                                                ReleaseSource (..),
                                                                constrainTo,
-                                                               mkExpand, widenTo)
+                                                               mkExpand,
+                                                               noPreference,
+                                                               widenTo)
 import           PubGrub.Incompatibility                      (Incompatibility)
 import           PubGrub.Provider                             (Provider (..))
 import           PubGrub.Variable                             (Flag (..))
@@ -108,6 +112,7 @@ withProvider cache manager state model targets constraints act =
                 Provider
                     ( mkExpand
                         (LogAction logMsg)
+                        noPreference
                         installedDb
                         ReleaseSource
                             { rsVersionsOf = ihSolverVersionsOf handle
@@ -264,6 +269,8 @@ releaseReader model platform cInfo pkgConfig handle store = do
                     FlagPackages -> [Flag f d | (f, d) <- srFlags sr, f `notElem` srManual sr]
                 , relGuarded = componentDepsStored model platform cInfo sr
                 , relUnbuildable = unbuildableAtDefaultsStored (pkgConfigPresent pkgConfig) platform cInfo sr
+                , relTools = componentToolsStored model platform cInfo sr
+                , relSetup = srSetup sr
                 }
 
         reduce = fromStored . toStored

@@ -129,7 +129,7 @@ instanceOf world p v =
 -- to the single empty pin set. That is the shape every guard folds to while flags
 -- are fixed at their declared defaults.
 mkProvider :: World -> Provider Cabal Identity
-mkProvider world = Provider (BP.mkExpand mempty (mkInstalledDb []) source)
+mkProvider world = Provider (BP.mkExpand mempty BP.noPreference (mkInstalledDb []) source)
   where
     source =
         BP.ReleaseSource
@@ -149,6 +149,8 @@ mkProvider world = Provider (BP.mkExpand mempty (mkInstalledDb []) source)
                     , BP.relGuarded =
                         [(Lit True, [mkDependency d vr mainLibSet | (d, vr) <- relDeps r])]
                     , BP.relUnbuildable = []
+                    , BP.relTools = []
+                    , BP.relSetup = []
                     }
               )
             | (p, rs) <- world

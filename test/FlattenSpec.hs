@@ -13,6 +13,10 @@
 module FlattenSpec (tests) where
 
 import           PubGrub.Cabal.Flatten                        (buildableCondition,
+                                                               componentTools,
+                                                               componentToolsAtDefaults,
+                                                               setupDeps,
+                                                               toolsAt,
                                                                componentDeps,
                                                                componentDepsAtDefaults,
                                                                defaultFlags,
@@ -40,7 +44,10 @@ import           Distribution.Types.Flag                      (FlagAssignment,
                                                                mkFlagAssignment,
                                                                mkFlagName)
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription)
+import           Distribution.Types.Dependency                (depPkgName)
+import           Distribution.Types.ExeDependency              (ExeDependency (..))
 import           Distribution.Types.PackageName               (unPackageName)
+import           Distribution.Types.UnqualComponentName        (unUnqualComponentName)
 import           Distribution.Types.PkgconfigDependency        (PkgconfigDependency (..))
 import           Distribution.Types.PkgconfigName              (mkPkgconfigName)
 import           Distribution.Types.PkgconfigVersionRange      (anyPkgconfigVersion)
@@ -129,6 +136,7 @@ tests =
         , testGroup "flags (resolved at flatten time, at their defaults)" defaultedTests
         , testGroup "buildability (pkg-config, buildable: False)" buildableTests
         , testGroup "merging" mergeTests
+        , testGroup "build tools and setup dependencies (not dependencies)" toolTests
         ]
 
 -- | 'buildableCondition' and 'unbuildableAtDefaults': resolving the machine's
@@ -689,3 +697,106 @@ mergeTests =
         at [("a", True)] @?= ["yes-dep"]
         at [("a", False)] @?= ["no-dep"]
     ]
+
+-- | 'componentTools' and 'setupDeps': what a release owes to other namespaces,
+-- kept out of its dependencies. The rules are cabal's own conversion's
+-- (@getAllToolDependencies@ minus @isInternal@, and @desugarBuildTool@): a
+-- @build-tool-depends@ as written, a legacy @build-tools@ name only when cabal
+-- knows which package it is, and never the release's own executable.
+toolTests :: [TestTree]
+toolTests =
+    [ testCase "build-tool-depends names the package and the executable, and is not a dependency" $ do
+        gpd <-
+            gpdOf . pkg $
+                unlines
+                    [ "library"
+                    , "  build-depends: base"
+                    , "  build-tool-depends: alex:alex >=3.2, happy:happy"
+                    ]
+        toolNames gpd @?= [("alex", "alex"), ("happy", "happy")]
+        names (componentDeps testPlatform testCompiler gpd) @?= ["base"]
+    , testCase "a tool that is the package's own executable is internal and dropped" $ do
+        gpd <-
+            gpdOf . pkg $
+                unlines
+                    [ "library"
+                    , "  build-depends: base"
+                    , "  build-tool-depends: fixture:gen, alex:alex"
+                    , ""
+                    , "executable gen"
+                    , "  main-is: Gen.hs"
+                    , "  build-depends: base"
+                    ]
+        toolNames gpd @?= [("alex", "alex")]
+    , testCase "legacy build-tools: a known name is its package, an own executable is internal, anything else is not a solver's business" $ do
+        gpd <-
+            gpdOf . legacyPkg $
+                unlines
+                    [ "library"
+                    , "  build-depends: base"
+                    , "  build-tools: hsc2hs, gen, some-script"
+                    , ""
+                    , "executable gen"
+                    , "  main-is: Gen.hs"
+                    , "  build-depends: base"
+                    ]
+        toolNames gpd @?= [("hsc2hs", "hsc2hs")]
+    , testCase "a tool under a flag keeps its guard, and under a false branch is gone" $ do
+        gpd <-
+            gpdOf . pkg $
+                flag "gen" True
+                    ++ unlines
+                        [ "library"
+                        , "  build-depends: base"
+                        , "  if flag(gen)"
+                        , "    build-tool-depends: alex:alex"
+                        , "  if os(windows)"
+                        , "    build-tool-depends: happy:happy"
+                        ]
+        toolNamesAt (assign [("gen", True)]) gpd @?= [("alex", "alex")]
+        toolNamesAt (assign [("gen", False)]) gpd @?= []
+        toolNamesAtDefaults gpd @?= [("alex", "alex")]
+    , testCase "an executable's tools count, a test suite's do not, as for dependencies" $ do
+        gpd <-
+            gpdOf . pkg $
+                unlines
+                    [ "library"
+                    , "  build-depends: base"
+                    , ""
+                    , "executable tool"
+                    , "  main-is: Main.hs"
+                    , "  build-depends: base"
+                    , "  build-tool-depends: alex:alex"
+                    , ""
+                    , "test-suite spec"
+                    , "  type: exitcode-stdio-1.0"
+                    , "  main-is: Spec.hs"
+                    , "  build-depends: base"
+                    , "  build-tool-depends: hspec-discover:hspec-discover"
+                    ]
+        toolNames gpd @?= [("alex", "alex")]
+    , testCase "setup-depends is read off the package, and is not a dependency" $ do
+        gpd <-
+            gpdOf $
+                unlines
+                    [ "cabal-version: 3.0"
+                    , "name: fixture"
+                    , "version: 1.0"
+                    , "build-type: Custom"
+                    , ""
+                    , "custom-setup"
+                    , "  setup-depends: base, Cabal >=3.0"
+                    , ""
+                    , "library"
+                    , "  build-depends: base"
+                    ]
+        map (unPackageName . depPkgName) (setupDeps gpd) @?= ["base", "Cabal"]
+        names (componentDeps testPlatform testCompiler gpd) @?= ["base"]
+    ]
+  where
+    -- @build-tools@ is gone from the 3.0 specification, so its fixture speaks 2.4.
+    legacyPkg body = unlines ["cabal-version: 2.4", "name: fixture", "version: 1.0", "build-type: Simple", ""] ++ body
+    toolNames gpd = [(unPackageName p, unUnqualComponentName e) | (_, ds) <- componentTools testPlatform testCompiler gpd, ExeDependency p e _ <- ds]
+    toolNamesAt flags gpd = [(unPackageName p, unUnqualComponentName e) | ExeDependency p e _ <- toolsAt flags (componentTools testPlatform testCompiler gpd)]
+    toolNamesAtDefaults gpd = [(unPackageName p, unUnqualComponentName e) | ExeDependency p e _ <- toolsAt (mkFlagAssignment (Map.toList (defaultFlags gpd))) (componentToolsAtDefaults testPlatform testCompiler gpd)]
+    names guarded = [unPackageName (depPkgName d) | (_, ds) <- guarded, d <- ds]

@@ -163,7 +163,8 @@ app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solv
   (`flattenWith`): the `build-depends`, and the `BuildInfo` that decides buildability
   (`buildable:` plus `pkgconfig-depends` against a `PkgConfigPresent` predicate, library
   only). The machine is an argument — `Platform`, `CompilerInfo`, the predicate — never
-  read here. Dependencies come from the four components cabal includes unconditionally —
+  read here. `componentTools` and `setupDeps` read what a release owes to other
+  namespaces off the same walk, and keep it out of `GuardedDeps`. Dependencies come from the four components cabal includes unconditionally —
   library, sublibraries, foreign libraries, executables — and the last three are gated
   on their own `buildable:` through Cabal-syntax's `addBuildableCondition`.
 - `Bridge.Cabal.Baseline` — drives `Distribution.Solver.Modular.modularResolver` over
@@ -228,6 +229,10 @@ wrong edit is, not the argument. Read the section before you touch the code.
 - **A dependency of `p` on `p` is dropped**, in two load-bearing halves — DESIGN §8.
 - **An unbuildable component contributes no dependencies**, through Cabal-syntax's
   own `addBuildableCondition`; the library is not gated — DESIGN §15.
+- **Build tools and `setup-depends` are not dependencies** — DESIGN §16. They ride in
+  `Release` as `relTools` and `relSetup` for a planner to solve in a namespace of its
+  own, and `mkExpand` tries a `Preference` before installed and newest. Do not fold
+  them into `GuardedDeps`.
 - **Boot packages are installed-only** — DESIGN §7.
 - **A depender term names a slot, not a version**, and the first slot has no lower
   bound — DESIGN §4.

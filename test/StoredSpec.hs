@@ -14,8 +14,13 @@
 -- than in a solve.
 module StoredSpec (tests) where
 
-import           PubGrub.Cabal.Flatten                  (componentDepsAtDefaults,
+import           PubGrub.Cabal.Flatten                  (FlagModel (..),
+                                                         StoredRelease (..),
+                                                         componentDepsAtDefaults,
                                                          componentDepsAtDefaultsStored,
+                                                         componentToolsAtDefaults,
+                                                         componentToolsStored,
+                                                         setupDeps,
                                                          toStored,
                                                          unbuildableAtDefaults,
                                                          unbuildableAtDefaultsStored)
@@ -74,6 +79,12 @@ agrees name src = testCase name $ do
     unbuildableAtDefaultsStored db testPlatform testCompiler roundTripped
         @?= unbuildableAtDefaults db testPlatform testCompiler gpd
 
+    componentToolsStored FixedFlags testPlatform testCompiler stored
+        @?= componentToolsAtDefaults testPlatform testCompiler gpd
+    componentToolsStored FixedFlags testPlatform testCompiler roundTripped
+        @?= componentToolsAtDefaults testPlatform testCompiler gpd
+    srSetup roundTripped @?= setupDeps gpd
+
 tests :: TestTree
 tests =
     testGroup
@@ -84,6 +95,28 @@ tests =
                 , "version: 1.0"
                 , "library"
                 , "  build-depends: base >=4 && <5, containers"
+                ]
+        , -- Build tools and setup dependencies ride in the node data, not the
+          -- constraints, and have to survive the codec with their guards.
+          agrees "build tools, legacy build-tools and setup-depends" $
+            unlines
+                [ "cabal-version: 2.4"
+                , "name: p"
+                , "version: 1.0"
+                , "build-type: Custom"
+                , "custom-setup"
+                , "  setup-depends: base, Cabal >=3.0"
+                , "flag gen"
+                , "  default: True"
+                , "library"
+                , "  build-depends: base"
+                , "  build-tools: hsc2hs, gen"
+                , "  if flag(gen)"
+                , "    build-tool-depends: alex:alex >=3"
+                , "executable gen"
+                , "  main-is: Gen.hs"
+                , "  build-depends: base"
+                , "  build-tool-depends: happy:happy, p:gen"
                 ]
         , -- The environment is what the store must NOT resolve: these conditions
           -- have to survive encoding and be resolved on the way out, or the store

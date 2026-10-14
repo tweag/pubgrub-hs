@@ -933,6 +933,56 @@ problem has one, so `test/FlattenSpec.hs` is the only thing holding them. The tw
 that stay out, test-suites and benchmarks, are the two cabal itself puts behind a
 `Stanza` that a plain `cabal build` never enables.
 
-`storeFormatVersion` is 4: the stored trees are gated before they are written, so a
+`storeFormatVersion` went to 4 with this change: the stored trees are gated before they are written, so a
 store from before this serves ungated ones — and one from before the foreign
 libraries went in is missing a component outright.
+
+## 16. Build tools and setup dependencies are another namespace's
+
+`build-tool-depends` and `setup-depends` are read, carried and not solved. A release's
+`Release` holds them beside its dependencies — `relTools`, flag-guarded like
+`relGuarded` and gated on buildability the same way, and `relSetup` — and the provider
+rule reads neither. The main solve's plan is the library closure, which is what
+`cabal build` would link.
+
+**Why not goals of the main solve.** cabal solves every scope in one run with qualified
+goals (`QualExe`, `QualSetup`) and then links instances across scopes so one build
+serves both; that is the most intricate part of its solver, and it exists because its
+instances are keyed by scope. The planner this solver was built for keys units by
+content, so when two solves pick the same version, flags and dependencies they are one
+build with no solver cooperation, and nothing needs identity across scopes: a
+`Setup.hs` never links against the project's libraries, a build tool's dependencies
+never reach the code it generates, and what does need one instance — Template Haskell
+and plugins — is `build-depends` in the main namespace. Decided by latti on 2026-10-14
+(`latti/DESIGN.md` §5, "one solve per namespace, linked by preference"); the
+one-version-per-name model this solver already has is exactly one namespace, so
+nothing qualified is needed here, which is also why the qualified-goals design stays
+shelved ([STATUS.md §3.2](STATUS.md#32-one-version-per-package-name)).
+
+**What links the namespaces is a preference, never an incompatibility.**
+`PubGrub.Cabal.Provider.Preference` is a map from package name to a version and an
+automatic-flag assignment, and `mkExpand` tries it first: a preferred release the
+offered set admits goes through the same scan as the rule, over a list of one, so one
+that cannot be built here states why and falls through to installed-then-newest with
+its facts; a preferred flag value is offered before the declared default. A
+preference changes which value is chosen and never what is learned, so it cannot
+make a solve fail — a tool that genuinely needs another version gets it without
+touching the main plan. The main solve passes `noPreference`.
+
+**What the list holds is what cabal's conversion keeps**
+(`Distribution.Solver.Modular.IndexConversion.convCondTree`: `getAllToolDependencies`
+minus `isInternal`): `build-tool-depends` as written; the legacy `build-tools` names
+cabal translates to a package of the same name — `hscolour`, `haddock`, `happy`,
+`alex`, `hsc2hs`, `c2hs`, `cpphs`, `greencard`, `hspec-discover`, restated from
+`Distribution.Simple.BuildToolDepends.desugarBuildToolSimple` because that module is
+in `Cabal` and `pubgrub-hs:cabal` is Cabal-syntax only — and never a tool that is one
+of the release's own executables, which is internal. Test suites and benchmarks
+contribute none, as they contribute no dependencies. A tool the compiler ships, such
+as `hsc2hs`, is in the list like any other: cabal solves it from Hackage too, and
+whether an installed program satisfies it is the planner's call.
+
+**The derived index carries both.** The stored node data, which was `()` for every
+component but the library, is now the node's tools (`Node`, and `lnTools` on
+`LibNode`), and `srSetup` is the release's `setup-depends`; `storeFormatVersion` went
+from 5 to 6 and the store was rebuilt at the pin. The gate's numbers did not move: no
+main-solve clause changed.

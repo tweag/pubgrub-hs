@@ -46,7 +46,7 @@ is added one rung at a time; each rung leaves a runnable solver.
 | 2 — flags and conditional dependencies | built, behind `--flags search` ([§3.1](#31-flags-are-fixed-at-their-declared-defaults-unless-asked)) |
 | 3 — `base` and GHC pinning, boot packages installed-only | built |
 | — buildability (not a rung) | built |
-| 4 — setup and build-tool dependencies | not started ([§4.1](#41-setup-and-build-tool-dependencies-rung-4)) |
+| 4 — setup and build-tool dependencies | built as what a release owes to another namespace, not as goals of the main solve ([§4.1](#41-setup-and-build-tool-dependencies-rung-4)) |
 | 5 — public sublibraries | not started ([§4.2](#42-public-sublibraries-rung-5)) |
 
 ---
@@ -276,21 +276,25 @@ still open. **Do not assume any of it exists in the code.**
 
 ### 4.1 Setup and build-tool dependencies (rung 4)
 
-Not started. `PubGrub.Cabal.Flatten.componentDeps` merges library,
-sublibraries and executables into one `GuardedDeps` and discards which component each
-occurrence came from. It reads neither `setup-depends` nor `build-tool-depends`.
+Built on 2026-10-14, in a shape decided by the planner that consumes this solver
+rather than by cabal's: **a build tool or a `Setup.hs` is another namespace's problem,
+and the main solve reads neither.** `PubGrub.Cabal.Flatten.componentTools` reads
+`build-tool-depends` and the legacy `build-tools` cabal knows how to translate off the
+same four component trees as `componentDeps`, flag-guarded and gated on buildability
+the same way, minus the release's own executables; `setupDeps` reads
+`setup-depends`. Both ride in `Release` (`relTools`, `relSetup`) and in the derived
+index (`storeFormatVersion` 6), and `GuardedDeps` does not contain them. A planner
+seeds a solve of its own from them, with the main plan's choices as a
+`PubGrub.Cabal.Provider.Preference`, tried before installed and newest
+([DESIGN.md §16](DESIGN.md#16-build-tools-and-setup-dependencies-are-another-namespaces)).
 
-Each component is gated on its own buildability first, which is what removed the
-plan divergence the merge used to cause
-([DESIGN.md §15](DESIGN.md#15-a-component-that-is-not-buildable-contributes-no-dependencies)).
-
-Recovering the component label is the bulk of the work, and it touches no solver code.
-
-Two things are owed on the way. Qualified goals, designed and shelved: the design and
-why it does not fix self-dependencies are in [§3.2](#32-one-version-per-package-name).
-And the setup self-dependency exception: cabal keeps a reverse-dependency edge for a
-*setup* self-dependency, so the cycle forces a different setup script
-([DESIGN.md §8](DESIGN.md#8-a-dependency-of-p-on-p-is-dropped)).
+What this leaves: the driver solves neither namespace, so our plan still lacks the
+`alex`, `happy`, `hsc2hs` and `Cabal` cabal's plans carry ([§2.1](#21-against-cabal-on-the-benchmark-set)),
+and the comparison on that point is of two different questions. Qualified goals stay
+shelved ([§3.2](#32-one-version-per-package-name)): nothing here needs them. The setup
+self-dependency exception cabal keeps
+([DESIGN.md §8](DESIGN.md#8-a-dependency-of-p-on-p-is-dropped)) belongs to whoever solves
+the setup namespace.
 
 ### 4.2 Public sublibraries (rung 5)
 

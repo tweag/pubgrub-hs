@@ -106,8 +106,15 @@ type World = [(PackageName, Pkg)]
 -- which is what 'PubGrub.Cabal.Flatten.componentDepsStored' does to a real
 -- release.
 worldProviderUnder :: FlagModel -> [(PackageName, Version)] -> World -> Provider Cabal TestM
-worldProviderUnder model unbuildableHere world =
-    Provider (BP.mkExpand mempty (mkInstalledDb []) source)
+worldProviderUnder = worldProviderUnderWith BP.noPreference
+
+-- | 'worldProviderUnder' with flag search and a 'BP.Preference'.
+worldProviderUnderPreferring :: BP.Preference -> [(PackageName, Version)] -> World -> Provider Cabal TestM
+worldProviderUnderPreferring preference = worldProviderUnderWith preference FlagPackages
+
+worldProviderUnderWith :: BP.Preference -> FlagModel -> [(PackageName, Version)] -> World -> Provider Cabal TestM
+worldProviderUnderWith preference model unbuildableHere world =
+    Provider (BP.mkExpand mempty preference (mkInstalledDb []) source)
   where
     source =
         BP.ReleaseSource
@@ -128,6 +135,8 @@ worldProviderUnder model unbuildableHere world =
                         FixedFlags   -> [(Lit True, deps) | (g, deps) <- relGuarded r, atDefaults (pkgFlags pk) g]
                         FlagPackages -> relGuarded r
                     , BP.relUnbuildable = [NotBuildable | (p, relVersion r) `elem` unbuildableHere]
+                    , BP.relTools = []
+                    , BP.relSetup = []
                     }
               )
             | (p, pk) <- world
@@ -268,6 +277,7 @@ tests =
         , flagFlip
         , fixedFlagsDoNotFlip
         , heldFlag
+        , preferenceTests
         , twoFlags
         , unsatOverFlags
         , unusedFlag
@@ -524,7 +534,7 @@ bootPackageStatesItself =
     -- The real provider rule over a world with one installed unit of @name@ and no
     -- releases at all, asked about that package with @offered@ on the table.
     expandIn name offered =
-        BP.mkExpand mempty db source (PackageVar (mkPackageName name)) (instanceSet offered)
+        BP.mkExpand mempty BP.noPreference db source (PackageVar (mkPackageName name)) (instanceSet offered)
       where
         db =
             mkInstalledDb
@@ -682,3 +692,50 @@ heldFlag =
         , (pkg "foo", Pkg [(fast, True)] [Release v1 [whenOn fast [pkg "speedy"], whenOff fast [pkg "slow"]]])
         , (pkg "slow", leaf)
         ]
+
+-- | 'BP.Preference': the main plan's choices, tried first when the offered set
+-- admits them. A choice of value and never an incompatibility, so a preferred
+-- release that cannot be built here, or that the index lacks, falls through to
+-- the rule — installed first, then newest — with nothing lost.
+preferenceTests :: TestTree
+preferenceTests =
+    testGroup
+        "a preference is tried first"
+        [ testCase "a preferred older release beats the newest" $ do
+            result <- runSolve (preferring [(pkg "foo", (v1, Map.empty))] world)
+            fmap (fmap versionOf . Map.lookup (pkg "foo")) result @?= Right (Just (Just v1))
+        , testCase "a preferred release the index lacks changes nothing" $ do
+            result <- runSolve (preferring [(pkg "foo", (V.mkVersion [9], Map.empty))] world)
+            fmap (fmap versionOf . Map.lookup (pkg "foo")) result @?= Right (Just (Just v2))
+        , testCase "a preferred release that cannot be built here falls through, and says why" $ do
+            result <- runSolveWith [] (worldProviderUnderPreferring (preferring' [(pkg "foo", (v1, Map.empty))]) [(pkg "foo", v1)] world)
+            fmap (fmap versionOf . Map.lookup (pkg "foo")) result @?= Right (Just (Just v2))
+        , testCase "a preferred flag value beats the declared default" $ do
+            result <- runSolve (preferring [(pkg "flagged", (v1, Map.fromList [(fast, False)]))] flagWorld)
+            result
+                @?= Right
+                    ( solutionOf
+                        [ (pkg "root", v1, [])
+                        , (pkg "flagged", v1, [(fast, False)])
+                        , (pkg "slow", v1, [])
+                        ]
+                    )
+        ]
+  where
+    fast = flg "fast"
+    -- foo has two releases and nothing forces either.
+    world =
+        [ (pkg "root", plain [pkg "foo"])
+        , (pkg "foo", Pkg [] [Release v1 [], Release v2 []])
+        ]
+    -- Either value of the flag resolves; the default is True.
+    flagWorld =
+        [ (pkg "root", plain [pkg "flagged"])
+        , (pkg "flagged", Pkg [(fast, True)] [Release v1 [whenOn fast [pkg "speedy"], whenOff fast [pkg "slow"]]])
+        , (pkg "speedy", leaf)
+        , (pkg "slow", leaf)
+        ]
+    preferring' prefs p = lookup p prefs
+    versionOf (Built v _) = Just v
+    versionOf Installed{} = Nothing
+    preferring prefs = worldProviderUnderPreferring (preferring' prefs) []

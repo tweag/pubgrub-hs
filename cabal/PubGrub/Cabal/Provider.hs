@@ -19,6 +19,8 @@
 module PubGrub.Cabal.Provider
     ( -- * The rule
       mkExpand
+    , Preference
+    , noPreference
     , widenTo
     , constrainTo
 
@@ -41,7 +43,9 @@ import           Data.List                      (find, sortOn)
 import           Data.List.NonEmpty             (NonEmpty)
 import qualified Data.List.NonEmpty             as NE
 import qualified Data.Map.Strict                as Map
-import           Data.Maybe                     (catMaybes, listToMaybe)
+import           Data.Map.Strict                (Map)
+import           Data.Maybe                     (catMaybes, fromMaybe,
+                                                 listToMaybe)
 import           Data.Ord                       (Down (..))
 import           Data.Set                       (Set)
 import qualified Data.Set                       as Set
@@ -50,14 +54,17 @@ import qualified Data.Text                      as T
 import           Distribution.Parsec.Error      (PError)
 import           Distribution.Pretty            (prettyShow)
 import           Distribution.Types.Condition   (Condition (..))
-import           Distribution.Types.Dependency  (depPkgName, depVerRange)
+import           Distribution.Types.Dependency  (Dependency, depPkgName,
+                                                 depVerRange)
+import           Distribution.Types.Flag        (FlagName)
 import           Distribution.Types.PackageName (PackageName)
 import qualified Distribution.Types.Version     as Cabal
 import           PubGrub.Cabal                  (Cabal, UnbuildableReason,
                                                  constraint, declaresFlag,
                                                  fromDependency, onlyInstalled,
                                                  unbuildable)
-import           PubGrub.Cabal.Flatten          (GuardedDeps, expandGuard)
+import           PubGrub.Cabal.Flatten          (GuardedDeps, GuardedTools,
+                                                 expandGuard)
 import           PubGrub.Cabal.Installed        (InstalledDb (..),
                                                  InstalledEdge (..),
                                                  closureEdges,
@@ -106,7 +113,28 @@ data Release = Release
     -- judged at the declared flag defaults, so there is one assignment to ask
     -- about. The condition is what 'PubGrub.Cabal.Flatten.buildableCondition'
     -- returns, and judging buildability under every assignment would need it.
+    , relTools :: GuardedTools
+    -- ^ the build tools, flag-guarded. The rule does not read them: a planner
+    -- solves the tools in a namespace of their own, from this list
+    -- ('PubGrub.Cabal.Flatten.GuardedTools').
+    , relSetup :: [Dependency]
+    -- ^ the @setup-depends@, likewise ('PubGrub.Cabal.Flatten.setupDeps')
     }
+
+-- | What a solve prefers, when the offered set admits it: for a package, a
+-- version and an assignment of its automatic flags. It is tried before the
+-- rule's own order (installed first, then newest). A preference chooses a value
+-- and is never an incompatibility, so it cannot make a solve fail.
+--
+-- The main solve passes 'noPreference'. A solve for a build tool's or a
+-- @Setup.hs@'s namespace passes the main plan's choices, so that where the two
+-- can agree on a version and its flags they do, and one build serves both; where
+-- the tool needs another version it gets it, without touching the main plan. A
+-- flag the preference does not name is offered at its declared default.
+type Preference = PackageName -> Maybe (Version, Map FlagName Bool)
+
+noPreference :: Preference
+noPreference = const Nothing
 
 
 -- | Where a package's /source releases/ come from: which versions exist, and how
@@ -154,25 +182,45 @@ mkExpand
     :: forall m
      . Monad m
     => LogAction m Text
+    -> Preference
     -> InstalledDb
     -> ReleaseSource m
     -> Var
     -> ValueSet
     -> m (Maybe Value, [Incompatibility Cabal])
-mkExpand logA installedDb source = expand'
+mkExpand logA preference installedDb source = expand'
   where
     expand' :: Var -> ValueSet -> m (Maybe Value, [Incompatibility Cabal])
-    expand' (FlagVar _ (Flag _ dflt)) set =
-        pure (listToMaybe [FlagValue b | b <- [dflt, not dflt], memberBool b (vsFlags set)], [])
+    expand' (FlagVar p (Flag f dflt)) set =
+        let first = fromMaybe dflt (preference p >>= Map.lookup f . snd)
+         in pure (listToMaybe [FlagValue b | b <- [first, not first], memberBool b (vsFlags set)], [])
     expand' (PackageVar pn) set = expandPackage pn (vsInstances set)
+
+    -- The preferred release first, when there is one, the offered set admits it
+    -- and the index has it ('Preference'). It goes through the same scan as the
+    -- rule, over a list of one, so a preferred release that cannot be built here
+    -- states why and falls through to the rule with its facts. A non-reinstallable
+    -- package has no source release to prefer.
+    expandPackage :: PackageName -> InstanceSet -> m (Maybe Value, [Incompatibility Cabal])
+    expandPackage pn range =
+        case preference pn of
+            Just (v, _)
+                | not (isNonReinstallable pn)
+                , BuildSource v `memberInstance` range
+                , Just slot <- lookup v (withSlots (rsVersionsOf source pn)) -> do
+                    (chosen, stated) <- scan pn range [] [(v, slot)]
+                    case chosen of
+                        Just _  -> pure (chosen, stated)
+                        Nothing -> fmap (stated ++) <$> expandByRule pn range
+            _ -> expandByRule pn range
 
     -- An 'InstanceSet' is a symbolic description (a version range plus the
     -- installed units in it), not a container: membership is decidable but it
     -- cannot be enumerated. So enumerate the package's own instances — cheaply,
     -- from the installed db and the index's version map, without parsing any
     -- @.cabal@ — and keep those the offered set admits.
-    expandPackage :: PackageName -> InstanceSet -> m (Maybe Value, [Incompatibility Cabal])
-    expandPackage pn range = do
+    expandByRule :: PackageName -> InstanceSet -> m (Maybe Value, [Incompatibility Cabal])
+    expandByRule pn range = do
         let installedHere = [toPreInstalled u | u <- Map.findWithDefault [] pn (idbByName installedDb)]
             admissible = sortOn (Down . version) (filter (`Set.member` isInstalled range) installedHere)
         case listToMaybe admissible of
@@ -199,86 +247,80 @@ mkExpand logA installedDb source = expand'
             -- 'onlyInstalledFact' for what stating all of them up front cost.
             Nothing
                 | isNonReinstallable pn -> pure (Nothing, onlyInstalledFact pn)
-                | otherwise -> firstUsable (withSlots (rsVersionsOf source pn))
+                | otherwise -> scan pn range [] (withSlots (rsVersionsOf source pn))
 
-                where
-                    -- Releases newest first. One @.cabal@ read per release.
-                    --
-                    -- @stated@ accumulates the facts about releases the scan
-                    -- rejects on the way past. They ride out with whichever
-                    -- release it settles on.
-                    firstUsable = scan []
-
-                    -- An exhausted list still answers @Nothing@ — the solver is what
-                    -- turns that into a decision to avoid the range — but the facts go
-                    -- with it. This is the case that matters, and it is why 'expand'
-                    -- reports its clauses outside the 'Maybe': a range holding nothing
-                    -- but unbuildable releases is the commonest way a real Hackage
-                    -- package fails to resolve, and without these the report says "no
-                    -- version for hpqtypes in >=1.13" where cabal says
-                    -- "pkg-config package libpq-any, not found in the pkg-config
-                    -- database".
-                    scan stated [] = pure (Nothing, reverse stated)
-                    scan stated ((v, slot):rest) = do
-                        result <- rsReadRelease source pn v
-                        case result of
-                            -- A .cabal that fails to parse: warn and skip. The
-                            -- release is then outside the universe the solve runs
-                            -- over, which is why the warning has to be visible.
-                            Left err -> do
-                                logA
-                                    <& T.pack
-                                        ( "warning: ignoring "
-                                            ++ prettyShow pn
-                                            ++ "-"
-                                            ++ T.unpack (pretty v)
-                                            ++ " (unparseable .cabal: "
-                                            ++ show err
-                                            ++ ")"
-                                        )
-                                scan stated rest
-                            -- A release whose library cannot be built here is not a
-                            -- candidate: its @pkgconfig-depends@ are unsatisfiable on
-                            -- this machine, or it declares @buildable: False@. Not
-                            -- warned about, because unlike an unparseable @.cabal@
-                            -- this is an ordinary fact about the release, and cabal
-                            -- applies the same rule from the same pkg-config db.
-                            --
-                            -- It is /stated/ rather than skipped
-                            -- (references/pubgrub.md:475): without the clause the
-                            -- report reads "no version for p in range" when the
-                            -- versions exist and cannot be built here. With it, the
-                            -- proof line names the reason, the module @pkg-config@
-                            -- could not find, as cabal's own message does.
-                            --
-                            -- The clause is over the release's whole slot. Buildability
-                            -- is judged at the declared flag defaults, so this is one
-                            -- verdict per release; a release unbuildable only under
-                            -- some assignment would need the guard carried into the
-                            -- clause, which is not done.
-                            Right release | Just why <- NE.nonEmpty (relUnbuildable release) ->
-                                scan (unbuildableFact pn slot why : stated) rest
-                            Right release
-                                | not (BuildSource v `memberInstance` range) -> scan stated rest
-                                | otherwise -> do
-                                    -- The release is the instance. What rides out with
-                                    -- it is one 'declaresFlag' clause per automatic flag,
-                                    -- which makes each flag a goal of its own, and one
-                                    -- dependency clause per guarded occurrence and
-                                    -- disjunct of its guard, each naming the flags it
-                                    -- holds under. A dependency on the package itself is
-                                    -- dropped (see 'consequencesOfUsePreInstalled').
-                                    let flags = relAutomatic release
-                                        declared = [declaresFlag pn (slotInstances slot) f | f <- flags]
-                                    incs <-
-                                        sequence
-                                            [ guardedInc pn v slot flags guard pins dep
-                                            | (guard, deps) <- relGuarded release
-                                            , pins <- expandGuard guard
-                                            , dep <- deps
-                                            , depPkgName dep /= pn
-                                            ]
-                                    pure (Just (PackageValue (BuildSource v)), reverse stated ++ declared ++ catMaybes incs)
+    -- Releases newest first. One @.cabal@ read per release.
+    --
+    -- @stated@ accumulates the facts about releases the scan rejects on the
+    -- way past. They ride out with whichever release it settles on, and with
+    -- the @Nothing@ of an exhausted list, which is why 'expand' returns its
+    -- clauses outside the 'Maybe': a range holding nothing but unbuildable
+    -- releases is the commonest way a real Hackage package fails to resolve,
+    -- and without these facts the report says "no version for hpqtypes in
+    -- >=1.13" where cabal says "pkg-config package libpq-any, not found in
+    -- the pkg-config database".
+    scan :: PackageName -> InstanceSet -> [Incompatibility Cabal] -> [(Version, Slot)] -> m (Maybe Value, [Incompatibility Cabal])
+    scan _ _ stated [] = pure (Nothing, reverse stated)
+    scan pn range stated ((v, slot):rest) = do
+        result <- rsReadRelease source pn v
+        case result of
+            -- A .cabal that fails to parse: warn and skip. The
+            -- release is then outside the universe the solve runs
+            -- over, which is why the warning has to be visible.
+            Left err -> do
+                logA
+                    <& T.pack
+                        ( "warning: ignoring "
+                            ++ prettyShow pn
+                            ++ "-"
+                            ++ T.unpack (pretty v)
+                            ++ " (unparseable .cabal: "
+                            ++ show err
+                            ++ ")"
+                        )
+                scan pn range stated rest
+            -- A release whose library cannot be built here is not a
+            -- candidate: its @pkgconfig-depends@ are unsatisfiable on
+            -- this machine, or it declares @buildable: False@. Not
+            -- warned about, because unlike an unparseable @.cabal@
+            -- this is an ordinary fact about the release, and cabal
+            -- applies the same rule from the same pkg-config db.
+            --
+            -- It is /stated/ rather than skipped
+            -- (references/pubgrub.md:475): without the clause the
+            -- report reads "no version for p in range" when the
+            -- versions exist and cannot be built here. With it, the
+            -- proof line names the reason, the module @pkg-config@
+            -- could not find, as cabal's own message does.
+            --
+            -- The clause is over the release's whole slot. Buildability
+            -- is judged at the declared flag defaults, so this is one
+            -- verdict per release; a release unbuildable only under
+            -- some assignment would need the guard carried into the
+            -- clause, which is not done.
+            Right release | Just why <- NE.nonEmpty (relUnbuildable release) ->
+                scan pn range (unbuildableFact pn slot why : stated) rest
+            Right release
+                | not (BuildSource v `memberInstance` range) -> scan pn range stated rest
+                | otherwise -> do
+                    -- The release is the instance. What rides out with
+                    -- it is one 'declaresFlag' clause per automatic flag,
+                    -- which makes each flag a goal of its own, and one
+                    -- dependency clause per guarded occurrence and
+                    -- disjunct of its guard, each naming the flags it
+                    -- holds under. A dependency on the package itself is
+                    -- dropped (see 'consequencesOfUsePreInstalled').
+                    let flags = relAutomatic release
+                        declared = [declaresFlag pn (slotInstances slot) f | f <- flags]
+                    incs <-
+                        sequence
+                            [ guardedInc pn v slot flags guard pins dep
+                            | (guard, deps) <- relGuarded release
+                            , pins <- expandGuard guard
+                            , dep <- deps
+                            , depPkgName dep /= pn
+                            ]
+                    pure (Just (PackageValue (BuildSource v)), reverse stated ++ declared ++ catMaybes incs)
 
     -- For a non-reinstallable package, the standing fact that it can __only__
     -- be an installed unit: no source release of it may be selected, whatever
@@ -339,11 +381,12 @@ mkExpand logA installedDb source = expand'
     -- different instance for the setup script; and @isInternal@
     -- (@Distribution.Solver.Modular.IndexConversion@) drops a
     -- @build-tool-depends@ on the package's own executable. Neither exception
-    -- arises here, because setup and build-tool dependencies are not read yet,
-    -- and the setup case has to come with them. Qualified goals would not
-    -- subsume the rule either: a library dependency inherits its depender's
-    -- qualifier (@qualifyDeps@'s @inheritedQ@), so an executable's dependency
-    -- on its own library stays a self-dependency under any qualifier scheme.
+    -- arises here, because this rule states no setup or build-tool
+    -- dependencies: they ride in 'Release' for a planner to solve in a
+    -- namespace of their own. Qualified goals would not subsume the rule
+    -- either: a library dependency inherits its depender's qualifier
+    -- (@qualifyDeps@'s @inheritedQ@), so an executable's dependency on its own
+    -- library stays a self-dependency under any qualifier scheme.
     consequencesOfUsePreInstalled pip =
             pure
                 [ fromDependency
