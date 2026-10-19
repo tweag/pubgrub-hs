@@ -15,6 +15,8 @@
 module StoredSpec (tests) where
 
 import           PubGrub.Cabal.Flatten                  (FlagModel (..),
+                                                         allStanzas,
+                                                         noStanzas,
                                                          StoredRelease (..),
                                                          componentDepsAtDefaults,
                                                          componentDepsAtDefaultsStored,
@@ -68,21 +70,22 @@ agrees name src = testCase name $ do
         roundTripped = deserialise (serialise stored)
         db = pkgConfigPresent (Just testPkgConfigDb)
 
-    componentDepsAtDefaultsStored testPlatform testCompiler stored
-        @?= componentDepsAtDefaults testPlatform testCompiler gpd
+    -- The codec has to carry the optional stanzas as well as the four
+    -- unconditional components, so each form is checked under both choices.
+    mapM_ (agreeUnder gpd stored) [noStanzas, allStanzas]
+    mapM_ (agreeUnder gpd roundTripped) [noStanzas, allStanzas]
+
     unbuildableAtDefaultsStored db testPlatform testCompiler stored
         @?= unbuildableAtDefaults db testPlatform testCompiler gpd
-
-    componentDepsAtDefaultsStored testPlatform testCompiler roundTripped
-        @?= componentDepsAtDefaults testPlatform testCompiler gpd
     unbuildableAtDefaultsStored db testPlatform testCompiler roundTripped
         @?= unbuildableAtDefaults db testPlatform testCompiler gpd
-
-    componentToolsStored FixedFlags testPlatform testCompiler stored
-        @?= componentToolsAtDefaults testPlatform testCompiler gpd
-    componentToolsStored FixedFlags testPlatform testCompiler roundTripped
-        @?= componentToolsAtDefaults testPlatform testCompiler gpd
     srSetup roundTripped @?= setupDeps gpd
+  where
+    agreeUnder gpd stored stanzas = do
+        componentDepsAtDefaultsStored stanzas testPlatform testCompiler stored
+            @?= componentDepsAtDefaults stanzas testPlatform testCompiler gpd
+        componentToolsStored FixedFlags stanzas testPlatform testCompiler stored
+            @?= componentToolsAtDefaults stanzas testPlatform testCompiler gpd
 
 tests :: TestTree
 tests =
@@ -116,6 +119,18 @@ tests =
                 , "  main-is: Gen.hs"
                 , "  build-depends: base"
                 , "  build-tool-depends: happy:happy, p:gen"
+                , "test-suite spec"
+                , "  type: exitcode-stdio-1.0"
+                , "  main-is: Spec.hs"
+                , "  build-depends: base, p, hspec"
+                , "  build-tool-depends: hspec-discover:hspec-discover"
+                , "  if flag(gen)"
+                , "    build-depends: tasty"
+                , "benchmark bench"
+                , "  type: exitcode-stdio-1.0"
+                , "  main-is: Bench.hs"
+                , "  build-depends: base, criterion"
+                , "  buildable: False"
                 ]
         , -- The environment is what the store must NOT resolve: these conditions
           -- have to survive encoding and be resolved on the way out, or the store

@@ -172,14 +172,21 @@ pubgrub-hs (package, unpublished)
   read here. `componentTools` and `setupDeps` read what a release owes to other
   namespaces off the same walk, and keep it out of `GuardedDeps`. Dependencies come from the four components cabal includes unconditionally —
   library, sublibraries, foreign libraries, executables — and the last three are gated
-  on their own `buildable:` through Cabal-syntax's `addBuildableCondition`.
+  on their own `buildable:` through Cabal-syntax's `addBuildableCondition`. Test suites
+  and benchmarks are read only when the caller's `Stanzas` ask, per release, the way a
+  planner enables them for a local package. The trees are our own `Tree`, and
+  `fromCondTree` is the one function that depends on the Cabal-syntax version.
 - `Bridge.Cabal.Baseline` — drives `Distribution.Solver.Modular.modularResolver` over
   our index. It builds a `PackageIndex (SourcePackage ())`. `modularResolver` runs
   `convPIs` itself.
 - `PubGrub.Cabal.Provider` — the rule: `mkExpand` picks an instance of a package
   (installed first, then the newest buildable source release) and states what it
   entails, over an `InstalledDb` and a `ReleaseSource` (which versions exist, and the
-  `Release` of one). `PubGrub.Cabal.Installed` is the installed set and its unit graph.
+  `Release` of one). `releaseOf` is the reduction of a `GenericPackageDescription` to a
+  `Release` (flag model, stanzas, platform, compiler, `pkg-config` predicate), and
+  `releaseOfStored` the same over the derived index's form; another tool with its own
+  descriptions calls the first, and the bridge's `releaseReader` memoises them over an
+  index entry. `PubGrub.Cabal.Installed` is the installed set and its unit graph.
 - `Bridge.Provider` — the world on this machine. `withWorld` opens the index, the
   installed database and the `pkg-config` database **once**, and both solvers are fed
   from it. That is what makes the comparison structural rather than arranged.

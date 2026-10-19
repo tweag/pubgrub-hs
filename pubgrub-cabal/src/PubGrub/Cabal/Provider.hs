@@ -71,6 +71,7 @@ import           Distribution.Types.GenericPackageDescription (GenericPackageDes
 import           PubGrub.Cabal.Flatten          (FlagModel (..), GuardedDeps,
                                                  GuardedTools,
                                                  PkgConfigPresent,
+                                                 Stanzas,
                                                  StoredRelease (..),
                                                  componentDepsStored,
                                                  componentToolsStored,
@@ -141,17 +142,21 @@ data Release = Release
 -- decides buildability. The flag model decides which flags stay symbolic:
 -- under 'FixedFlags' every flag is its declared default and 'relAutomatic' is
 -- empty; under 'FlagPackages' each automatic flag is a solver variable and the
--- guards name it. A caller that keeps releases in their pre-environment form
--- goes through 'releaseOfStored' instead, which is the same function over that
--- form.
+-- guards name it. The 'Stanzas' decide whether the release's test suites and
+-- benchmarks count — 'PubGrub.Cabal.Flatten.noStanzas' for a dependency, and a
+-- planner's choice for a local package. A caller that keeps releases in their
+-- pre-environment form goes through 'releaseOfStored' instead, which is the
+-- same function over that form.
 releaseOf
     :: FlagModel
+    -> Stanzas
     -> Platform
     -> CompilerInfo
     -> PkgConfigPresent
     -> GenericPackageDescription
     -> Release
-releaseOf model platform compiler present = releaseOfStored model platform compiler present . toStored
+releaseOf model stanzas platform compiler present =
+    releaseOfStored model stanzas platform compiler present . toStored
 
 -- | 'releaseOf' over the pre-environment form a derived index keeps
 -- ('PubGrub.Cabal.Flatten.StoredRelease'). Everything a 'Release' holds is
@@ -159,19 +164,20 @@ releaseOf model platform compiler present = releaseOfStored model platform compi
 -- reused for every assignment tried against it.
 releaseOfStored
     :: FlagModel
+    -> Stanzas
     -> Platform
     -> CompilerInfo
     -> PkgConfigPresent
     -> StoredRelease
     -> Release
-releaseOfStored model platform compiler present sr =
+releaseOfStored model stanzas platform compiler present sr =
     Release
         { relAutomatic = case model of
             FixedFlags   -> []
             FlagPackages -> [Flag f d | (f, d) <- srFlags sr, f `notElem` srManual sr]
-        , relGuarded = componentDepsStored model platform compiler sr
+        , relGuarded = componentDepsStored model stanzas platform compiler sr
         , relUnbuildable = unbuildableAtDefaultsStored present platform compiler sr
-        , relTools = componentToolsStored model platform compiler sr
+        , relTools = componentToolsStored model stanzas platform compiler sr
         , relSetup = srSetup sr
         }
 

@@ -32,6 +32,7 @@
 | Flags | fixed at their declared defaults by default; `--flags search` makes every automatic flag a solver variable, on both sides ([§3.1](#31-flags-are-fixed-at-their-declared-defaults-unless-asked)) |
 | Boot packages | the installed database becomes instances. A boot package offers installed units or nothing |
 | Buildability | a release whose library cannot be built here is not offered, and the proof says why: the `pkg-config` module that is missing, by name, or `buildable: False` |
+| Test suites and benchmarks | read only when the reduction is asked, per release (`releaseOf` takes a `Stanzas`): a planner enables them for a local package and never for a dependency, as cabal's does; the driver passes none ([DESIGN.md §15](DESIGN.md#15-a-component-that-is-not-buildable-contributes-no-dependencies)) |
 | Explanations | `PubGrub.Report` prints a numbered proof that follows the spec's own reporting algorithm |
 | cabal baseline | `pubgrub --cabal <target>` runs cabal's modular solver over the same index |
 | Regression gate | `scripts/gate.sh` runs 26 problems through both solvers and fails on any regression |
@@ -284,7 +285,7 @@ and the main solve reads neither.** `PubGrub.Cabal.Flatten.componentTools` reads
 same four component trees as `componentDeps`, flag-guarded and gated on buildability
 the same way, minus the release's own executables; `setupDeps` reads
 `setup-depends`. Both ride in `Release` (`relTools`, `relSetup`) and in the derived
-index (`storeFormatVersion` 6), and `GuardedDeps` does not contain them. A planner
+index (`storeFormatVersion` 8), and `GuardedDeps` does not contain them. A planner
 seeds a solve of its own from them, with the main plan's choices as a
 `PubGrub.Cabal.Provider.Preference`, tried before installed and newest
 ([DESIGN.md §16](DESIGN.md#16-build-tools-and-setup-dependencies-are-another-namespaces)).

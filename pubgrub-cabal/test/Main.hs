@@ -6,6 +6,7 @@ import qualified InstalledSpec
 import qualified InstanceSetSpec
 import qualified PaperSpec
 import qualified PartialSolutionSpec
+import qualified ReleaseSpec
 import qualified ReportSpec
 import qualified SolverSpec
 import qualified StoreSpec
@@ -27,4 +28,5 @@ main =
             , ReportSpec.tests
             , FlagSolveSpec.tests
             , InstalledSpec.tests
+            , ReleaseSpec.tests
             ]

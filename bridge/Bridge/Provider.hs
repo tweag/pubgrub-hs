@@ -53,7 +53,8 @@ import           Hackage.Security.Client.Repository.Cache     (Cache)
 import           Network.HTTP.Client                          (Manager)
 import           PubGrub.Cabal                                (Cabal, request)
 import           PubGrub.Cabal.Flatten                        (FlagModel (..),
-                                                               PkgConfigPresent)
+                                                               PkgConfigPresent,
+                                                               noStanzas)
 import           PubGrub.Cabal.Installed                      (mkInstalledDb)
 import           PubGrub.Cabal.Provider                       (ParseError,
                                                                Release (..),
@@ -262,7 +263,9 @@ releaseReader model platform cInfo pkgConfig handle store = do
                     parsed <- fmap reduce <$> ihLookupGPD handle pn v
                     pure (parsed, False)
 
+        -- Every release the driver reads is a dependency, so no test suite or
+        -- benchmark of it counts: the two solvers are compared on build plans.
         present = pkgConfigPresent pkgConfig
-        fromStored = releaseOfStored model platform cInfo present
-        reduce = releaseOf model platform cInfo present
+        fromStored = releaseOfStored model noStanzas platform cInfo present
+        reduce = releaseOf model noStanzas platform cInfo present
     pure (readRelease, (\(_, p, d, reused) -> (p, d, reused)) <$> readIORef ref)

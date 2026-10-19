@@ -78,6 +78,9 @@
 -- states each occurrence as a separate fact.
 module PubGrub.Cabal.Flatten (
     GuardedDeps,
+    Stanzas (..),
+    noStanzas,
+    allStanzas,
     componentDeps,
     componentDepsAtDefaults,
     buildableCondition,
@@ -155,6 +158,8 @@ import           Distribution.Types.SetupBuildInfo             (SetupBuildInfo (
 import           Distribution.Types.UnqualComponentName        (UnqualComponentName,
                                                                mkUnqualComponentName)
 import           Distribution.Types.ForeignLib                (ForeignLib (foreignLibBuildInfo))
+import           Distribution.Types.TestSuite                 (TestSuite (testBuildInfo))
+import           Distribution.Types.Benchmark                 (Benchmark (benchmarkBuildInfo))
 import           Distribution.Types.BuildInfo                 (BuildInfo (..))
 import           Distribution.Types.CondTree                  (CondBranch (..),
                                                                CondTree (..))
@@ -196,6 +201,35 @@ type GuardedDeps = [(Guard, [Dependency])]
 -- @pkgconfig-depends@ when the database is absent, and a missing module still
 -- has to be named in the proof.
 type PkgConfigPresent = PkgconfigDependency -> Bool
+
+-- | Which optional stanzas a reduction reads beside the four components cabal
+-- includes unconditionally (library, sub-libraries, foreign libraries,
+-- executables): the test suites, the benchmarks, both or neither.
+--
+-- A test suite or benchmark is behind a stanza that a plain @cabal build@ never
+-- enables, and a planner enables it __per package__: @cabal test@ resolves the
+-- test suites of the local packages and never those of their dependencies. So
+-- the choice is made where a release is reduced, by whoever reduces it, and a
+-- solve for a build plan passes 'noStanzas' for every release. What the stanzas
+-- add is read the same way as the rest: flag-guarded, gated on their own
+-- @buildable:@ ('gateOnBuildable'), their build tools alongside
+-- ('componentTools'). A test suite's dependency on its own package's library
+-- is an intra-package edge, which the provider rule drops, as it does for an
+-- executable.
+data Stanzas = Stanzas
+    { withTests      :: Bool
+    , withBenchmarks :: Bool
+    }
+    deriving (Eq, Show)
+
+-- | The four unconditional components only: a release as a dependency.
+noStanzas :: Stanzas
+noStanzas = Stanzas{withTests = False, withBenchmarks = False}
+
+-- | The test suites and the benchmarks too: a local package under @cabal test@
+-- and @cabal bench@.
+allStanzas :: Stanzas
+allStanzas = Stanzas{withTests = True, withBenchmarks = True}
 
 -- | Resolve the fixed environment: OS, arch and compiler conditions become
 -- concrete @Right@ booleans.
@@ -308,19 +342,19 @@ flattenWith env at = go (Lit True)
 -- dependency trees to flag-guarded groups, resolving OS\/arch\/compiler conditions
 -- against the given platform and compiler.
 --
--- Those four are exactly the components
--- @Distribution.Solver.Modular.IndexConversion.convGPD@ includes unconditionally.
--- Test-suites and benchmarks are excluded, as they are there: cabal puts them behind
--- a @Stanza@ that a plain @cabal build@ never enables, so a solve for a build plan
--- does not drag in a package's own test dependencies.
+-- Those four are exactly the components cabal's solver includes
+-- unconditionally. Test-suites and benchmarks are read only when the 'Stanzas'
+-- ask for them, as they are there: cabal puts them behind a stanza that a plain
+-- @cabal build@ never enables, so a solve for a build plan does not drag in a
+-- package's own test dependencies, and a planner enables them per local package.
 --
 -- __A component that is not buildable contributes nothing__, and the gate is
--- Cabal-syntax's own 'addBuildableCondition' — the very function
--- @Distribution.Solver.Modular.IndexConversion.convGPD@ pipes every component
--- through before converting it. It rewrites a tree to @if <buildable> then
--- <tree>@, to the empty tree where @buildable:@ is statically @False@, and leaves
--- it alone where it is statically @True@; so the condition joins the guards
--- already being accumulated and costs nothing where nothing is conditional.
+-- Cabal-syntax's own 'addBuildableCondition', the function cabal's solver
+-- applies to every component before converting it. It rewrites a tree to
+-- @if <buildable> then <tree>@, to the empty tree where @buildable:@ is
+-- statically @False@, and leaves it alone where it is statically @True@; so the
+-- condition joins the guards already being accumulated and costs nothing where
+-- nothing is conditional.
 --
 -- Without the gate, a dependency is read out of a stanza that is never built.
 -- @http2-5.4.4@'s @hpack-encode@ declares @aeson >=2@ and closes with
@@ -333,8 +367,8 @@ flattenWith env at = go (Lit True)
 -- dependency-free — and 'unbuildableAtDefaults' already carries it to the solver
 -- with the reason attached, which is what lets a proof name the missing
 -- @pkg-config@ module.
-componentDeps :: Platform -> CompilerInfo -> GenericPackageDescription -> GuardedDeps
-componentDeps platform compiler = depsWith Left platform compiler . toStored
+componentDeps :: Stanzas -> Platform -> CompilerInfo -> GenericPackageDescription -> GuardedDeps
+componentDeps stanzas platform compiler = depsWith Left stanzas platform compiler . toStored
 
 -- | 'componentDeps' with every flag resolved at its __declared default__: flags
 -- are parsed and applied, but treated as manual, so none of them is a search
@@ -356,19 +390,20 @@ componentDeps platform compiler = depsWith Left platform compiler . toStored
 -- An /undeclared/ flag named by a condition resolves to 'False', matching the
 -- convention 'evalCond' documents. It should not arise — a guard mentions only
 -- flags its own release declares.
-componentDepsAtDefaults :: Platform -> CompilerInfo -> GenericPackageDescription -> GuardedDeps
-componentDepsAtDefaults platform compiler = componentDepsAtDefaultsStored platform compiler . toStored
+componentDepsAtDefaults :: Stanzas -> Platform -> CompilerInfo -> GenericPackageDescription -> GuardedDeps
+componentDepsAtDefaults stanzas platform compiler = componentDepsAtDefaultsStored stanzas platform compiler . toStored
 
 -- | The guarded dependencies of a stored release, with each flag resolved as
 -- @flagEnv@ says.
 depsWith
     :: (FlagName -> Either FlagName Bool)
+    -> Stanzas
     -> Platform
     -> CompilerInfo
     -> StoredRelease
     -> GuardedDeps
-depsWith flagEnv platform compiler sr =
-    concat [flattenWith env nodeDeps t | t <- componentTrees sr]
+depsWith flagEnv stanzas platform compiler sr =
+    concat [flattenWith env nodeDeps t | t <- componentTrees stanzas sr]
   where
     env = envConfVar flagEnv platform compiler
 
@@ -507,9 +542,9 @@ unusable present isBuildable pcs =
 
 -- | Dependencies of a package version at a flag assignment, as a version-set
 -- map. (Convenience: 'depsAt' over 'componentDeps'.)
-flattenDeps :: Platform -> CompilerInfo -> FlagAssignment -> GenericPackageDescription -> Map PackageName VersionSet
-flattenDeps platform compiler flags gpd =
-    depsAt flags (componentDeps platform compiler gpd)
+flattenDeps :: Stanzas -> Platform -> CompilerInfo -> FlagAssignment -> GenericPackageDescription -> Map PackageName VersionSet
+flattenDeps stanzas platform compiler flags gpd =
+    depsAt flags (componentDeps stanzas platform compiler gpd)
 
 -- | A guard in disjunctive normal form: a list of partial flag assignments
 -- whose disjunction is the guard. A flag an assignment does not mention is
@@ -617,25 +652,27 @@ toolsOf self exes bi =
     , p /= self
     ]
 
--- | The release's build tools, flag-guarded, read off the same four component
--- trees as 'componentDeps' and gated on buildability the same way.
-componentTools :: Platform -> CompilerInfo -> GenericPackageDescription -> GuardedTools
-componentTools platform compiler = toolsWith Left platform compiler . toStored
+-- | The release's build tools, flag-guarded, read off the same component
+-- trees as 'componentDeps' — the same 'Stanzas' choice — and gated on
+-- buildability the same way.
+componentTools :: Stanzas -> Platform -> CompilerInfo -> GenericPackageDescription -> GuardedTools
+componentTools stanzas platform compiler = toolsWith Left stanzas platform compiler . toStored
 
 -- | 'componentTools' with every flag at its declared default.
-componentToolsAtDefaults :: Platform -> CompilerInfo -> GenericPackageDescription -> GuardedTools
-componentToolsAtDefaults platform compiler = componentToolsStored FixedFlags platform compiler . toStored
+componentToolsAtDefaults :: Stanzas -> Platform -> CompilerInfo -> GenericPackageDescription -> GuardedTools
+componentToolsAtDefaults stanzas platform compiler = componentToolsStored FixedFlags stanzas platform compiler . toStored
 
 -- | The guarded build tools of a stored release, with each flag resolved as
 -- @flagEnv@ says.
 toolsWith
     :: (FlagName -> Either FlagName Bool)
+    -> Stanzas
     -> Platform
     -> CompilerInfo
     -> StoredRelease
     -> GuardedTools
-toolsWith flagEnv platform compiler sr =
-    concat [flattenWith env nodeTools t | t <- componentTrees sr]
+toolsWith flagEnv stanzas platform compiler sr =
+    concat [flattenWith env nodeTools t | t <- componentTrees stanzas sr]
   where
     env = envConfVar flagEnv platform compiler
 
@@ -694,6 +731,10 @@ data StoredRelease = StoredRelease
     , srOthers  :: [Tree Node]
     -- ^ the sub-libraries, foreign libraries and executables, each gated on its
     -- own buildability
+    , srTests   :: [Tree Node]
+    -- ^ the test suites, gated likewise; read only under 'withTests'
+    , srBenchmarks :: [Tree Node]
+    -- ^ the benchmarks, gated likewise; read only under 'withBenchmarks'
     , srSetup   :: [Dependency]
     -- ^ 'setupDeps'
     }
@@ -710,6 +751,8 @@ toStored gpd =
             [other libBuildInfo t | (_, t) <- condSubLibraries gpd]
                 ++ [other foreignLibBuildInfo t | (_, t) <- condForeignLibs gpd]
                 ++ [other buildInfo t | (_, t) <- condExecutables gpd]
+        , srTests = [other testBuildInfo t | (_, t) <- condTestSuites gpd]
+        , srBenchmarks = [other benchmarkBuildInfo t | (_, t) <- condBenchmarks gpd]
         , srSetup = setupDeps gpd
         }
   where
@@ -726,15 +769,19 @@ toStored gpd =
     node bi = Node{nodeDeps = targetBuildDepends bi, nodeTools = tools bi}
 
 -- | The component trees a reduction reads, as one shape: the library, then
--- the sub-libraries, foreign libraries and executables.
-componentTrees :: StoredRelease -> [Tree Node]
-componentTrees sr =
-    [fmap asNode t | t <- maybeToList (srLibrary sr)] ++ srOthers sr
+-- the sub-libraries, foreign libraries and executables, then the optional
+-- stanzas asked for, tests before benchmarks.
+componentTrees :: Stanzas -> StoredRelease -> [Tree Node]
+componentTrees stanzas sr =
+    [fmap asNode t | t <- maybeToList (srLibrary sr)]
+        ++ srOthers sr
+        ++ (if withTests stanzas then srTests sr else [])
+        ++ (if withBenchmarks stanzas then srBenchmarks sr else [])
   where
     asNode ln = Node{nodeDeps = lnDeps ln, nodeTools = lnTools ln}
 
 -- | 'componentDepsAtDefaults' over a stored release.
-componentDepsAtDefaultsStored :: Platform -> CompilerInfo -> StoredRelease -> GuardedDeps
+componentDepsAtDefaultsStored :: Stanzas -> Platform -> CompilerInfo -> StoredRelease -> GuardedDeps
 componentDepsAtDefaultsStored = componentDepsStored FixedFlags
 
 -- | Which flags the solver searches.
@@ -759,15 +806,15 @@ storedFlagEnv model sr f
     defaults = Map.fromList (srFlags sr)
 
 -- | The guarded dependencies of a stored release under a flag model.
-componentDepsStored :: FlagModel -> Platform -> CompilerInfo -> StoredRelease -> GuardedDeps
-componentDepsStored model platform compiler sr =
-    depsWith (storedFlagEnv model sr) platform compiler sr
+componentDepsStored :: FlagModel -> Stanzas -> Platform -> CompilerInfo -> StoredRelease -> GuardedDeps
+componentDepsStored model stanzas platform compiler sr =
+    depsWith (storedFlagEnv model sr) stanzas platform compiler sr
 
 -- | The guarded build tools of a stored release under a flag model
 -- ('componentTools').
-componentToolsStored :: FlagModel -> Platform -> CompilerInfo -> StoredRelease -> GuardedTools
-componentToolsStored model platform compiler sr =
-    toolsWith (storedFlagEnv model sr) platform compiler sr
+componentToolsStored :: FlagModel -> Stanzas -> Platform -> CompilerInfo -> StoredRelease -> GuardedTools
+componentToolsStored model stanzas platform compiler sr =
+    toolsWith (storedFlagEnv model sr) stanzas platform compiler sr
 
 -- | 'unbuildableAtDefaults' over a stored release.
 unbuildableAtDefaultsStored

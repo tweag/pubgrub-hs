@@ -90,6 +90,7 @@ test-suite pubgrub-cabal-test
         InstanceSetSpec
         PaperSpec
         PartialSolutionSpec
+        ReleaseSpec
         ReportSpec
         SolverSpec
         StoreSpec

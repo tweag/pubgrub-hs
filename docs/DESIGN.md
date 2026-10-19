@@ -964,8 +964,22 @@ changed cabal's plans but left `futhark` failing exactly as before.
 libraries and executables, the last three gated. Foreign libraries were the last one
 in, added on 2026-09-10 for completeness rather than to fix anything — no corpus
 problem has one, so `test/FlattenSpec.hs` is the only thing holding them. The two
-that stay out, test-suites and benchmarks, are the two cabal itself puts behind a
-`Stanza` that a plain `cabal build` never enables.
+that stay out of a dependency's reduction, test-suites and benchmarks, are the two
+cabal itself puts behind a `Stanza` that a plain `cabal build` never enables.
+
+**The optional stanzas are the caller's choice, per release.** cabal's planner enables
+a stanza per *package*: `cabal test` resolves the test suites of the local packages
+and never those of their dependencies. So the choice is an argument of the reduction,
+`Flatten.Stanzas` on `releaseOf`, rather than a property of the index: a planner passes
+`allStanzas` for a local package and `noStanzas` for everything else, and the driver,
+which compares build plans, passes `noStanzas` throughout. When read, a test suite or
+benchmark is a component like any other — flag-guarded, gated on its own `buildable:`
+through the same `addBuildableCondition`, its build tools in `relTools` — and its
+dependency on its own package's library is the self-dependency
+[§8](#8-a-dependency-of-p-on-p-is-dropped) drops, so enabling the stanzas pins
+nothing. The derived index stores both trees beside the others (`srTests`,
+`srBenchmarks`; `storeFormatVersion` 8), and `test/ReleaseSpec.hs` solves a local
+package with its tests on over a world of dependencies with theirs off.
 
 `storeFormatVersion` went to 4 with this change: the stored trees are gated before they are written, so a
 store from before this serves ungated ones — and one from before the foreign
@@ -1011,7 +1025,8 @@ cabal translates to a package of the same name — `hscolour`, `haddock`, `happy
 `Distribution.Simple.BuildToolDepends.desugarBuildToolSimple` because that module is
 in `Cabal` and `pubgrub-cabal` is Cabal-syntax only — and never a tool that is one
 of the release's own executables, which is internal. Test suites and benchmarks
-contribute none, as they contribute no dependencies. A tool the compiler ships, such
+contribute theirs exactly when they contribute dependencies, under the same
+`Stanzas` ([§15](#15-a-component-that-is-not-buildable-contributes-no-dependencies)). A tool the compiler ships, such
 as `hsc2hs`, is in the list like any other: cabal solves it from Hackage too, and
 whether an installed program satisfies it is the planner's call.
 

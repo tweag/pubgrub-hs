@@ -12,7 +12,10 @@
 -- 'depsAt' is given an assignment.
 module FlattenSpec (tests) where
 
-import           PubGrub.Cabal.Flatten                        (buildableCondition,
+import           PubGrub.Cabal.Flatten                        (Stanzas (..),
+                                                               allStanzas,
+                                                               buildableCondition,
+                                                               noStanzas,
                                                                componentTools,
                                                                componentToolsAtDefaults,
                                                                setupDeps,
@@ -112,7 +115,7 @@ depsAtSrc flags src = do
     gpd <- gpdOf src
     pure
         [ (unPackageName n, vs)
-        | (n, vs) <- Map.toList (depsAt flags (componentDeps testPlatform testCompiler gpd))
+        | (n, vs) <- Map.toList (depsAt flags (componentDeps noStanzas testPlatform testCompiler gpd))
         ]
 
 -- | The names of the dependencies active at an assignment, sorted.
@@ -367,6 +370,45 @@ componentTests =
                     , "  build-depends: from-bench"
                     ]
         names @?= ["from-lib"]
+    , -- ...unless the reduction is asked for them, which is what a planner does
+      -- for a local package under `cabal test`: then they are read like any
+      -- other component, gated on their own buildable: and flag-guarded.
+      testCase "test-suites and benchmarks contribute when the stanzas ask" $ do
+        gpd <-
+            gpdOf . pkg $
+                unlines
+                    [ "flag slow"
+                    , "  default: False"
+                    , "  manual: True"
+                    , ""
+                    , "library"
+                    , "  build-depends: from-lib"
+                    , ""
+                    , "test-suite spec"
+                    , "  type: exitcode-stdio-1.0"
+                    , "  main-is: Spec.hs"
+                    , "  build-depends: fixture, from-test"
+                    , "  if flag(slow)"
+                    , "    build-depends: from-slow-test"
+                    , ""
+                    , "test-suite never"
+                    , "  type: exitcode-stdio-1.0"
+                    , "  main-is: Never.hs"
+                    , "  build-depends: from-never"
+                    , "  buildable: False"
+                    , ""
+                    , "benchmark bench"
+                    , "  type: exitcode-stdio-1.0"
+                    , "  main-is: Bench.hs"
+                    , "  build-depends: from-bench"
+                    ]
+        let namesUnder stanzas flags =
+                Map.keys (depsAt flags (componentDeps stanzas testPlatform testCompiler gpd))
+        map unPackageName (namesUnder allStanzas (assign [])) @?= ["fixture", "from-bench", "from-lib", "from-test"]
+        map unPackageName (namesUnder allStanzas (assign [("slow", True)])) @?= ["fixture", "from-bench", "from-lib", "from-slow-test", "from-test"]
+        map unPackageName (namesUnder (Stanzas{withTests = True, withBenchmarks = False}) (assign [])) @?= ["fixture", "from-lib", "from-test"]
+        map unPackageName (namesUnder (Stanzas{withTests = False, withBenchmarks = True}) (assign [])) @?= ["from-bench", "from-lib"]
+        map unPackageName (namesUnder noStanzas (assign [])) @?= ["from-lib"]
     , testCase "a package with no components has no deps" $ do
         names <- namesAt (assign []) (pkg "")
         names @?= []
@@ -423,7 +465,7 @@ envTests =
                     , "  else"
                     , "    build-depends: unix"
                     ]
-        map fst (componentDeps testPlatform testCompiler gpd)
+        map fst (componentDeps noStanzas testPlatform testCompiler gpd)
             @?= [Lit True, Lit False, Lit True]
     ]
 
@@ -448,7 +490,7 @@ defaultedTests =
                         , "  else"
                         , "    build-depends: slow"
                         ]
-        map fst (componentDepsAtDefaults testPlatform testCompiler gpd)
+        map fst (componentDepsAtDefaults noStanzas testPlatform testCompiler gpd)
             @?= [Lit True, Lit False, Lit True]
     , -- The flatten has already committed, so a later 'depsAt' cannot reopen the
       -- choice — which is exactly the difference from 'componentDeps', where the
@@ -464,7 +506,7 @@ defaultedTests =
                         , "  else"
                         , "    build-depends: slow"
                         ]
-        let guarded = componentDepsAtDefaults testPlatform testCompiler gpd
+        let guarded = componentDepsAtDefaults noStanzas testPlatform testCompiler gpd
             at fs = map (unPackageName . fst) (Map.toList (depsAt (assign fs) guarded))
         at [] @?= ["slow"]
         at [("fast", True)] @?= ["slow"]
@@ -479,7 +521,7 @@ defaultedTests =
                         , "  else"
                         , "    build-depends: slow"
                         ]
-        let guarded = componentDepsAtDefaults testPlatform testCompiler gpd
+        let guarded = componentDepsAtDefaults noStanzas testPlatform testCompiler gpd
         map (unPackageName . fst) (Map.toList (depsAt (assign []) guarded))
             @?= ["speedy"]
     , -- What 'PubGrub.Cabal.Provider' does with those literals, and why no other part of
@@ -499,7 +541,7 @@ defaultedTests =
                         , "  else"
                         , "    build-depends: slow"
                         ]
-        map (expandGuard . fst) (componentDepsAtDefaults testPlatform testCompiler gpd)
+        map (expandGuard . fst) (componentDepsAtDefaults noStanzas testPlatform testCompiler gpd)
             @?= [[Map.empty], [], [Map.empty]]
     , -- 'componentDepsAtDefaults' has to resolve every flag, so it needs an answer
       -- for one the release does not declare. It reads False, matching the
@@ -621,7 +663,7 @@ flagTests =
                         , "    build-depends: slow"
                         ]
         let defaults = mkFlagAssignment (Map.toList (defaultFlags gpd))
-        map unPackageName (Map.keys (flattenDeps testPlatform testCompiler defaults gpd))
+        map unPackageName (Map.keys (flattenDeps noStanzas testPlatform testCompiler defaults gpd))
             @?= ["speedy"]
     , testCase "flags not mentioned by any guard are simply ignored" $ do
         let src =
@@ -693,7 +735,7 @@ mergeTests =
                         , "  else"
                         , "    build-depends: no-dep"
                         ]
-        let guarded = componentDeps testPlatform testCompiler gpd
+        let guarded = componentDeps noStanzas testPlatform testCompiler gpd
             at fs = map unPackageName (Map.keys (depsAt (assign fs) guarded))
         at [("a", True)] @?= ["yes-dep"]
         at [("a", False)] @?= ["no-dep"]
@@ -715,7 +757,7 @@ toolTests =
                     , "  build-tool-depends: alex:alex >=3.2, happy:happy"
                     ]
         toolNames gpd @?= [("alex", "alex"), ("happy", "happy")]
-        names (componentDeps testPlatform testCompiler gpd) @?= ["base"]
+        names (componentDeps noStanzas testPlatform testCompiler gpd) @?= ["base"]
     , testCase "a tool that is the package's own executable is internal and dropped" $ do
         gpd <-
             gpdOf . pkg $
@@ -776,6 +818,7 @@ toolTests =
                     , "  build-tool-depends: hspec-discover:hspec-discover"
                     ]
         toolNames gpd @?= [("alex", "alex")]
+        toolNamesUnder allStanzas gpd @?= [("alex", "alex"), ("hspec-discover", "hspec-discover")]
     , testCase "setup-depends is read off the package, and is not a dependency" $ do
         gpd <-
             gpdOf $
@@ -792,12 +835,13 @@ toolTests =
                     , "  build-depends: base"
                     ]
         map (unPackageName . depPkgName) (setupDeps gpd) @?= ["base", "Cabal"]
-        names (componentDeps testPlatform testCompiler gpd) @?= ["base"]
+        names (componentDeps noStanzas testPlatform testCompiler gpd) @?= ["base"]
     ]
   where
     -- @build-tools@ is gone from the 3.0 specification, so its fixture speaks 2.4.
     legacyPkg body = unlines ["cabal-version: 2.4", "name: fixture", "version: 1.0", "build-type: Simple", ""] ++ body
-    toolNames gpd = [(unPackageName p, unUnqualComponentName e) | (_, ds) <- componentTools testPlatform testCompiler gpd, ExeDependency p e _ <- ds]
-    toolNamesAt flags gpd = [(unPackageName p, unUnqualComponentName e) | ExeDependency p e _ <- toolsAt flags (componentTools testPlatform testCompiler gpd)]
-    toolNamesAtDefaults gpd = [(unPackageName p, unUnqualComponentName e) | ExeDependency p e _ <- toolsAt (mkFlagAssignment (Map.toList (defaultFlags gpd))) (componentToolsAtDefaults testPlatform testCompiler gpd)]
+    toolNames = toolNamesUnder noStanzas
+    toolNamesUnder stanzas gpd = [(unPackageName p, unUnqualComponentName e) | (_, ds) <- componentTools stanzas testPlatform testCompiler gpd, ExeDependency p e _ <- ds]
+    toolNamesAt flags gpd = [(unPackageName p, unUnqualComponentName e) | ExeDependency p e _ <- toolsAt flags (componentTools noStanzas testPlatform testCompiler gpd)]
+    toolNamesAtDefaults gpd = [(unPackageName p, unUnqualComponentName e) | ExeDependency p e _ <- toolsAt (mkFlagAssignment (Map.toList (defaultFlags gpd))) (componentToolsAtDefaults noStanzas testPlatform testCompiler gpd)]
     names guarded = [unPackageName (depPkgName d) | (_, ds) <- guarded, d <- ds]
