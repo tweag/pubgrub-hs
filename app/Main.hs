@@ -74,15 +74,18 @@ import           Hackage.Security.Util.Path                (fromFilePath,
 import           Network.HTTP.Client                       (defaultManagerSettings,
                                                             newManager)
 import           Control.Applicative                       (many, some)
+import           Data.Version                              (showVersion)
 import           Options.Applicative                       (Parser, argument,
                                                             eitherReader,
                                                             execParser, flag,
                                                             fullDesc, header,
                                                             help, helper, info,
+                                                            infoOption,
                                                             long, metavar,
                                                             option, progDesc,
                                                             short, switch,
                                                             value)
+import qualified Paths_pubgrub_hs                          as Paths
 import           PubGrub.Cabal                             (Cabal,
                                                             CabalFact (..))
 import           PubGrub.Incompatibility                   (Cause (..),
@@ -391,8 +394,9 @@ optionsParser =
 
 main :: IO ()
 main = do
-    handle tooNew $ work =<< execParser (info (helper <*> optionsParser) infoMod)
+    handle tooNew $ work =<< execParser (info (helper <*> versionOption <*> optionsParser) infoMod)
     where
+        versionOption = infoOption (showVersion Paths.version) (long "version" <> help "Print the version and exit")
         infoMod = fullDesc <>
                   progDesc "Resolve the dependency closure of one or more Hackage packages" <>
                   header "pubgrub - a Hackage dependency resolver"
