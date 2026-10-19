@@ -152,10 +152,6 @@ cabal's on `vector` under both models.
 
 ## 6. What this leaves open
 
-- **Buildability under a flag.** `relUnbuildable` is still evaluated at the
-  defaults. A release unbuildable only under some assignment (a
-  `pkgconfig-depends` behind a flag) needs the guard carried into its
-  unbuildable clause, as a guarded unit clause.
 - **User flag constraints** (`--constraint 'p +f'`): a level-0 constraint on the
   flag variable, `PubGrub.Cabal.flagConstraint`, "if the flag is in play, it is at
   this value". The seed is built (2026-10-14) and tested; no driver option parses

@@ -950,6 +950,24 @@ dependency-free — and `unbuildableAtDefaults` already carries it to the solver
 the reason attached, which is what lets a proof name the missing `pkg-config` module
 ([§9](#9-the-report-follows-the-specs-reporting-algorithm)).
 
+**A library unbuildable only under some flag value bans the value, not the release.**
+`Flatten.unbuildableStored` resolves each unusable library node's guard under the flag
+model, and `Release.relUnbuildable` keeps the guard with the reasons. A node whose
+guard holds under every assignment rules the release out as before: `mkExpand` skips
+it and states the unit clause over its slot. A node under a guard naming automatic
+flags does not: the release is offered, and with it one clause per disjunct of the
+guard, `{foo: slot, foo:sys: {True}}` with the reasons as its cause
+(`PubGrub.Cabal.unbuildable` with a guard, the shape of a guarded dependency fact).
+With the release decided, propagation derives the other value of the one open flag,
+so zlib's `if flag(pkg-config) pkgconfig-depends: zlib` on a machine without `zlib`
+flips the flag rather than losing every release of zlib — which is what cabal does,
+by pruning the flag's branch in validation. The store merges two such facts only
+under the same guard, and the proof says "every version of foo with +sys is marked
+buildable: False". Under `fixed` every guard is a literal and nothing changes; the
+gate's numbers did not move. Built on 2026-10-19, for latti's flag search: a release
+buildable at its defaults and not under the chosen assignment was the one way
+`--flags search` could hand a planner a plan that does not build.
+
 **There is no target/dependency distinction, and there must not be.** cabal's solver
 includes every package's library, sub-libraries, foreign libraries and executables
 unconditionally (`convGPD`, the four `concatMap` lines); only test-suites and

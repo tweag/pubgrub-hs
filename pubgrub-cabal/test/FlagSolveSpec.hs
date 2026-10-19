@@ -35,6 +35,7 @@ import           Control.Monad.IO.Class         (liftIO)
 import           Data.Either                    (fromLeft, isLeft)
 import           Data.IORef                     (IORef, modifyIORef', newIORef,
                                                  readIORef)
+import qualified Data.List.NonEmpty             as NE
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Data.Maybe                     (fromMaybe)
@@ -106,14 +107,19 @@ type World = [(PackageName, Pkg)]
 -- guards are resolved at the declared defaults before the provider sees them,
 -- which is what 'PubGrub.Cabal.Flatten.componentDepsStored' does to a real
 -- release.
-worldProviderUnder :: FlagModel -> [(PackageName, Version)] -> World -> Provider Cabal TestM
+worldProviderUnder :: FlagModel -> UnbuildableHere -> World -> Provider Cabal TestM
 worldProviderUnder = worldProviderUnderWith BP.noPreference
 
 -- | 'worldProviderUnder' with flag search and a 'BP.Preference'.
-worldProviderUnderPreferring :: BP.Preference -> [(PackageName, Version)] -> World -> Provider Cabal TestM
+worldProviderUnderPreferring :: BP.Preference -> UnbuildableHere -> World -> Provider Cabal TestM
 worldProviderUnderPreferring preference = worldProviderUnderWith preference FlagPackages
 
-worldProviderUnderWith :: BP.Preference -> FlagModel -> [(PackageName, Version)] -> World -> Provider Cabal TestM
+-- | Which releases cannot be built here, and under which flag condition:
+-- @Lit True@ for a release that cannot be built at all, as the toy analogue of
+-- @PubGrub.Cabal.Flatten.unbuildableStored@.
+type UnbuildableHere = [((PackageName, Version), Condition FlagName)]
+
+worldProviderUnderWith :: BP.Preference -> FlagModel -> UnbuildableHere -> World -> Provider Cabal TestM
 worldProviderUnderWith preference model unbuildableHere world =
     Provider (BP.mkExpand mempty preference (mkInstalledDb []) source)
   where
@@ -135,7 +141,7 @@ worldProviderUnderWith preference model unbuildableHere world =
                     , BP.relGuarded = case model of
                         FixedFlags   -> [(Lit True, deps) | (g, deps) <- relGuarded r, atDefaults (pkgFlags pk) g]
                         FlagPackages -> relGuarded r
-                    , BP.relUnbuildable = [NotBuildable | (p, relVersion r) `elem` unbuildableHere]
+                    , BP.relUnbuildable = [(g, NE.singleton NotBuildable) | ((p', v'), g) <- unbuildableHere, (p', v') == (p, relVersion r)]
                     , BP.relTools = []
                     , BP.relSetup = []
                     }
@@ -208,7 +214,7 @@ solveWorldUnder :: FlagModel -> World -> IO (Either Text (Map PackageName Resolv
 solveWorldUnder model = runSolve . worldProviderUnder model []
 
 solveWorldWith :: [(PackageName, Version)] -> World -> IO (Either Text (Map PackageName Resolved))
-solveWorldWith unbuildableHere = runSolve . worldProviderUnder FlagPackages unbuildableHere
+solveWorldWith unbuildableHere = runSolve . worldProviderUnder FlagPackages [(pv, Lit True) | pv <- unbuildableHere]
 
 -- | Wrap a provider so that every @expand@ of a /package/ records it. The
 -- solver asks exactly once per decision, so the tally counts decision attempts:
@@ -287,6 +293,7 @@ tests =
         , newestKeptFlagFlipped
         , bootPackageStatesItself
         , unbuildableStatesItself
+        , unbuildableUnderFlag
         , selfDependencyDropped
         ]
 
@@ -612,12 +619,12 @@ unbuildableStatesItself =
         , -- The fact itself, at the point it is minted: the scan passes 2.0.0,
           -- settles on 1.0.0, and hands both out together.
           testCase "the fact rides out with the release the scan settles on" $ do
-            let provider = worldProviderUnder FlagPackages [(pkg "foo", v2)] world
+            let provider = worldProviderUnder FlagPackages [((pkg "foo", v2), Lit True)] world
             result <- runTestM (expand provider (PackageVar (pkg "foo")) (instanceSet (sourceInstances VersionSet.fullVersionSet)))
             case result of
                 (Just (PackageValue (BuildSource v)), incs) -> do
                     v @?= v1
-                    [p | Fact (CauseUnbuildable p _ _) <- map incompCause incs] @?= [pkg "foo"]
+                    [p | Fact (CauseUnbuildable p _ _ _) <- map incompCause incs] @?= [pkg "foo"]
                 _ -> assertFailure "expected 1.0.0 to be chosen"
         ]
   where
@@ -659,6 +666,48 @@ selfDependencyDropped =
         case result of
             (Just (PackageValue (BuildSource _)), incs) -> pure incs
             _ -> liftIO (assertFailure "expected p 1.0.0 to be chosen")
+
+-- | A release unbuildable only under some flag value: zlib's shape, a
+-- @pkgconfig-depends@ behind a flag that defaults on, on a machine without the
+-- module. The release is still offered — the verdict is about the flag value,
+-- not the release — and the guarded clause makes the solver flip the flag, the
+-- way a missing dependency under a flag does ('flagFlip'). Held at the value
+-- that cannot be built, the proof names the flag and the reason.
+unbuildableUnderFlag :: TestTree
+unbuildableUnderFlag =
+    testGroup
+        "a release unbuildable under a flag"
+        [ testCase "the flag is flipped rather than the release dropped" $ do
+            result <- runSolve (worldProviderUnder FlagPackages unbuildableWhenSys world)
+            result
+                @?= Right
+                    ( solutionOf
+                        [ (pkg "root", v1, [])
+                        , (pkg "foo", v1, [(sys, False)])
+                        , (pkg "bundled", v1, [])
+                        ]
+                    )
+        , testCase "held at that value, the proof names the flag and the reason" $ do
+            result <- runSolveWith [flagConstraint (pkg "foo") (Flag sys True) True] (worldProviderUnder FlagPackages unbuildableWhenSys world)
+            case result of
+                Right sol -> assertFailure ("expected no solution, got " ++ show (Map.keys sol))
+                Left proof ->
+                    -- Over the release's slot, which here is every version of foo.
+                    assertBool
+                        ("the proof should say foo with +sys is marked buildable: False:\n" <> T.unpack proof)
+                        (T.pack "foo with +sys is marked buildable: False" `T.isInfixOf` proof)
+        , testCase "the same world solves at the default when the release can be built" $ do
+            result <- solveWorld world
+            result @?= Right (solutionOf [(pkg "root", v1, []), (pkg "foo", v1, [(sys, True)])])
+        ]
+  where
+    sys = flg "sys"
+    unbuildableWhenSys = [((pkg "foo", v1), Var sys)]
+    world =
+        [ (pkg "root", plain [pkg "foo"])
+        , (pkg "foo", Pkg [(sys, True)] [Release v1 [whenOff sys [pkg "bundled"]]])
+        , (pkg "bundled", leaf)
+        ]
 
 -- | 2c. A flag held at a value by a constraint seed ('flagConstraint'), the
 -- shape a lock entry's automatic flags take, and the one a flag constraint such
@@ -709,7 +758,7 @@ preferenceTests =
             result <- runSolve (preferring [(pkg "foo", (V.mkVersion [9], Map.empty))] world)
             fmap (fmap versionOf . Map.lookup (pkg "foo")) result @?= Right (Just (Just v2))
         , testCase "a preferred release that cannot be built here falls through, and says why" $ do
-            result <- runSolveWith [] (worldProviderUnderPreferring (preferring' [(pkg "foo", (v1, Map.empty))]) [(pkg "foo", v1)] world)
+            result <- runSolveWith [] (worldProviderUnderPreferring (preferring' [(pkg "foo", (v1, Map.empty))]) [((pkg "foo", v1), Lit True)] world)
             fmap (fmap versionOf . Map.lookup (pkg "foo")) result @?= Right (Just (Just v2))
         , testCase "a preferred flag value beats the declared default" $ do
             result <- runSolve (preferring [(pkg "flagged", (v1, Map.fromList [(fast, False)]))] flagWorld)

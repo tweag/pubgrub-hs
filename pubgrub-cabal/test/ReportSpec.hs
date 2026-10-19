@@ -12,6 +12,7 @@ module ReportSpec (tests) where
 import           Data.List                       (isInfixOf)
 import qualified Data.List.NonEmpty              as NE
 import qualified Data.Map.Strict                 as Map
+import           Distribution.Types.Flag         (mkFlagName)
 import qualified Data.Set                        as Set
 import           Distribution.Types.PackageName  (PackageName, mkPackageName)
 import           Distribution.Types.PkgconfigDependency (PkgconfigDependency (..))
@@ -35,7 +36,7 @@ import           PubGrub.Incompatibility         (Cause (..),
                                                   priorCause)
 import           PubGrub.Cabal.InstanceSet             (InstanceSet (..))
 import           PubGrub.Cabal.Value                   (instanceSet)
-import           PubGrub.Cabal.Variable                (Var (..))
+import           PubGrub.Cabal.Variable                (Flag (..), Var (..))
 import           PubGrub.Cabal.Report            (collapseNoInstances,
                                                   reportConflict,
                                                   reportHeadline, styleProof,
@@ -334,17 +335,22 @@ bootLeaf =
 unbuildableLeaf :: [TestTree]
 unbuildableLeaf =
     [ testCase "a missing pkg-config module is named" $ do
-        let proof = unlines (proofLines (unbuildable pkgA (from 1) (NE.singleton (missing "libpq"))))
+        let proof = unlines (proofLines (unbuildable pkgA (from 1) Map.empty (NE.singleton (missing "libpq"))))
         assertBool proof ("a >=1 needs pkg-config package libpq, which is not found" `isInfixOf` proof)
     , testCase "several missing modules share one needs, in order" $ do
-        let proof = unlines (proofLines (unbuildable pkgA (from 1) (NE.fromList [missing "libpq", missing "zlib"])))
+        let proof = unlines (proofLines (unbuildable pkgA (from 1) Map.empty (NE.fromList [missing "libpq", missing "zlib"])))
         assertBool proof ("a >=1 needs pkg-config packages libpq and zlib, which are not found" `isInfixOf` proof)
     , testCase "buildable: False says so" $ do
-        let proof = unlines (proofLines (unbuildable pkgA (from 1) (NE.singleton NotBuildable)))
+        let proof = unlines (proofLines (unbuildable pkgA (from 1) Map.empty (NE.singleton NotBuildable)))
         assertBool proof ("a >=1 is marked buildable: False" `isInfixOf` proof)
     , testCase "both kinds of reason are joined with and" $ do
-        let proof = unlines (proofLines (unbuildable pkgA (from 1) (NE.fromList [NotBuildable, missing "libpq"])))
+        let proof = unlines (proofLines (unbuildable pkgA (from 1) Map.empty (NE.fromList [NotBuildable, missing "libpq"])))
         assertBool proof ("a >=1 is marked buildable: False and needs pkg-config package libpq, which is not found" `isInfixOf` proof)
+    , -- A verdict under a flag names the flag value it holds under, as a
+      -- guarded dependency does.
+      testCase "a verdict under a flag names the flag" $ do
+        let proof = unlines (proofLines (unbuildable pkgA (from 1) (Map.singleton (Flag (mkFlagName "pkg-config") True) True) (NE.singleton (missing "zlib"))))
+        assertBool proof ("a >=1 with +pkg-config needs pkg-config package zlib, which is not found" `isInfixOf` proof)
     ]
 
 -- | A @pkgconfig-depends@ on the module at any version.
@@ -405,7 +411,7 @@ headline =
         T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2: a is pinned to 3 (installed)."
     , -- The reason is part of the fact, so it is part of the wall.
       testCase "an unbuildable wall carries its reason" $ do
-        let inc = resolveOn (unbuildable pkgA (from 1) (NE.singleton (missing "libpq"))) (request pkgA (range 1 2)) pkgA
+        let inc = resolveOn (unbuildable pkgA (from 1) Map.empty (NE.singleton (missing "libpq"))) (request pkgA (range 1 2)) pkgA
         T.unpack (reportHeadline inc)
             @?= "No solution for a >=1 && <2: a >=1 needs pkg-config package libpq, which is not found."
     , testCase "a pure version conflict has no wall" $ do

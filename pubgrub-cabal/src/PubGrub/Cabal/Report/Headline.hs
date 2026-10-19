@@ -103,7 +103,7 @@ walled root = nub (concat [wallPackage c | c <- externals root])
   where
     wallPackage c = case incompCause c of
         Fact (CauseOnlyInstalled p _) -> [p]
-        Fact (CauseUnbuildable p _ _) -> [p]
+        Fact (CauseUnbuildable p _ _ _) -> [p]
         _                             -> []
 
 -- --------------------------------------------------------------------------

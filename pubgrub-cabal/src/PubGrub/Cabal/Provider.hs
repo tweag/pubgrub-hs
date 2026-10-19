@@ -68,15 +68,14 @@ import           PubGrub.Cabal                  (Cabal, UnbuildableReason,
 import           Distribution.Compiler          (CompilerInfo)
 import           Distribution.System            (Platform)
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription)
-import           PubGrub.Cabal.Flatten          (FlagModel (..), GuardedDeps,
-                                                 GuardedTools,
-                                                 PkgConfigPresent,
-                                                 Stanzas,
+import           PubGrub.Cabal.Flatten          (FlagModel (..), Guard,
+                                                 GuardedDeps, GuardedTools,
+                                                 PkgConfigPresent, Stanzas,
                                                  StoredRelease (..),
                                                  componentDepsStored,
                                                  componentToolsStored,
                                                  expandGuard, toStored,
-                                                 unbuildableAtDefaultsStored)
+                                                 unbuildableStored)
 import           PubGrub.Cabal.Installed        (InstalledDb (..),
                                                  InstalledEdge (..),
                                                  closureEdges,
@@ -116,15 +115,15 @@ data Release = Release
     , relGuarded   :: GuardedDeps
     -- ^ the dependencies as flag-guarded groups; a guard mentions automatic
     -- flags only, everything else having been resolved
-    , relUnbuildable :: [UnbuildableReason]
-    -- ^ why this release's library cannot be built here, if it cannot: @buildable@
-    -- and @pkgconfig-depends@ resolved against the machine, at the declared flag
-    -- defaults (@PubGrub.Cabal.Flatten.unbuildableAtDefaults@). Empty means it can.
-    --
-    -- A verdict rather than the condition it comes from, because buildability is
-    -- judged at the declared flag defaults, so there is one assignment to ask
-    -- about. The condition is what 'PubGrub.Cabal.Flatten.buildableCondition'
-    -- returns, and judging buildability under every assignment would need it.
+    , relUnbuildable :: [(Guard, NonEmpty UnbuildableReason)]
+    -- ^ why, and under which flags, this release's library cannot be built
+    -- here: @buildable@ and @pkgconfig-depends@ resolved against the machine,
+    -- one entry per unusable library node with its guard
+    -- (@PubGrub.Cabal.Flatten.unbuildableStored@). Empty means it can be built
+    -- under every assignment. An entry whose guard holds however the flags
+    -- fall, such as @Lit True@, rules the release out; any other rules out the
+    -- flag values that reach it, and the rule states it as a guarded unit
+    -- clause when it offers the release.
     , relTools :: GuardedTools
     -- ^ the build tools, flag-guarded. The rule does not read them: a planner
     -- solves the tools in a namespace of their own, from this list
@@ -176,7 +175,7 @@ releaseOfStored model stanzas platform compiler present sr =
             FixedFlags   -> []
             FlagPackages -> [Flag f d | (f, d) <- srFlags sr, f `notElem` srManual sr]
         , relGuarded = componentDepsStored model stanzas platform compiler sr
-        , relUnbuildable = unbuildableAtDefaultsStored present platform compiler sr
+        , relUnbuildable = unbuildableStored model present platform compiler sr
         , relTools = componentToolsStored model stanzas platform compiler sr
         , relSetup = srSetup sr
         }
@@ -339,12 +338,13 @@ mkExpand logA preference installedDb source = expand'
                             ++ ")"
                         )
                 scan pn range stated rest
-            -- A release whose library cannot be built here is not a
-            -- candidate: its @pkgconfig-depends@ are unsatisfiable on
-            -- this machine, or it declares @buildable: False@. Not
-            -- warned about, because unlike an unparseable @.cabal@
-            -- this is an ordinary fact about the release, and cabal
-            -- applies the same rule from the same pkg-config db.
+            -- A release whose library cannot be built here under any
+            -- assignment is not a candidate: its @pkgconfig-depends@
+            -- are unsatisfiable on this machine, or it declares
+            -- @buildable: False@. Not warned about, because unlike an
+            -- unparseable @.cabal@ this is an ordinary fact about the
+            -- release, and cabal applies the same rule from the same
+            -- pkg-config db.
             --
             -- It is /stated/ rather than skipped
             -- (references/pubgrub.md:475): without the clause the
@@ -353,12 +353,13 @@ mkExpand logA preference installedDb source = expand'
             -- proof line names the reason, the module @pkg-config@
             -- could not find, as cabal's own message does.
             --
-            -- The clause is over the release's whole slot. Buildability
-            -- is judged at the declared flag defaults, so this is one
-            -- verdict per release; a release unbuildable only under
-            -- some assignment would need the guard carried into the
-            -- clause, which is not done.
-            Right release | Just why <- NE.nonEmpty (relUnbuildable release) ->
+            -- The clause is over the release's whole slot, and it is
+            -- the /unconditional/ verdict: the reasons of every node
+            -- whose guard holds under every assignment. A node unusable
+            -- only under some flag values does not rule the release
+            -- out; it rides out with the release below, as a guarded
+            -- unit clause over the flags that reach it.
+            Right release | Just why <- NE.nonEmpty (unconditionallyUnbuildable release) ->
                 scan pn range (unbuildableFact pn slot why : stated) rest
             Right release
                 | not (BuildSource v `memberInstance` range) -> scan pn range stated rest
@@ -372,6 +373,19 @@ mkExpand logA preference installedDb source = expand'
                     -- dropped (see 'consequencesOfUsePreInstalled').
                     let flags = relAutomatic release
                         declared = [declaresFlag pn (slotInstances slot) f | f <- flags]
+                        -- A library node unusable under some flag values:
+                        -- the release with those values is banned, one
+                        -- clause per disjunct of the guard, as for a
+                        -- dependency. The release itself is still
+                        -- offered, and propagation turns the clause into
+                        -- the other value of the one open flag.
+                        unbuildableUnder =
+                            catMaybes
+                                [ guardedUnbuildable pn slot flags pins why
+                                | (guard, why) <- relUnbuildable release
+                                , pins <- expandGuard guard
+                                , not (Map.null pins)
+                                ]
                     incs <-
                         sequence
                             [ guardedInc pn v slot flags guard pins dep
@@ -380,7 +394,7 @@ mkExpand logA preference installedDb source = expand'
                             , dep <- deps
                             , depPkgName dep /= pn
                             ]
-                    pure (Just (PackageValue (BuildSource v)), reverse stated ++ declared ++ catMaybes incs)
+                    pure (Just (PackageValue (BuildSource v)), reverse stated ++ declared ++ unbuildableUnder ++ catMaybes incs)
 
     -- For a non-reinstallable package, the standing fact that it can __only__
     -- be an installed unit: no source release of it may be selected, whatever
@@ -414,7 +428,26 @@ mkExpand logA preference installedDb source = expand'
     -- reads as the range the spec asks for. The store merges only facts that
     -- give the same reasons, so a release missing @libpq@ and one declaring
     -- @buildable: False@ stay two facts, each with its own sentence.
-    unbuildableFact pn slot why = unbuildable pn (slotInstances slot) why
+    unbuildableFact pn slot why = unbuildable pn (slotInstances slot) Map.empty why
+
+    -- The reasons a release cannot be built under /any/ assignment: those of
+    -- every entry whose guard has a disjunct with no pins, which is to say
+    -- holds however the flags fall. In tree order, as 'unbuildableStored'
+    -- gives them.
+    unconditionallyUnbuildable release =
+        concat
+            [ NE.toList why
+            | (guard, why) <- relUnbuildable release
+            , Map.empty `elem` expandGuard guard
+            ]
+
+    -- The ban on a release under one disjunct of a node's guard, over the
+    -- release's slot. The pins are looked up among the release's automatic
+    -- flags as 'guardedInc' looks its own up, and a pin naming a flag the
+    -- release does not declare drops the clause rather than widening it.
+    guardedUnbuildable pn slot flags pins why =
+        (\g -> unbuildable pn (slotInstances slot) (Map.fromList g) why)
+            <$> traverse (asFlagOf flags) (Map.toList pins)
 
     -- Every source instance of a package: any version.
     anySourceRelease = sourceInstances VersionSet.fullVersionSet
@@ -487,7 +520,7 @@ mkExpand logA preference installedDb source = expand'
     -- the disjunct is dropped rather than stated with a widened antecedent,
     -- which would be the unsound direction.
     guardedInc pn v slot flags guard pins dep =
-        case traverse asFlag (Map.toList pins) of
+        case traverse (asFlagOf flags) (Map.toList pins) of
             Nothing -> pure Nothing
             Just g -> do
                 dependers <- spanningOccurrenceWith (sameFlags guard flags) pn v slot guard dep
@@ -498,8 +531,9 @@ mkExpand logA preference installedDb source = expand'
                         (Map.fromList g)
                         (depPkgName dep)
                         (widen (depPkgName dep) (VersionSet.fromVersionRange (depVerRange dep)))
-      where
-        asFlag (name, b) = (\f -> (f, b)) <$> find ((== name) . flagName) flags
+
+    -- A pin by flag name, as its declaration among the release's automatic flags.
+    asFlagOf flags (name, b) = (\f -> (f, b)) <$> find ((== name) . flagName) flags
 
     -- A neighbour spanned under a guard must declare the same automatic flags with
     -- the same defaults: the flag variables are named by both, so a neighbour that

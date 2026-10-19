@@ -144,7 +144,9 @@ fact f c = case f of
     CauseOnlyInstalled p [] -> pretty p <> " is not installed and cannot be built from source"
     CauseOnlyInstalled p vs ->
         pretty p <> " is pinned to " <> T.intercalate " or " (map pretty vs) <> " (installed)"
-    CauseUnbuildable p s why -> namedP p s <> " " <> reasons why
+    CauseUnbuildable p s g why
+        | Map.null g -> namedP p s <> " " <> reasons why
+        | otherwise -> namedP p s <> " with " <> guardText g <> " " <> reasons why
     CauseDeclaresFlag p s f' -> namedP p s <> " declares flag " <> pretty f'
     -- 'PubGrub.Cabal.fromDependency' drops the dependee's term when the
     -- dependency is unsatisfiable, and then there is no \"depends on\" left: the

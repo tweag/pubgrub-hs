@@ -112,6 +112,7 @@ module PubGrub.Cabal.Flatten (
     FlagModel (..),
     componentDepsStored,
     componentToolsStored,
+    unbuildableStored,
     unbuildableAtDefaultsStored,
 
     -- * Build tools and setup dependencies
@@ -127,6 +128,8 @@ import           Control.Applicative                          (Alternative (..))
 import           GHC.Generics                                 (Generic)
 import           Data.Bool                                    (bool)
 import           Data.Char                                    (isAlphaNum, toLower)
+import           Data.List.NonEmpty                           (NonEmpty)
+import qualified Data.List.NonEmpty                           as NE
 import qualified Data.Map.Merge.Strict                        as Map
 import           Data.Map.Strict                              (Map)
 import qualified Data.Map.Strict                              as Map
@@ -171,7 +174,6 @@ import           Distribution.Types.Flag                      (FlagAssignment,
                                                                FlagName,
                                                                PackageFlag (..),
                                                                lookupFlagAssignment,
-                                                               mkFlagAssignment,
                                                                mkFlagName,
                                                                unFlagName)
 import           Distribution.Types.Library                   (Library (..))
@@ -456,10 +458,9 @@ defaultFlags gpd = Map.fromList [(flagName f, flagDefault f) | f <- genPackageFl
 -- >   pkgconfig-depends: zlib-any
 --
 -- 'unbuildableAtDefaults' evaluates this at the declared defaults, keeping the
--- reasons, and that is what decides buildability even when flags are searched.
--- Keeping the condition is what lets buildability under a flag be added without
--- redoing the analysis: it has to /satisfy/ this condition rather than evaluate
--- it.
+-- reasons. A search over flags does not evaluate it: 'unbuildableStored' keeps
+-- each unusable node's guard, so only the flag values that reach the node are
+-- ruled out.
 --
 -- == Why the library only
 --
@@ -516,19 +517,6 @@ libraryNodes platform compiler sr =
     ]
   where
     env = envConfVar Left platform compiler
-
--- | The reasons the nodes in force at @flags@ give, in tree order.
-unbuildableNodes
-    :: PkgConfigPresent
-    -> FlagAssignment
-    -> [(Guard, Bool, [PkgconfigDependency])]
-    -> [UnbuildableReason]
-unbuildableNodes db flags nodes =
-    [ reason
-    | (guard, isBuildable, pcs) <- nodes
-    , evalCond flags guard
-    , reason <- unusable db isBuildable pcs
-    ]
 
 -- | What makes one node unusable: @buildable: False@, and each @pkgconfig-depends@
 -- the machine's @pkg-config@ cannot satisfy. Empty when the node is usable.
@@ -816,11 +804,37 @@ componentToolsStored :: FlagModel -> Stanzas -> Platform -> CompilerInfo -> Stor
 componentToolsStored model stanzas platform compiler sr =
     toolsWith (storedFlagEnv model sr) stanzas platform compiler sr
 
--- | 'unbuildableAtDefaults' over a stored release.
+-- | Why, and under which flags, a stored release's library cannot be built
+-- here: one entry per unusable library node, with its guard resolved under the
+-- flag model and its reasons in tree order. A node under a dead branch is
+-- dropped.
+--
+-- Under 'FixedFlags' every guard folds to a literal, so each entry's guard is
+-- @Lit True@ and the whole is the verdict 'unbuildableAtDefaults' gives. Under
+-- 'FlagPackages' an entry whose guard names an automatic flag is a verdict
+-- about the flag values that reach the node, and the provider states it as a
+-- guarded unit clause over the release ('PubGrub.Cabal.unbuildable') rather
+-- than ruling the release out.
+unbuildableStored
+    :: FlagModel
+    -> PkgConfigPresent
+    -> Platform
+    -> CompilerInfo
+    -> StoredRelease
+    -> [(Guard, NonEmpty UnbuildableReason)]
+unbuildableStored model db platform compiler sr =
+    [ (guard, why)
+    | tree <- maybeToList (srLibrary sr)
+    , (guard, ln) <- flattenWith env id tree
+    , guard /= Lit False
+    , Just why <- [NE.nonEmpty (unusable db (lnBuildable ln) (lnPkgConfig ln))]
+    ]
+  where
+    env = envConfVar (storedFlagEnv model sr) platform compiler
+
+-- | 'unbuildableAtDefaults' over a stored release: 'unbuildableStored' under
+-- 'FixedFlags', where every guard left is @Lit True@, flattened to its reasons.
 unbuildableAtDefaultsStored
     :: PkgConfigPresent -> Platform -> CompilerInfo -> StoredRelease -> [UnbuildableReason]
 unbuildableAtDefaultsStored db platform compiler sr =
-    unbuildableNodes
-        db
-        (mkFlagAssignment (srFlags sr))
-        (libraryNodes platform compiler sr)
+    concat [NE.toList why | (_, why) <- unbuildableStored FixedFlags db platform compiler sr]

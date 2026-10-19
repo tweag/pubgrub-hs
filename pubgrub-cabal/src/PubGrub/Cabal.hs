@@ -82,7 +82,7 @@ type Guard = Map Flag Bool
 data CabalFact
     = CauseRequest PackageName InstanceSet                        -- request
     | CauseOnlyInstalled PackageName [Version]                    -- onlyInstalled
-    | CauseUnbuildable PackageName InstanceSet (NonEmpty UnbuildableReason)  -- unbuildable
+    | CauseUnbuildable PackageName InstanceSet Guard (NonEmpty UnbuildableReason)  -- unbuildable
     | CauseDependency PackageName InstanceSet Guard (PackageName, InstanceSet)  -- fromDependency
     | CauseDeclaresFlag PackageName InstanceSet Flag              -- declaresFlag
     | CauseConstraint Var ValueSet                                -- constraint: the set allowed
@@ -177,23 +177,40 @@ onlyInstalled p installed anySource =
 -- it, and any adjacent versions that cannot be selected either, should never be
 -- selected.
 --
+-- @{ p: Positive instances, f₁: Positive {b₁}, … }@
+--
+-- The guard is the flags the verdict holds under, as for 'fromDependency': a
+-- @pkgconfig-depends@ or a @buildable: False@ inside a flag-guarded block of the
+-- library rules out the flag values that reach it, not the release. With the
+-- release decided and one of the guard's flags open, propagation derives the
+-- other value for that flag, and the release stays in the plan under it. An
+-- empty guard is the unconditional case: the release is never selected, and
+-- the provider states it instead of the release's dependencies.
+--
 -- It is stated rather than the release silently skipped because of the report:
 -- a release that is merely absent leaves the solver to discover that its range
 -- is empty, which reads as \"no version for foo in …\" when the versions exist
 -- and cannot be built here.
 --
 -- The adjacent versions are not gathered here. 'PubGrub.Store' merges two of
--- these facts about the same package and with the same reasons into one clause
--- over the union of their instances, and when the instances are adjacent
--- release slots the union is one contiguous range. Two runs ruled out for
--- different reasons stay two facts, so the proof never attributes one release's
--- missing module to another.
+-- these facts about the same package under the same guard and with the same
+-- reasons into one clause over the union of their instances, and when the
+-- instances are adjacent release slots the union is one contiguous range. Two
+-- runs ruled out for different reasons stay two facts, so the proof never
+-- attributes one release's missing module to another.
 --
 -- The reasons are there for the proof only, like the installed versions of
--- 'onlyInstalled': the clause's term is the ban, and the reasons are what the
+-- 'onlyInstalled': the clause's terms are the ban, and the reasons are what the
 -- sentence says instead of a bare \"cannot be built\".
-unbuildable :: PackageName -> InstanceSet -> NonEmpty UnbuildableReason -> Incompatibility Cabal
-unbuildable p s why = Incompatibility (Map.singleton (PackageVar p) (Positive (instanceSet s))) (Fact (CauseUnbuildable p s why))
+unbuildable :: PackageName -> InstanceSet -> Guard -> NonEmpty UnbuildableReason -> Incompatibility Cabal
+unbuildable p s guard why =
+    Incompatibility
+        ( Map.fromList
+            ( (PackageVar p, Positive (instanceSet s))
+                : [(FlagVar p f, Positive (flagSet (boolSet b))) | (f, b) <- Map.toList guard]
+            )
+        )
+        (Fact (CauseUnbuildable p s guard why))
 
 -- | Dependency incompatibility: @package@ in @instances@, with each flag of
 -- @guard@ at the value it names, requires @dep@ in @depSet@:
@@ -267,13 +284,13 @@ declaresFlag p s f =
 -- package, the dependee package, the guard, and the __dependee instance set__,
 -- which must be identical rather than merely overlapping. A flag declaration
 -- ('MergeDeclares') matches on the package and the flag. An unbuildable fact
--- ('MergeUnbuildable') matches on the package and the __reasons__: it is a unit
--- clause, so there is no second term to agree about, and two of them giving the
--- same reasons are the same fact about two runs of releases; merging them is how
--- the adjacent versions of 'unbuildable' are gathered. Merging two runs ruled
--- out for different reasons would put one release's missing module on the
--- other's range in the proof. The reasons compare as a set, so their order in
--- the @.cabal@ does not keep two identical facts apart.
+-- ('MergeUnbuildable') matches on the package, the guard and the __reasons__:
+-- there is no dependee term to agree about, and two of them giving the same
+-- reasons under the same flags are the same fact about two runs of releases;
+-- merging them is how the adjacent versions of 'unbuildable' are gathered.
+-- Merging two runs ruled out for different reasons would put one release's
+-- missing module on the other's range in the proof. The reasons compare as a
+-- set, so their order in the @.cabal@ does not keep two identical facts apart.
 --
 -- The dependee set is compared with 'Eq', which 'InstanceSet' has lawfully:
 -- both of its halves are canonical. The depender term is in no key: it is what
@@ -285,7 +302,7 @@ data MergeKey
       -- in 'PubGrub.Store' holds term for term
     | MergeDeclares PackageName Flag
       -- ^ two releases declaring the same flag: one clause over both
-    | MergeUnbuildable PackageName (Set UnbuildableReason)
+    | MergeUnbuildable PackageName Guard (Set UnbuildableReason)
     deriving (Eq, Ord)
 
 -- | The key of a clause that may take part in a merge: a dependency fact, a
@@ -300,7 +317,7 @@ mergeKey :: Incompatibility Cabal -> Maybe MergeKey
 mergeKey i = case incompCause i of
     Fact (CauseDependency p _ g (q, depSet)) -> Just (MergeDep p q g depSet)
     Fact (CauseDeclaresFlag p _ f)           -> Just (MergeDeclares p f)
-    Fact (CauseUnbuildable p _ why)          -> Just (MergeUnbuildable p (Set.fromList (NE.toList why)))
+    Fact (CauseUnbuildable p _ g why)        -> Just (MergeUnbuildable p g (Set.fromList (NE.toList why)))
     _                                        -> Nothing
 
 -- | The union of two clauses carrying the same key, rebuilt through the
@@ -318,8 +335,8 @@ mergeWith c new = case (incompCause c, incompCause new) of
     -- range, which is what references/pubgrub.md:476 asks to be stated.
     -- The key made the two reason sets equal, so the existing clause's
     -- reasons are the merged clause's.
-    (Fact (CauseUnbuildable p aSet why), Fact (CauseUnbuildable _ bSet _)) ->
-        unbuildable p (aSet `union` bSet) why
+    (Fact (CauseUnbuildable p aSet g why), Fact (CauseUnbuildable _ bSet _ _)) ->
+        unbuildable p (aSet `union` bSet) g why
     -- Unreachable: equal keys imply the same kind of cause. If it were
     -- reached, the newer clause would be lost.
     _ -> c

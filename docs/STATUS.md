@@ -12,7 +12,7 @@
 > Hindsight bank, one document per decision: `decision-log-index` lists the records in
 > order, and `decision-log-dropped-directions` lists the directions that were dropped.
 >
-> **Checked against the tree on 2026-10-19.** 250 tests pass over the three packages and
+> **Checked against the tree on 2026-10-19.** 259 tests pass over the three packages and
 > [`scripts/gate.sh`](../scripts/gate.sh) passes, at the index-state pinned in
 > [`bench/index-state`](../bench/index-state), `2026-09-09T02:42:09Z`.
 
@@ -31,7 +31,7 @@
 | Version order | ours, not Cabal's: trailing zeros are insignificant, so `1.2` and `1.2.0.0` are one version. Cabal's type stops at the bridge ([DESIGN.md §14](DESIGN.md#14-versions-compare-with-trailing-zeros-insignificant)) |
 | Flags | fixed at their declared defaults by default; `--flags search` makes every automatic flag a solver variable, on both sides ([§3.1](#31-flags-are-fixed-at-their-declared-defaults-unless-asked)) |
 | Boot packages | the installed database becomes instances. A boot package offers installed units or nothing |
-| Buildability | a release whose library cannot be built here is not offered, and the proof says why: the `pkg-config` module that is missing, by name, or `buildable: False` |
+| Buildability | a release whose library cannot be built here is not offered, and the proof says why: the `pkg-config` module that is missing, by name, or `buildable: False`. Under `--flags search` a library unbuildable only under some flag value is offered, and that value is banned by a guarded clause the proof states as "foo with +sys needs pkg-config package zlib" ([DESIGN.md §15](DESIGN.md#15-a-component-that-is-not-buildable-contributes-no-dependencies)) |
 | Test suites and benchmarks | read only when the reduction is asked, per release (`releaseOf` takes a `Stanzas`): a planner enables them for a local package and never for a dependency, as cabal's does; the driver passes none ([DESIGN.md §15](DESIGN.md#15-a-component-that-is-not-buildable-contributes-no-dependencies)) |
 | Explanations | `PubGrub.Report` prints a numbered proof that follows the spec's own reporting algorithm |
 | cabal baseline | `pubgrub --cabal <target>` runs cabal's modular solver over the same index |
@@ -307,7 +307,6 @@ Not started. [cabal-build-model.md](cabal-build-model.md) is the reference, and
 
 | thing | specification | note |
 | --- | --- | --- |
-| **`buildable:` under a flag** | [flags-as-variables.md](flags-as-variables.md) §6 | half built. `buildableCondition` returns the condition and `buildableAtDefaults` evaluates it. A release unbuildable only under some assignment needs the guard carried into its unbuildable clause |
 | **User flag constraints** (`--constraint 'p +f'`) | [flags-as-variables.md](flags-as-variables.md) §6 | the seed exists, `PubGrub.Cabal.flagConstraint`, a level-0 constraint on the flag variable. No driver option parses one yet, and the baseline is passed none |
 | **`preferred-versions`** | — | the index reader does not read it. Its entries are in the tar with timestamps, so an index-state would apply to it unchanged |
 
@@ -316,10 +315,9 @@ Not started. [cabal-build-model.md](cabal-build-model.md) is the reference, and
 Flag search is built, behind `--flags search` ([§3.1](#31-flags-are-fixed-at-their-declared-defaults-unless-asked),
 [flags-as-variables.md](flags-as-variables.md)): every automatic flag is a solver
 variable, both solvers search them, and the gate agrees 26/26 under either model.
-What is left is in [flags-as-variables.md §6](flags-as-variables.md): buildability
-under a flag, user flag constraints, a dedicated sentence for a derived step that
-names a flag, and a measured answer to whether flags should be decided right after
-their owner. The gate's recorded baselines are for `fixed`; moving them to `search`
+What is left is in [flags-as-variables.md §6](flags-as-variables.md): user flag
+constraints, a dedicated sentence for a derived step that names a flag, and a
+measured answer to whether flags should be decided right after their owner. The gate's recorded baselines are for `fixed`; moving them to `search`
 means re-measuring the corpus, where two problems become solvable.
 
 ### 4.5 Open questions

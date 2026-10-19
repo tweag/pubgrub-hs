@@ -112,7 +112,7 @@ zlib = NE.singleton (missing "zlib")
 -- | A release cannot be built here for want of @libpq@ — the reason every
 -- unbuildable fact below gives unless it says otherwise.
 needsLibpq :: InstanceSet -> Incompatibility Cabal
-needsLibpq s = unbuildable pkgA s libpq
+needsLibpq s = unbuildable pkgA s Map.empty libpq
 
 tests :: TestTree
 tests =
@@ -306,12 +306,12 @@ unbuildableTests =
                     [needsLibpq (slot 1 2), needsLibpq (slot 2 3)]
                     emptyStore
         case map incompCause (storeClauses store) of
-            [Fact (CauseUnbuildable p _ why)] -> (p, why) @?= (pkgA, libpq)
+            [Fact (CauseUnbuildable p _ _ why)] -> (p, why) @?= (pkgA, libpq)
             _ -> assertFailure "expected a single CauseUnbuildable leaf"
     , testCase "different packages stay separate" $ do
         let store =
                 insertClauses
-                    [needsLibpq (slot 1 2), unbuildable pkgB (slot 2 3) libpq]
+                    [needsLibpq (slot 1 2), unbuildable pkgB (slot 2 3) Map.empty libpq]
                     emptyStore
         length (storeClauses store) @?= 2
     , -- The reasons are part of the fact. Merging a release that lacks libpq with
@@ -320,18 +320,33 @@ unbuildableTests =
       testCase "adjacent slots ruled out for different reasons stay separate" $ do
         let store =
                 insertClauses
-                    [needsLibpq (slot 1 2), unbuildable pkgA (slot 2 3) zlib]
+                    [needsLibpq (slot 1 2), unbuildable pkgA (slot 2 3) Map.empty zlib]
                     emptyStore
         length (storeClauses store) @?= 2
     , -- ...but the same reasons in another order are the same fact: the key is a
       -- set, so the order the .cabal lists its modules in does not split a run.
       testCase "the same reasons in a different order still merge" $ do
-        let both = unbuildable pkgA (slot 1 2) (NE.fromList [missing "libpq", missing "zlib"])
-            swapped = unbuildable pkgA (slot 2 3) (NE.fromList [missing "zlib", missing "libpq"])
+        let both = unbuildable pkgA (slot 1 2) Map.empty (NE.fromList [missing "libpq", missing "zlib"])
+            swapped = unbuildable pkgA (slot 2 3) Map.empty (NE.fromList [missing "zlib", missing "libpq"])
             store = insertClauses [both, swapped] emptyStore
         case storeClauses store of
             [only] -> bannedBy only `shouldDenote` sourceOnly (halfOpen 1 3)
             cs     -> assertFailure ("expected one clause, got " ++ show (length cs))
+    , -- A verdict under a flag is a fact about those flag values, so two runs
+      -- unbuildable under the same value of the same flag are one fact, and the
+      -- merged clause keeps the flag term.
+      testCase "guarded unbuildable facts merge under the same guard, and keep it" $ do
+        let under b s = unbuildable pkgA s (Map.singleton fast b) libpq
+            store = insertClauses [under True (slot 1 2), under True (slot 2 3)] emptyStore
+        case storeClauses store of
+            [only] -> do
+                bannedBy only `shouldDenote` sourceOnly (halfOpen 1 3)
+                Map.member (FlagVar pkgA fast) (incompTerms only) @?= True
+            cs -> assertFailure ("expected one clause, got " ++ show (length cs))
+    , testCase "guarded unbuildable facts under different guards stay separate" $ do
+        let under b s = unbuildable pkgA s (Map.singleton fast b) libpq
+            store = insertClauses [under True (slot 1 2), under False (slot 2 3), needsLibpq (slot 3 4)] emptyStore
+        length (storeClauses store) @?= 3
     , -- Two different facts about the same instances: "cannot be built" and
       -- "has this dependency". Merging them would state one as the other.
       testCase "an unbuildable fact does not merge with a dependency fact" $ do
@@ -349,7 +364,7 @@ unbuildableTests =
 -- | The instance set an unbuildable fact bans, read off its cause.
 bannedBy :: Incompatibility Cabal -> InstanceSet
 bannedBy i = case incompCause i of
-    Fact (CauseUnbuildable _ s _) -> s
+    Fact (CauseUnbuildable _ s _ _) -> s
     _ -> error "not an unbuildable clause"
 
 halfOpen :: Int -> Int -> VersionSet.VersionSet
