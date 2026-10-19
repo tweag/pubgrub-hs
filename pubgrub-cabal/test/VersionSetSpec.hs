@@ -16,7 +16,7 @@ import           Distribution.Version  (VersionRange, anyVersion,
                                         orEarlierVersion, orLaterVersion,
                                         thisVersion, unionVersionRanges)
 import           PubGrub.Pretty        (Pretty (pretty))
-import           PubGrub.SetOps        (isSubsetOf)
+import           PubGrub.SetOps        (SetOps (..))
 import           PubGrub.Cabal.Version       (Version, mkVersion, toCabalVersion,
                                         versionNumbers)
 import           PubGrub.Cabal.VersionSet
@@ -94,6 +94,13 @@ tests =
                     )
         , testProperty "isSubsetOf agrees with intersection" $ \(a :: VersionSet) (b :: VersionSet) ->
             isSubsetOf a b === (intersectionVersionSet a b == a)
+        , -- The sweeps answer exactly what the set-building definitions they
+          -- replace answered; 'isEmpty' is exact on a version set, so this is an
+          -- equality and not a one-sided claim.
+          testProperty "isSubsetOf is the emptiness of the difference" $ \(a :: VersionSet) (b :: VersionSet) ->
+            isSubsetOf a b === isEmpty (a `difference` b)
+        , testProperty "isDisjoint is the emptiness of the intersection" $ \(a :: VersionSet) (b :: VersionSet) ->
+            isDisjoint a b === isEmpty (a `intersect` b)
         , testGroup
             -- What the provider's version /slots/ rest on. A slot is
             -- @halfOpenVersionSet release (next release in the index)@. Slots

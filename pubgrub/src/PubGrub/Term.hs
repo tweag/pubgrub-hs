@@ -116,12 +116,28 @@ termIsUniversal (Negative s) = isEmpty s
 -- False
 --
 -- The empty set of states is ⊥, which is /positive/ ('isBottomTerm').
+--
+-- 'isSubsetOf' and 'isDisjoint' go by cases on polarity, so that neither
+-- builds a term. Each case is the default definition evaluated by hand:
+-- @P x ⊆ N y@ is @isEmpty (P (x ∩ y))@, @N x ⊆ N y@ is @isEmpty (P (y \\ x))@,
+-- and a negative term is never empty, which is why @N x ⊆ P y@ is 'False' and
+-- two negative terms are never disjoint ('isEmptyTerm').
 instance SetOps a => SetOps (Term a) where
     empty = Positive empty
     intersect = intersectTerm
     union = unionTerm
     difference = differenceTerm
     isEmpty = isEmptyTerm
+
+    isSubsetOf (Positive x) (Positive y) = x `isSubsetOf` y
+    isSubsetOf (Positive x) (Negative y) = x `isDisjoint` y
+    isSubsetOf (Negative _) (Positive _) = False
+    isSubsetOf (Negative x) (Negative y) = y `isSubsetOf` x
+
+    isDisjoint (Positive x) (Positive y) = x `isDisjoint` y
+    isDisjoint (Positive x) (Negative y) = x `isSubsetOf` y
+    isDisjoint (Negative x) (Positive y) = y `isSubsetOf` x
+    isDisjoint (Negative _) (Negative _) = False
 
 -- | The always-true term ⊤: "absent, or any value". This is what an
 -- 'PubGrub.Incompatibility.Incompatibility' never stores — such an entry says

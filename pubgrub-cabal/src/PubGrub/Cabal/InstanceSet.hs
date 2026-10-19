@@ -75,6 +75,8 @@ instance SetOps InstanceSet where
     intersect a b = InstanceSet (isInstalled a `Set.intersection` isInstalled b) (isSource a `intersect` isSource b)
     difference a b = InstanceSet (isInstalled a `Set.difference` isInstalled b) (isSource a `difference` isSource b)
     isEmpty a = Set.null (isInstalled a) && isEmpty (isSource a)
+    isSubsetOf a b = isInstalled a `Set.isSubsetOf` isInstalled b && isSource a `isSubsetOf` isSource b
+    isDisjoint a b = isInstalled a `Set.disjoint` isInstalled b && isSource a `isDisjoint` isSource b
 
 -- | The empty instance set. @Negative emptyInstanceSet@ is the always-true
 -- term ⊤; @Positive emptyInstanceSet@ is the never-true term ⊥.

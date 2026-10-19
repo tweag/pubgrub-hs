@@ -367,6 +367,37 @@ instance SetOps VersionSet where
     union = unionVersionSet
     difference a b = intersectionVersionSet a (complementVersionSet b)
     isEmpty = null . intervals
+    isSubsetOf = subsetVersionSet
+    isDisjoint = disjointVersionSet
+
+-- | @a ⊆ b@: every interval of @a@ lies inside one interval of @b@. One sweep,
+-- no set built. Both lists are sorted and their intervals separated by at least
+-- one position, so an interval of @b@ that ends at or before the interval of @a@
+-- in hand covers none of it and is passed; one that starts after it, or ends
+-- before it does, leaves part of it uncovered that no later interval of @b@
+-- can reach. The same answer as @isEmpty (a \\ b)@.
+subsetVersionSet :: VersionSet -> VersionSet -> Bool
+subsetVersionSet a b = go (cutsOf a) (cutsOf b)
+  where
+    go [] _ = True
+    go _ [] = False
+    go xs@((lo1, hi1) : xs') ys@((lo2, hi2) : ys')
+        | hi2 <= lo1 = go xs ys'
+        | lo2 <= lo1 && hi1 <= hi2 = go xs' ys
+        | otherwise = False
+
+-- | @a ∩ b = ∅@: no interval of @a@ overlaps one of @b@. Two intervals overlap
+-- iff each starts before the other ends, so the sweep drops whichever ends
+-- first. The same answer as @isEmpty (a ∩ b)@.
+disjointVersionSet :: VersionSet -> VersionSet -> Bool
+disjointVersionSet a b = go (cutsOf a) (cutsOf b)
+  where
+    go [] _ = True
+    go _ [] = True
+    go xs@((lo1, hi1) : xs') ys@((lo2, hi2) : ys')
+        | hi1 <= lo2 = go xs' ys
+        | hi2 <= lo1 = go xs ys'
+        | otherwise = False
 
 -- | Membership: @v@ lies in an interval iff the interval starts at or before
 -- @Before v@ and ends at or after @After v@.

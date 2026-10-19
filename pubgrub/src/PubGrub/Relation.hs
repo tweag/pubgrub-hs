@@ -3,7 +3,7 @@ module PubGrub.Relation
     , relation
     ) where
 
-import           PubGrub.SetOps (SetOps, isDisjoint, isSubsetOf)
+import           PubGrub.SetOps (SetOps (..))
 import           PubGrub.Term   (Term (..))
 
 

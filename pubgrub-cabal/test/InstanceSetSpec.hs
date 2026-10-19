@@ -142,6 +142,15 @@ tests =
                 not (isSubsetOf a b) || model a `Set.isSubsetOf` model b
             , testProperty "isDisjoint" $ \(Sym a) (Sym b) ->
                 not (isDisjoint a b) || Set.null (model a `Set.intersection` model b)
+            , -- The direct forms answer exactly what the set-building defaults
+              -- would: 'isEmpty' is exact on an instance set, and on a term both
+              -- sides go through the same one-sided test.
+              testProperty "isSubsetOf is the emptiness of the difference" $ \(Sym a) (Sym b) ->
+                isSubsetOf a b === isEmpty (a `difference` b)
+            , testProperty "isDisjoint is the emptiness of the intersection" $ \(Sym a) (Sym b) ->
+                isDisjoint a b === isEmpty (a `intersect` b)
+            , testProperty "on terms, likewise" $ \(SymTerm x) (SymTerm y) ->
+                (isSubsetOf x y, isDisjoint x y) === (isEmpty (x `difference` y), isEmpty (x `intersect` y))
             , testProperty "equivalent" $ \(Sym a) (Sym b) ->
                 not (equivalent a b) || model a == model b
             , testProperty "Eq" $ \(Sym a) (Sym b) ->

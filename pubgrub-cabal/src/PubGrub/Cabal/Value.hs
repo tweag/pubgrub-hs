@@ -84,6 +84,8 @@ instance SetOps BoolSet where
     intersect (BoolSet f t) (BoolSet f' t') = BoolSet (f && f') (t && t')
     difference (BoolSet f t) (BoolSet f' t') = BoolSet (f && not f') (t && not t')
     isEmpty (BoolSet f t) = not f && not t
+    isSubsetOf (BoolSet f t) (BoolSet f' t') = (f' || not f) && (t' || not t)
+    isDisjoint (BoolSet f t) (BoolSet f' t') = not (f && f') && not (t && t')
 
 boolSet :: Bool -> BoolSet
 boolSet True  = BoolSet False True
@@ -117,6 +119,8 @@ instance SetOps ValueSet where
     intersect (ValueSet a b) (ValueSet a' b') = ValueSet (a `intersect` a') (b `intersect` b')
     difference (ValueSet a b) (ValueSet a' b') = ValueSet (a `difference` a') (b `difference` b')
     isEmpty (ValueSet a b) = isEmpty a && isEmpty b
+    isSubsetOf (ValueSet a b) (ValueSet a' b') = a `isSubsetOf` a' && b `isSubsetOf` b'
+    isDisjoint (ValueSet a b) (ValueSet a' b') = a `isDisjoint` a' && b `isDisjoint` b'
 
 -- | No values. @Negative emptyValueSet@ is the always-true term ⊤ for any
 -- variable; @Positive emptyValueSet@ is the never-true term ⊥.

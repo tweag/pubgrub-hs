@@ -17,6 +17,12 @@ import qualified Data.Set as Set
 -- 'PubGrub.Term.Term', where it is a polarity flip that costs nothing. Pairing
 -- a set with a polarity turns this ring into a Boolean algebra. (A domain may
 -- well know its universe, but the algebra never has to ask for it.)
+--
+-- The two tests are methods with defaults so that a set type can answer them
+-- without building the difference or the intersection first. They are what
+-- 'PubGrub.Relation.relation' asks of every term of every clause on every
+-- visit, which is most of what a solve does. An instance that overrides them
+-- must answer exactly as the defaults would.
 class SetOps a where
     empty       :: a
     intersect   :: a -> a -> a
@@ -24,25 +30,25 @@ class SetOps a where
     difference  :: a -> a -> a
     isEmpty     :: a -> Bool
 
--- | @a ⊆ b@ iff removing @b@ from @a@ leaves nothing.
---
--- >>> Set.fromList [3,4] `isSubsetOf` Set.fromList [1..9]
--- True
---
--- >>> Set.fromList [1..9] `isSubsetOf` Set.fromList [3,4]
--- False
-isSubsetOf :: SetOps a => a -> a -> Bool
-isSubsetOf a b = isEmpty (a `difference` b)
+    -- | @a ⊆ b@ iff removing @b@ from @a@ leaves nothing.
+    --
+    -- >>> Set.fromList [3,4] `isSubsetOf` Set.fromList [1..9]
+    -- True
+    --
+    -- >>> Set.fromList [1..9] `isSubsetOf` Set.fromList [3,4]
+    -- False
+    isSubsetOf :: a -> a -> Bool
+    isSubsetOf a b = isEmpty (a `difference` b)
 
--- | @a ∩ b = ∅@.
---
--- >>> Set.fromList [1,2] `isDisjoint` Set.fromList [3,4]
--- True
---
--- >>> Set.fromList [1,2,3] `isDisjoint` Set.fromList [3,4]
--- False
-isDisjoint :: SetOps a => a -> a -> Bool
-isDisjoint xs ys = isEmpty (xs `intersect` ys)
+    -- | @a ∩ b = ∅@.
+    --
+    -- >>> Set.fromList [1,2] `isDisjoint` Set.fromList [3,4]
+    -- True
+    --
+    -- >>> Set.fromList [1,2,3] `isDisjoint` Set.fromList [3,4]
+    -- False
+    isDisjoint :: a -> a -> Bool
+    isDisjoint xs ys = isEmpty (xs `intersect` ys)
 
 equivalent :: SetOps s => s -> s -> Bool
 equivalent x y = x `isSubsetOf` y && y `isSubsetOf` x
@@ -53,3 +59,5 @@ instance Ord a => SetOps (Set a) where
     union = Set.union
     difference = Set.difference
     isEmpty = Set.null
+    isSubsetOf = Set.isSubsetOf
+    isDisjoint = Set.disjoint
