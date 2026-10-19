@@ -1,98 +1,192 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Rendering a failed resolution as a human-readable proof.
+-- | Rendering a failed resolution as a human-readable proof, over any 'Domain'.
 --
--- A terminal 'Incompatibility' carries the 'Cause' tree that produced
--- it, which is all this module needs: 'reportConflict' replays that tree as a
--- written argument.
+-- A terminal t'Incompatibility' carries the 'Cause' tree that produced it, which
+-- is all this module needs: 'reportConflict' replays that tree as PubGrub's
+-- argument for why no solution exists, one line per step it keeps, ending
+-- \"So, because …, version solving failed\".
+--
+-- == What is fixed and what is the domain's
+--
+-- The wording is the domain's; the /shape/ of the argument is fixed: which
+-- steps get a line, which are skipped, where a line number is minted and where
+-- a blank line falls. The shape is here, written once. The words come from a
+-- t'Formatter' the domain supplies (what a fact says, what a /hole/, a set of
+-- values in which the provider had nothing, says, and what a set of terms
+-- concludes), together with any rules of its own that say a step in fewer
+-- lines than the standard cases would, and a pass over the tree before the walk
+-- begins.
 --
 -- == How the proof is made
 --
--- The walker, @derived@, visits a derived step and emits one line for it: a
+-- The walker visits each derived step and writes one line for it: a
 -- connective, a __premise__, and what the step concludes. The premise is what
--- varies, and it is chosen by a __rule__ — the first of @lineRules@ to fire.
+-- varies, and it is chosen by a __rule__ — the first of the line rules to fire.
 -- A rule is a @do@ block in 'Maybe', written in the vocabulary of
--- "PubGrub.Report.Rule": each line reads a view of the tree or states a guard,
+-- "PubGrub.Derivation": each line reads a view of the tree or states a guard,
 -- and the last says the premise and names the sub-derivation, if any, the line
--- continues (@Line@). Two facts named together in one premise are joined by a
--- second table, @clauseRules@, in the same language. The sentences themselves
--- are "PubGrub.Report.Wording"'s, and the headline above the proof is
--- "PubGrub.Report.Headline"'s.
+-- continues ('Line'). Two facts named together in one premise are joined by a
+-- second table, the clause rules, in the same language.
 --
--- Two rules keep the proof short. Replayed naively, one line per derived
--- incompatibility and each naming one external fact, a proof is too long to
--- read to the end.
+-- Two rules keep the proof short, and both are PubGrub's own. Neither is
+-- cosmetic: a proof is only useful if it is read to the end, and the naive
+-- replay of the derivation tree — one line per derived incompatibility, each
+-- naming one external fact — is too long for that.
 --
---  * __A chain of two external facts is one sentence__ (@chainOfTwo@,
---    @sharedDepender@). Where a dependency's dependee is the depender of the
---    next, the proof says \"@foo@ depends on @bar@ /which depends on/ @baz@\"
---    rather than naming @bar@ twice, and where two facts share a depender it
---    says \"depends on /both/ X and Y\".
+--  * __A chain of two external facts is one sentence__: a domain's clause rules.
+--    Where a dependency's dependee is the depender of the next, the proof writes
+--    \"@foo@ depends on @bar@ /which depends on/ @baz@\" rather than naming
+--    @bar@ twice, and where two facts share a depender it writes \"depends on
+--    /both/ X and Y\". What a dependency is, the core does not know, so these
+--    rules belong to the domain's t'Formatter'.
 --
---  * __Every other derived step is skipped__ (@everyOtherStep@). Where a step's
---    derived cause has a single derived cause of its own, that intermediate
---    /conclusion/ is left out and both external facts are named in one line.
---    Since most derivation graphs are linear chains, this halves them.
---
--- Three more rules shorten it further — @samePairRun@, @wideningRun@ and
--- 'collapseNoInstances' — and each carries its soundness argument where it is
--- defined.
+--  * __Every other derived step is skipped__. Where a step's derived cause has
+--    a single derived cause of its own, that intermediate /conclusion/ is left
+--    out and both external facts are named in one line. Most derivation graphs
+--    are linear chains, so this halves them without losing anything a reader
+--    needs.
 --
 -- == Line numbers are for joins only
 --
--- Only an incompatibility that a later line refers back to is numbered, and in
--- a linear chain that is none of them. A number is minted in exactly one place
--- — @numberLast@, at a step with two derived causes — so a proof that never
--- branches carries no numbers at all.
+-- A line is numbered only if a later line refers back to it, and in a linear
+-- chain none does. A number is given only at a step with two derived causes,
+-- so a proof that never branches carries no numbers at all.
 --
--- A sub-derivation shared by two steps is not detected: 'Incompatibility' has no
--- identity to detect it with, so a shared node is explained twice instead of
--- being referred to.
+-- A sub-derivation that two steps share is explained twice rather than
+-- referred to: an t'Incompatibility' has no identity to recognise it by.
 module PubGrub.Report
-    ( reportConflict
-    , reportHeadline
-    , collapseNoInstances
-      -- * Re-exported from "PubGrub.Report.Layout"
-    , wrapProof
-    , styleProof
-    , rangeToken
+    ( -- * The domain's words
+      Formatter (..)
+    , Line (..)
+    , leaf
+    , summaryWith
+    , listing
+    , anyOf
+      -- * The proof
+    , reportConflict
     ) where
 
-import           Control.Monad                  (guard)
-import qualified Data.Map.Strict                as Map
-import           Data.Maybe                     (fromMaybe)
-import           Data.Text                      (Text)
-import qualified Data.Text                      as T
-import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Cabal                  (Cabal,
-                                                 CabalFact (..))
-import           PubGrub.Incompatibility        (Cause (..),
-                                                 Incompatibility (..),
-                                                 priorCauseTerms)
-import           PubGrub.InstanceSet            (InstanceSet)
-import           PubGrub.Report.Headline        (headline)
-import           PubGrub.Value                  (ValueSet (..))
-import           PubGrub.Variable               (Var (..))
-import           PubGrub.Report.Layout          (rangeToken, styleProof,
-                                                 wrapProof)
-import           PubGrub.Report.Rule
-import           PubGrub.Report.Wording         (bareP, dep, leaf, namedP,
-                                                 summary, summaryTerms)
-import           PubGrub.SetOps                 (isSubsetOf)
-import           PubGrub.Term                   (Term (..))
+import           Data.List               (unsnoc)
+import           Data.Map.Strict         (Map)
+import qualified Data.Map.Strict         as Map
+import           Data.Maybe              (fromMaybe)
+import           Data.Text               (Text)
+import qualified Data.Text               as T
+import           PubGrub.Derivation      (Rule, bothDerived, bothExternal,
+                                          chainStep, firstOf, isDerived)
+import           PubGrub.Incompatibility (Cause (..), Domain (..),
+                                          Incompatibility (..))
+import           PubGrub.Term            (Term (..))
+
+-- --------------------------------------------------------------------------
+-- The domain's words
+-- --------------------------------------------------------------------------
+
+-- | What a domain says, and the rules of its own it adds to the standard ones.
+--
+-- Every field that says something answers with a fragment: no connective in
+-- front of it and no full stop after it, because the walker puts its own
+-- \"Because\" before a fragment and ends every line as a sentence. A fragment
+-- must therefore never open with \"because\" or \"and\".
+data Formatter d = Formatter
+    { sayFact     :: FactOf d -> Incompatibility d -> Text
+      -- ^ a leaf that states a fact, a seed's or the provider's; the
+      -- incompatibility it is the cause of comes with it, for a fact whose
+      -- sentence depends on which of its terms survived
+    , sayNoValues :: VarOf d -> SetOf d -> Text
+      -- ^ the solver's own leaf: nothing to offer in this set
+    , sayTerms    :: Map (VarOf d) (Term (SetOf d)) -> Text
+      -- ^ what a set of terms concludes; 'summaryWith' is the standard sentences
+    , prepare     :: Incompatibility d -> Incompatibility d
+      -- ^ a pass over the tree before the walk; 'id' for none
+    , lineRules   :: [Rule (Incompatibility d) (Line d)]
+      -- ^ the domain's own ways of saying a step that is not a branch, tried
+      -- before the standard rules for a chain of steps; a rule must keep the
+      -- proof sound on its own, and can check that it does by replaying the
+      -- steps it covers with 'PubGrub.Incompatibility.priorCauseTerms'
+    , clauseRules :: [Rule (Incompatibility d, Incompatibility d) Text]
+      -- ^ the domain's ways of saying two external facts as one premise, tried
+      -- in order; the fallback names them side by side
+    }
+
+-- | What a rule proposes for one line of the proof.
+data Line d
+    = Line
+        Text
+        -- ^ the premise, which goes after the connective
+        (Maybe (Incompatibility d))
+        -- ^ the sub-derivation the line continues, explained before it; a line
+        -- that continues nothing opens a line of derivation
+
+-- | An external fact at a leaf of the proof, in the domain's words; a derived
+-- node, which is not a leaf, reads as what its terms conclude.
+leaf :: Formatter d -> Incompatibility d -> Text
+leaf fmt c = case incompCause c of
+    Seed f       -> sayFact fmt f c
+    Fact f       -> sayFact fmt f c
+    NoValues v s -> sayNoValues fmt v s
+    Derived _ _  -> sayTerms fmt (incompTerms c)
+
+-- | What an incompatibility says, in PubGrub's standard sentences, given how
+-- the domain names a variable with its set: @named@ where the sentence calls
+-- for the full form (\"every version of foo\") and @bare@ where it does not. A
+-- negative term is never written as \"not …\": it says the variable /must/ be
+-- in that set, and the sentence carries the negation — \"foo requires bar >=2\",
+-- \"if foo and bar then baz <3\", \"either foo <2 or bar <3\". The empty
+-- incompatibility is failure by name: \"version solving failed\".
+summaryWith
+    :: (VarOf d -> SetOf d -> Text)
+    -> (VarOf d -> SetOf d -> Text)
+    -> Map (VarOf d) (Term (SetOf d))
+    -> Text
+summaryWith named bare ts = case Map.toList ts of
+    [] -> "version solving failed"
+    [(p, Positive r)] -> bare p r <> " is forbidden"
+    [(p, Negative r)] -> bare p r <> " is required"
+    [(p1, Positive r1), (p2, Negative r2)] -> requires p1 r1 p2 r2
+    [(p2, Negative r2), (p1, Positive r1)] -> requires p1 r1 p2 r2
+    [(p1, Positive r1), (p2, Positive r2)] -> bare p1 r1 <> " is incompatible with " <> bare p2 r2
+    [(p1, Negative r1), (p2, Negative r2)] -> "either " <> bare p1 r1 <> " or " <> bare p2 r2
+    terms ->
+        let positives = [(p, r) | (p, Positive r) <- terms]
+            negatives = [bare p r | (p, Negative r) <- terms]
+         in case (positives, negatives) of
+                ([(p, r)], _ : _) -> named p r <> " requires " <> anyOf negatives
+                (_ : _, _ : _) ->
+                    "if " <> T.intercalate " and " (map (uncurry bare) positives)
+                        <> " then " <> anyOf negatives
+                (_, []) -> "one of " <> anyOf (map (uncurry bare) positives) <> " must be false"
+                ([], _) -> "one of " <> anyOf negatives <> " must be true"
+  where
+    -- A /derived/ two-term incompatibility. The spec says \"requires\" here and
+    -- keeps \"depends on\" for the external fact (@:1005@, both in one line): a
+    -- dependency is declared, a requirement is what the solver worked out.
+    requires p1 r1 p2 r2 = named p1 r1 <> " requires " <> bare p2 r2
+
+-- | \"a, b and c\"
+listing :: [Text] -> Text
+listing xs = case unsnoc xs of
+    Just (front@(_ : _), l) -> T.intercalate ", " front <> " and " <> l
+    _                       -> T.intercalate ", " xs
+
+-- | \"a or b or c\"
+anyOf :: [Text] -> Text
+anyOf = T.intercalate " or "
+
+-- --------------------------------------------------------------------------
+-- The proof
+-- --------------------------------------------------------------------------
 
 -- | Render an incompatibility and its derivation as a human-readable proof.
-reportConflict :: Incompatibility Cabal -> Text
-reportConflict root0
-    | isDerived root = render (reverse (outLines (derived True root (Out [] 1))))
+reportConflict :: Domain d => Formatter d -> Incompatibility d -> Text
+reportConflict fmt root0
+    | isDerived root = render (reverse (outLines (derived fmt True root (Out [] 1))))
     -- The terminal incompatibility is itself an external fact: nothing was
     -- derived, so the fact is the whole explanation.
-    | otherwise = leaf root
+    | otherwise = leaf fmt root
   where
-    -- The holes go first: a derivation step that only established that a range
-    -- is empty is not a step worth a line, and leaving them in is what stops
-    -- the chain fusion from ever firing on a real problem.
-    root = collapseNoInstances root0
+    root = prepare fmt root0
 
     -- Every line is a sentence and ends as one. A blank line between two
     -- branches of a derivation (references/pubgrub.md:632) stays blank.
@@ -101,10 +195,6 @@ reportConflict root0
     line n t  = prefix n <> t <> "."
     prefix Nothing  = ""
     prefix (Just n) = T.pack (show n) <> ". "
-
--- | One or two lines to put above the proof: see "PubGrub.Report.Headline".
-reportHeadline :: Incompatibility Cabal -> Text
-reportHeadline = headline . collapseNoInstances
 
 -- --------------------------------------------------------------------------
 -- The walker
@@ -136,8 +226,8 @@ numberLast out = case outLines out of
 -- | Explain one derived incompatibility, ending with the line that concludes it.
 -- @final@ marks the last line of the whole proof, which reads \"So, …\" and
 -- concludes failure by name.
-derived :: Bool -> Incompatibility Cabal -> Out -> Out
-derived final inc out = case bothDerived inc of
+derived :: Domain d => Formatter d -> Bool -> Incompatibility d -> Out -> Out
+derived fmt final inc out = case bothDerived inc of
     -- Case 1 (references/pubgrub.md:595): both causes derived — the derivation
     -- branches, and this is the only place a line number is wanted. Explain the
     -- first branch, number the line it ends on, then explain the second and close
@@ -145,19 +235,28 @@ derived final inc out = case bothDerived inc of
     -- (:632): it marks that a new line of derivation starts. No rule chooses
     -- this: it is the structure of the proof, not a way of saying a step.
     Just (c1, c2) ->
-        let (n, out') = numberLast (derived False c1 out)
+        let (n, out') = numberLast (derived fmt False c1 out)
          in emit
                 (opening (Just c2) <> summary c1 <> " (" <> T.pack (show n) <> "), " <> says inc)
-                (derived False c2 (emit "" out'))
-    Nothing -> case firstOf lineRules inc of
+                (derived fmt False c2 (emit "" out'))
+    Nothing -> case firstOf rules inc of
         Just (Line premise below) ->
             emit
                 (opening below <> premise <> ", " <> says inc)
-                (maybe out (\d -> derived False d out) below)
+                (maybe out (\d -> derived fmt False d out) below)
         -- Not reached: a derived step either branches, chains or joins two
         -- facts, and the last two rules of the table fire on any such step.
-        Nothing -> emit (leaf inc) out
+        Nothing -> emit (leaf fmt inc) out
   where
+    -- The domain's rules go between the spec's case 3 and its case 2: a run
+    -- rule collapses what the ordinary skip would print two facts at a time,
+    -- and the spec's 2.iii fires on any chain step, so the table is total over
+    -- chain steps. Case 3 fires only on a step both of whose causes are
+    -- external, which no chain rule reads, so its place in the table is free.
+    rules = twoFacts fmt : lineRules fmt ++ [everyOtherStep fmt, oneFact fmt]
+
+    summary c = sayTerms fmt (incompTerms c)
+
     -- "So," marks the conclusion (references/pubgrub.md:1027); "Because" opens a
     -- line of derivation, which only a step with nothing below it does; "And
     -- because" continues one.
@@ -170,284 +269,33 @@ derived final inc out = case bothDerived inc of
         | otherwise = summary c
 
 -- --------------------------------------------------------------------------
--- The line rules
+-- The spec's cases
 -- --------------------------------------------------------------------------
-
--- | What a rule proposes for one line of the proof.
-data Line
-    = Line
-        Text
-        -- ^ the premise, which goes after the connective
-        (Maybe (Incompatibility Cabal))
-        -- ^ the sub-derivation the line continues, explained before it; a line
-        -- that continues nothing opens a line of derivation
-
--- | The rules for a step that is not a branch, tried in this order. The two
--- run rules go before the ordinary skip because they collapse what the skip
--- would print two facts at a time; 'oneFact' is the spec's case 2.iii and
--- fires on any chain step, so the table is total over chain steps.
-lineRules :: [Rule (Incompatibility Cabal) Line]
-lineRules =
-    [ twoFacts
-    , wideningRun
-    , samePairRun
-    , everyOtherStep
-    , oneFact
-    ]
 
 -- | Case 3: both causes are external. One line, and the only case that opens a
 -- line of derivation rather than continuing one.
-twoFacts :: Rule (Incompatibility Cabal) Line
-twoFacts step = do
+twoFacts :: Formatter d -> Rule (Incompatibility d) (Line d)
+twoFacts fmt step = do
     (c1, c2) <- bothExternal step
-    pure (Line (clause c1 c2) Nothing)
+    pure (Line (clause fmt c1 c2) Nothing)
 
 -- | Case 2.ii — the every-other-step skip. The derived cause's own conclusion
 -- is left unsaid and the two external facts are named together here, which is
 -- where a long linear chain loses half its lines.
-everyOtherStep :: Rule (Incompatibility Cabal) Line
-everyOtherStep step = do
+everyOtherStep :: Formatter d -> Rule (Incompatibility d) (Line d)
+everyOtherStep fmt step = do
     (d, e) <- chainStep step
     (dd, de) <- chainStep d
-    pure (Line (clause de e) (Just dd))
+    pure (Line (clause fmt de e) (Just dd))
 
 -- | Case 2.iii: the derived cause branches or bottoms out, so it gets its own
 -- lines and this one closes with the external fact alone.
-oneFact :: Rule (Incompatibility Cabal) Line
-oneFact step = do
+oneFact :: Formatter d -> Rule (Incompatibility d) (Line d)
+oneFact fmt step = do
     (d, e) <- chainStep step
-    pure (Line (leaf e) (Just d))
+    pure (Line (leaf fmt e) (Just d))
 
--- | __The same-pair run.__ Before the ordinary every-other-step skip, look for a
--- run of steps that all say the same kind of thing: this range of @p@ depends on
--- @q@, and so does the next range, and the next. That is one fact about @p@ as a
--- whole, and printed a range at a time it walks one bound's history an adjacent
--- pair of releases at a time (four of @matterhorn@'s ten lines did this to
--- @hashable@).
---
--- It is /not/ the collapsing of adjacent versions' identical dependencies,
--- which merges facts with an __identical__ dependee range. Here the dependee
--- ranges differ — that is why the solver had to derive its way along them — and
--- what is printed is their union.
---
--- Stating the union of the facts is sound on its own — each says @p ∈ Sᵢ@
--- requires @q ∈ Rᵢ@, so @p ∈ ⋃S@ requires @q ∈ ⋃R@ — but a line may not claim
--- to justify more of @p@ than the step it is attached to concluded, and the
--- last two guards are what stop it: the conclusion really is \"p requires q\",
--- and the collapsed depender range is one it covers. 'isSubsetOf' is one-sided
--- the safe way: it can only refuse a collapse that would have been fine.
-samePairRun :: Rule (Incompatibility Cabal) Line
-samePairRun step = do
-    (d, e) <- chainStep step
-    (p, s, q, r) <- asDependency e
-    let (rest, more) = runWhile (dependencyOn p q) d
-    guard (not (null more))
-    ss <- unions (s : map fst more)
-    rs <- unions (r : map snd more)
-    sInc <- concludesRequires p q step
-    guard (ss `isSubsetOf` sInc)
-    pure (Line (dep p ss q rs) (Just rest))
-  where
-    -- A fact about this @(depender, dependee)@ pair: its two ranges.
-    dependencyOn p q e = do
-        (p', s, q', r) <- asDependency e
-        guard (p' == p && q' == q)
-        pure (s, r)
-
--- | Is this step's conclusion of the shape \"p requires q\"? If so, the range of
--- @p@ it speaks for. Anything else and a collapsed sentence would be attached
--- to a claim it does not support.
-concludesRequires :: PackageName -> PackageName -> Rule (Incompatibility Cabal) InstanceSet
-concludesRequires p q step = case Map.toList (incompTerms step) of
-    [(a, Positive s), (b, Negative _)] | (a, b) == (PackageVar p, PackageVar q) -> Just (vsInstances s)
-    [(b, Negative _), (a, Positive s)] | (a, b) == (PackageVar p, PackageVar q) -> Just (vsInstances s)
-    _ -> Nothing
-
--- | __The widening run.__ The same-pair run needs every fact in the run to name
--- the same dependee, and needs the step's conclusion to be the two-term \"p
--- requires q\". Neither holds on a problem with an /unconstrained/ target:
--- refuting one takes a walk along the target's whole version history, and
--- consecutive releases rarely fail over the same dependee. @aeson@ against
--- @optparse-applicative ==0.15.1.0@ spent thirteen lines on that walk, folding
--- in one @aeson@ dependency each time while every other term stood still.
---
--- So collect the run by __depender alone__ and state it once. Each fact says
--- @p ∈ Sᵢ@ requires @qᵢ ∈ Rᵢ@, so their union says @p ∈ ⋃S@ requires
--- @q₁ ∈ ⋃R₁@ or … or @qₙ ∈ ⋃Rₙ@: if @p@ is in the union it is in some @Sᵢ@, and
--- that fact's own dependee is one of the disjuncts. Nothing else about @p@ is
--- claimed, which is why 'mergeFacts' refuses a run where some package is a
--- depender in one fact and a dependee in another — the argument is about one
--- depender and holds for nothing else.
---
--- Three facts at least. Two of them fit one line as they are, where the
--- ordinary skip already puts them, and naming both says strictly more than
--- naming their union — so the union has to buy a line to be worth taking. The
--- same-pair run still takes two facts whose dependee agrees.
---
--- __The guard is the operation, not a description of it.__ A line that stands
--- for a run has to arrive where the run arrived, and the only way to know that
--- is to go there: 'PubGrub.Incompatibility.priorCauseTerms' — the term algebra
--- 'PubGrub.Incompatibility.priorCause' itself runs, pivoting on the depender —
--- is applied once to the merged fact, and the collapse is taken only if the
--- result is term for term the conclusion this line is attached to. So the rule
--- needs no subset side-condition of its own, and it needs no case analysis over
--- what the run did: whether the depender __accumulated__ (@aeson@ climbing from
--- @\<0.8.0.1@ to @\<2.2.5.0@) or was __eliminated__ (@directory@ losing one slot
--- per fact until nothing was left), one step over the union lands where @n@
--- steps over the members landed, or the collapse does not happen.
-wideningRun :: Rule (Incompatibility Cabal) Line
-wideningRun step = do
-    (d, e) <- chainStep step
-    (p, _, _, _) <- asDependency e
-    let (rest, more) = runWhile (dependencyOf p) d
-    guard (length more >= 2)
-    merged <- mergeFacts (e : more)
-    guard (sameTerms (priorCauseTerms (PackageVar p) (incompTerms rest) merged) (incompTerms step))
-    pure (Line (runFact p merged) (Just rest))
-  where
-    -- A fact with this depender, whatever it depends on.
-    dependencyOf p e = do
-        (p', _, _, _) <- asDependency e
-        guard (p' == p)
-        pure e
-
-    -- The merged fact, as its sentence. With one dependee it is the shape the
-    -- same-pair run prints, word for word, so a run that both could take reads
-    -- the same either way; with several it is a requirement with alternatives,
-    -- and "requires" rather than "depends on" because a union of declared
-    -- dependencies is something the solver worked out, not something an author
-    -- wrote (references/pubgrub.md:1005).
-    runFact p terms = case Map.toList (Map.delete (PackageVar p) terms) of
-        [(PackageVar q, Negative r)]
-            | Just (Positive sp) <- Map.lookup (PackageVar p) terms -> dep p (vsInstances sp) q (vsInstances r)
-        _ -> summaryTerms terms
-
--- --------------------------------------------------------------------------
--- The clause rules: two external facts as one premise
--- --------------------------------------------------------------------------
-
--- | Two external facts, as one clause: the first of 'clauseRules' to fire, or
--- the two facts side by side.
-clause :: Incompatibility Cabal -> Incompatibility Cabal -> Text
-clause c1 c2 = fromMaybe (leaf c1 <> " and " <> leaf c2) (firstOf clauseRules (c1, c2))
-
--- | Each fusion is guarded so that it cannot say more than the facts do.
-clauseRules :: [Rule (Incompatibility Cabal, Incompatibility Cabal) Text]
-clauseRules =
-    [ twoRequests
-    , symmetric dependsOnNothing
-    , symmetric requestsNothing
-    , symmetric chainOfTwo
-    , sharedDepender
-    ]
-
--- | Two seeds close a proof together: \"baz >=1 && <2 and foo >=1 && <2 are
--- requested\", the spec's \"depends on both\" sentence without a depender in
--- front of it.
-twoRequests :: Rule (Incompatibility Cabal, Incompatibility Cabal) Text
-twoRequests (c1, c2) = do
-    (p1, r1) <- asRequest c1
-    (p2, r2) <- asRequest c2
-    pure (bareP p1 r1 <> " and " <> bareP p2 r2 <> " are requested")
-
--- | A dependency whose dependee range the solver has already found empty.
--- Naming both facts would print that range /twice/ in one sentence, and on a
--- real proof it is not short: haddock 2.29.1's bound on base is seven windows.
---
--- Saying it once is sound only when the dependency's whole range is inside the
--- empty one, which is what the 'isSubsetOf' checks. Where it is only partly
--- inside, the two facts stay separate — absorbing that case means widening the
--- term rather than dropping a clause, so it is not a rendering change.
-dependsOnNothing :: Rule (Incompatibility Cabal, Incompatibility Cabal) Text
-dependsOnNothing (fact, hole) = do
-    (q', empty) <- asHole hole
-    (p, s, q, r) <- asDependency fact
-    guard (q == q' && r `isSubsetOf` empty)
-    pure (dep p s q r <> ", which has no versions")
-
--- | A request whose whole range is empty reads the same way.
-requestsNothing :: Rule (Incompatibility Cabal, Incompatibility Cabal) Text
-requestsNothing (fact, hole) = do
-    (p', empty) <- asHole hole
-    (p, r) <- asRequest fact
-    guard (p == p' && r `isSubsetOf` empty)
-    pure (bareP p r <> " is requested, which has no versions")
-
--- | A __chain__ — the first fact's dependee is the second's depender — reads
--- \"a depends on b which depends on c\". That is only true if every instance the
--- first fact leaves open for the middle package is one the second fact speaks
--- about, hence the 'isSubsetOf'.
-chainOfTwo :: Rule (Incompatibility Cabal, Incompatibility Cabal) Text
-chainOfTwo (c1, c2) = do
-    (p1, s1, q1, r1) <- asDependency c1
-    (p2, s2, q2, r2) <- asDependency c2
-    guard (q1 == p2 && r1 `isSubsetOf` s2)
-    pure (dep p1 s1 q1 r1 <> " which depends on " <> bareP q2 r2)
-
--- | __One depender, two dependees__ reads \"a depends on both b and c\", for
--- which the two facts must be about the same instances of @a@.
-sharedDepender :: Rule (Incompatibility Cabal, Incompatibility Cabal) Text
-sharedDepender (c1, c2) = do
-    (p1, s1, q1, r1) <- asDependency c1
-    (p2, s2, q2, r2) <- asDependency c2
-    guard (p1 == p2 && s1 == s2)
-    pure (namedP p1 s1 <> " depends on both " <> bareP q1 r1 <> " and " <> bareP q2 r2)
-
--- --------------------------------------------------------------------------
--- The pre-pass
--- --------------------------------------------------------------------------
-
--- | Absorb \"no version for @p@ in @r@\" facts into the sibling they were resolved
--- against, and drop the step.
---
--- Intensional ranges are why these exist at all: a dependency's declared range is
--- put into a term verbatim, so the solver has to /separately/ learn that the range's
--- holes hold no releases, and each such discovery is a leaf of the derivation. They
--- are honest facts, and they are noise.
---
--- __Why this is sound, and why it is not even a weakening.__ Resolving a unit clause
--- @{p ∈ r}@ against a dependency fact on the pivot @p@ unions the two terms about
--- @p@ and keeps the other side unchanged, so the step's own conclusion /already is/
--- that dependency with @p@'s term adjusted. The pass therefore does not recompute
--- anything: it keeps the derived node's terms exactly and re-labels them as the leaf
--- they are equivalent to. Nothing in the proof gets wider or narrower; a step that
--- said nothing new stops being a step. A fact about a version that does not exist
--- constrains nothing.
---
--- Three cases are deliberately left alone:
---
---  * __both causes are holes.__ There is no dependency to absorb into, and two empty
---    ranges do not make a sentence.
---  * __the dependee's whole range is empty.__ Then the union over the pivot is ⊤, the
---    dependee entry drops out of the resolvent, and rebuilding would produce a
---    dependency fact whose dependee range is /gone/ — the proof would say \"haddock
---    >=2.29.1 is forbidden\" and never mention @base@. @dependsOnNothing@ renders
---    that case as \"depends on … , which has no versions\", which keeps the range,
---    so the guard here is that the node must still carry a term for both packages.
---  * __the sibling is itself derived.__ Only an external dependency fact is
---    absorbed into; dropping the hole beside a derived sibling would print a
---    conclusion wider than the line's two causes justify.
-collapseNoInstances :: Incompatibility Cabal -> Incompatibility Cabal
-collapseNoInstances inc = case incompCause inc of
-    Derived c1 c2 ->
-        let c1' = collapseNoInstances c1
-            c2' = collapseNoInstances c2
-            node = Incompatibility (incompTerms inc) (Derived c1' c2')
-         in fromMaybe node (symmetric (absorb node) (c1', c2'))
-    _ -> inc
-  where
-    -- @hole@ is a range known empty, @other@ the dependency fact it was resolved
-    -- against. Answers with the node re-labelled as that dependency, over the
-    -- node's own terms.
-    absorb node (hole, other) = do
-        (p, _) <- asHole hole
-        (p1, q) <- dependencyPackages other
-        guard (p == p1 || p == q)
-        guard (Map.size (incompTerms node) == 2)
-        s1 <- vsInstances <$> (positive =<< Map.lookup (PackageVar p1) (incompTerms node))
-        r2 <- vsInstances <$> (negative =<< Map.lookup (PackageVar q) (incompTerms node))
-        pure (Incompatibility (incompTerms node) (Fact (CauseDependency p1 s1 Map.empty (q, r2))))
-
-    dependencyPackages c = case incompCause c of
-        Fact (CauseDependency p1 _ g (q, _)) | p1 /= q, Map.null g -> Just (p1, q)
-        _ -> Nothing
+-- | Two external facts, as one clause: the first of the domain's clause rules
+-- to fire, or the two facts side by side.
+clause :: Formatter d -> Incompatibility d -> Incompatibility d -> Text
+clause fmt c1 c2 = fromMaybe (leaf fmt c1 <> " and " <> leaf fmt c2) (firstOf (clauseRules fmt) (c1, c2))

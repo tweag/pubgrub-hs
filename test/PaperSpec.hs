@@ -54,7 +54,7 @@ import           PubGrub.Provider               (Provider (Provider))
 import           PubGrub.Cabal                  (Cabal,
                                                  request)
 import           PubGrub.Incompatibility        (Incompatibility)
-import           PubGrub.Report                 (reportConflict)
+import           PubGrub.Cabal.Report           (reportConflict)
 import qualified PubGrub.VersionSet             as VersionSet
 import           PubGrub.Solver                 (SolveError (..),
                                                  solve)

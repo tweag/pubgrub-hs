@@ -1,4 +1,5 @@
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies      #-}
 
 -- | The solver over a domain that is not cabal's.
 --
@@ -16,11 +17,15 @@ import qualified Data.Map.Strict         as Map
 import           Data.Ord                (comparing)
 import           Data.Set                (Set)
 import qualified Data.Set                as Set
+import           Data.Text               (Text)
+import qualified Data.Text               as T
 import           PubGrub.Derivation      (asFact, asNoValues, conflictSet,
                                           externals)
 import           PubGrub.Incompatibility (Cause (..), Domain (..),
                                           Incompatibility (..))
 import           PubGrub.Provider        (Provider (..))
+import           PubGrub.Report          (Formatter (..), reportConflict,
+                                          summaryWith)
 import           PubGrub.Solver          (SolveError (..), solve)
 import           PubGrub.Term            (Term (..))
 import           Test.Tasty              (TestTree, testGroup)
@@ -60,6 +65,22 @@ needs p v q ws =
     Incompatibility
         (Map.fromList [(p, Positive (Set.singleton v)), (q, Negative (Set.fromList ws))])
         (Fact (Needs p v q (Set.fromList ws)))
+
+-- | The domain's words, for the proof: two sentences and a name.
+words' :: Formatter Toy
+words' =
+    Formatter
+        { sayFact = \f _ -> case f of
+            Wants p vs     -> name p vs <> " is requested"
+            Needs p v q ws -> name p (Set.singleton v) <> " depends on " <> name q ws
+        , sayNoValues = \p vs -> "no version for " <> name p vs
+        , sayTerms = summaryWith name name
+        , prepare = id
+        , lineRules = []
+        , clauseRules = []
+        }
+  where
+    name (Pkg p) vs = T.pack p <> " " <> T.pack (show (Set.toList vs))
 
 -- --------------------------------------------------------------------------
 -- A world
@@ -126,7 +147,22 @@ tests =
                     let leaves = externals root
                     [f | Just f <- map asFact leaves, isWants f] @?= [Wants app (Set.fromList [1])]
                     sort [h | Just h <- map asNoValues leaves] @?= [(util, Set.fromList [1]), (util, Set.fromList [2])]
+                    -- And the spec's walker explains it in the domain's words.
+                    T.lines (reportConflict words' root) @?= expectedProof
         ]
   where
     isWants Wants{} = True
     isWants _       = False
+
+-- | The proof, as the spec's three cases render the derivation above: the two
+-- refutations of @lib@ are two branches (@references\/pubgrub.md:595@), so the
+-- first ends on a numbered line and the second refers back to it (@:608@), and
+-- the closing line ends in \"version solving failed\" (@:1030@).
+expectedProof :: [Text]
+expectedProof =
+    [ "1. Because lib [1] depends on util [1] and no version for util [1], lib [1] is forbidden."
+    , ""
+    , "Because no version for util [2] and lib [2] depends on util [2], lib [2] is forbidden."
+    , "And because lib [1] is forbidden (1), lib [1,2] is forbidden."
+    , "So, because app [1] depends on lib [1,2] and app [1] is requested, version solving failed."
+    ]

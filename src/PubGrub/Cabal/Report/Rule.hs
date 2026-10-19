@@ -19,7 +19,7 @@
 -- predicates, so a rule cannot change what the proof claims, only how it is
 -- said; the soundness argument of each rule is made where the rule is written,
 -- and this module supplies the vocabulary the argument is made in.
-module PubGrub.Report.Rule
+module PubGrub.Cabal.Report.Rule
     ( -- * Re-exported from "PubGrub.Derivation"
       Rule
     , firstOf

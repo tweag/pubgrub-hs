@@ -21,6 +21,11 @@ library
     exposed-modules:
         PubGrub
         PubGrub.Cabal
+        PubGrub.Cabal.Report
+        PubGrub.Cabal.Report.Headline
+        PubGrub.Cabal.Report.Layout
+        PubGrub.Cabal.Report.Rule
+        PubGrub.Cabal.Report.Wording
         PubGrub.Derivation
         PubGrub.Incompatibility
         PubGrub.Index.PreInstalled
@@ -29,10 +34,6 @@ library
         PubGrub.Provider
         PubGrub.Relation
         PubGrub.Report
-        PubGrub.Report.Headline
-        PubGrub.Report.Layout
-        PubGrub.Report.Rule
-        PubGrub.Report.Wording
         PubGrub.SetOps
         PubGrub.Solver
         PubGrub.Store

@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | The sentences a proof is made of: the standard PubGrub forms, in cabal's
@@ -16,9 +15,11 @@
 -- fragment must therefore never open with \"because\" or \"and\"; that is why an
 -- unbuildable release \"needs pkg-config package libpq\" rather than \"cannot be
 -- built because …\".
-module PubGrub.Report.Wording
-    ( -- * A variable with its set
-      named
+module PubGrub.Cabal.Report.Wording
+    ( -- * The words, as the walker takes them
+      wording
+      -- * A variable with its set
+    , named
     , bare
       -- * A package with its range
     , namedP
@@ -26,17 +27,17 @@ module PubGrub.Report.Wording
       -- * Facts
     , dep
     , guardedDep
-    , requires
+    , fact
+    , hole
     , leaf
       -- * Conclusions
     , summary
     , summaryTerms
-      -- * Lists
+      -- * Re-exported from "PubGrub.Report"
     , listing
     , anyOf
     ) where
 
-import           Data.List                      (unsnoc)
 import           Data.List.NonEmpty             (NonEmpty)
 import qualified Data.List.NonEmpty             as NE
 import           Data.Map.Strict                (Map)
@@ -49,13 +50,28 @@ import           PubGrub.Cabal                  (Cabal,
                                                  CabalFact (..),
                                                  Guard,
                                                  UnbuildableReason (..))
-import           PubGrub.Incompatibility        (Cause (..),
-                                                 Incompatibility (..))
+import           PubGrub.Incompatibility        (Incompatibility (..))
 import           PubGrub.InstanceSet            (InstanceSet, isEveryVersion)
 import           PubGrub.Pretty                 (Pretty (..))
-import           PubGrub.Term                   (Term (..))
+import           PubGrub.Report                 (Formatter (..), anyOf,
+                                                 listing, summaryWith)
+import qualified PubGrub.Report                 as Report
+import           PubGrub.Term                   (Term)
 import           PubGrub.Value                  (BoolSet (..), ValueSet (..))
 import           PubGrub.Variable               (Flag, Var (..))
+
+-- | The cabal domain's words, with no rules and no pass: the half of a
+-- 'Formatter' that this module owns. "PubGrub.Cabal.Report" adds the rest.
+wording :: Formatter Cabal
+wording =
+    Formatter
+        { sayFact = fact
+        , sayNoValues = hole
+        , sayTerms = summaryTerms
+        , prepare = id
+        , lineRules = []
+        , clauseRules = []
+        }
 
 -- | A variable with the set it is constrained to, as words. A package set
 -- admitting every version reads \"every version of foo\" where the sentence
@@ -108,41 +124,38 @@ guardedDep p1 r1 g p2 r2
     | Map.null g = dep p1 r1 p2 r2
     | otherwise = namedP p1 r1 <> " with " <> guardText g <> " depends on " <> bareP p2 r2
 
--- | A /derived/ two-term incompatibility. It says \"requires\", and keeps
--- \"depends on\" for the external fact: a dependency is declared in a @.cabal@
--- file, a requirement is what the solver worked out from one.
-requires :: Var -> ValueSet -> Var -> ValueSet -> Text
-requires p1 r1 p2 r2 = named p1 r1 <> " requires " <> bare p2 r2
-
--- | An external fact at a leaf of the proof. Rendered from the cause rather
--- than from the bare terms so that each explains itself: an empty range reads
--- as unsatisfiable rather than as a conflict with anything else; a
--- compiler-provided package names the version it is pinned to instead of
--- reading \"no version\", since the bound that failed is only legible against
+-- | An external fact at a leaf of the proof, or what a derived node's terms
+-- conclude. A fact is rendered from its cause rather than from its terms so
+-- that it explains itself: an empty range reads as unsatisfiable rather than
+-- as a conflict with anything else; a compiler-provided package names the
+-- version it is pinned to, since the bound that failed is only legible against
 -- that version and nothing else in the proof states it; and a release that
 -- cannot be built here says so, and why, rather than looking absent.
 leaf :: Incompatibility Cabal -> Text
-leaf c = case incompCause c of
-    NoValues v s -> "no version for " <> pretty v <> " in " <> pretty s
-    Seed f       -> fact f
-    Fact f       -> fact f
-    Derived _ _  -> summary c
-  where
-    fact = \case
-        CauseRequest p s -> bareP p s <> " is requested"
-        CauseConstraint (PackageVar p) s -> pretty p <> " is constrained to " <> pretty (vsInstances s)
-        CauseConstraint (FlagVar p f) s -> pretty p <> " is constrained to " <> flagText f (vsFlags s)
-        CauseOnlyInstalled p [] -> pretty p <> " is not installed and cannot be built from source"
-        CauseOnlyInstalled p vs ->
-            pretty p <> " is pinned to " <> T.intercalate " or " (map pretty vs) <> " (installed)"
-        CauseUnbuildable p s why -> namedP p s <> " " <> reasons why
-        CauseDeclaresFlag p s f -> namedP p s <> " declares flag " <> pretty f
-        -- 'PubGrub.Cabal.fromDependency' drops the dependee's term when the
-        -- dependency is unsatisfiable, and then there is no \"depends on\" left: the
-        -- clause is a bare ban on the depender and reads as one.
-        CauseDependency p s g (q, r)
-            | Map.member (PackageVar q) (incompTerms c) -> guardedDep p s g q r
-            | otherwise -> summary c
+leaf = Report.leaf wording
+
+-- | What a fact says. The clause it is the cause of rides along for the one
+-- case whose sentence depends on it.
+fact :: CabalFact -> Incompatibility Cabal -> Text
+fact f c = case f of
+    CauseRequest p s -> bareP p s <> " is requested"
+    CauseConstraint (PackageVar p) s -> pretty p <> " is constrained to " <> pretty (vsInstances s)
+    CauseConstraint (FlagVar p f') s -> pretty p <> " is constrained to " <> flagText f' (vsFlags s)
+    CauseOnlyInstalled p [] -> pretty p <> " is not installed and cannot be built from source"
+    CauseOnlyInstalled p vs ->
+        pretty p <> " is pinned to " <> T.intercalate " or " (map pretty vs) <> " (installed)"
+    CauseUnbuildable p s why -> namedP p s <> " " <> reasons why
+    CauseDeclaresFlag p s f' -> namedP p s <> " declares flag " <> pretty f'
+    -- 'PubGrub.Cabal.fromDependency' drops the dependee's term when the
+    -- dependency is unsatisfiable, and then there is no \"depends on\" left: the
+    -- clause is a bare ban on the depender and reads as one.
+    CauseDependency p s g (q, r)
+        | Map.member (PackageVar q) (incompTerms c) -> guardedDep p s g q r
+        | otherwise -> summary c
+
+-- | The solver's own leaf: a range the solver found to hold no releases.
+hole :: Var -> ValueSet -> Text
+hole v s = "no version for " <> pretty v <> " in " <> pretty s
 
 -- | Why a release cannot be built, as the predicate of its sentence: \"needs
 -- pkg-config package libpq, which is not found\", and \"is marked buildable:
@@ -163,40 +176,10 @@ reasons why =
         [m] -> ["needs pkg-config package " <> m <> ", which is not found"]
         ms  -> ["needs pkg-config packages " <> listing ms <> ", which are not found"]
 
--- | What an incompatibility says. A negative term is never written as
--- \"not …\": it says the variable /must/ be in that set, and the sentence carries
--- the negation — \"foo requires bar >=2\", \"if foo and bar then baz <3\",
--- \"either foo <2 or bar <3\". The empty incompatibility reads \"version solving
--- failed\".
+-- | What an incompatibility says: the standard sentences
+-- ('PubGrub.Report.summaryWith') over cabal's names.
 summary :: Incompatibility Cabal -> Text
 summary c = summaryTerms (incompTerms c)
 
 summaryTerms :: Map Var (Term ValueSet) -> Text
-summaryTerms ts = case Map.toList ts of
-    [] -> "version solving failed"
-    [(p, Positive r)] -> bare p r <> " is forbidden"
-    [(p, Negative r)] -> bare p r <> " is required"
-    [(p1, Positive r1), (p2, Negative r2)] -> requires p1 r1 p2 r2
-    [(p2, Negative r2), (p1, Positive r1)] -> requires p1 r1 p2 r2
-    [(p1, Positive r1), (p2, Positive r2)] -> bare p1 r1 <> " is incompatible with " <> bare p2 r2
-    [(p1, Negative r1), (p2, Negative r2)] -> "either " <> bare p1 r1 <> " or " <> bare p2 r2
-    terms ->
-        let positives = [(p, r) | (p, Positive r) <- terms]
-            negatives = [bare p r | (p, Negative r) <- terms]
-         in case (positives, negatives) of
-                ([(p, r)], _ : _) -> named p r <> " requires " <> anyOf negatives
-                (_ : _, _ : _) ->
-                    "if " <> T.intercalate " and " (map (uncurry bare) positives)
-                        <> " then " <> anyOf negatives
-                (_, []) -> "one of " <> anyOf (map (uncurry bare) positives) <> " must be false"
-                ([], _) -> "one of " <> anyOf negatives <> " must be true"
-
--- | \"a, b and c\"
-listing :: [Text] -> Text
-listing xs = case unsnoc xs of
-    Just (front@(_ : _), l) -> T.intercalate ", " front <> " and " <> l
-    _                       -> T.intercalate ", " xs
-
--- | \"a or b or c\"
-anyOf :: [Text] -> Text
-anyOf = T.intercalate " or "
+summaryTerms = summaryWith named bare

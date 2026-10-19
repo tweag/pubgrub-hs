@@ -26,7 +26,7 @@
 -- produce it, tried in the order of 'culprit'. Every guard in them fails the
 -- safe way — 'isSubsetOf' and 'equivalent' are one-sided — so doubt means no
 -- line, never a wrong one.
-module PubGrub.Report.Headline
+module PubGrub.Cabal.Report.Headline
     ( headline
     ) where
 
@@ -42,8 +42,8 @@ import           PubGrub.Incompatibility        (Cause (..),
                                                  Incompatibility (..))
 import           PubGrub.InstanceSet            (InstanceSet)
 import           PubGrub.Pretty                 (Pretty (..))
-import           PubGrub.Report.Rule
-import           PubGrub.Report.Wording         (bare, bareP, leaf, listing,
+import           PubGrub.Cabal.Report.Rule
+import           PubGrub.Cabal.Report.Wording   (bare, bareP, leaf, listing,
                                                  namedP)
 import           PubGrub.SetOps                 (SetOps (intersect, union),
                                                  isSubsetOf)
@@ -53,7 +53,7 @@ import           PubGrub.Variable               (Var (..))
 import           PubGrub.Version                (Version)
 
 -- | The headline of a proof whose holes have been absorbed
--- ('PubGrub.Report.collapseNoInstances').
+-- ('PubGrub.Cabal.Report.collapseNoInstances').
 headline :: Incompatibility Cabal -> Text
 headline root = T.concat ["No solution", forWhat, walls, ".", culprit]
   where

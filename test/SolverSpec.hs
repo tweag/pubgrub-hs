@@ -21,7 +21,7 @@ import           PubGrub.InstanceSet            (HasVersion (version),
                                                  memberInstance,
                                                  singletonInstance)
 import           PubGrub.Provider               (Provider (..))
-import           PubGrub.Report                 (reportConflict)
+import           PubGrub.Cabal.Report           (reportConflict)
 import           PubGrub.SetOps                 (union)
 import           PubGrub.Solver                 (SolveError (..),
                                                  solve)

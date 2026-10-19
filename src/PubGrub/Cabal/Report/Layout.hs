@@ -3,7 +3,7 @@
 -- | Two layers a caller can put over a rendered proof: wrapping to the
 -- terminal's width, and colour. Neither changes a word. 'PubGrub.Report' itself
 -- does neither, so its output stays plain text, one sentence per line.
-module PubGrub.Report.Layout
+module PubGrub.Cabal.Report.Layout
     ( wrapProof
     , styleProof
     , rangeToken

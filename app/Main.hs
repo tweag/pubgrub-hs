@@ -94,7 +94,7 @@ import           PubGrub.InstanceSet                       (HasVersion (version)
                                                             singletonInstance)
 import           PubGrub.Pretty                            (Pretty (pretty))
 import           PubGrub.Provider                          (Provider (..))
-import           PubGrub.Report                            (reportConflict,
+import           PubGrub.Cabal.Report                       (reportConflict,
                                                             reportHeadline,
                                                             styleProof, wrapProof)
 import           PubGrub.Solver                            (SolveError (..),

@@ -36,7 +36,7 @@ import           PubGrub.Incompatibility         (Cause (..),
 import           PubGrub.InstanceSet             (InstanceSet (..))
 import           PubGrub.Value                   (instanceSet)
 import           PubGrub.Variable                (Var (..))
-import           PubGrub.Report                  (collapseNoInstances,
+import           PubGrub.Cabal.Report            (collapseNoInstances,
                                                   reportConflict,
                                                   reportHeadline, styleProof,
                                                   wrapProof)
