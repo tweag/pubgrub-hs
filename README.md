@@ -31,6 +31,46 @@ it is built that way, and [`CLAUDE.md`](CLAUDE.md) the architecture.
 
 [PubGrub]: https://github.com/dart-lang/pub/blob/master/doc/solver.md
 
+## Install
+
+Releases ship the `pubgrub` executable, the source distribution of every package and
+the documentation of the two libraries. Building from the checkout is
+[Build](#build) below.
+
+### Pre-built binaries
+
+Download the archive for your platform from the [latest release](https://github.com/tweag/pubgrub-hs/releases/latest) and unpack it. It contains the `pubgrub` executable. There are archives for x86_64 and aarch64 Linux, x86_64 and aarch64 macOS, and x86_64 Windows.
+
+- Linux binaries need glibc 2.34 or newer (e.g. Ubuntu 22.04, Debian 12, RHEL 9), libgmp and zlib.
+- macOS binaries are not notarised. Remove the quarantine attribute before running one: `xattr -d com.apple.quarantine pubgrub`.
+
+Each release also has `SHA256SUMS`, and a GitHub attestation for every file. To check an archive:
+
+```
+sha256sum --check --ignore-missing SHA256SUMS
+gh attestation verify ARCHIVE --repo tweag/pubgrub-hs
+```
+
+### With mise
+
+[mise](https://mise.jdx.dev/) installs the release archive for your platform with its [GitHub backend](https://mise.jdx.dev/dev-tools/backends/github.html), and checks its checksum and attestation:
+
+```
+mise use -g github:tweag/pubgrub-hs
+```
+
+Add `@VERSION` to pin a version, for example `github:tweag/pubgrub-hs@0.1.0.0`. Without `-g`, the tool is added to the current project's `mise.toml`.
+
+### From source
+
+Each release has the source distribution of every package, `PACKAGE-VERSION.tar.gz`. With GHC 9.12 and cabal, unpack the one with the executables and install from it:
+
+```
+tar -xzf pubgrub-hs-VERSION.tar.gz
+cd pubgrub-hs-VERSION
+cabal install exe:pubgrub
+```
+
 ## Requirements
 
 - **GHC 9.12.x** and **cabal 3.8+**. The project builds with `base ^>=4.21`.
@@ -135,6 +175,15 @@ two error-reporting examples assert the printed proof against a golden file.
 measures: it runs the `pubgrub` executable as a child process, three times per solver
 per problem, and writes the benchmark report and the explanation showcase. See
 [`docs/benchmarking.md`](docs/benchmarking.md).
+
+## Documentation
+
+The API documentation of the latest release is at
+<https://tweag.github.io/pubgrub-hs/>.
+
+Each [release](https://github.com/tweag/pubgrub-hs/releases) also has the
+documentation of every package with a library, as
+`PACKAGE-VERSION-docs.tar.gz`, in the format Hackage takes.
 
 ## Layout
 
