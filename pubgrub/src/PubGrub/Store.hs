@@ -65,6 +65,7 @@ module PubGrub.Store
     , insertClauses
     ) where
 
+import           Data.List               (elemIndex)
 import           Data.Set                (Set)
 import qualified Data.Set                as Set
 import           PubGrub.Incompatibility (Domain (..), Incompatibility,
@@ -80,10 +81,17 @@ import           PubGrub.Incompatibility (Domain (..), Incompatibility,
 -- would find nothing — the common case by far, since most dependency facts are
 -- the first of their kind.
 --
+-- Each clause's key is computed once, on insert, and kept in @stKeys@ in
+-- lockstep with @stClauses@: the walk to a merge target compares keys and
+-- never recomputes one, which would otherwise be a key construction per clause
+-- walked past. A merge keeps the key — the rule rebuilds the clause through
+-- the constructor the key was read from — so the key list is never rebuilt.
+--
 -- The key type is the rule's own and existential, as in t'MergeRule': the
 -- store only ever asks whether a key is present.
 data Store d = forall k. Ord k => Store
     { stClauses   :: [Incompatibility d]
+    , stKeys      :: [Maybe k]
     , stMergeable :: !(Set k)
     , stKey       :: Incompatibility d -> Maybe k
     , stMerge     :: Incompatibility d -> Incompatibility d -> Incompatibility d
@@ -93,7 +101,7 @@ data Store d = forall k. Ord k => Store
 emptyStore :: Domain d => Store d
 emptyStore = case mergeRule of
     MergeRule{mergeKey, mergeWith} ->
-        Store{stClauses = [], stMergeable = Set.empty, stKey = mergeKey, stMerge = mergeWith}
+        Store{stClauses = [], stKeys = [], stMergeable = Set.empty, stKey = mergeKey, stMerge = mergeWith}
 
 -- | The clauses in scan order, newest first.
 storeClauses :: Store d -> [Incompatibility d]
@@ -101,11 +109,17 @@ storeClauses = stClauses
 
 -- | Add a clause: merge it into the fact it agrees with, or prepend it.
 insertClause :: Incompatibility d -> Store d -> Store d
-insertClause i (Store clauses mergeable key merge) = case key i of
-    Nothing -> Store (i : clauses) mergeable key merge
+insertClause i (Store clauses keys mergeable key merge) = case key i of
+    Nothing -> Store (i : clauses) (Nothing : keys) mergeable key merge
     Just k
-        | k `Set.member` mergeable -> Store (mergeInto key merge k i clauses) mergeable key merge
-        | otherwise -> Store (i : clauses) (Set.insert k mergeable) key merge
+        | k `Set.member` mergeable -> case elemIndex (Just k) keys of
+            Just n -> Store (mergeAt n merge i clauses) keys mergeable key merge
+            -- Unreachable: a key in the set is the key of some clause. If it
+            -- ever is reached, the clause is kept — at the back, which is a
+            -- bad scan position and a correct store; losing a fact would be a
+            -- wrong answer, and rescanning one extra clause is not.
+            Nothing -> Store (clauses ++ [i]) (keys ++ [Just k]) mergeable key merge
+        | otherwise -> Store (i : clauses) (Just k : keys) (Set.insert k mergeable) key merge
 
 -- | Insert several clauses, preserving their order at the front: @insertClauses
 -- [a,b,c]@ leaves the store scanning @a@, @b@, @c@, then what was there before,
@@ -113,25 +127,19 @@ insertClause i (Store clauses mergeable key merge) = case key i of
 insertClauses :: [Incompatibility d] -> Store d -> Store d
 insertClauses is store = foldr insertClause store is
 
--- | Replace the first clause carrying @k@ with the merge of it and @new@, in
--- place. The tail beyond the match is shared, so the cost is the position of the
--- match, and every other clause keeps the position it had.
---
--- @k@ is known to be present, so running off the end cannot happen from
--- 'insertClause'. If it ever did, the clause is kept — at the back, which is a bad
--- scan position and a correct store; losing a fact would be a wrong answer, and
--- rescanning one extra clause is not.
-mergeInto
-    :: Eq k
-    => (Incompatibility d -> Maybe k)
+-- | Replace the clause at position @n@ with the merge of it and @new@, in
+-- place. The tail beyond it is shared, so the cost is the position, and every
+-- other clause keeps the position it had. A position past the end cannot come
+-- from 'insertClause'; if it did, @new@ would be appended with no key beside
+-- it, which is a bad scan position and a correct store.
+mergeAt
+    :: Int
     -> (Incompatibility d -> Incompatibility d -> Incompatibility d)
-    -> k
     -> Incompatibility d
     -> [Incompatibility d]
     -> [Incompatibility d]
-mergeInto key merge k new = go
+mergeAt n merge new = go n
   where
-    go [] = [new]
-    go (c : cs)
-        | key c == Just k = merge c new : cs
-        | otherwise = c : go cs
+    go _ [] = [new]
+    go 0 (c : cs) = merge c new : cs
+    go m (c : cs) = c : go (m - 1) cs
