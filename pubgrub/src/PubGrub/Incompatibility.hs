@@ -194,20 +194,27 @@ incompRelation
     => (VarOf d -> Maybe (Term (SetOf d)))
     -> Incompatibility d
     -> IncompatRelation (VarOf d)
-incompRelation lookupTerm (Incompatibility m _) = go ISatisfied (Map.toList m)
+incompRelation lookupTerm (Incompatibility m _) = Map.foldlWithKey' step ISatisfied m
   where
-    go acc [] = acc
-    go acc ((v, it) : rest) =
+    -- A strict fold over the map rather than a walk over 'Map.toList': this runs
+    -- for every clause on every visit, and building the list costs allocation. A
+    -- clause has a handful of terms, so once the answer is final the remaining
+    -- terms are skipped by the first two equations rather than by stopping. Terms
+    -- are judged in key order, which decides the variable a contradiction or an
+    -- open term is reported on.
+    step acc@(IContradicted _) _ _ = acc
+    step IInconclusive _ _ = IInconclusive
+    step acc v it =
         case lookupTerm v of
             Just term ->
                 case relation term it of
-                    Satisfied    -> go acc rest
+                    Satisfied    -> acc
                     Contradicted -> IContradicted v
-                    Inconclusive -> almost v acc rest
-            Nothing -> almost v acc rest
+                    Inconclusive -> almost v acc
+            Nothing -> almost v acc
     -- absent or inconclusive term: at most one allowed for AlmostSatisfied
-    almost v ISatisfied rest = go (IAlmostSatisfied v) rest
-    almost _ _ _             = IInconclusive
+    almost v ISatisfied = IAlmostSatisfied v
+    almost _ _          = IInconclusive
 
 -- | Rule of Resolution. From the current incompatibility and the cause of the
 -- satisfier (sharing @pivot@), derive their resolvent: union the shared
