@@ -5,3 +5,11 @@ packages:
     pubgrub
     pubgrub-cabal
     .
+
+-- GHC 9.14 ships base 4.22 and containers 0.8, which the harness package's
+-- serialise 0.2.6.1 (with its cborg) and co-log 0.7.0.0 do not admit yet. Both
+-- build against them; the constraint keeps the solver from escaping to a co-log
+-- old enough to have no such bound. The two published packages need nothing here.
+if impl(ghc >= 9.14)
+    allow-newer: serialise:*, cborg:*, co-log:*
+    constraints: co-log ^>=0.7

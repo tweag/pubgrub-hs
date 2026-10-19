@@ -283,7 +283,7 @@ examples, so a wording change earns its way past them.
 
 ## Conventions
 
-- GHC 9.12.x (`base ^>=4.21`); `cabal-version: 3.0` in the two published packages,
+- GHC 9.12 or 9.14 (`base >=4.21 && <4.23`, CI on 9.14.1); `cabal-version: 3.0` in the two published packages,
   `3.8` in the harness package
 - `default-language: GHC2021` on every component, with
   `default-extensions: ImportQualifiedPost`. The test-suite is the one stanza that

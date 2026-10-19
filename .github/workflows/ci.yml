@@ -35,7 +35,7 @@ env:
   CABAL_VERSION: 3.18.1.0
   # Release archives and documentation come from the builds with this GHC.
   # It must be one of matrix.ghc, normally the newest.
-  RELEASE_GHC: 9.12.2
+  RELEASE_GHC: 9.14.1
   # The executables that a release publishes, by name, separated by spaces.
   # Only these go into the archives; other executables in the project are
   # built and tested but not published.
@@ -54,7 +54,7 @@ jobs:
       fail-fast: false
       matrix:
         ghc:
-          - 9.12.2
+          - 9.14.1
         target:
           - x86_64-linux
           - aarch64-linux

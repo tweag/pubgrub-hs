@@ -63,7 +63,7 @@ Add `@VERSION` to pin a version, for example `github:tweag/pubgrub-hs@0.1.0.0`. 
 
 ### From source
 
-Each release has the source distribution of every package, `PACKAGE-VERSION.tar.gz`. With GHC 9.12 and cabal, unpack the one with the executables and install from it:
+Each release has the source distribution of every package, `PACKAGE-VERSION.tar.gz`. With GHC 9.14 and cabal, unpack the one with the executables and install from it:
 
 ```
 tar -xzf pubgrub-hs-VERSION.tar.gz
@@ -73,7 +73,7 @@ cabal install exe:pubgrub
 
 ## Requirements
 
-- **GHC 9.12.x** and **cabal 3.8+**. The project builds with `base ^>=4.21`.
+- **GHC 9.12 or 9.14** and **cabal 3.8+**. The project builds with `base >=4.21 && <4.23`; CI builds with 9.14.1.
 - **A `ghc` on your `PATH`.** The solver reads that compiler's global package database
   and treats its boot packages as installed. This is what pins `base`.
 - **Network access on the first run.** The Hackage package index is downloaded and
