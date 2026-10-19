@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP   #-}
 {-# LANGUAGE GADTs #-}
 module Bridge.Hackage where
 
@@ -18,8 +19,7 @@ import qualified Data.ByteString.Lazy                         as BSL
 import           Data.Int                                     (Int64)
 import           Data.Map.Strict                              (Map)
 import qualified Data.Map.Strict                              as Map
-import           Data.Maybe                                   (fromMaybe,
-                                                               maybeToList)
+import           Data.Maybe                                   (fromMaybe)
 import           Data.Set                                     (Set)
 import qualified Data.Set                                     as Set
 import           Data.Text                                    (Text)
@@ -45,17 +45,13 @@ import           UnliftIO                                     (MonadIO (..),
 
 import           Distribution.PackageDescription.Parsec       (parseGenericPackageDescription,
                                                                runParseResult)
+#if MIN_VERSION_Cabal_syntax(3,18,0)
+import           Distribution.Parsec.Error                    (PErrorWithSource (..))
+#endif
 import           PubGrub.Cabal.Provider                       (ParseError (..))
 import           Distribution.Pretty                          (prettyShow)
-import qualified Distribution.Types.BuildInfo.Lens            as L
-import           Distribution.Types.ComponentName             (ComponentName (..))
-import           Distribution.Types.CondTree                  (CondTree,
-                                                               mapTreeData)
-import           Distribution.Types.ConfVar                   (ConfVar)
-import           Distribution.Types.Dependency                (Dependency)
 import           Distribution.Types.Flag                      (PackageFlag (..))
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
-import           Distribution.Types.LibraryName               (LibraryName (..))
 import           Distribution.Types.PackageId                 (PackageIdentifier (..))
 import           Distribution.Types.PackageName               (PackageName)
 import           Distribution.Types.Version                   (Version)
@@ -584,29 +580,17 @@ updateCache path Sec.IndexCallbacks{Sec.indexDirectory, Sec.indexLookupEntry} = 
 
 type Result e a = Either (Either SomeException e) a
 
--- Not used yet: each component's conditional dependency tree, for reading
--- dependencies under flags, operating system and architecture.
-newtype DepInfo = DepInfo (Map ComponentName (CondTree ConfVar [Dependency] ()))
-
-extractDepInfo :: GenericPackageDescription -> DepInfo
-extractDepInfo gpd =
-    DepInfo $
-        Map.fromList $
-            [(CLibName LMainLibName, f tree) | tree <- maybeToList (condLibrary gpd)]
-                <> [(CLibName (LSubLibName ucn), f tree) | (ucn, tree) <- condSubLibraries gpd]
-                <> [(CFLibName ucn, f tree) | (ucn, tree) <- condForeignLibs gpd]
-                <> [(CExeName ucn, f tree) | (ucn, tree) <- condExecutables gpd]
-                <> [(CTestName ucn, f tree) | (ucn, tree) <- condTestSuites gpd]
-                <> [(CBenchName ucn, f tree) | (ucn, tree) <- condBenchmarks gpd]
-  where
-    f :: L.HasBuildInfo a => CondTree v c a -> CondTree v c ()
-    f = mapTreeData (const ())
-
-
+-- | Parse one @.cabal@. Cabal-syntax 3.18 tags each error with its source,
+-- which for bytes parsed from the index is unknown; 'ParseError' keeps the
+-- error alone.
 parseGPD :: BSL.ByteString -> Either ParseError GenericPackageDescription
 parseGPD bs =
     case runParseResult (parseGenericPackageDescription (BSL.toStrict bs)) of
+#if MIN_VERSION_Cabal_syntax(3,18,0)
+        (_, Left (mver, errs)) -> Left (ParseError mver (fmap perror errs))
+#else
         (_, Left (mver, errs)) -> Left (ParseError mver errs)
+#endif
         (_, Right gpd)         -> Right gpd
 
 mkCache :: Path Absolute -> Sec.Cache

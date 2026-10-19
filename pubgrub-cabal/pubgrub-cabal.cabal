@@ -71,7 +71,7 @@ library
         PubGrub.Cabal.VersionSet
     build-depends:
         , base         >=4.21  && <4.22
-        , Cabal-syntax >=3.14  && <3.16
+        , Cabal-syntax >=3.14  && <3.20
         , co-log-core  >=0.3.2 && <0.4
         , containers   >=0.7   && <0.8
         , pubgrub      ^>=0.1

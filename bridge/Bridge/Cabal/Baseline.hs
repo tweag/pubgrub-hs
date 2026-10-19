@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 -- | cabal's own modular solver, driven from /our/ index: the baseline the
 -- PubGrub implementation is measured against.
 --
@@ -29,6 +30,8 @@ module Bridge.Cabal.Baseline
     ( -- * Running it
       solveWithCabal
     , outcome
+    , SolverStep
+    , renderSolverStep
 
       -- * The inputs, each of which has to be built rather than defaulted
     , sourcePackageIndex
@@ -66,6 +69,10 @@ import           Distribution.Solver.Types.PkgConfigDb (PkgConfigDb)
 import qualified Distribution.Solver.Types.PackageIndex as SolverIndex
 import           Distribution.Solver.Types.PackagePreferences (PackagePreferences (..))
 import           Distribution.Solver.Types.Progress (Progress, foldProgress)
+#if MIN_VERSION_cabal_install_solver(3,18,0)
+import           Distribution.Solver.Modular.Message (renderSummarizedMessage)
+import           Distribution.Solver.Types.SummarizedMessage (SummarizedMessage)
+#endif
 import           Distribution.Solver.Types.ResolverPackage (ResolverPackage (..))
 import           Distribution.Solver.Types.Settings (AvoidReinstalls (..),
                                                      CountConflicts (..),
@@ -109,7 +116,7 @@ solveWithCabal
     -> [(PackageName, VersionRange)]
     -- ^ the constraints: a range a package must be in /if/ it is chosen, as
     -- @cabal build --constraint@ takes them
-    -> Progress String String [ResolverPackage ()]
+    -> Progress SolverStep String [ResolverPackage ()]
 solveWithCabal config platform cinfo installed pkgConfig source targets constraints =
     modularResolver
         config
@@ -130,8 +137,23 @@ solveWithCabal config platform cinfo installed pkgConfig source targets constrai
 --
 -- The lines are counted rather than kept: the log of a hard solve is large, and
 -- holding it while the solver runs would put the log in the memory measurement.
-outcome :: Progress String String a -> (Int, Either String a)
+outcome :: Progress SolverStep String a -> (Int, Either String a)
 outcome = foldProgress (\_ (n, r) -> (n + 1, r)) (\e -> (0, Left e)) (\a -> (0, Right a))
+
+-- | One line of cabal's solver log. A rendered string up to cabal-install-solver
+-- 3.16; from 3.18 a structured message that 'renderSolverStep' renders on demand,
+-- which is what lets 'outcome' count the lines without paying to print them.
+#if MIN_VERSION_cabal_install_solver(3,18,0)
+type SolverStep = SummarizedMessage
+
+renderSolverStep :: SolverStep -> String
+renderSolverStep = renderSummarizedMessage
+#else
+type SolverStep = String
+
+renderSolverStep :: SolverStep -> String
+renderSolverStep = id
+#endif
 
 -- | Every release in our index as a cabal @SourcePackage@, with its @.cabal@
 -- parsed __on demand__.
@@ -233,7 +255,11 @@ defaultSolverConfig =
         , enableBackjumping = EnableBackjumping True
         , solveExecutables = SolveExecutables True
         , goalOrder = Nothing
+#if MIN_VERSION_cabal_install_solver(3,18,0)
+        , solverVerbosity = Verbosity.Normal
+#else
         , solverVerbosity = Verbosity.normal
+#endif
         , pruneAfterFirstSuccess = PruneAfterFirstSuccess False
         }
 

@@ -311,6 +311,14 @@ Four properties to know before you touch
   `componentDepsAtDefaultsStored` and `buildableAtDefaultsStored` run the *same*
   `flattenWith` over the *same* trees as their description-taking counterparts, so
   the two paths agree by construction, and `test/StoredSpec.hs` asserts it anyway.
+- **The trees are ours, not Cabal-syntax's.** `Flatten.Tree` is Cabal-syntax's
+  `CondTree` with each node reduced to what is ever read, and a node's dependencies
+  are read off its `BuildInfo` (`targetBuildDepends`) rather than off the tree.
+  Cabal-syntax 3.18 removed `CondTree`'s constraints parameter, which was only ever
+  a copy of that field (the 3.14 parser filled it from there, and 3.18's
+  `convCondTree` reads the field where it read the copy), so the one place the
+  Cabal-syntax version is consulted is `fromCondTree`, and the stored form does not
+  change shape with that package. `storeFormatVersion` went to 7 with this change.
 - **CBOR, not `binary`.** 410 B per release against 1040, so 62.5 MB against 159 MB.
   `binary` decodes 2.5× faster, but decode stopped being the scarce resource.
 - **Granularity is the package, not the release.** One slice holds every version, so

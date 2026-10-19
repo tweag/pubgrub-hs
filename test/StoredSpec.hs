@@ -26,14 +26,13 @@ import           PubGrub.Cabal.Flatten                  (FlagModel (..),
                                                          unbuildableAtDefaultsStored)
 import           Bridge.Hackage.Store                   ()
 import           Codec.Serialise                        (deserialise, serialise)
-import           Data.ByteString.Char8                  (pack)
+import qualified Data.ByteString.Lazy.Char8             as BL
 import           Distribution.Compiler                  (AbiTag (NoAbiTag),
                                                          CompilerFlavor (GHC),
                                                          CompilerId (..),
                                                          CompilerInfo,
                                                          unknownCompilerInfo)
-import           Distribution.PackageDescription.Parsec (parseGenericPackageDescription,
-                                                         runParseResult)
+import           Bridge.Hackage                         (parseGPD)
 import           Bridge.Provider                        (pkgConfigPresent)
 import           Distribution.Solver.Types.PkgConfigDb  (PkgConfigDb,
                                                          pkgConfigDbFromList)
@@ -56,7 +55,7 @@ testPkgConfigDb :: PkgConfigDb
 testPkgConfigDb = pkgConfigDbFromList [("zlib", "1.3.1")]
 
 gpdOf :: String -> IO GenericPackageDescription
-gpdOf src = case snd (runParseResult (parseGenericPackageDescription (pack src))) of
+gpdOf src = case parseGPD (BL.pack src) of
     Right gpd -> pure gpd
     Left err  -> assertFailure ("could not parse the test .cabal: " <> show err)
 

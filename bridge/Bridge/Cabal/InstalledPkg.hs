@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 -- | The installed packages of the compiler's global package database, read
 -- through Cabal's own 'Cabal.getInstalledPackages' and reduced to what the
 -- solver uses: each unit's id, name, version and dependencies.
@@ -40,6 +42,15 @@ reduceIndex iidx =
 -- 'InstalledPackageIndex', because that is what its resolver takes, and both
 -- solvers must see the /same/ db. So the db is read once, here, and
 -- 'reduceIndex' cuts it down for our solver.
+--
+-- Cabal 3.18 reads the db through the program db alone and no longer takes the
+-- 'Compiler'; the parameter stays so that the caller is the same under either
+-- version.
 getInstalledPackageIndex :: Verbosity -> Compiler -> ProgramDb -> IO InstalledPackageIndex
+#if MIN_VERSION_Cabal(3,18,0)
+getInstalledPackageIndex verbosity _compiler programDb =
+    Cabal.getInstalledPackages verbosity Nothing [GlobalPackageDB] programDb
+#else
 getInstalledPackageIndex verbosity compiler programDb =
     Cabal.getInstalledPackages verbosity compiler Nothing [GlobalPackageDB] programDb
+#endif

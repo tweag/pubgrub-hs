@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP        #-}
 {-# LANGUAGE LambdaCase #-}
 
 -- | Extract a GenericPackageDescription's dependencies as a function of its
@@ -42,39 +43,39 @@
 --   guard is always a formula over flag /names/.
 -- * /A formula, not a flag/. @flag(a) && !flag(b)@ is one guard mentioning two
 --   flags. Do not picture one flag per guard.
--- * /Accumulated down the tree/. @flattenComponent@ starts at @Lit True@ and
+-- * /Accumulated down the tree/. 'flattenWith' starts at @Lit True@ and
 --   pushes conditions down: the @if@ branch gets @guard \`cAnd\` cond@, the
 --   @else@ branch @guard \`cAnd\` cNot cond@. A dependency nested two levels deep
 --   carries both conditions conjoined; nesting produces a longer formula, not
 --   nested structure.
 -- * /Per release, not per package/. A guard comes from one @.cabal@ file, so it
---   mentions only flags /that/ release declares. This is why a pin derived from a
---   guard under a known version is two-valued — the flag is known to exist, so
---   @NotDeclared@ cannot arise (@docs\/decision-semantics.md@ §7).
+--   mentions only flags /that/ release declares, and a flag term built from it
+--   names one of the depender's own flags.
 --
 -- Note @Lit True@ is a real guard, not the absence of one: every component has an
 -- unconditional block and its guard is exactly @Lit True@.
 --
--- == Flags are resolved here, not by the solver
+-- == One walk, two entry points
 --
--- Everything above describes 'componentDeps', which a search over flags needs.
--- The solver is fed 'componentDepsAtDefaults' instead ('Bridge.Provider' makes
--- the call): every flag is treated as /manual/ and fixed at its declared
--- default, so no guard reaches the solver. See that function for why the
--- downstream machinery needs no other change.
+-- Everything is read off the __pre-environment form__, 'StoredRelease': the
+-- component trees as the @.cabal@ file wrote them, with the environment's
+-- conditions unresolved and each node reduced to what is ever consulted. The
+-- description-taking functions ('componentDeps', 'buildableCondition', …) go
+-- through 'toStored' and the @Stored@ ones take the form directly, which is what a
+-- derived index keeps; so the two cannot disagree, because they are one walk
+-- rather than two kept in step.
 --
--- Terminology, since the specifications distinguish these and
--- @docs\/flags-semantics.md@ §4.2 turns on the difference:
+-- Terminology:
 --
 -- * a /flag/ is a declared name with a default;
 -- * a /guard/ is a boolean formula over flag names;
 -- * a /guarded dependency occurrence/ is one guard paired with /one/
---   dependency — §4.2's unit, and what an incompatibility may be built from;
+--   dependency, the unit an incompatibility is built from;
 -- * 'GuardedDeps' is the whole flat list for a release.
 --
 -- The same package may appear under several guards (an unconditional @q >=1@ and
--- a guarded @q <3@). 'depsAt' intersects those into one range, where §4.2 wants
--- them kept as separate facts.
+-- a guarded @q <3@). 'depsAt' intersects those into one range; the provider
+-- states each occurrence as a separate fact.
 module PubGrub.Cabal.Flatten (
     GuardedDeps,
     componentDeps,
@@ -94,18 +95,15 @@ module PubGrub.Cabal.Flatten (
     --
     -- | What a @.cabal@ parse yields once everything the /environment/ decides is
     -- still undecided: the conditional trees as they were written, with
-    -- 'ConfVar' guards unresolved. This is the form a derived index stores,
+    -- 'ConfVar' conditions unresolved. This is the form a derived index stores,
     -- because parsing is 106x the cost of flattening and only the flatten
     -- depends on the machine ('envConfVar' resolves @os@\/@arch@\/@impl@, and
     -- 'buildableCondition' additionally resolves @pkgconfig-depends@).
-    --
-    -- The two @Stored@ resolvers below run the /same/ 'flattenWith' over the
-    -- /same/ trees as their 'GenericPackageDescription' counterparts, so they
-    -- agree by construction rather than by a second implementation kept in step.
-    -- @test\/StoredSpec.hs@ asserts it anyway, on hand-written @.cabal@ sources.
     StoredRelease (..),
     LibNode (..),
     Node (..),
+    Tree (..),
+    Branch (..),
     toStored,
     componentDepsAtDefaultsStored,
     FlagModel (..),
@@ -231,36 +229,80 @@ evalCond flags = go
     go (COr a b)  = go a || go b
     go (CAnd a b) = go a && go b
 
+-- --------------------------------------------------------------------------
+-- The conditional tree
+-- --------------------------------------------------------------------------
+
+-- | One component's conditional tree, in the shape the @.cabal@ file wrote it:
+-- a node's own fields, then its @if@ blocks, each with an optional @else@.
+--
+-- Cabal-syntax's own @CondTree@ with the node reduced to what this module ever
+-- reads. It is ours rather than Cabal-syntax's for two reasons. It is what a
+-- derived index stores, and a stored form keyed to another package's type
+-- changes shape with that package — Cabal-syntax 3.18 dropped @CondTree@'s
+-- constraints parameter, which is the one this module read. And it keeps the
+-- node's dependencies where Cabal-syntax keeps them, on the @BuildInfo@: that
+-- parameter was only ever a copy of @targetBuildDepends@ (the parser filled it
+-- from there, and cabal's own solver reads the field in 3.18 where it read the
+-- copy before), so reading the field is the same answer on either side of the
+-- change. 'fromCondTree' is the one place the Cabal-syntax version is consulted.
+data Tree a = Tree
+    { treeData     :: a
+    , treeBranches :: [Branch a]
+    }
+    deriving (Eq, Show, Generic, Functor)
+
+-- | An @if@ block: its condition, the tree under it, and the @else@ tree if
+-- there is one. The condition is over 'ConfVar', unresolved: resolving
+-- @os@\/@arch@\/@impl@ is the walk's business ('flattenWith'), not the tree's.
+data Branch a = Branch
+    { branchCondition :: Condition ConfVar
+    , branchIfTrue    :: Tree a
+    , branchIfFalse   :: Maybe (Tree a)
+    }
+    deriving (Eq, Show, Generic, Functor)
+
+#if MIN_VERSION_Cabal_syntax(3,18,0)
+type CabalTree a = CondTree ConfVar a
+#else
+type CabalTree a = CondTree ConfVar [Dependency] a
+#endif
+
+-- | Cabal-syntax's tree as ours, with each node reduced by @f@. The only
+-- function in the package that depends on which Cabal-syntax it was built
+-- against.
+fromCondTree :: (a -> b) -> CabalTree a -> Tree b
+#if MIN_VERSION_Cabal_syntax(3,18,0)
+fromCondTree f (CondNode x branches) = Tree (f x) (map branch branches)
+#else
+fromCondTree f (CondNode x _constraints branches) = Tree (f x) (map branch branches)
+#endif
+  where
+    branch (CondBranch cond ifTrue ifFalse) =
+        Branch cond (fromCondTree f ifTrue) (fmap (fromCondTree f) ifFalse)
+
 -- | Walk one component's conditional tree, pushing each branch condition (with
 -- the environment resolved) down as an accumulated flag guard, and taking @at@
 -- from every node along the way.
 --
--- What is taken is a parameter because two different things are read off the same
--- tree in the same shape: the @build-depends@ ('flattenComponent') and the
--- @BuildInfo@ that decides whether the node can be built here at all
--- ('buildableCondition'). One walk, described once.
+-- What is taken is a parameter because several different things are read off
+-- the same tree in the same shape: the @build-depends@ ('componentDeps'), the
+-- build tools ('componentTools'), and what decides whether the node can be built
+-- here at all ('buildableCondition'). One walk, described once.
 flattenWith
     :: (ConfVar -> Either FlagName Bool)
-    -> (CondTree ConfVar [Dependency] a -> b)
-    -> CondTree ConfVar [Dependency] a
+    -> (a -> b)
+    -> Tree a
     -> [(Guard, b)]
 flattenWith env at = go (Lit True)
   where
-    go guard node@(CondNode _data _deps branches) =
-        (guard, at node) : concatMap (goBranch guard) branches
-    goBranch guard (CondBranch cond ifTrue mIfFalse) =
+    go guard (Tree x branches) =
+        (guard, at x) : concatMap (goBranch guard) branches
+    goBranch guard (Branch cond ifTrue mIfFalse) =
         let (cond', _free) = simplifyCondition cond env
             whenTrue = go (guard `cAnd` cond') ifTrue
             whenFalse = maybe [] (go (guard `cAnd` cNot cond')) mIfFalse
          in whenTrue ++ whenFalse
-
--- | Flatten one component's conditional tree to its flag-guarded dependency
--- groups.
-flattenComponent
-    :: (ConfVar -> Either FlagName Bool)
-    -> CondTree ConfVar [Dependency] a
-    -> GuardedDeps
-flattenComponent env = flattenWith env condTreeConstraints
 
 -- | Flatten the library, sub-library, foreign-library and executable conditional
 -- dependency trees to flag-guarded groups, resolving OS\/arch\/compiler conditions
@@ -292,7 +334,7 @@ flattenComponent env = flattenWith env condTreeConstraints
 -- with the reason attached, which is what lets a proof name the missing
 -- @pkg-config@ module.
 componentDeps :: Platform -> CompilerInfo -> GenericPackageDescription -> GuardedDeps
-componentDeps = componentDepsWith Left
+componentDeps platform compiler = depsWith Left platform compiler . toStored
 
 -- | 'componentDeps' with every flag resolved at its __declared default__: flags
 -- are parsed and applied, but treated as manual, so none of them is a search
@@ -315,24 +357,18 @@ componentDeps = componentDepsWith Left
 -- convention 'evalCond' documents. It should not arise — a guard mentions only
 -- flags its own release declares.
 componentDepsAtDefaults :: Platform -> CompilerInfo -> GenericPackageDescription -> GuardedDeps
-componentDepsAtDefaults platform compiler gpd =
-    componentDepsWith atDefault platform compiler gpd
-  where
-    defaults = defaultFlags gpd
-    atDefault f = Right (Map.findWithDefault False f defaults)
+componentDepsAtDefaults platform compiler = componentDepsAtDefaultsStored platform compiler . toStored
 
-componentDepsWith
+-- | The guarded dependencies of a stored release, with each flag resolved as
+-- @flagEnv@ says.
+depsWith
     :: (FlagName -> Either FlagName Bool)
     -> Platform
     -> CompilerInfo
-    -> GenericPackageDescription
+    -> StoredRelease
     -> GuardedDeps
-componentDepsWith flagEnv platform compiler gpd =
-    concat $
-        [flattenComponent env t | t <- maybeToList (condLibrary gpd)]
-            ++ [flattenComponent env (gateOnBuildable libBuildInfo t) | (_, t) <- condSubLibraries gpd]
-            ++ [flattenComponent env (gateOnBuildable foreignLibBuildInfo t) | (_, t) <- condForeignLibs gpd]
-            ++ [flattenComponent env (gateOnBuildable buildInfo t) | (_, t) <- condExecutables gpd]
+depsWith flagEnv platform compiler sr =
+    concat [flattenWith env nodeDeps t | t <- componentTrees sr]
   where
     env = envConfVar flagEnv platform compiler
 
@@ -344,8 +380,8 @@ componentDepsWith flagEnv platform compiler gpd =
 gateOnBuildable
     :: Monoid a
     => (a -> BuildInfo)
-    -> CondTree ConfVar [Dependency] a
-    -> CondTree ConfVar [Dependency] a
+    -> CabalTree a
+    -> CabalTree a
 gateOnBuildable = addBuildableCondition
 
 -- | Evaluate the guards at a concrete flag assignment and merge the resulting
@@ -411,7 +447,7 @@ buildableCondition
 buildableCondition db platform compiler gpd =
     foldr cAnd (Lit True) $
         [ cNot guard
-        | (guard, isBuildable, pcs) <- libraryNodes platform compiler gpd
+        | (guard, isBuildable, pcs) <- libraryNodes platform compiler (toStored gpd)
         , not (null (unusable db isBuildable pcs))
         ]
 
@@ -429,23 +465,19 @@ unbuildableAtDefaults
     -> CompilerInfo
     -> GenericPackageDescription
     -> [UnbuildableReason]
-unbuildableAtDefaults db platform compiler gpd =
-    unbuildableNodes
-        db
-        (mkFlagAssignment (Map.toList (defaultFlags gpd)))
-        (libraryNodes platform compiler gpd)
+unbuildableAtDefaults db platform compiler = unbuildableAtDefaultsStored db platform compiler . toStored
 
 -- | The library's nodes with what decides their buildability: the guard, the
 -- @buildable@ field, and the @pkgconfig-depends@.
 libraryNodes
     :: Platform
     -> CompilerInfo
-    -> GenericPackageDescription
+    -> StoredRelease
     -> [(Guard, Bool, [PkgconfigDependency])]
-libraryNodes platform compiler gpd =
-    [ (guard, buildable bi, pkgconfigDepends bi)
-    | tree <- maybeToList (condLibrary gpd)
-    , (guard, bi) <- flattenWith env (libBuildInfo . condTreeData) tree
+libraryNodes platform compiler sr =
+    [ (guard, lnBuildable ln, lnPkgConfig ln)
+    | tree <- maybeToList (srLibrary sr)
+    , (guard, ln) <- flattenWith env id tree
     ]
   where
     env = envConfVar Left platform compiler
@@ -473,8 +505,8 @@ unusable present isBuildable pcs =
     [NotBuildable | not isBuildable]
         ++ [MissingPkgConfig d | d <- pcs, not (present d)]
 
--- | Dependencies of a package version at its /default/ flag values, as a
--- version-set map. (Convenience: 'depsAt' the defaults over 'componentDeps'.)
+-- | Dependencies of a package version at a flag assignment, as a version-set
+-- map. (Convenience: 'depsAt' over 'componentDeps'.)
 flattenDeps :: Platform -> CompilerInfo -> FlagAssignment -> GenericPackageDescription -> Map PackageName VersionSet
 flattenDeps platform compiler flags gpd =
     depsAt flags (componentDeps platform compiler gpd)
@@ -543,10 +575,6 @@ prettyMap = unwords . map (\m -> "{" ++ unwords [ bool "-" "+" b ++ unFlagName f
 
 
 -- --------------------------------------------------------------------------
--- The pre-environment form
--- --------------------------------------------------------------------------
-
--- --------------------------------------------------------------------------
 -- Build tools and setup dependencies
 -- --------------------------------------------------------------------------
 
@@ -592,28 +620,24 @@ toolsOf self exes bi =
 -- | The release's build tools, flag-guarded, read off the same four component
 -- trees as 'componentDeps' and gated on buildability the same way.
 componentTools :: Platform -> CompilerInfo -> GenericPackageDescription -> GuardedTools
-componentTools = componentToolsWith Left
+componentTools platform compiler = toolsWith Left platform compiler . toStored
 
 -- | 'componentTools' with every flag at its declared default.
 componentToolsAtDefaults :: Platform -> CompilerInfo -> GenericPackageDescription -> GuardedTools
-componentToolsAtDefaults platform compiler gpd =
-    componentToolsWith (\f -> Right (Map.findWithDefault False f (defaultFlags gpd))) platform compiler gpd
+componentToolsAtDefaults platform compiler = componentToolsStored FixedFlags platform compiler . toStored
 
-componentToolsWith
+-- | The guarded build tools of a stored release, with each flag resolved as
+-- @flagEnv@ says.
+toolsWith
     :: (FlagName -> Either FlagName Bool)
     -> Platform
     -> CompilerInfo
-    -> GenericPackageDescription
+    -> StoredRelease
     -> GuardedTools
-componentToolsWith flagEnv platform compiler gpd =
-    concat $
-        [flattenWith env (tools libBuildInfo) t | t <- maybeToList (condLibrary gpd)]
-            ++ [flattenWith env (tools libBuildInfo) (gateOnBuildable libBuildInfo t) | (_, t) <- condSubLibraries gpd]
-            ++ [flattenWith env (tools foreignLibBuildInfo) (gateOnBuildable foreignLibBuildInfo t) | (_, t) <- condForeignLibs gpd]
-            ++ [flattenWith env (tools buildInfo) (gateOnBuildable buildInfo t) | (_, t) <- condExecutables gpd]
+toolsWith flagEnv platform compiler sr =
+    concat [flattenWith env nodeTools t | t <- componentTrees sr]
   where
     env = envConfVar flagEnv platform compiler
-    tools bi = toolsOf (ownName gpd) (ownExecutables gpd) . bi . condTreeData
 
 -- | The build tools in force at a flag assignment: 'depsAt' for 'GuardedTools',
 -- without the merge, since a tool is named rather than ranged over. A dead
@@ -639,32 +663,37 @@ ownExecutables gpd = [n | (n, _) <- condExecutables gpd]
 -- The pre-environment form
 -- --------------------------------------------------------------------------
 
--- | The bits of a library node's @BuildInfo@ that are ever consulted: what
--- decides buildability, and the build tools. Nothing else is kept.
+-- | The bits of a library node's @BuildInfo@ that are ever consulted: its
+-- dependencies, what decides buildability, and the build tools. Nothing else is
+-- kept.
 data LibNode = LibNode
-    { lnBuildable :: Bool
+    { lnDeps      :: [Dependency]
+    , lnBuildable :: Bool
     , lnPkgConfig :: [PkgconfigDependency]
     , lnTools     :: [ExeDependency]
     }
     deriving (Eq, Show, Generic)
 
--- | What is kept of any other component's node: its build tools. Dependencies
--- are the tree's constraints, and buildability is already in the guards
--- ('gateOnBuildable').
-newtype Node = Node
-    { nodeTools :: [ExeDependency]
+-- | What is kept of any other component's node: its dependencies and its build
+-- tools. Buildability is already in the guards ('gateOnBuildable').
+data Node = Node
+    { nodeDeps  :: [Dependency]
+    , nodeTools :: [ExeDependency]
     }
     deriving (Eq, Show, Generic)
 
--- | One release, parsed and no further. The trees are Cabal-syntax's own, so the
--- resolvers below are the existing walk rather than a paraphrase of it.
+-- | One release, parsed and no further. The trees are the @.cabal@ file's own
+-- ('Tree'), so the resolvers over them are the existing walk rather than a
+-- paraphrase of it.
 data StoredRelease = StoredRelease
     { srFlags   :: [(FlagName, Bool)]
     , srManual  :: [FlagName]
     -- ^ the flags declared @manual: True@, which stay at their defaults even
     -- when automatic flags are searched
-    , srLibrary :: Maybe (CondTree ConfVar [Dependency] LibNode)
-    , srOthers  :: [CondTree ConfVar [Dependency] Node]
+    , srLibrary :: Maybe (Tree LibNode)
+    , srOthers  :: [Tree Node]
+    -- ^ the sub-libraries, foreign libraries and executables, each gated on its
+    -- own buildability
     , srSetup   :: [Dependency]
     -- ^ 'setupDeps'
     }
@@ -676,19 +705,33 @@ toStored gpd =
     StoredRelease
         { srFlags = [(flagName f, flagDefault f) | f <- genPackageFlags gpd]
         , srManual = [flagName f | f <- genPackageFlags gpd, flagManual f]
-        , srLibrary = fmap (fmap libNode) (condLibrary gpd)
+        , srLibrary = fromCondTree libNode <$> condLibrary gpd
         , srOthers =
-            [fmap (node libBuildInfo) (gateOnBuildable libBuildInfo t) | (_, t) <- condSubLibraries gpd]
-                ++ [fmap (node foreignLibBuildInfo) (gateOnBuildable foreignLibBuildInfo t) | (_, t) <- condForeignLibs gpd]
-                ++ [fmap (node buildInfo) (gateOnBuildable buildInfo t) | (_, t) <- condExecutables gpd]
+            [other libBuildInfo t | (_, t) <- condSubLibraries gpd]
+                ++ [other foreignLibBuildInfo t | (_, t) <- condForeignLibs gpd]
+                ++ [other buildInfo t | (_, t) <- condExecutables gpd]
         , srSetup = setupDeps gpd
         }
   where
     tools = toolsOf (ownName gpd) (ownExecutables gpd)
     libNode lib =
         let bi = libBuildInfo lib
-         in LibNode{lnBuildable = buildable bi, lnPkgConfig = pkgconfigDepends bi, lnTools = tools bi}
-    node bi x = Node{nodeTools = tools (bi x)}
+         in LibNode
+                { lnDeps = targetBuildDepends bi
+                , lnBuildable = buildable bi
+                , lnPkgConfig = pkgconfigDepends bi
+                , lnTools = tools bi
+                }
+    other bi = fromCondTree (node . bi) . gateOnBuildable bi
+    node bi = Node{nodeDeps = targetBuildDepends bi, nodeTools = tools bi}
+
+-- | The component trees a reduction reads, as one shape: the library, then
+-- the sub-libraries, foreign libraries and executables.
+componentTrees :: StoredRelease -> [Tree Node]
+componentTrees sr =
+    [fmap asNode t | t <- maybeToList (srLibrary sr)] ++ srOthers sr
+  where
+    asNode ln = Node{nodeDeps = lnDeps ln, nodeTools = lnTools ln}
 
 -- | 'componentDepsAtDefaults' over a stored release.
 componentDepsAtDefaultsStored :: Platform -> CompilerInfo -> StoredRelease -> GuardedDeps
@@ -718,21 +761,13 @@ storedFlagEnv model sr f
 -- | The guarded dependencies of a stored release under a flag model.
 componentDepsStored :: FlagModel -> Platform -> CompilerInfo -> StoredRelease -> GuardedDeps
 componentDepsStored model platform compiler sr =
-    concat $
-        [flattenComponent env t | t <- maybeToList (srLibrary sr)]
-            ++ [flattenComponent env t | t <- srOthers sr]
-  where
-    env = envConfVar (storedFlagEnv model sr) platform compiler
+    depsWith (storedFlagEnv model sr) platform compiler sr
 
 -- | The guarded build tools of a stored release under a flag model
 -- ('componentTools').
 componentToolsStored :: FlagModel -> Platform -> CompilerInfo -> StoredRelease -> GuardedTools
 componentToolsStored model platform compiler sr =
-    concat $
-        [flattenWith env (lnTools . condTreeData) t | t <- maybeToList (srLibrary sr)]
-            ++ [flattenWith env (nodeTools . condTreeData) t | t <- srOthers sr]
-  where
-    env = envConfVar (storedFlagEnv model sr) platform compiler
+    toolsWith (storedFlagEnv model sr) platform compiler sr
 
 -- | 'unbuildableAtDefaults' over a stored release.
 unbuildableAtDefaultsStored
@@ -741,9 +776,4 @@ unbuildableAtDefaultsStored db platform compiler sr =
     unbuildableNodes
         db
         (mkFlagAssignment (srFlags sr))
-        [ (guard, lnBuildable ln, lnPkgConfig ln)
-        | tree <- maybeToList (srLibrary sr)
-        , (guard, ln) <- flattenWith env condTreeData tree
-        ]
-  where
-    env = envConfVar Left platform compiler
+        (libraryNodes platform compiler sr)

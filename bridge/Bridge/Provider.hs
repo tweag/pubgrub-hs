@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 -- | The real 'Provider', backed by a Hackage 'IndexHandle' and the compiler's
 -- installed (boot) package database.
 --
@@ -74,6 +75,15 @@ import qualified PubGrub.Cabal.Version                              as V
 import           PubGrub.Cabal.VersionSet                           (VersionSet)
 import           UnliftIO                                     (MonadUnliftIO,
                                                                liftIO)
+
+-- | Cabal's normal verbosity. From Cabal 3.18 a 'Verbosity.Verbosity' also
+-- carries the handles it prints to, and 'Verbosity.normal' is the flags alone.
+normal :: Verbosity.Verbosity
+#if MIN_VERSION_Cabal(3,18,0)
+normal = Verbosity.mkVerbosity Verbosity.defaultVerbosityHandles Verbosity.normal
+#else
+normal = Verbosity.normal
+#endif
 
 -- | 'PubGrub.Cabal.Flatten.PkgConfigPresent' from cabal's own reading of this
 -- machine's @pkg-config@, so both solvers answer a @pkgconfig-depends@ from one
@@ -177,9 +187,9 @@ withWorld
 withWorld cache manager state act =
     withHackageIndex cache manager state $ \handle -> do
         (compiler, mPlatform, programDb) <-
-            liftIO $ configure Verbosity.normal Nothing Nothing defaultProgramDb
-        installedIndex <- liftIO $ getInstalledPackageIndex Verbosity.normal compiler programDb
-        pkgConfig <- liftIO $ readPkgConfigDb Verbosity.normal programDb
+            liftIO $ configure normal Nothing Nothing defaultProgramDb
+        installedIndex <- liftIO $ getInstalledPackageIndex normal compiler programDb
+        pkgConfig <- liftIO $ readPkgConfigDb normal programDb
         act
             World
                 { wIndex = handle

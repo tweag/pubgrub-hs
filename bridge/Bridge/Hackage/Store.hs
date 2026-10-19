@@ -61,9 +61,11 @@ module Bridge.Hackage.Store
     , storeFormatVersion
     ) where
 
-import           PubGrub.Cabal.Flatten                  (LibNode (..),
+import           PubGrub.Cabal.Flatten                  (Branch (..),
+                                                         LibNode (..),
                                                          Node (..),
-                                                         StoredRelease (..))
+                                                         StoredRelease (..),
+                                                         Tree (..))
 import           Codec.Serialise                        (Serialise (..),
                                                          deserialiseOrFail,
                                                          serialise)
@@ -72,7 +74,7 @@ import           Codec.Serialise.Encoding               (encodeListLen)
 import           Control.Exception                      (SomeException, try)
 import           Data.ByteString.Lazy                   (ByteString)
 import qualified Data.ByteString.Lazy                   as BL
-import           Data.IORef                             (IORef, atomicModifyIORef',
+import           Data.IORef                             (atomicModifyIORef',
                                                          newIORef, readIORef)
 import           Data.Int                               (Int64)
 import           Data.List.NonEmpty                     (NonEmpty (..))
@@ -81,13 +83,10 @@ import qualified Data.Map.Strict                        as Map
 import           Data.Set                               (Set)
 import qualified Data.Set                               as Set
 import           Data.Word                              (Word32)
-import           Distribution.Compat.NonEmptySet        (NonEmptySet)
 import qualified Distribution.Compat.NonEmptySet        as NES
 import           Distribution.Compiler                  (CompilerFlavor)
 import           Distribution.System                    (Arch, OS)
 import           Distribution.Types.Condition            (Condition (..))
-import           Distribution.Types.CondTree             (CondBranch (..),
-                                                          CondTree (..))
 import           Distribution.Types.ConfVar              (ConfVar (..))
 import           Distribution.Types.Dependency           (Dependency (..))
 import           Distribution.Types.ExeDependency        (ExeDependency)
@@ -125,7 +124,7 @@ import           System.IO                               (IOMode (..), hClose,
 -- 'Bridge.Hackage.readVersionCache' does: a generic encoding is positional, so
 -- reordering a constructor silently changes its meaning.
 storeFormatVersion :: Int
-storeFormatVersion = 6
+storeFormatVersion = 7
 
 -- These are orphans. They belong here rather than in Cabal-syntax, and wrapping
 -- every type in a newtype to avoid the orphan would cost more clarity than it
@@ -178,8 +177,8 @@ instance Serialise Arch
 instance Serialise CompilerFlavor
 instance Serialise ConfVar
 instance Serialise a => Serialise (Condition a)
-instance (Serialise v, Serialise c, Serialise a) => Serialise (CondBranch v c a)
-instance (Serialise v, Serialise c, Serialise a) => Serialise (CondTree v c a)
+instance Serialise a => Serialise (Branch a)
+instance Serialise a => Serialise (Tree a)
 instance Serialise ExeDependency
 instance Serialise LibNode
 instance Serialise Node

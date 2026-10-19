@@ -24,9 +24,11 @@ import           PubGrub.Cabal.Flatten                        (buildableConditio
                                                                expandGuard,
                                                                flattenDeps,
                                                                unbuildableAtDefaults)
+import           Bridge.Hackage                                (parseGPD)
 import           Bridge.Provider                               (pkgConfigPresent)
+import           PubGrub.Cabal.Provider                        (ParseError (..))
 import           Distribution.Solver.Types.PkgConfigDb        (pkgConfigDbFromList)
-import           Data.ByteString.Char8                        (pack)
+import qualified Data.ByteString.Lazy.Char8                   as BL
 import           Data.List                                    (isInfixOf)
 import qualified Data.Map.Strict                              as Map
 import           Distribution.Compiler                        (AbiTag (NoAbiTag),
@@ -34,8 +36,6 @@ import           Distribution.Compiler                        (AbiTag (NoAbiTag)
                                                                CompilerId (..),
                                                                CompilerInfo,
                                                                unknownCompilerInfo)
-import           Distribution.PackageDescription.Parsec       (parseGenericPackageDescription,
-                                                               runParseResult)
 import           Distribution.System                          (Arch (X86_64),
                                                                OS (Linux),
                                                                Platform (..))
@@ -78,7 +78,7 @@ testCompiler = unknownCompilerInfo (CompilerId GHC (mkVersion [9, 12, 2])) NoAbi
 
 -- | Parse a @.cabal@ source, failing the test on a parse error.
 gpdOf :: String -> IO GenericPackageDescription
-gpdOf src = case snd (runParseResult (parseGenericPackageDescription (pack src))) of
+gpdOf src = case parseGPD (BL.pack src) of
     Right gpd -> pure gpd
     Left err  -> assertFailure ("test fixture failed to parse: " ++ show err)
 
@@ -514,11 +514,12 @@ defaultedTests =
                         , "  if flag(ghost)"
                         , "    build-depends: spooky"
                         ]
-        case snd (runParseResult (parseGenericPackageDescription (pack src))) of
-            Left (_, errs) ->
+        case parseGPD (BL.pack src) of
+            Left (ParseError _ errs) ->
                 assertBool
                     ("expected an undefined-flag error, got: " ++ show errs)
                     (any (("used without having been defined" `isInfixOf`) . show) errs)
+            Left err -> assertFailure ("expected a parse error, got: " ++ show err)
             Right _ -> assertFailure "expected the parse to fail on an undefined flag"
     ]
 
