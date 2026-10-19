@@ -92,9 +92,7 @@ import           PubGrub.Incompatibility                   (Cause (..),
                                                             Incompatibility,
                                                             incompCause,
                                                             incompTerms)
-import           PubGrub.Cabal.InstanceSet                       (HasVersion (version),
-                                                            Instance (..),
-                                                            singletonInstance)
+import           PubGrub.Cabal.InstanceSet                       (HasVersion (version))
 import           PubGrub.Pretty                            (Pretty (pretty))
 import           PubGrub.Provider                          (Provider (..))
 import           PubGrub.Cabal.Report                       (reportConflict,
