@@ -26,12 +26,13 @@ import qualified PubGrub.Version                 as V
 import           Distribution.Types.VersionRange (earlierVersion,
                                                   orLaterVersion)
 import           PubGrub.Cabal                  (Cabal,
-                                                 IncompatCause (..),
+                                                 CabalFact (..),
                                                  UnbuildableReason (..),
                                                  fromDependency,
                                                  unbuildable)
-import           PubGrub.Incompatibility        (Incompatibility (..),
-                                                 noInstances)
+import           PubGrub.Incompatibility        (Cause (..),
+                                                 Incompatibility (..),
+                                                 noValues)
 import           PubGrub.InstanceSet            (InstanceSet (..))
 import           PubGrub.SetOps                 (SetOps (isEmpty), equivalent)
 import           PubGrub.Value                  (ValueSet (..), instanceSet)
@@ -87,7 +88,7 @@ dependency p s q r = fromDependency p s Map.empty q r
 
 -- | A ban on a range of a package, as the solver mints one.
 ban :: PackageName -> InstanceSet -> Incompatibility Cabal
-ban p s = noInstances (PackageVar p) (instanceSet s)
+ban p s = noValues (PackageVar p) (instanceSet s)
 
 -- | @a@ over some range depends on @q@ in @1..3@.
 dependsOnQ :: InstanceSet -> Incompatibility Cabal
@@ -155,12 +156,12 @@ mergeTests =
         length (storeClauses backwards) @?= 1
     , -- What the merge is for on the reporting side: the result must stay a leaf.
       -- Reaching the same range by resolving the narrow facts against each other
-      -- produces a 'CauseDerivedFrom' node, and those nodes are the proof lines
+      -- produces a 'Derived' node, and those nodes are the proof lines
       -- this exists to remove.
       testCase "the merged fact is a dependency leaf, not a derived node" $ do
         let store = insertClauses [dependsOnQ (slot 1 2), dependsOnQ (slot 2 3)] emptyStore
         case map incompCause (storeClauses store) of
-            [CauseDependency p _ _ (q, _)] -> (p, q) @?= (pkgA, pkgQ)
+            [Fact (CauseDependency p _ _ (q, _))] -> (p, q) @?= (pkgA, pkgQ)
             _ -> assertFailure "expected a single CauseDependency leaf"
     , -- Clause position dominates propagation cost, so a merge must not move the
       -- clause it merges into: the store here is [newest … oldest] and the merged
@@ -174,7 +175,7 @@ mergeTests =
         case storeClauses store of
             [b, a] -> do
                 case incompCause b of
-                    CauseNoInstances p _ -> p @?= PackageVar pkgB
+                    NoValues p _ -> p @?= PackageVar pkgB
                     _ -> assertFailure "the newest clause should still be the ban"
                 dependerOf a `shouldDenote` sourceOnly (halfOpen 1 3)
             cs -> assertFailure ("expected two clauses, got " ++ show (length cs))
@@ -214,7 +215,7 @@ separateTests =
                     ]
                     emptyStore
         length (storeClauses store) @?= 2
-    , -- A @noInstances@ ban is not a merge candidate. Unlike the unbuildable facts
+    , -- A @noValues@ ban is not a merge candidate. Unlike the unbuildable facts
       -- below it is minted by the /solver/, for the one range it happened to query,
       -- and no part of the spec asks for those to be collapsed; merging them would
       -- be sound and simply is not done. Derived clauses are
@@ -262,7 +263,7 @@ separateTests =
             [only] -> do
                 dependerOf only `shouldDenote` sourceOnly (halfOpen 1 3)
                 case incompCause only of
-                    CauseDependency _ _ g _ -> g @?= Map.singleton fast True
+                    Fact (CauseDependency _ _ g _) -> g @?= Map.singleton fast True
                     _ -> assertFailure "expected a dependency leaf"
             cs -> assertFailure ("expected one clause, got " ++ show (length cs))
     ]
@@ -305,7 +306,7 @@ unbuildableTests =
                     [needsLibpq (slot 1 2), needsLibpq (slot 2 3)]
                     emptyStore
         case map incompCause (storeClauses store) of
-            [CauseUnbuildable p _ why] -> (p, why) @?= (pkgA, libpq)
+            [Fact (CauseUnbuildable p _ why)] -> (p, why) @?= (pkgA, libpq)
             _ -> assertFailure "expected a single CauseUnbuildable leaf"
     , testCase "different packages stay separate" $ do
         let store =
@@ -348,8 +349,8 @@ unbuildableTests =
 -- | The instance set an unbuildable fact bans, read off its cause.
 bannedBy :: Incompatibility Cabal -> InstanceSet
 bannedBy i = case incompCause i of
-    CauseUnbuildable _ s _ -> s
-    _                      -> error "not an unbuildable clause"
+    Fact (CauseUnbuildable _ s _) -> s
+    _ -> error "not an unbuildable clause"
 
 halfOpen :: Int -> Int -> VersionSet.VersionSet
 halfOpen lo hi = VersionSet.halfOpenVersionSet (v lo) (Just (v hi))
@@ -357,8 +358,8 @@ halfOpen lo hi = VersionSet.halfOpenVersionSet (v lo) (Just (v hi))
 -- | The depender's instance set, read off the clause's cause.
 dependerOf :: Incompatibility Cabal -> InstanceSet
 dependerOf i = case incompCause i of
-    CauseDependency _ s _ _ -> s
-    _                       -> error "not a dependency clause"
+    Fact (CauseDependency _ s _ _) -> s
+    _ -> error "not a dependency clause"
 
 -- | Semantic equality, by mutual containment; with a canonical 'InstanceSet'
 -- this is '==', and keeping the semantic form says what is being asked.

@@ -18,8 +18,9 @@ import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import qualified Distribution.Version           as Cabal
-import           PubGrub.Cabal                  (Cabal, conflictSet,
+import           PubGrub.Cabal                  (Cabal,
                                                  fromDependency, request)
+import           PubGrub.Derivation             (conflictSet)
 import           PubGrub.Cabal.Installed        (InstalledDb, mkInstalledDb)
 import           PubGrub.Cabal.Provider         (constrainTo)
 import           PubGrub.Incompatibility        (Incompatibility)

@@ -23,14 +23,15 @@ import qualified PubGrub.Version                 as V
 import           Distribution.Types.VersionRange (earlierVersion,
                                                   orLaterVersion)
 import           PubGrub.Cabal                   (Cabal,
-                                                  IncompatCause (..),
+                                                  CabalFact (..),
                                                   UnbuildableReason (..),
                                                   fromDependency,
                                                   onlyInstalled,
                                                   request,
                                                   unbuildable)
-import           PubGrub.Incompatibility         (Incompatibility (..),
-                                                  noInstances,
+import           PubGrub.Incompatibility         (Cause (..),
+                                                  Incompatibility (..),
+                                                  noValues,
                                                   priorCause)
 import           PubGrub.InstanceSet             (InstanceSet (..))
 import           PubGrub.Value                   (instanceSet)
@@ -95,19 +96,19 @@ dependsOnQ dependers = dependency pkgA dependers pkgQ (range 1 5)
 
 -- | The hole the solver learns when a range holds no releases.
 hole :: PackageName -> InstanceSet -> Incompatibility Cabal
-hole p s = noInstances (PackageVar p) (instanceSet s)
+hole p s = noValues (PackageVar p) (instanceSet s)
 
-causeOf :: Incompatibility Cabal -> IncompatCause
+causeOf :: Incompatibility Cabal -> Cause Cabal
 causeOf = incompCause
 
 -- | Every cause in the tree, so a test can assert that no hole survives.
-causes :: Incompatibility Cabal -> [IncompatCause]
+causes :: Incompatibility Cabal -> [Cause Cabal]
 causes inc = incompCause inc : case incompCause inc of
-    CauseDerivedFrom c1 c2 -> causes c1 ++ causes c2
-    _                      -> []
+    Derived c1 c2 -> causes c1 ++ causes c2
+    _             -> []
 
 holesIn :: Incompatibility Cabal -> Int
-holesIn inc = length [() | CauseNoInstances _ _ <- causes inc]
+holesIn inc = length [() | NoValues _ _ <- causes inc]
 
 tests :: TestTree
 tests =
@@ -141,7 +142,7 @@ absorbed =
         let collapsed = collapseNoInstances step
         holesIn collapsed @?= 0
         case causeOf collapsed of
-            CauseDependency p s _ (q, r) -> do
+            Fact (CauseDependency p s _ (q, r)) -> do
                 (p, q) @?= (pkgA, pkgQ)
                 -- the depender is the union of the two, which is what the step
                 -- concluded; the dependee is untouched
@@ -155,7 +156,7 @@ absorbed =
         let dep = dependsOnQ (range 1 2)
             step = resolveOn dep (hole pkgQ (range 4 5)) pkgQ
         case causeOf (collapseNoInstances step) of
-            CauseDependency _ _ _ (q, r) -> do
+            Fact (CauseDependency _ _ _ (q, r)) -> do
                 q @?= pkgQ
                 assertBool "dependee should have lost 4..5" (r `equivalent` range 1 4)
             c -> assertFailure ("expected a dependency leaf, got " ++ describe c)
@@ -509,7 +510,7 @@ untouched =
       testCase "two holes stay a derivation step" $ do
         let step = resolveOn (hole pkgA (range 1 2)) (hole pkgA (range 2 4)) pkgA
         case causeOf (collapseNoInstances step) of
-            CauseDerivedFrom _ _ -> pure ()
+            Derived _ _ -> pure ()
             c -> assertFailure ("expected the step to survive, got " ++ describe c)
     , -- The dependee's *whole* range being empty makes the union over the pivot ⊤,
       -- so the dependee entry drops out of the step's terms. Rebuilding from those
@@ -522,7 +523,7 @@ untouched =
             step = resolveOn dep (hole pkgQ (range 1 5)) pkgQ
         Map.size (incompTerms step) @?= 1
         case causeOf (collapseNoInstances step) of
-            CauseDerivedFrom _ _ -> pure ()
+            Derived _ _ -> pure ()
             c -> assertFailure ("expected the step to survive, got " ++ describe c)
     , -- Only dependency facts are absorbed into. A hole resolved against "cannot be
       -- built from source" would have to widen *that* claim, which would say the
@@ -530,7 +531,7 @@ untouched =
       testCase "a hole is not absorbed into a boot-package fact" $ do
         let step = resolveOn (onlyInstalled pkgA [v 3] (from 1)) (hole pkgA (range 1 2)) pkgA
         case causeOf (collapseNoInstances step) of
-            CauseDerivedFrom _ _ -> pure ()
+            Derived _ _ -> pure ()
             c -> assertFailure ("expected the step to survive, got " ++ describe c)
     , -- pubgrub-rs leaves this one too (its @collapse_no_versions@ carries a TODO).
       -- Dropping the hole here would print a conclusion wider than the two causes
@@ -539,7 +540,7 @@ untouched =
         let inner = resolveOn (dependsOnQ (range 1 2)) (dependsOnQ (range 2 3)) pkgQ
             step = resolveOn inner (hole pkgA (range 3 4)) pkgA
         case causeOf (collapseNoInstances step) of
-            CauseDerivedFrom _ _ -> pure ()
+            Derived _ _ -> pure ()
             c -> assertFailure ("expected the step to survive, got " ++ describe c)
     ]
 
@@ -572,12 +573,16 @@ soundness =
     sameTerm (Negative a) (Just (Negative b)) = a `equivalent` b
     sameTerm _ _                              = False
 
-describe :: IncompatCause -> String
-describe CauseRequest{}       = "CauseRequest"
-describe CauseNoInstances{}   = "CauseNoInstances"
-describe CauseOnlyInstalled{} = "CauseOnlyInstalled"
-describe CauseUnbuildable{}   = "CauseUnbuildable"
-describe CauseDependency{}    = "CauseDependency"
-describe CauseDeclaresFlag{}  = "CauseDeclaresFlag"
-describe CauseConstraint{}    = "CauseConstraint"
-describe CauseDerivedFrom{}   = "CauseDerivedFrom"
+describe :: Cause Cabal -> String
+describe (Seed f)     = "Seed " ++ fact f
+describe (Fact f)     = "Fact " ++ fact f
+describe NoValues{}   = "NoValues"
+describe Derived{}    = "Derived"
+
+fact :: CabalFact -> String
+fact CauseRequest{}       = "CauseRequest"
+fact CauseOnlyInstalled{} = "CauseOnlyInstalled"
+fact CauseUnbuildable{}   = "CauseUnbuildable"
+fact CauseDependency{}    = "CauseDependency"
+fact CauseDeclaresFlag{}  = "CauseDeclaresFlag"
+fact CauseConstraint{}    = "CauseConstraint"

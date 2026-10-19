@@ -5,14 +5,15 @@
 -- A variable is a package name or one automatic flag of a package
 -- ('PubGrub.Variable'); a value is an instance or a Boolean, and a set of
 -- values is a set of instances or a set of Booleans ('PubGrub.Value'). The
--- causes are the facts a @.cabal@ file states, plus what the solver learns from
--- them. The constructors here are the only way a fact of this domain is built:
--- the provider states facts through them, and 'PubGrub.Store' rebuilds a merged
--- clause through them, so a clause's cause always agrees with its terms.
+-- facts are what a @.cabal@ file states and what the request asks for. The
+-- constructors here are the only way a fact of this domain is built: the
+-- provider states facts through them, and 'PubGrub.Store' rebuilds a merged
+-- clause through them, so a clause's cause always agrees with its terms. What
+-- the solver learns from the facts is the core's own 'Cause'.
 module PubGrub.Cabal
     ( Cabal
-      -- * Causes
-    , IncompatCause (..)
+      -- * Facts
+    , CabalFact (..)
     , Guard
     , UnbuildableReason (..)
       -- * Constructors
@@ -23,8 +24,6 @@ module PubGrub.Cabal
     , unbuildable
     , fromDependency
     , declaresFlag
-      -- * Reading a failure
-    , conflictSet
     ) where
 
 import           Data.List.NonEmpty                     (NonEmpty)
@@ -35,7 +34,8 @@ import           Data.Set                               (Set)
 import qualified Data.Set                               as Set
 import           Distribution.Types.PackageName         (PackageName)
 import           Distribution.Types.PkgconfigDependency (PkgconfigDependency)
-import           PubGrub.Incompatibility                (Domain (..),
+import           PubGrub.Incompatibility                (Cause (..),
+                                                         Domain (..),
                                                          Incompatibility (..),
                                                          MergeRule (MergeRule))
 import           PubGrub.InstanceSet                    (InstanceSet)
@@ -62,38 +62,30 @@ instance Domain Cabal where
     type VarOf Cabal = Var
     type ValueOf Cabal = Value
     type SetOf Cabal = ValueSet
-    type CauseOf Cabal = IncompatCause
+    type FactOf Cabal = CabalFact
 
     singleton _ = singletonValue
-
-    derivedCause = CauseDerivedFrom
-
-    noInstancesCause = CauseNoInstances
-
-    isRequest i = case incompCause i of
-        CauseRequest{}    -> True
-        CauseConstraint{} -> True
-        _                 -> False
 
     mergeRule = MergeRule mergeKey mergeWith
 
 -- --------------------------------------------------------------------------
--- Causes
+-- Facts
 -- --------------------------------------------------------------------------
 
 -- | The flags a dependency holds under, each with the value it needs. Empty for
 -- an unconditional dependency. Every flag is one of the depender's own.
 type Guard = Map Flag Bool
 
-data IncompatCause
+-- | What a leaf of a cabal proof says. The two seeds are stated as
+-- 'Seed's, the rest as 'Fact's; the solver's own leaf — no release in a
+-- range — is the core's 'NoValues', and a derived step is its 'Derived'.
+data CabalFact
     = CauseRequest PackageName InstanceSet                        -- request
-    | CauseNoInstances Var ValueSet                               -- noInstances
     | CauseOnlyInstalled PackageName [Version]                    -- onlyInstalled
     | CauseUnbuildable PackageName InstanceSet (NonEmpty UnbuildableReason)  -- unbuildable
     | CauseDependency PackageName InstanceSet Guard (PackageName, InstanceSet)  -- fromDependency
     | CauseDeclaresFlag PackageName InstanceSet Flag              -- declaresFlag
     | CauseConstraint Var ValueSet                                -- constraint: the set allowed
-    | CauseDerivedFrom (Incompatibility Cabal) (Incompatibility Cabal)  -- priorCause
 
 -- | Why a release's library cannot be built on this machine: one entry per
 -- thing that rules it out, read off the library's @BuildInfo@ at the flag
@@ -124,7 +116,7 @@ data UnbuildableReason
 -- level 0 before anything is decided; 'PubGrub.Solver' recognises a conflict that
 -- rests on those derivations alone as the end of the search.
 request :: PackageName -> InstanceSet -> Incompatibility Cabal
-request p s = Incompatibility (Map.singleton (PackageVar p) (Negative (instanceSet s))) (CauseRequest p s)
+request p s = Incompatibility (Map.singleton (PackageVar p) (Negative (instanceSet s))) (Seed (CauseRequest p s))
 
 -- | A constraint: if @v@ is in the plan at all, it is in @allowed@. It is
 -- impossible for @v@ to be in @forbidden@, the complement of @allowed@ in the
@@ -148,7 +140,7 @@ request p s = Incompatibility (Map.singleton (PackageVar p) (Negative (instanceS
 -- the two-valued case, which needs nothing.
 constraint :: Var -> ValueSet -> ValueSet -> Incompatibility Cabal
 constraint v allowed forbidden =
-    Incompatibility (Map.singleton v (Positive forbidden)) (CauseConstraint v allowed)
+    Incompatibility (Map.singleton v (Positive forbidden)) (Seed (CauseConstraint v allowed))
 
 -- | A flag held at a value: @p:f@ is @b@ if it is in play at all. A 'constraint'
 -- over the flag's own variable, as cabal's @--constraint 'p +f'@ is.
@@ -161,10 +153,9 @@ flagConstraint p f b =
 -- — so the clause forbids the whole source side of the package at once.
 --
 -- This is a fact about the world rather than about a range, which is why it has
--- its own cause. Rendered as 'CauseNoInstances' it would read \"no version for
--- base in >=0\", which is false-sounding and unhelpful: there are plenty of
--- versions of @base@, and the reason none may be used is that the compiler
--- provides it.
+-- its own cause. Rendered as 'NoValues' it would read \"no version for base in
+-- >=0\", which is false-sounding and unhelpful: there are plenty of versions of
+-- @base@, and the reason none may be used is that the compiler provides it.
 --
 -- The installed versions are there for the proof only. The clause bans the
 -- source side and says nothing about the installed units, but a reader of
@@ -178,7 +169,7 @@ flagConstraint p f b =
 -- shape.
 onlyInstalled :: PackageName -> [Version] -> InstanceSet -> Incompatibility Cabal
 onlyInstalled p installed anySource =
-    Incompatibility (Map.singleton (PackageVar p) (Positive (instanceSet anySource))) (CauseOnlyInstalled p installed)
+    Incompatibility (Map.singleton (PackageVar p) (Positive (instanceSet anySource))) (Fact (CauseOnlyInstalled p installed))
 
 -- | Instances that cannot be built in this environment, and so must never be
 -- selected. This is the PubGrub algorithm's rule for a version that cannot be
@@ -202,7 +193,7 @@ onlyInstalled p installed anySource =
 -- 'onlyInstalled': the clause's term is the ban, and the reasons are what the
 -- sentence says instead of a bare \"cannot be built\".
 unbuildable :: PackageName -> InstanceSet -> NonEmpty UnbuildableReason -> Incompatibility Cabal
-unbuildable p s why = Incompatibility (Map.singleton (PackageVar p) (Positive (instanceSet s))) (CauseUnbuildable p s why)
+unbuildable p s why = Incompatibility (Map.singleton (PackageVar p) (Positive (instanceSet s))) (Fact (CauseUnbuildable p s why))
 
 -- | Dependency incompatibility: @package@ in @instances@, with each flag of
 -- @guard@ at the value it names, requires @dep@ in @depSet@:
@@ -243,7 +234,7 @@ fromDependency pkgName pkgSet guard depName depSet =
                 ++ [(PackageVar depName, Negative (instanceSet depSet)) | not (isTopTerm (Negative (instanceSet depSet)))]
             )
         )
-        (CauseDependency pkgName pkgSet guard (depName, depSet))
+        (Fact (CauseDependency pkgName pkgSet guard (depName, depSet)))
 
 -- | A release declares an automatic flag: @package@ in @instances@ requires the
 -- flag to be in play, at either value:
@@ -264,7 +255,7 @@ declaresFlag p s f =
             , (FlagVar p f, Negative (flagSet bothValues))
             ]
         )
-        (CauseDeclaresFlag p s f)
+        (Fact (CauseDeclaresFlag p s f))
 
 -- --------------------------------------------------------------------------
 -- Merging
@@ -307,19 +298,19 @@ data MergeKey
 -- clauses about the same dependee merge.
 mergeKey :: Incompatibility Cabal -> Maybe MergeKey
 mergeKey i = case incompCause i of
-    CauseDependency p _ g (q, depSet) -> Just (MergeDep p q g depSet)
-    CauseDeclaresFlag p _ f           -> Just (MergeDeclares p f)
-    CauseUnbuildable p _ why          -> Just (MergeUnbuildable p (Set.fromList (NE.toList why)))
-    _                                 -> Nothing
+    Fact (CauseDependency p _ g (q, depSet)) -> Just (MergeDep p q g depSet)
+    Fact (CauseDeclaresFlag p _ f)           -> Just (MergeDeclares p f)
+    Fact (CauseUnbuildable p _ why)          -> Just (MergeUnbuildable p (Set.fromList (NE.toList why)))
+    _                                        -> Nothing
 
 -- | The union of two clauses carrying the same key, rebuilt through the
 -- constructor of their kind so that the cause stays a leaf cause with the
 -- unioned term ('PubGrub.Store' says why that matters).
 mergeWith :: Incompatibility Cabal -> Incompatibility Cabal -> Incompatibility Cabal
 mergeWith c new = case (incompCause c, incompCause new) of
-    (CauseDependency p aSet g (q, depSet), CauseDependency _ bSet _ _) ->
+    (Fact (CauseDependency p aSet g (q, depSet)), Fact (CauseDependency _ bSet _ _)) ->
         fromDependency p (aSet `union` bSet) g q depSet
-    (CauseDeclaresFlag p aSet f, CauseDeclaresFlag _ bSet _) ->
+    (Fact (CauseDeclaresFlag p aSet f), Fact (CauseDeclaresFlag _ bSet _)) ->
         declaresFlag p (aSet `union` bSet) f
     -- Two unit clauses banning instances of the same package: ¬(p ∈ A) and
     -- ¬(p ∈ B) is ¬(p ∈ A∪B), so the union claims nothing new. Slots touch, so
@@ -327,26 +318,9 @@ mergeWith c new = case (incompCause c, incompCause new) of
     -- range, which is what references/pubgrub.md:476 asks to be stated.
     -- The key made the two reason sets equal, so the existing clause's
     -- reasons are the merged clause's.
-    (CauseUnbuildable p aSet why, CauseUnbuildable _ bSet _) ->
+    (Fact (CauseUnbuildable p aSet why), Fact (CauseUnbuildable _ bSet _)) ->
         unbuildable p (aSet `union` bSet) why
     -- Unreachable: equal keys imply the same kind of cause. If it were
     -- reached, the newer clause would be lost.
     _ -> c
 
--- --------------------------------------------------------------------------
--- Reading a failure
--- --------------------------------------------------------------------------
-
--- | Every variable a failed solve's derivation mentions: the terminal
--- incompatibility's own terms, and the terms of every incompatibility it was
--- derived from, down to the external facts at the leaves.
---
--- This is the __conflict set__ in cabal's sense — the packages on the path to the
--- conflict as well as those in it — and it is what a planner holding a lock
--- reads to decide which held packages to release before solving again. A held
--- package that is not in the set took no part in the failure, and releasing it
--- cannot help.
-conflictSet :: Incompatibility Cabal -> Set Var
-conflictSet inc = Map.keysSet (incompTerms inc) <> case incompCause inc of
-    CauseDerivedFrom a b -> conflictSet a <> conflictSet b
-    _                    -> Set.empty

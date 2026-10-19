@@ -4,9 +4,9 @@
 -- | Incompatibilities: the solver's unit of knowledge, over any 'Domain'.
 --
 -- The solver is written once, over a domain it knows only through the class
--- below: variables, their values, the sets a term ranges over, and the causes a
--- clause carries. The cabal domain — package names and flags, instances and
--- Booleans, the facts a @.cabal@ file states — is "PubGrub.Cabal".
+-- below: variables, their values, the sets a term ranges over, and the facts
+-- a clause can rest on. The cabal domain — package names and flags, instances
+-- and Booleans, the facts a @.cabal@ file states — is "PubGrub.Cabal".
 module PubGrub.Incompatibility
     ( -- * The domain
       Domain (..)
@@ -16,8 +16,10 @@ module PubGrub.Incompatibility
     , VarTerm (..)
       -- * Incompatibilities
     , Incompatibility (..)
+    , Cause (..)
     , incompGet
-    , noInstances
+    , noValues
+    , isSeed
       -- * Judging against the partial solution
     , IncompatRelation (..)
     , incompRelation
@@ -40,9 +42,9 @@ import           PubGrub.Term     (Term (..), anyTerm, intersectTerm,
 
 -- | A problem domain: everything the solver needs to know about what it is
 -- solving over, and nothing it does not. The algorithm — unit propagation,
--- conflict resolution, the decision loop — reads variables only through 'Ord',
--- sets only through 'SetOps', and causes only through the three operations
--- here. What a variable, a value or a cause /is/ never reaches it.
+-- conflict resolution, the decision loop — reads variables only through 'Ord'
+-- and sets only through 'SetOps'. What a variable, a value or a fact /is/
+-- never reaches it.
 --
 -- One type fixes the variable, set and cause types together. The variable type
 -- is declared injective so that a variable alone names its domain, which is what
@@ -54,26 +56,15 @@ class (Ord (VarOf d), SetOps (SetOf d)) => Domain d where
     type ValueOf d
     -- | A set of values of one variable: what a 'Term' ranges over.
     type SetOf d
-    -- | Why an incompatibility holds. Provenance only: no solver decision
-    -- consults it, and it never affects what an incompatibility means.
-    type CauseOf d
+    -- | An external fact: what the domain knows about the world, and the
+    -- only thing a clause can rest on that the solver did not derive itself.
+    -- Provenance only: no solver decision consults it, and it never affects
+    -- what an incompatibility means.
+    type FactOf d
 
     -- | The set holding exactly one value of the variable — the shape of a
     -- decision.
     singleton :: VarOf d -> ValueOf d -> SetOf d
-
-    -- | The cause of a resolvent: the two incompatibilities it was derived
-    -- from, in the order 'priorCause' took them.
-    derivedCause :: Incompatibility d -> Incompatibility d -> CauseOf d
-
-    -- | The cause of a ban on a set of a variable's values, which the solver
-    -- states when the provider has nothing to offer inside it ('noInstances').
-    noInstancesCause :: VarOf d -> SetOf d -> CauseOf d
-
-    -- | Is this a seed — one of the incompatibilities the solve was asked for?
-    -- A conflict that rests on the seeds' own derivations alone is the end of
-    -- the search ("PubGrub.Solver").
-    isRequest :: Incompatibility d -> Bool
 
     -- | Which clauses say the same thing, and the clause that says it once.
     -- "PubGrub.Store" applies it as clauses arrive. The default merges nothing.
@@ -139,22 +130,50 @@ data VarTerm d = VarTerm
 -- of "no solution exists".
 --
 -- Alongside its terms, every incompatibility records /why/ it holds
--- ('CauseOf'), which is what lets a failed resolution be rendered as a
+-- ('Cause'), which is what lets a failed resolution be rendered as a
 -- numbered proof ("PubGrub.Report"). The cause is provenance only: no solver
 -- decision consults it, and it never affects what an incompatibility means.
 data Incompatibility d = Incompatibility
     { incompTerms :: Map (VarOf d) (Term (SetOf d))
-    , incompCause :: CauseOf d
+    , incompCause :: Cause d
     }
+
+-- | Why an incompatibility holds. PubGrub partitions incompatibilities into the
+-- external ones, which state a fact about the world, and the derived ones,
+-- which the solver resolved from two others; the derived ones form the
+-- derivation graph a failure is explained from. That structure is the solver's
+-- own, so it is fixed here, and the domain supplies only what a leaf says
+-- ('FactOf').
+--
+-- A seed is a fact too — it is what the solve was asked for — and it is kept
+-- apart because the solver treats it specially: a conflict that rests on the
+-- seeds' own derivations alone is the end of the search ("PubGrub.Solver").
+data Cause d
+    = Seed (FactOf d)
+      -- ^ one of the incompatibilities the solve was asked for
+    | Fact (FactOf d)
+      -- ^ a fact about the world, stated by the provider
+    | NoValues (VarOf d) (SetOf d)
+      -- ^ the solver's own fact: the provider had nothing to offer in this
+      -- set of the variable's values ('noValues')
+    | Derived (Incompatibility d) (Incompatibility d)
+      -- ^ the resolvent of two incompatibilities, in the order 'priorCause'
+      -- took them
 
 -- | The term an incompatibility states about @v@, if any.
 incompGet :: Domain d => VarOf d -> Incompatibility d -> Maybe (Term (SetOf d))
 incompGet v (Incompatibility m _) = Map.lookup v m
 
--- | The provider has nothing to offer in this set of values of the variable,
--- so none of it can be selected.
-noInstances :: Domain d => VarOf d -> SetOf d -> Incompatibility d
-noInstances v s = Incompatibility (Map.singleton v (Positive s)) (noInstancesCause v s)
+-- | What the solver states when the provider has nothing to offer in this set
+-- of a variable's values: none of them can be selected.
+noValues :: Domain d => VarOf d -> SetOf d -> Incompatibility d
+noValues v s = Incompatibility (Map.singleton v (Positive s)) (NoValues v s)
+
+-- | Is this a seed — one of the incompatibilities the solve was asked for?
+isSeed :: Incompatibility d -> Bool
+isSeed i = case incompCause i of
+    Seed _ -> True
+    _      -> False
 
 -- Judging against the partial solution -----------------------------------------
 
@@ -204,7 +223,7 @@ priorCause
     -- ^ shared (pivot) variable
     -> Incompatibility d
 priorCause current@(Incompatibility cur _) satCause@(Incompatibility sat _) pivot =
-    Incompatibility (priorCauseTerms pivot cur sat) (derivedCause current satCause)
+    Incompatibility (priorCauseTerms pivot cur sat) (Derived current satCause)
 
 -- | The terms a 'priorCause' arrives at, without the derivation node: the pivot's
 -- two terms unioned, every other variable's intersected, and the pivot dropped

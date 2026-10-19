@@ -80,7 +80,7 @@ find nothing. Most dependency facts are the first of their kind.
 
 **The merged clause is a leaf.** It is rebuilt with `fromDependency`, so its cause
 stays `CauseDependency` with the unioned range — the fact the spec wants stated.
-Reaching the same range through conflict resolution instead produces `CauseDerivedFrom`
+Reaching the same range through conflict resolution instead produces `Derived`
 nodes, and those nodes **are** the proof lines this exists to remove. `conduit <1.3`
 was once 1061 lines of pairwise merging. Merging at insert does not shorten those
 lines. It stops them existing.

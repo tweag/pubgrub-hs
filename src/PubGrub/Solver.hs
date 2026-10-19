@@ -60,7 +60,7 @@ import           PubGrub.Incompatibility        (Domain (..),
                                                  Incompatibility (..),
                                                  VarTerm (..),
                                                  incompGet, incompRelation,
-                                                 noInstances, priorCause)
+                                                 isSeed, noValues, priorCause)
 import           PubGrub.Provider               (Provider (..))
 import           PubGrub.SetOps                 (SetOps (..))
 import           PubGrub.Store                  (Store, emptyStore,
@@ -93,21 +93,21 @@ data Assignment d = Assignment
 -- partial selectors, and a partial selector is a crash waiting for the wrong
 -- constructor.
 data AssignmentKind d
-    = Decided (ValueOf d)
-    | Derived (Term (SetOf d)) (Incompatibility d)
+    = Decision (ValueOf d)
+    | Derivation (Term (SetOf d)) (Incompatibility d)
 
 -- | The term contributed by an assignment; for a decision, @Positive@ of the
 -- singleton.
 assignmentTerm :: Domain d => Assignment d -> Term (SetOf d)
 assignmentTerm a = case aKind a of
-    Decided i   -> Positive (singleton (aVar a) i)
-    Derived t _ -> t
+    Decision i   -> Positive (singleton (aVar a) i)
+    Derivation t _ -> t
 
 -- | The value a decision decides; 'Nothing' for a derivation.
 decidedValue :: Assignment d -> Maybe (ValueOf d)
 decidedValue a = case aKind a of
-    Decided i -> Just i
-    Derived{} -> Nothing
+    Decision i -> Just i
+    Derivation{} -> Nothing
 
 -- | The assignment as "one term about one variable".
 assignmentVarTerm :: Domain d => Assignment d -> VarTerm d
@@ -175,7 +175,7 @@ recordAssignment a ps@PartialSolution{psVariables, psNextIndex} =
 addDecision :: Domain d => VarOf d -> ValueOf d -> PartialSolution d -> PartialSolution d
 addDecision p i ps@PartialSolution{psLevel, psNextIndex} =
     recordAssignment
-        (Assignment psNextIndex (psLevel + 1) p (Decided i))
+        (Assignment psNextIndex (psLevel + 1) p (Decision i))
         ps{psLevel = psLevel + 1}
 
 -- | Record a derivation: the negation of @cause@'s term for @p@, at the
@@ -183,7 +183,7 @@ addDecision p i ps@PartialSolution{psLevel, psNextIndex} =
 addDerivation :: Domain d => VarOf d -> Incompatibility d -> PartialSolution d -> PartialSolution d
 addDerivation p cause ps@PartialSolution{psLevel, psNextIndex} =
     let term = maybe anyTerm negateTerm (incompGet p cause)
-     in recordAssignment (Assignment psNextIndex psLevel p (Derived term cause)) ps
+     in recordAssignment (Assignment psNextIndex psLevel p (Derivation term cause)) ps
 
 -- | Backtrack: drop every assignment strictly above the target level.
 --
@@ -310,7 +310,7 @@ satisfierSearch ps i = do
     -- was selected, and notes that level 0 is safe (:401).
     let prevLevel = aLevel prevAssign
     pure $ case aKind satAssign of
-        Derived _ cause
+        Derivation _ cause
             | prevLevel >= satLevel -> (satVar, SameDecisionLevels cause)
         _ -> (satVar, DifferentDecisionLevels prevLevel)
   where
@@ -326,11 +326,11 @@ satisfierSearch ps i = do
 -- 'PubGrub.Incompatibility.request'. They are the oldest assignments of all,
 -- and they are never backtracked.
 seedAssignments :: Domain d => PartialSolution d -> VarOf d -> [Assignment d]
-seedAssignments ps p = [a | a <- varHistory ps p, isSeed a]
+seedAssignments ps p = [a | a <- varHistory ps p, fromSeed a]
   where
-    isSeed a = case aKind a of
-        Derived _ cause -> isRequest cause
-        Decided _       -> False
+    fromSeed a = case aKind a of
+        Derivation _ cause -> isSeed cause
+        Decision _       -> False
 
 -- | Is the incompatibility satisfied by the seeds' own derivations alone? Then
 -- no decision took part in the conflict, so nothing can be backtracked and
@@ -369,7 +369,7 @@ closeWithSeeds logA ps = go
     -- a pass removed something. Two seeds on one variable need the second pass:
     -- the first alone leaves the part of its range the other seed excludes.
     go inc = do
-        inc' <- foldM step inc [(p, cause) | p <- Map.keys (incompTerms inc), a <- seedAssignments ps p, Derived _ cause <- [aKind a]]
+        inc' <- foldM step inc [(p, cause) | p <- Map.keys (incompTerms inc), a <- seedAssignments ps p, Derivation _ cause <- [aKind a]]
         if Map.size (incompTerms inc') < Map.size (incompTerms inc) then go inc' else pure inc'
     step inc (p, cause)
         | Map.member p (incompTerms inc) = do
@@ -525,7 +525,7 @@ solve logA provider seeds =
         --
         -- __Progress does not depend on the provider being thorough.__ Whatever it
         -- says, this bans all of @range@ between them: the facts cover part, the
-        -- @noInstances@ clause covers the remainder. So @p@ cannot be offered the
+        -- @noValues@ clause covers the remainder. So @p@ cannot be offered the
         -- same set twice, which is the property termination rests on. 'isEmpty' is
         -- one-sided on a set — it may miss that a set is empty — and it
         -- errs in the safe direction here: a redundant clause, never a missing one.
@@ -533,9 +533,9 @@ solve logA provider seeds =
             -- Said nothing: the range itself, untouched. A @difference@ against the
             -- empty set would give an equivalent but differently shaped DNF, and so
             -- change the search for every provider that states no facts.
-            | [] <- stated = insertClause (noInstances p range)
+            | [] <- stated = insertClause (noValues p range)
             | isEmpty leftover = id
-            | otherwise = insertClause (noInstances p leftover)
+            | otherwise = insertClause (noValues p leftover)
           where
             leftover = case stated of
                 []       -> range

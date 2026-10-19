@@ -17,7 +17,7 @@ module PubGrub.Value
     , BoolSet (..)
     , boolSet
     , bothValues
-    , noValues
+    , neitherValue
     , memberBool
     , ValueSet (..)
     , emptyValueSet
@@ -79,7 +79,7 @@ data BoolSet = BoolSet
     deriving (Eq, Ord, Show)
 
 instance SetOps BoolSet where
-    empty = noValues
+    empty = neitherValue
     union (BoolSet f t) (BoolSet f' t') = BoolSet (f || f') (t || t')
     intersect (BoolSet f t) (BoolSet f' t') = BoolSet (f && f') (t && t')
     difference (BoolSet f t) (BoolSet f' t') = BoolSet (f && not f') (t && not t')
@@ -89,9 +89,9 @@ boolSet :: Bool -> BoolSet
 boolSet True  = BoolSet False True
 boolSet False = BoolSet True False
 
-bothValues, noValues :: BoolSet
+bothValues, neitherValue :: BoolSet
 bothValues = BoolSet True True
-noValues = BoolSet False False
+neitherValue = BoolSet False False
 
 memberBool :: Bool -> BoolSet -> Bool
 memberBool True  = allowsTrue
@@ -121,12 +121,12 @@ instance SetOps ValueSet where
 -- | No values. @Negative emptyValueSet@ is the always-true term ⊤ for any
 -- variable; @Positive emptyValueSet@ is the never-true term ⊥.
 emptyValueSet :: ValueSet
-emptyValueSet = ValueSet emptyInstanceSet noValues
+emptyValueSet = ValueSet emptyInstanceSet neitherValue
 
 -- | These instances, and no Boolean: the set a term about a package ranges
 -- over.
 instanceSet :: InstanceSet -> ValueSet
-instanceSet s = ValueSet s noValues
+instanceSet s = ValueSet s neitherValue
 
 -- | These Booleans, and no instance: the set a term about a flag ranges over.
 flagSet :: BoolSet -> ValueSet

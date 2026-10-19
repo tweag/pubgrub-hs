@@ -149,18 +149,26 @@ An **incompatibility** is a set of terms (at most one per package) that cannot a
 In SAT solving this would be called a *clause*. In Answer Set Programming it is a *nogood*. PubGrub uses the word incompatibility throughout.
 
 ```haskell
-data IncompatCause
-  = CauseRequest PackageName InstanceSet
-  | CauseNoInstances PackageName InstanceSet
-  | CauseOnlyInstalled PackageName
-  | CauseUnbuildable PackageName InstanceSet (NonEmpty UnbuildableReason)
-  | CauseDependency PackageName InstanceSet (PackageName, InstanceSet)
-  | CauseDerivedFrom Incompatibility Incompatibility
+-- the core: the shape of a derivation, over any domain d
+data Cause d
+  = Seed (FactOf d)                                -- what the solve was asked for
+  | Fact (FactOf d)                                -- a fact the provider stated
+  | NoValues (VarOf d) (SetOf d)                   -- nothing to offer in this set
+  | Derived (Incompatibility d) (Incompatibility d) -- resolved from two others
 
-data Incompatibility p vs = Incompatibility
-  { terms :: Map p (Term vs)
-  , cause :: IncompatCause p vs
+data Incompatibility d = Incompatibility
+  { incompTerms :: Map (VarOf d) (Term (SetOf d))
+  , incompCause :: Cause d
   }
+
+-- the cabal domain: what a leaf says
+data CabalFact
+  = CauseRequest PackageName InstanceSet
+  | CauseOnlyInstalled PackageName [Version]
+  | CauseUnbuildable PackageName InstanceSet (NonEmpty UnbuildableReason)
+  | CauseDependency PackageName InstanceSet Guard (PackageName, InstanceSet)
+  | CauseDeclaresFlag PackageName InstanceSet Flag
+  | CauseConstraint Var ValueSet
 ```
 
 ### Three canonical forms
@@ -202,7 +210,7 @@ incompatibility covering the whole range. The spec **requires** this
 
 **3. Conflict-derived incompatibility**
 
-Created during conflict resolution (§6.2) when the solver detects a contradiction and applies the Rule of Resolution to two existing incompatibilities. These carry a `CauseDerivedFrom` cause for error reporting (§7). Every other constructor is a **leaf**: a fact about the world rather than a step of reasoning.
+Created during conflict resolution (§6.2) when the solver detects a contradiction and applies the Rule of Resolution to two existing incompatibilities. These carry a `Derived` cause for error reporting (§7). Every other cause is a **leaf**: a fact about the world rather than a step of reasoning.
 
 ### Special case: unit incompatibility
 
@@ -347,7 +355,7 @@ solve provider seeds = go (insertClauses seeds emptyStore)
 
 ## 7. Error Reporting — The Derivation Tree
 
-Because every derived incompatibility carries its two parents in `CauseDerivedFrom`, the final conflict is the root of a DAG traceable back to the original dependency facts. This is what allows PubGrub to produce messages like:
+Because every derived incompatibility carries its two parents in `Derived`, the final conflict is the root of a DAG traceable back to the original dependency facts. This is what allows PubGrub to produce messages like:
 
 > Because `aeson ^>=2.2` requires `text ^>=2.0` and `servant 0.20` requires `text ^>=1.2`, `aeson ^>=2.2` and `servant 0.20` are incompatible.
 
@@ -357,9 +365,9 @@ reportConflict :: Incompatibility -> [Text]
 
 The printer walks the DAG:
 
-- **a leaf** is a fact about the world. `CauseDependency` prints "X depends on Y in range R". `CauseNoInstances` prints "no version for Y in R". `CauseOnlyInstalled` prints "Y cannot be built from source". `CauseUnbuildable` prints "Y needs pkg-config package M, which is not found", or "Y is marked buildable: False".
+- **a leaf** is a fact about the world. `CauseDependency` prints "X depends on Y in range R". The core's own `NoValues` prints "no version for Y in R". `CauseOnlyInstalled` prints "Y cannot be built from source". `CauseUnbuildable` prints "Y needs pkg-config package M, which is not found", or "Y is marked buildable: False".
 - **`CauseRequest`** is a seed, and prints "foo >=1 && <2 is requested". It is the last fact of every proof: a terminal conflict is resolved against the seeds it rests on, so the last line reads "So, because …, version solving failed".
-- **`CauseDerivedFrom`** prints "Because [cause 1] and [cause 2], [this conclusion]".
+- **`Derived`** prints "Because [cause 1] and [cause 2], [this conclusion]".
 
 > **Deduplication.** The derivation structure is a DAG, not a tree, so the same incompatibility can be a parent of several nodes. A printer that recurses naively repeats large subtrees. Give a line number to any incompatibility referenced more than once, and replace repeated expansions with a back-reference.
 
@@ -497,7 +505,7 @@ PubGrub has no built-in notion of this either, and it does not need one here. Ou
 
 The modular solver's approach: accumulate a trace of every decision and its rationale. Error messages are excerpts of that trace with irrelevant steps removed, guided by conflict sets. As Löh noted, "all the information is there" but the presentation is not yet polished.
 
-PubGrub's approach: the derivation tree is structurally embedded in the `IncompatCause` of each derived incompatibility. Rendering it is a pure recursive function over the tree structure (§7). The output takes the form of a logical proof: "Because X requires Y and Z requires ¬Y, X and Z are incompatible." This structure is always available regardless of how complex the conflict was.
+PubGrub's approach: the derivation tree is structurally embedded in the `Cause` of each derived incompatibility. Rendering it is a pure recursive function over the tree structure (§7). The output takes the form of a logical proof: "Because X requires Y and Z requires ¬Y, X and Z are incompatible." This structure is always available regardless of how complex the conflict was.
 
 Both approaches aim at the same goal. PubGrub's advantage is that the derivation tree is a first-class value produced by the algorithm itself, not a post-hoc reconstruction from logs.
 

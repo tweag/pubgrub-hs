@@ -21,6 +21,7 @@ library
     exposed-modules:
         PubGrub
         PubGrub.Cabal
+        PubGrub.Derivation
         PubGrub.Incompatibility
         PubGrub.Index.PreInstalled
         PubGrub.InstanceSet
@@ -156,6 +157,7 @@ test-suite pubgrub-hs-test
         SolverSpec
         StoredSpec
         StoreSpec
+        ToyDomainSpec
         VersionSetSpec
     build-depends:
         , pubgrub-hs

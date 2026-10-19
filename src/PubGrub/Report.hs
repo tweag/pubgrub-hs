@@ -2,7 +2,7 @@
 
 -- | Rendering a failed resolution as a human-readable proof.
 --
--- A terminal 'Incompatibility' carries the 'IncompatCause' tree that produced
+-- A terminal 'Incompatibility' carries the 'Cause' tree that produced
 -- it, which is all this module needs: 'reportConflict' replays that tree as a
 -- written argument.
 --
@@ -65,8 +65,9 @@ import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Types.PackageName (PackageName)
 import           PubGrub.Cabal                  (Cabal,
-                                                 IncompatCause (..))
-import           PubGrub.Incompatibility        (Incompatibility (..),
+                                                 CabalFact (..))
+import           PubGrub.Incompatibility        (Cause (..),
+                                                 Incompatibility (..),
                                                  priorCauseTerms)
 import           PubGrub.InstanceSet            (InstanceSet)
 import           PubGrub.Report.Headline        (headline)
@@ -428,10 +429,10 @@ sharedDepender (c1, c2) = do
 --    conclusion wider than the line's two causes justify.
 collapseNoInstances :: Incompatibility Cabal -> Incompatibility Cabal
 collapseNoInstances inc = case incompCause inc of
-    CauseDerivedFrom c1 c2 ->
+    Derived c1 c2 ->
         let c1' = collapseNoInstances c1
             c2' = collapseNoInstances c2
-            node = Incompatibility (incompTerms inc) (CauseDerivedFrom c1' c2')
+            node = Incompatibility (incompTerms inc) (Derived c1' c2')
          in fromMaybe node (symmetric (absorb node) (c1', c2'))
     _ -> inc
   where
@@ -445,8 +446,8 @@ collapseNoInstances inc = case incompCause inc of
         guard (Map.size (incompTerms node) == 2)
         s1 <- vsInstances <$> (positive =<< Map.lookup (PackageVar p1) (incompTerms node))
         r2 <- vsInstances <$> (negative =<< Map.lookup (PackageVar q) (incompTerms node))
-        pure (Incompatibility (incompTerms node) (CauseDependency p1 s1 Map.empty (q, r2)))
+        pure (Incompatibility (incompTerms node) (Fact (CauseDependency p1 s1 Map.empty (q, r2))))
 
     dependencyPackages c = case incompCause c of
-        CauseDependency p1 _ g (q, _) | p1 /= q, Map.null g -> Just (p1, q)
-        _                                                   -> Nothing
+        Fact (CauseDependency p1 _ g (q, _)) | p1 /= q, Map.null g -> Just (p1, q)
+        _ -> Nothing

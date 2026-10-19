@@ -51,10 +51,11 @@ import           Distribution.Types.UnitId      (mkUnitId)
 import           Distribution.Types.Version     (mkVersion)
 import           Distribution.Version           (anyVersion, thisVersion)
 import           PubGrub.Cabal                  (Cabal,
-                                                 IncompatCause (..),
+                                                 CabalFact (..),
                                                  UnbuildableReason (..),
                                                  flagConstraint, request)
-import           PubGrub.Incompatibility        (Incompatibility (..))
+import           PubGrub.Incompatibility        (Cause (..),
+                                                 Incompatibility (..))
 import           PubGrub.Index.PreInstalled     (PreInstalledPackage (..))
 import           PubGrub.InstanceSet            (Instance (..),
                                                  InstanceSet (..),
@@ -507,18 +508,18 @@ bootPackageStatesItself =
         "non-reinstallable packages"
         [ testCase "deciding one also states that it cannot be built from source" $ do
             incs <- runTestM (expandInstalled "base")
-            case [p | CauseOnlyInstalled p _ <- map incompCause incs] of
+            case [p | Fact (CauseOnlyInstalled p _) <- map incompCause incs] of
                 [p] -> p @?= mkPackageName "base"
                 ps -> assertFailure ("expected one such fact, got " ++ show (length ps))
         , testCase "an ordinary installed package states no such thing" $ do
             incs <- runTestM (expandInstalled "ordinary")
-            [() | CauseOnlyInstalled _ _ <- map incompCause incs] @?= []
+            [() | Fact (CauseOnlyInstalled _ _) <- map incompCause incs] @?= []
         , -- The case with no decision to hang the fact on: the offered range holds
           -- no installed unit, so the rule has nothing to return, and it says why.
           testCase "a source-only range of one still says why" $ do
             (chosen, incs) <- runTestM (expandIn "base" sourceOnly)
             chosen @?= Nothing
-            [p | CauseOnlyInstalled p _ <- map incompCause incs] @?= [mkPackageName "base"]
+            [p | Fact (CauseOnlyInstalled p _) <- map incompCause incs] @?= [mkPackageName "base"]
         , testCase "an ordinary package in the same position says nothing" $ do
             (chosen, incs) <- runTestM (expandIn "ordinary" sourceOnly)
             chosen @?= Nothing
@@ -616,7 +617,7 @@ unbuildableStatesItself =
             case result of
                 (Just (PackageValue (BuildSource v)), incs) -> do
                     v @?= v1
-                    [p | CauseUnbuildable p _ _ <- map incompCause incs] @?= [pkg "foo"]
+                    [p | Fact (CauseUnbuildable p _ _) <- map incompCause incs] @?= [pkg "foo"]
                 _ -> assertFailure "expected 1.0.0 to be chosen"
         ]
   where
@@ -635,10 +636,10 @@ selfDependencyDropped =
         "self-dependencies"
         [ testCase "a release depending on itself states nothing about itself" $ do
             incs <- runTestM expandSelfDep
-            [q | CauseDependency _ _ _ (q, _) <- map incompCause incs, q == pkg "p"] @?= []
+            [q | Fact (CauseDependency _ _ _ (q, _)) <- map incompCause incs, q == pkg "p"] @?= []
         , testCase "its other dependencies are still stated" $ do
             incs <- runTestM expandSelfDep
-            [q | CauseDependency _ _ _ (q, _) <- map incompCause incs] @?= [pkg "q"]
+            [q | Fact (CauseDependency _ _ _ (q, _)) <- map incompCause incs] @?= [pkg "q"]
         , testCase "and the world still solves" $ do
             result <- solveWorld selfDepWorld
             result @?= Right (solutionOf [(pkg "root", v1, []), (pkg "p", v1, []), (pkg "q", v1, [])])

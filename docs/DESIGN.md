@@ -26,16 +26,31 @@ candidate's `.cabal` file, including the ones the search discards.
 
 **The algorithm is written once, over a domain it reads through a class.**
 `PubGrub.Incompatibility.Domain` fixes four types together — the variables, their
-values, the sets a term ranges over, and the causes a clause carries — and the solver
-uses variables only through `Ord`, sets only through `SetOps`, and causes only through
-the operations the class names: the cause of a resolvent, the cause of a ban, whether a
-clause is a seed, and which clauses the store may merge. This is the shape of
-pubgrub-rs's `DependencyProvider`, where one type fixes the package, version-set and
-metadata types. The cabal instantiation is `PubGrub.Cabal`: a type `Cabal` with no
-values, so a clause of ours is an `Incompatibility Cabal`, and the module holds the
-cause type, the five constructors a `.cabal` fact is stated through, and the merge rule.
-`Solver`, `Store`, `Provider` and `Incompatibility` mention nothing of it; `Report` is
-the cabal renderer and is written over `Cabal` on purpose.
+values, the sets a term ranges over, and the facts a leaf can state — and the solver
+uses variables only through `Ord`, sets only through `SetOps`, and asks the class for
+two things besides: the singleton set of a decision, and which clauses the store may
+merge. This is the shape of pubgrub-rs's `DependencyProvider`, where one type fixes
+the package, version-set and metadata types. The cabal instantiation is
+`PubGrub.Cabal`: a type `Cabal` with no values, so a clause of ours is an
+`Incompatibility Cabal`, and the module holds the fact type, the six constructors a
+`.cabal` fact or a request is stated through, and the merge rule. `Solver`, `Store`,
+`Provider` and `Incompatibility` mention nothing of it; `Report` is the cabal renderer
+and is written over `Cabal` on purpose.
+
+**The derivation tree is the core's, and only its leaves are the domain's.** The spec
+partitions incompatibilities into the external ones, which state a fact, and the
+derived ones, which the solver resolved from two others (`references/pubgrub.md:136`
+and `:143`), and its reporting algorithm walks that structure without looking inside
+a fact (`:586`, cases at `:595`, `:641` and `:668`). So `PubGrub.Incompatibility.Cause`
+fixes the shape — `Seed`, `Fact`, `NoValues` and `Derived` — and the domain supplies
+only what a `Seed` or `Fact` says (`FactOf`). Before 2026-10-19 the whole cause was the
+domain's, and the core built resolvents and bans through two class methods it could
+never read back; every view of the tree was then written over `Cabal`, and the
+reporter could not ship with the core. The views are now `PubGrub.Derivation`, written
+once, and `conflictSet` with them. pubgrub-rs reached the same shape
+(`DerivationTree` is `External | Derived`); unlike it, a dependency fact is not built
+into the core, because a dependency of ours carries a guard and a slot, and both are
+cabal's.
 
 The variable type is declared injective — a variable type belongs to one domain — so
 that a variable alone tells the compiler its domain, and `singleton`, which needs only
@@ -46,7 +61,10 @@ a variable and a value, takes nothing else. The empty set needs no variable: it 
 Nothing observable changed when this was done: the gate came out identical, the
 goldens unchanged, and the suite at the same count. What it buys is that the solver
 module states its own assumptions, and can be read or tested against a toy domain
-without `Cabal-syntax` in sight.
+without `Cabal-syntax` in sight. `test/ToyDomainSpec.hs` is that domain — a package is
+a name, a value an `Int`, a set a `Set Int`, a fact one of two sentences — and it
+imports nothing from `PubGrub.Cabal`, so the core leaning on cabal again is a compile
+error there before it is anything else.
 
 ## 2. Version sets are intensional
 

@@ -241,7 +241,7 @@ mkExpand logA preference installedDb source = expand'
             -- the reason is that the compiler provides base. The fact replaces a
             -- clause rather than adding one: the solver's @banRest@ subtracts
             -- what the provider stated, and the fact covers every source
-            -- instance, so the @noInstances@ clause it would have added is empty.
+            -- instance, so the @noValues@ clause it would have added is empty.
             --
             -- Stating a boot fact changes the search, not only the wording; see
             -- 'onlyInstalledFact' for what stating all of them up front cost.
@@ -327,7 +327,7 @@ mkExpand logA preference installedDb source = expand'
     -- the range. Stated with the decision that commits to one of its installed
     -- units, and with the 'Nothing' for a range that admits none. Without it,
     -- every range of @base@ that admits only source releases costs a decision,
-    -- a provider call answering 'Nothing' and a @noInstances@ clause naming that
+    -- a provider call answering 'Nothing' and a @noValues@ clause naming that
     -- one range. cabal states the same rule as a constraint up front
     -- (@PackagePropertyInstalled@ on each non-reinstallable package).
     --

@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | The sentences a proof is made of: the standard PubGrub forms, in cabal's
@@ -45,10 +46,11 @@ import qualified Data.Text                      as T
 import           Distribution.Pretty            (prettyShow)
 import           Distribution.Types.PackageName (PackageName)
 import           PubGrub.Cabal                  (Cabal,
+                                                 CabalFact (..),
                                                  Guard,
-                                                 IncompatCause (..),
                                                  UnbuildableReason (..))
-import           PubGrub.Incompatibility        (Incompatibility (..))
+import           PubGrub.Incompatibility        (Cause (..),
+                                                 Incompatibility (..))
 import           PubGrub.InstanceSet            (InstanceSet, isEveryVersion)
 import           PubGrub.Pretty                 (Pretty (..))
 import           PubGrub.Term                   (Term (..))
@@ -121,21 +123,26 @@ requires p1 r1 p2 r2 = named p1 r1 <> " requires " <> bare p2 r2
 -- cannot be built here says so, and why, rather than looking absent.
 leaf :: Incompatibility Cabal -> Text
 leaf c = case incompCause c of
-    CauseRequest p s -> bareP p s <> " is requested"
-    CauseConstraint (PackageVar p) s -> pretty p <> " is constrained to " <> pretty (vsInstances s)
-    CauseConstraint (FlagVar p f) s -> pretty p <> " is constrained to " <> flagText f (vsFlags s)
-    CauseNoInstances v s -> "no version for " <> pretty v <> " in " <> pretty s
-    CauseOnlyInstalled p [] -> pretty p <> " is not installed and cannot be built from source"
-    CauseOnlyInstalled p vs ->
-        pretty p <> " is pinned to " <> T.intercalate " or " (map pretty vs) <> " (installed)"
-    CauseUnbuildable p s why -> namedP p s <> " " <> reasons why
-    CauseDeclaresFlag p s f -> namedP p s <> " declares flag " <> pretty f
-    -- 'PubGrub.Incompatibility.fromDependency' drops the dependee's term when the
-    -- dependency is unsatisfiable, and then there is no \"depends on\" left: the
-    -- clause is a bare ban on the depender and reads as one.
-    CauseDependency p s g (q, r)
-        | Map.member (PackageVar q) (incompTerms c) -> guardedDep p s g q r
-    _ -> summary c
+    NoValues v s -> "no version for " <> pretty v <> " in " <> pretty s
+    Seed f       -> fact f
+    Fact f       -> fact f
+    Derived _ _  -> summary c
+  where
+    fact = \case
+        CauseRequest p s -> bareP p s <> " is requested"
+        CauseConstraint (PackageVar p) s -> pretty p <> " is constrained to " <> pretty (vsInstances s)
+        CauseConstraint (FlagVar p f) s -> pretty p <> " is constrained to " <> flagText f (vsFlags s)
+        CauseOnlyInstalled p [] -> pretty p <> " is not installed and cannot be built from source"
+        CauseOnlyInstalled p vs ->
+            pretty p <> " is pinned to " <> T.intercalate " or " (map pretty vs) <> " (installed)"
+        CauseUnbuildable p s why -> namedP p s <> " " <> reasons why
+        CauseDeclaresFlag p s f -> namedP p s <> " declares flag " <> pretty f
+        -- 'PubGrub.Cabal.fromDependency' drops the dependee's term when the
+        -- dependency is unsatisfiable, and then there is no \"depends on\" left: the
+        -- clause is a bare ban on the depender and reads as one.
+        CauseDependency p s g (q, r)
+            | Map.member (PackageVar q) (incompTerms c) -> guardedDep p s g q r
+            | otherwise -> summary c
 
 -- | Why a release cannot be built, as the predicate of its sentence: \"needs
 -- pkg-config package libpq, which is not found\", and \"is marked buildable:

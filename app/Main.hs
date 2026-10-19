@@ -84,8 +84,9 @@ import           Options.Applicative                       (Parser, argument,
                                                             short, switch,
                                                             value)
 import           PubGrub.Cabal                             (Cabal,
-                                                            IncompatCause (..))
-import           PubGrub.Incompatibility                   (Incompatibility,
+                                                            CabalFact (..))
+import           PubGrub.Incompatibility                   (Cause (..),
+                                                            Incompatibility,
                                                             incompCause,
                                                             incompTerms)
 import           PubGrub.InstanceSet                       (HasVersion (version),
@@ -640,7 +641,7 @@ dependencyMap provider solution =
         let deps =
                 [ d
                 | inc <- incs
-                , CauseDependency p _ _ (d, _) <- [incompCause inc]
+                , Fact (CauseDependency p _ _ (d, _)) <- [incompCause inc]
                 , p == pn
                 ]
         pure (pn, deps)

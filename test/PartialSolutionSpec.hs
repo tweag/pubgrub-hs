@@ -25,7 +25,7 @@ import           PubGrub.Cabal                   (Cabal,
                                                   fromDependency,
                                                   request)
 import           PubGrub.Incompatibility         (Incompatibility,
-                                                  incompGet, noInstances)
+                                                  incompGet, noValues)
 import           PubGrub.InstanceSet             (Instance (..),
                                                   InstanceSet (..),
                                                   singletonInstance)
@@ -85,7 +85,7 @@ sets =
 incompatibilities :: [Incompatibility Cabal]
 incompatibilities =
     [request p (singletonInstance i) | PackageVar p <- packages, PackageValue i <- instances]
-        ++ [noInstances p (instanceSet s) | p <- packages, s <- sets]
+        ++ [noValues p (instanceSet s) | p <- packages, s <- sets]
         ++ [ fromDependency p s Map.empty q t
            | (PackageVar p, PackageVar q) <- zip packages (drop 1 packages)
            , s <- take 1 sets
@@ -139,11 +139,11 @@ emptyModel = Model{mAssignments = [], mLevel = 0, mNextIndex = 0}
 
 mDecide :: Var -> Value -> Model -> Model
 mDecide p i (Model as l n) =
-    Model (as ++ [Assignment n (l + 1) p (Decided i)]) (l + 1) (n + 1)
+    Model (as ++ [Assignment n (l + 1) p (Decision i)]) (l + 1) (n + 1)
 
 mDerive :: Var -> Incompatibility Cabal -> Model -> Model
 mDerive p cause (Model as l n) =
-    Model (as ++ [Assignment n l p (Derived term cause)]) l (n + 1)
+    Model (as ++ [Assignment n l p (Derivation term cause)]) l (n + 1)
   where
     term = maybe anyTerm negateTerm (incompGet p cause)
 

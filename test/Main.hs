@@ -13,6 +13,7 @@ import qualified ConstraintSpec
 import qualified StoredSpec
 import qualified StoreSpec
 import           Test.Tasty     (defaultMain, testGroup)
+import qualified ToyDomainSpec
 import qualified VersionSetSpec
 
 main :: IO ()
@@ -33,4 +34,5 @@ main =
             , FlagSolveSpec.tests
             , InstalledSpec.tests
             , IndexStateSpec.tests
+            , ToyDomainSpec.tests
             ]

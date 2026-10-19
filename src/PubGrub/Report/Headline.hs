@@ -37,8 +37,9 @@ import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Types.PackageName (PackageName)
 import           PubGrub.Cabal                  (Cabal,
-                                                 IncompatCause (..))
-import           PubGrub.Incompatibility        (Incompatibility (..))
+                                                 CabalFact (..))
+import           PubGrub.Incompatibility        (Cause (..),
+                                                 Incompatibility (..))
 import           PubGrub.InstanceSet            (InstanceSet)
 import           PubGrub.Pretty                 (Pretty (..))
 import           PubGrub.Report.Rule
@@ -66,9 +67,9 @@ headline root = T.concat ["No solution", forWhat, walls, ".", culprit]
     -- never reaches is not the one that failed.
     requests = nub [bareP p r | (p, r) <- seedRanges root]
     isWorld c = case incompCause c of
-        CauseOnlyInstalled{} -> True
-        CauseUnbuildable{}   -> True
-        _                    -> False
+        Fact CauseOnlyInstalled{} -> True
+        Fact CauseUnbuildable{}   -> True
+        _                         -> False
     culprit = case firstOf [wallStory, pivotStory] root of
         Nothing -> ""
         Just s  -> "\n" <> s <> "."
@@ -86,7 +87,7 @@ seeds = nub . map fst . seedRanges
 
 -- | The pinned packages the proof rests on, with their installed versions.
 pinnedWalls :: Incompatibility Cabal -> [(PackageName, [Version])]
-pinnedWalls root = nub [(p, vs) | c <- externals root, CauseOnlyInstalled p vs@(_ : _) <- [incompCause c]]
+pinnedWalls root = nub [(p, vs) | c <- externals root, Fact (CauseOnlyInstalled p vs@(_ : _)) <- [incompCause c]]
 
 -- | A pinned package as \"base 4.21.0.0 (installed)\": the installed version is
 -- what a reader can act on, and a step's own term for the wall may be its
@@ -101,9 +102,9 @@ walled :: Incompatibility Cabal -> [PackageName]
 walled root = nub (concat [wallPackage c | c <- externals root])
   where
     wallPackage c = case incompCause c of
-        CauseOnlyInstalled p _  -> [p]
-        CauseUnbuildable p _ _  -> [p]
-        _                       -> []
+        Fact (CauseOnlyInstalled p _) -> [p]
+        Fact (CauseUnbuildable p _ _) -> [p]
+        _                             -> []
 
 -- --------------------------------------------------------------------------
 -- The wall story
@@ -154,7 +155,7 @@ wallStep root n = do
         _     -> Nothing
     guard (x `notElem` seeds root)
     let against = [wallText root p | (p, _) <- ps, p `elem` pinnedPackages]
-        pinned = nub [wallText root p | c <- externals n, CauseOnlyInstalled p (_ : _) <- [incompCause c]]
+        pinned = nub [wallText root p | c <- externals n, Fact (CauseOnlyInstalled p (_ : _)) <- [incompCause c]]
     guard (not (null against) || not (null pinned))
     pure (x, w, if null against then pinned else against)
   where
@@ -270,7 +271,7 @@ gaveUpOn p node
     -- so @d ∈ ⋃S@ does.
     leaves =
         Map.toList
-            (Map.fromListWith union [(d, s) | c <- externals node, CauseDependency d s g (q, _) <- [incompCause c], Map.null g, q == p, d /= p])
+            (Map.fromListWith union [(d, s) | c <- externals node, Fact (CauseDependency d s g (q, _)) <- [incompCause c], Map.null g, q == p, d /= p])
     dependers = map (PackageVar . fst) leaves
     needs = case leaves of
         [(d, s)] -> namedP d s <> " needs " <> pretty p
