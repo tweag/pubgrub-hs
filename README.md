@@ -43,7 +43,8 @@ it is built that way, and [`CLAUDE.md`](CLAUDE.md) the architecture.
 ## Build
 
 ```sh
-cabal build
+cabal build all
+cabal test all                                                        # the three packages' suites
 cabal run pubgrub-index -- --index-state "$(cat bench/index-state)"   # optional but recommended, ~200 s, once per refresh
 ```
 
@@ -121,7 +122,7 @@ sentences against cabal's 193.
 ## Test
 
 ```sh
-cabal test                  # 229 tests
+cabal test all              # 250 tests over the three packages
 scripts/gate.sh             # every check that must not regress, over 26 real problems
 cabal run pubgrub-harness   # both solvers over both problem sets; writes bench/output/
 ```
@@ -137,19 +138,22 @@ per problem, and writes the benchmark report and the explanation showcase. See
 
 ## Layout
 
+Three packages in one `cabal.project`. The first two are meant for Hackage.
+
 ```
-src/PubGrub/        core library — the pure PubGrub algorithm and types.
-                    Of the cabal ecosystem it depends on Cabal-syntax only:
-                    no cabal-install, no cabal-install-solver.
-cabal/PubGrub/Cabal/ the cabal provider (public sublibrary): the .cabal flatten and
-                    the rule that picks an instance of a package, over any index
-                    and installed set. Cabal-syntax only, like the core.
-bridge/Bridge/      the Cabal bridge (private library): reads the Hackage index,
-                    resolves the compiler and installed packages on this machine,
-                    feeds them to the provider, and drives cabal's own solver
-                    over the same index as the baseline.
+pubgrub/            the solver, written once over any domain: the algorithm, the
+                    derivation views, the spec's reporting walker over a Formatter,
+                    and version sets. Depends on base, containers, text, co-log-core.
+pubgrub-cabal/      the cabal domain: packages and flags as variables, the facts a
+                    .cabal file states, the proof renderer, the .cabal flatten and
+                    the rule that picks an instance of a package, over any index and
+                    installed set. Cabal-syntax only.
+bridge/Bridge/      the Cabal bridge (private library of this package): reads the
+                    Hackage index, resolves the compiler and installed packages on
+                    this machine, feeds them to the provider, and drives cabal's own
+                    solver over the same index as the baseline.
 app/                the `pubgrub`, `pubgrub-index` and `pubgrub-harness` executables.
-test/               the test suite, plus test/golden/.
+test/               the tests that need the bridge; each package has its own suite.
 docs/               STATUS.md first. See docs/STATUS.md §6 for what each file decides.
 ```
 

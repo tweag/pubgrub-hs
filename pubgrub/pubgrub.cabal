@@ -1,0 +1,80 @@
+cabal-version:      3.0
+name:               pubgrub
+version:            0.1.0.0
+synopsis:           The PubGrub version solver, over any domain
+description:
+    A native implementation of PubGrub, the version-solving algorithm behind
+    pub, Cargo's resolver and uv: unit propagation with conflict-driven clause
+    learning, and a proof of why a resolution failed when one does.
+
+    The solver is written once over a @Domain@ — what a variable, a value, a set
+    of values and an external fact are — and reads the world through one
+    callback, @expand@. A failed solve hands back the terminal incompatibility
+    with its whole derivation, and @PubGrub.Report@ renders it as the numbered
+    proof the specification describes, in words a @Formatter@ supplies.
+
+    The instantiation for cabal packages is the @pubgrub-cabal@ package. The
+    algorithm follows pub's specification, vendored in the repository as the
+    authority.
+category:           Distribution
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             Andrea Bedini
+maintainer:         andrea.bedini@moduscreate.com
+copyright:          (c) 2026 Tweag I/O by Modus Create
+homepage:           https://github.com/tweag/pubgrub-hs
+bug-reports:        https://github.com/tweag/pubgrub-hs/issues
+build-type:         Simple
+tested-with:        GHC ==9.12.2
+extra-doc-files:
+    CHANGELOG.md
+    README.md
+
+source-repository head
+    type:     git
+    location: https://github.com/tweag/pubgrub-hs.git
+    subdir:   pubgrub
+
+common warnings
+    ghc-options: -Wall
+
+common language
+    default-language:   GHC2021
+    default-extensions: ImportQualifiedPost
+
+library
+    import:          warnings, language
+    hs-source-dirs:  src
+    exposed-modules:
+        PubGrub
+        PubGrub.Derivation
+        PubGrub.Incompatibility
+        PubGrub.Pretty
+        PubGrub.Provider
+        PubGrub.Relation
+        PubGrub.Report
+        PubGrub.SetOps
+        PubGrub.Solver
+        PubGrub.Store
+        PubGrub.Term
+        PubGrub.Version
+        PubGrub.VersionSet
+    build-depends:
+        , base        >=4.21  && <4.22
+        , co-log-core >=0.3.2 && <0.4
+        , containers  >=0.7   && <0.8
+        , text        >=2.1   && <2.2
+
+test-suite pubgrub-test
+    import:         warnings, language
+    type:           exitcode-stdio-1.0
+    hs-source-dirs: test
+    main-is:        Main.hs
+    other-modules:  ToyDomainSpec
+    build-depends:
+        , base
+        , containers
+        , pubgrub
+        , tasty       >=1.5 && <1.6
+        , tasty-hunit >=0.10 && <0.11
+        , text

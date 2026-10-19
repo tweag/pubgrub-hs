@@ -13,9 +13,13 @@
 
 ## 1. The core knows nothing about Cabal
 
-`pubgrub-hs` depends on `Cabal-syntax`, `base`, `containers`, `text` and `co-log-core`.
-It does not depend on `cabal-install` or on `cabal-install-solver`. The bridge holds
-that entanglement, and the bridge is a private library.
+`pubgrub`, the solver, depends on `base`, `containers`, `text` and `co-log-core`, and
+nothing from the cabal ecosystem. `pubgrub-cabal`, the cabal domain, adds
+`Cabal-syntax` and no more. Neither depends on `cabal-install` or on
+`cabal-install-solver`; the bridge holds that entanglement, and the bridge is a private
+library of the unpublished harness package. Since 2026-10-19 the three are separate
+packages in one `cabal.project`, the first two with `cabal check` clean, so the split
+is a `build-depends` line rather than a sublibrary's visibility flag.
 
 The seam is one callback, `PubGrub.Provider.expand`. It takes a package name and the
 accumulated constraint on it. It answers with one instance and the incompatibilities
@@ -223,13 +227,13 @@ decided release and reads its neighbours. It extends the depender's range while 
 *guarded occurrence* is identical — same guard and same dependency, not the whole
 dependency set.
 
-**At insert time.** [`PubGrub.Store`](../src/PubGrub/Store.hs) unions the depender
+**At insert time.** [`PubGrub.Store`](../pubgrub/src/PubGrub/Store.hs) unions the depender
 terms of two facts that agree about the dependee, as they arrive. Unbuildable facts
 about one package that give the same reasons merge the same way, which is
 `references/pubgrub.md:476`'s half of the rule. Two runs ruled out for different
 reasons stay two facts, so a proof never puts one release's missing module on the
 other's range. Which facts qualify, and what the merged clause is, is the cabal
-domain's `mergeRule` in [`PubGrub.Cabal`](../src/PubGrub/Cabal.hs); the store only
+domain's `mergeRule` in [`PubGrub.Cabal`](../pubgrub-cabal/src/PubGrub/Cabal.hs); the store only
 compares keys.
 
 Merging is sound because the two clauses `¬(p ∈ A ∧ q ∉ R)` and `¬(p ∈ B ∧ q ∉ R)`
@@ -419,13 +423,17 @@ decline to fuse — never fuse wrongly.
 of the derivation tree to what it makes of it, written as a `do` block in `Maybe`
 whose lines each read a view of the tree (`chainStep`, `asDependency`, `runWhile`),
 state a guard (`isSubsetOf`, `sameTerms`) or, last, say the sentence. The vocabulary
-is `PubGrub.Report.Rule`, the sentences are `PubGrub.Report.Wording`, and a table of
-rules is tried in order by `firstOf`, so the order of a table is part of its meaning
-and is written next to it. There are three tables: `lineRules` chooses the premise
-of a proof line and the sub-derivation it continues (rules 2, 3 and 4, plus the
-spec's cases 2.iii and 3); `clauseRules` joins two external facts into one premise
-(rule 1, the seeds, and a dependency on an empty range); and the headline's two
-stories are tried as a table of their own. Rule 5 is a pre-pass over the tree and
+is the core's `PubGrub.Derivation` (the views of the tree) and the cabal side's
+`PubGrub.Cabal.Report.Rule` (the views of a cabal fact), the sentences are
+`PubGrub.Cabal.Report.Wording`, and a table of rules is tried in order by `firstOf`,
+so the order of a table is part of its meaning and is written next to it. The spec's
+own cases live in the core's `PubGrub.Report`, and the cabal rules reach it through a
+`Formatter`: its `lineRules` choose the premise of a proof line and the sub-derivation
+it continues (rules 3 and 4, tried before the spec's cases 2.ii and 2.iii), its
+`clauseRules` join two external facts into one premise (rule 1, the seeds, a
+dependency on an empty range, and the spec's own chain and shared-depender
+sentences, which name a dependency and so cannot be the core's); and the headline's
+two stories are tried as a table of their own. Rule 5 is a pre-pass over the tree and
 not a table, and the spec's branching case is the walker's own structure, since it
 mints the line number. The views are read-only and the guards are predicates, so a
 rule can choose how a step is said and cannot change what the proof claims; adding
@@ -993,7 +1001,7 @@ minus `isInternal`): `build-tool-depends` as written; the legacy `build-tools` n
 cabal translates to a package of the same name — `hscolour`, `haddock`, `happy`,
 `alex`, `hsc2hs`, `c2hs`, `cpphs`, `greencard`, `hspec-discover`, restated from
 `Distribution.Simple.BuildToolDepends.desugarBuildToolSimple` because that module is
-in `Cabal` and `pubgrub-hs:cabal` is Cabal-syntax only — and never a tool that is one
+in `Cabal` and `pubgrub-cabal` is Cabal-syntax only — and never a tool that is one
 of the release's own executables, which is internal. Test suites and benchmarks
 contribute none, as they contribute no dependencies. A tool the compiler ships, such
 as `hsc2hs`, is in the list like any other: cabal solves it from Hackage too, and

@@ -59,7 +59,7 @@ import           Distribution.Types.LibraryName               (LibraryName (..))
 import           Distribution.Types.PackageId                 (PackageIdentifier (..))
 import           Distribution.Types.PackageName               (PackageName)
 import           Distribution.Types.Version                   (Version)
-import qualified PubGrub.Version                              as V
+import qualified PubGrub.Cabal.Version                              as V
 
 
 import qualified Bridge.Hackage.Unlifted                      as U

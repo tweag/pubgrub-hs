@@ -224,14 +224,16 @@ fi
 run_tests() {
     local name=$1 pattern=$2
     local log="$OUT/tests.$name.log"
+    # Three packages, three suites: a pattern selects by name in each, and a
+    # suite where it matches nothing passes with zero tests.
     if [ -z "$pattern" ]; then
-        timeout "$TIMEOUT" cabal test >"$log" 2>&1
+        timeout "$TIMEOUT" cabal test all >"$log" 2>&1
     else
-        timeout "$TIMEOUT" cabal test --test-options="-p $pattern" >"$log" 2>&1
+        timeout "$TIMEOUT" cabal test all --test-options="-p $pattern" >"$log" 2>&1
     fi
     local code=$?
     local count
-    count=$(grep -aoE '[0-9]+ tests? passed' "$log" | tail -1)
+    count=$(grep -aoE '[0-9]+ tests? passed' "$log" | awk '{s += $1} END {print s " tests passed"}')
     if [ $code -eq 0 ]; then
         gate "$name" ok "${count:-passed}"
     else

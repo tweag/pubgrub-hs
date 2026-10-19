@@ -17,7 +17,7 @@ import           Data.Word                      (Word32)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import qualified Data.Set                       as Set
 import           Distribution.Types.Version     (Version, mkVersion)
-import qualified PubGrub.Version                as V
+import qualified PubGrub.Cabal.Version                as V
 import           Test.Tasty                     (TestTree, testGroup)
 import           Test.Tasty.HUnit               (assertBool, assertFailure,
                                                  testCase, (@?=))

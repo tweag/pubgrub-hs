@@ -278,7 +278,7 @@ From theory to practice.** Artificial Intelligence 187–188:52–89.
 Inference as **unit propagation on nogoods**, with conflict-driven learning and
 backjumping. Structurally: their nogoods are our incompatibilities, their propagation
 is ours, their learning is conflict resolution. This is the rigorous account of the
-machinery `src/PubGrub/Solver.hs` implements, and the peer-reviewed check on the
+machinery `pubgrub/src/PubGrub/Solver.hs` implements, and the peer-reviewed check on the
 resolvent argument.
 
 **The instructive delta.** Their nogoods are over *ground atoms*, so propagation is

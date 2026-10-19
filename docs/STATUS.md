@@ -12,7 +12,7 @@
 > Hindsight bank, one document per decision: `decision-log-index` lists the records in
 > order, and `decision-log-dropped-directions` lists the directions that were dropped.
 >
-> **Checked against the tree on 2026-10-12.** 229 tests pass and
+> **Checked against the tree on 2026-10-19.** 250 tests pass over the three packages and
 > [`scripts/gate.sh`](../scripts/gate.sh) passes, at the index-state pinned in
 > [`bench/index-state`](../bench/index-state), `2026-09-09T02:42:09Z`.
 
@@ -22,6 +22,7 @@
 
 | area | state |
 | --- | --- |
+| Packages | `pubgrub` (the solver, over any domain) and `pubgrub-cabal` (the cabal domain) are separate packages with `cabal check` clean, ready for Hackage and not yet uploaded; this package keeps the bridge, the driver and the harness ([DESIGN.md §1](DESIGN.md#1-the-core-knows-nothing-about-cabal)) |
 | Hackage index | our own reader over the cached `01-index.tar`, through `hackage-security`. No `cabal-install` dependency |
 | Index-state | `--index-state T` gives both solvers the index as it was at `T`, revisions included, with cabal's semantics. A run prints the state it is really at |
 | Derived index | every release parsed once into `_cache/derived-index.cbor`. A read is a CBOR decode, served only for the revision in force |

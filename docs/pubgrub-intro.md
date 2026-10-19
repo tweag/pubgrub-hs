@@ -138,7 +138,7 @@ Positive r₁  ∧  Negative r₂  =  Positive (r₁ ∩ complement r₂)
 Negative r₁  ∧  Negative r₂  =  Negative (r₁ ∪ r₂)
 ```
 
-*Lives in: [`src/PubGrub/Term.hs`](../src/PubGrub/Term.hs)*
+*Lives in: [`pubgrub/src/PubGrub/Term.hs`](../pubgrub/src/PubGrub/Term.hs)*
 
 ---
 
@@ -216,7 +216,7 @@ Created during conflict resolution (§6.2) when the solver detects a contradicti
 
 An incompatibility with a single term `{ p: Positive r }` bans all versions of `p` in range `r`. This arises when `expand` returns no instance (§6.3). The solver creates `{ p: Positive currentRange }` and re-enters conflict resolution to learn why `p` has no valid version.
 
-*Lives in: [`src/PubGrub/Incompatibility.hs`](../src/PubGrub/Incompatibility.hs)*
+*Lives in: [`pubgrub/src/PubGrub/Incompatibility.hs`](../pubgrub/src/PubGrub/Incompatibility.hs)*
 
 ---
 
@@ -242,7 +242,7 @@ Because a Decision can be treated as the term `Positive {v}`, both assignment ki
 **Backtracking** discards everything after a target decision level. The solver is then
 in a consistent state from before the problematic guess.
 
-*Lives in: [`src/PubGrub/Solver.hs`](../src/PubGrub/Solver.hs). Note the real structure
+*Lives in: [`pubgrub/src/PubGrub/Solver.hs`](../pubgrub/src/PubGrub/Solver.hs). Note the real structure
 is indexed by package name rather than being a flat list, and it caches each package's
 accumulated term. That change made the solver 3.7–4.5× faster, and backtracking has to
 rebuild the caches.*
@@ -349,7 +349,7 @@ solve provider seeds = go (insertClauses seeds emptyStore)
       -- seeds alone, which is failure
 ```
 
-*Lives in: [`src/PubGrub/Solver.hs`](../src/PubGrub/Solver.hs)*
+*Lives in: [`pubgrub/src/PubGrub/Solver.hs`](../pubgrub/src/PubGrub/Solver.hs)*
 
 ---
 
@@ -373,7 +373,7 @@ The printer walks the DAG:
 
 **The real reporter does more than this.** It follows the spec's own reporting algorithm (`references/pubgrub.md:504`), which fuses chains, skips every other derived step, states a run of steps once, and absorbs empty-range leaves. That is what takes a proof from hundreds of lines to a handful. See [DESIGN.md](DESIGN.md) §9.
 
-*Lives in: [`src/PubGrub/Report.hs`](../src/PubGrub/Report.hs) and [`src/PubGrub/Report/`](../src/PubGrub/Report/)*
+*Lives in: [`pubgrub/src/PubGrub/Report.hs`](../pubgrub/src/PubGrub/Report.hs) and [`pubgrub-cabal/src/PubGrub/Cabal/Report/`](../pubgrub-cabal/src/PubGrub/Cabal/Report/)*
 
 ---
 

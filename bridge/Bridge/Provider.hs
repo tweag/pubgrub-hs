@@ -69,9 +69,9 @@ import           PubGrub.Cabal.Provider                       (ParseError,
                                                                widenTo)
 import           PubGrub.Incompatibility                      (Incompatibility)
 import           PubGrub.Provider                             (Provider (..))
-import           PubGrub.Variable                             (Flag (..))
-import qualified PubGrub.Version                              as V
-import           PubGrub.VersionSet                           (VersionSet)
+import           PubGrub.Cabal.Variable                             (Flag (..))
+import qualified PubGrub.Cabal.Version                              as V
+import           PubGrub.Cabal.VersionSet                           (VersionSet)
 import           UnliftIO                                     (MonadUnliftIO,
                                                                liftIO)
 

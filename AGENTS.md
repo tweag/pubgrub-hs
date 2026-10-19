@@ -57,7 +57,7 @@ design decision per section, with the evidence that earned it.
 
 ```sh
 cabal build
-cabal test                           # 229 tests, ~0.3 s
+cabal test all                       # 250 tests over the three packages, ~0.5 s
 cabal run pubgrub -- aeson              # the driver; add -v for the search trace
 cabal run pubgrub -- 'aeson <2'         # a target is ONE argument: package and range
 cabal run pubgrub -- hlint 'aeson <2'   # several targets, solved together
@@ -108,48 +108,54 @@ desktop), total allocation from `+RTS -s` is the stable stand-in for time, and
 
 ## Architecture
 
-Four layers with a hard dependency boundary. The cabal-install entanglement is
-quarantined so the core and the cabal provider stay lightweight, and another tool
-can drive the solver over its own index with the two public libraries alone.
+Three packages in one `cabal.project`, with a hard dependency boundary. The first two
+are meant for Hackage; the third is this repository's research harness and stays here.
+The cabal-install entanglement is quarantined in the third so the solver and its cabal
+instantiation stay lightweight, and another tool can drive the solver over its own
+index with the two published packages alone.
 
 ```
-pubgrub-hs (library) ──── no cabal-install, no cabal-install-solver
-  native PubGrub: Term, VersionSet, Incompatibility, Relation, Solver, Store, Report
-  pure algorithm and types, generic over a Domain; PubGrub.Cabal is the cabal domain.
-  Of the cabal ecosystem it needs Cabal-syntax only
-  (plus base, containers, text, co-log-core: the solver takes its LogAction as an argument)
-        ▲  one callback: Provider.expand
-cabal (public sublibrary) ──── Cabal-syntax only, like the core
-  the cabal provider rule (PubGrub.Cabal.Provider.mkExpand) over an installed set
-  and a ReleaseSource; the .cabal flatten (PubGrub.Cabal.Flatten) with the machine
-  passed in as plain data: Platform, CompilerInfo, a pkg-config predicate
+pubgrub (package) ──── base, containers, text, co-log-core. Nothing from the cabal ecosystem
+  native PubGrub, written once over a Domain: SetOps, Term, Relation, Incompatibility
+  (the Domain class and the core-owned Cause), Store, Provider, Solver, Derivation (the
+  views of a derivation), Report (the spec's walker over a Formatter), Pretty, and
+  Version/VersionSet as batteries. test: a toy domain that imports none of cabal
+        ▲  one callback: Provider.expand; one instance: Domain Cabal
+pubgrub-cabal (package) ──── pubgrub, Cabal-syntax, base, containers, text, co-log-core
+  the cabal domain (PubGrub.Cabal: Var, Flag, Value, InstanceSet, the facts), the
+  renderer (PubGrub.Cabal.Report: the words, the headline, the five rules), the .cabal
+  flatten (PubGrub.Cabal.Flatten) with the machine passed in as plain data, the
+  installed set (PubGrub.Cabal.Installed), and the provider rule
+  (PubGrub.Cabal.Provider.mkExpand) over a ReleaseSource
         ▲  a ReleaseSource and an InstalledDb
-bridge (private library) ──── cabal-install-solver, Cabal, Cabal-syntax,
-                              hackage-security, http-client
-  index acquisition, the derived index, the compiler's world on this machine
-  builds a package index and feeds it to BOTH:
-    ├─ cabal's modularResolver, via Bridge.Cabal.Baseline   (the baseline)
-    └─ our own Provider
-        ▲
-app/Main.hs — the `pubgrub` driver: --cabal picks the baseline,
-              --stats prints counts and phases, --plan lines prints a diffable plan,
-              --index-state pins the index to a moment, for both solvers
-        ▲
-app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solver,
-                 problem and repetition; writes bench/output/benchmark.md and showcase.md
+pubgrub-hs (package, unpublished)
+  bridge (private library) ──── cabal-install-solver, Cabal, hackage-security, http-client
+    index acquisition, the derived index, the compiler's world on this machine
+    builds a package index and feeds it to BOTH:
+      ├─ cabal's modularResolver, via Bridge.Cabal.Baseline   (the baseline)
+      └─ our own Provider
+          ▲
+  app/Main.hs — the `pubgrub` driver: --cabal picks the baseline,
+                --stats prints counts and phases, --plan lines prints a diffable plan,
+                --index-state pins the index to a moment, for both solvers
+          ▲
+  app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solver,
+                   problem and repetition; writes bench/output/benchmark.md and showcase.md
 ```
 
-**Seven cabal components:**
+**Three packages, eight components:**
 
 | component | what it is |
 | --- | --- |
-| library `pubgrub-hs` | `src/` — the solver. `PubGrub.hs` plus `PubGrub/{Version,VersionSet,Variable,InstanceSet,Value,Term,SetOps,Relation,Incompatibility,Cabal,Solver,Store,Provider,Report,Pretty}.hs`, `PubGrub/Report/{Rule,Wording,Headline,Layout}.hs`, `PubGrub/Index/PreInstalled.hs` |
-| library `cabal` (public) | `cabal/` — `PubGrub/Cabal/{Flatten,Installed,Provider}.hs`. The translation from `.cabal` files and an installed set into the solver's input, and the provider rule. Cabal-syntax only |
+| `pubgrub` library | `pubgrub/src/` — the solver. `PubGrub.hs` (the public surface) plus `PubGrub/{SetOps,Term,Relation,Incompatibility,Store,Provider,Solver,Derivation,Report,Pretty,Version,VersionSet}.hs`. `cabal check` clean |
+| `pubgrub` test-suite | `pubgrub/test/ToyDomainSpec.hs` — the solver and the walker over a domain that is not cabal's; it imports nothing from `PubGrub.Cabal`, so the core leaning on cabal is a compile error here first |
+| `pubgrub-cabal` library | `pubgrub-cabal/src/` — `PubGrub/Cabal.hs` and `PubGrub/Cabal/{Variable,Value,InstanceSet,PreInstalled,Version,VersionSet,Pretty,Flatten,Installed,Provider,Report}.hs`, `PubGrub/Cabal/Report/{Rule,Wording,Headline,Layout}.hs`. Cabal-syntax only. `cabal check` clean |
+| `pubgrub-cabal` test-suite | `pubgrub-cabal/test/` — 10 spec modules plus `test/golden/` |
 | library `bridge` (private) | `bridge/` — `Bridge/{Hackage,Provider}.hs`, `Bridge/Hackage/{HttpClient,Store,Unlifted}.hs`, `Bridge/Cabal/{Baseline,InstalledPkg}.hs` |
 | executable `pubgrub` | `app/Main.hs` — the CLI driver |
 | executable `pubgrub-index` | `app/BuildIndex.hs` — builds the derived index |
 | executable `pubgrub-harness` | `app/Harness.hs` — the harness. Depends on neither library: it drives the `pubgrub` executable as a child, parses its `stats:`, `phases:` and `plan:` lines, and writes the two reports |
-| test-suite | `test/` — 11 spec modules plus `test/golden/` |
+| `pubgrub-hs` test-suite | `test/` — the 3 spec modules that need the bridge or `cabal-install-solver` |
 
 **What each cabal and bridge module does.**
 
@@ -183,8 +189,9 @@ app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solv
 **Dependency boundary.** We avoid `cabal-install` entirely, including for the
 baseline. We do depend on `hackage-security`, and there is no `tar` dependency.
 `cabal-install-solver` is a dependency of `bridge`, of the `pubgrub` executable and of
-the test-suite. It is **not** a dependency of the core library or of the `cabal`
-sublibrary, which is what lets latti depend on those two and nothing else.
+this package's test-suite. It is **not** a dependency of `pubgrub` or of
+`pubgrub-cabal`, which is what lets latti depend on those two and nothing else, and
+what lets them go to Hackage.
 
 **Why `cabal-install` is avoidable.** The `../cabal-solver-plan` reference depends on
 it, and tracing its imports shows three uses:
@@ -256,8 +263,10 @@ constraints and buildability under a flag are not built; §4 says what each owes
 
 ## Reporting
 
-`PubGrub.Report.reportConflict` follows the spec's own reporting algorithm
-(`references/pubgrub.md:504`). [`docs/DESIGN.md`](docs/DESIGN.md) §9 states the five
+`PubGrub.Report.reportConflict` is the spec's own reporting algorithm
+(`references/pubgrub.md:504`), written once over any domain and given its words by a
+`Formatter`; `PubGrub.Cabal.Report` is the cabal `Formatter` and the entry point the
+driver uses. [`docs/DESIGN.md`](docs/DESIGN.md) §9 states the five
 rules with their soundness arguments, the headline, the wrapping and colour layers,
 and the wording: pub's sentences in cabal's range syntax, a declared range quoted as
 its author wrote it, no byte-parity with pub. Two things there matter to every
@@ -267,7 +276,8 @@ examples, so a wording change earns its way past them.
 
 ## Conventions
 
-- GHC 9.12.x (`base ^>=4.21`), `cabal-version: 3.8`
+- GHC 9.12.x (`base ^>=4.21`); `cabal-version: 3.0` in the two published packages,
+  `3.8` in the harness package
 - `default-language: GHC2021` on every component, with
   `default-extensions: ImportQualifiedPost`. The test-suite is the one stanza that
   lacks the extension.

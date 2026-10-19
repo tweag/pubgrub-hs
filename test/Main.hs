@@ -1,38 +1,16 @@
 module Main (main) where
 
-import qualified FlagSolveSpec
 import qualified FlattenSpec
 import qualified IndexStateSpec
-import qualified InstalledSpec
-import qualified InstanceSetSpec
-import qualified PartialSolutionSpec
-import qualified PaperSpec
-import qualified ReportSpec
-import qualified SolverSpec
-import qualified ConstraintSpec
 import qualified StoredSpec
-import qualified StoreSpec
 import           Test.Tasty     (defaultMain, testGroup)
-import qualified ToyDomainSpec
-import qualified VersionSetSpec
 
 main :: IO ()
 main =
     defaultMain $
         testGroup
             "pubgrub-hs"
-            [ VersionSetSpec.tests
-            , InstanceSetSpec.tests
-            , PartialSolutionSpec.tests
-            , SolverSpec.tests
-            , ConstraintSpec.tests
-            , StoreSpec.tests
-            , StoredSpec.tests
-            , PaperSpec.tests
-            , ReportSpec.tests
+            [ StoredSpec.tests
             , FlattenSpec.tests
-            , FlagSolveSpec.tests
-            , InstalledSpec.tests
             , IndexStateSpec.tests
-            , ToyDomainSpec.tests
             ]

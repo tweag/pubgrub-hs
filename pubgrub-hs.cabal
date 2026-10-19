@@ -8,73 +8,16 @@ author:          Andrea Bedini
 maintainer:      andrea.bedini@moduscreate.com
 build-type:      Simple
 extra-doc-files: CHANGELOG.md
-
--- The expected proofs that test/PaperSpec.hs compares against. The test-suite
--- reads them at run time, so the source distribution must ship them.
-extra-source-files: test/golden/*.txt
+synopsis:        The research harness around pubgrub and pubgrub-cabal
+description:
+    The part of the repository that is not published: the Hackage index reader,
+    the compiler's world on this machine, cabal's own solver as the baseline,
+    the driver, the index builder and the benchmark harness. The solver is the
+    @pubgrub@ package and its cabal instantiation is @pubgrub-cabal@, both in
+    this repository.
 
 common warnings
     ghc-options: -Wall
-
-library
-    import:           warnings
-    exposed-modules:
-        PubGrub
-        PubGrub.Cabal
-        PubGrub.Cabal.Report
-        PubGrub.Cabal.Report.Headline
-        PubGrub.Cabal.Report.Layout
-        PubGrub.Cabal.Report.Rule
-        PubGrub.Cabal.Report.Wording
-        PubGrub.Derivation
-        PubGrub.Incompatibility
-        PubGrub.Index.PreInstalled
-        PubGrub.InstanceSet
-        PubGrub.Pretty
-        PubGrub.Provider
-        PubGrub.Relation
-        PubGrub.Report
-        PubGrub.SetOps
-        PubGrub.Solver
-        PubGrub.Store
-        PubGrub.Term
-        PubGrub.Value
-        PubGrub.Variable
-        PubGrub.Version
-        PubGrub.VersionSet
-    build-depends:
-        , base ^>=4.21.0.0
-        , co-log-core
-        , containers
-        , Cabal-syntax
-        , text
-    hs-source-dirs:   src
-    default-language: GHC2021
-    default-extensions: ImportQualifiedPost
-
--- The cabal provider: the translation from .cabal files and an installed package
--- set into the solver's input, and the rule that picks an instance of a package
--- and states what it entails. Public, and of the cabal ecosystem it needs
--- Cabal-syntax only, so another tool can drive the solver over its own index,
--- installed world and pkg-config without this repository's index reader (the
--- private `bridge` below) or cabal-install-solver.
-library cabal
-    import:             warnings
-    visibility:         public
-    hs-source-dirs:     cabal
-    exposed-modules:
-        PubGrub.Cabal.Flatten
-        PubGrub.Cabal.Installed
-        PubGrub.Cabal.Provider
-    build-depends:
-        , base
-        , Cabal-syntax
-        , co-log-core
-        , containers
-        , pubgrub-hs
-        , text
-    default-language:   GHC2021
-    default-extensions: ImportQualifiedPost
 
 library bridge
     import:             warnings
@@ -104,8 +47,8 @@ library bridge
         , http-client
         , http-types
         , network-uri
-        , pubgrub-hs
-        , pubgrub-hs:cabal
+        , pubgrub
+        , pubgrub-cabal
         , process
         , serialise
         , text
@@ -133,9 +76,9 @@ executable pubgrub
         , http-client
         , mtl
         , optparse-applicative
-        , pubgrub-hs
+        , pubgrub
+        , pubgrub-cabal
         , pubgrub-hs:bridge
-        , pubgrub-hs:cabal
         , text
         , unliftio
     default-language:   GHC2021
@@ -146,37 +89,22 @@ test-suite pubgrub-hs-test
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
     other-modules:
-        ConstraintSpec
-        FlagSolveSpec
         FlattenSpec
         IndexStateSpec
-        InstalledSpec
-        InstanceSetSpec
-        PaperSpec
-        PartialSolutionSpec
-        ReportSpec
-        SolverSpec
         StoredSpec
-        StoreSpec
-        ToyDomainSpec
-        VersionSetSpec
     build-depends:
-        , pubgrub-hs
+        , pubgrub
+        , pubgrub-cabal
         , pubgrub-hs:bridge
-        , pubgrub-hs:cabal
         , base
         , binary
         , bytestring
         , cabal-install-solver
         , Cabal-syntax
-        , co-log
         , containers
-        , mtl
         , serialise
         , tasty
-        , tasty-golden
         , tasty-hunit
-        , tasty-quickcheck
         , text
     hs-source-dirs:   test
     default-language: GHC2021
@@ -198,8 +126,8 @@ executable pubgrub-index
         , http-client
         , mtl
         , optparse-applicative
+        , pubgrub-cabal
         , pubgrub-hs:bridge
-        , pubgrub-hs:cabal
         , text
         , unliftio
     default-language:   GHC2021

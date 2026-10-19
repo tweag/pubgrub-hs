@@ -13,13 +13,13 @@
 ## 1. The model
 
 ```haskell
-data Flag = Flag { flagName :: FlagName, flagDefault :: Bool }   -- PubGrub.Variable
+data Flag = Flag { flagName :: FlagName, flagDefault :: Bool }   -- PubGrub.Cabal.Variable
 data Var  = PackageVar PackageName | FlagVar PackageName Flag
 
-data Instance = UsePreInstalled PreInstalledPackage | BuildSource Version   -- PubGrub.InstanceSet
+data Instance = UsePreInstalled PreInstalledPackage | BuildSource Version   -- PubGrub.Cabal.InstanceSet
 data InstanceSet = InstanceSet { isInstalled :: Set PreInstalledPackage, isSource :: VersionSet }
 
-data Value    = PackageValue Instance   | FlagValue Bool     -- PubGrub.Value
+data Value    = PackageValue Instance   | FlagValue Bool     -- PubGrub.Cabal.Value
 data ValueSet = ValueSet { vsInstances :: InstanceSet, vsFlags :: BoolSet }
 ```
 
@@ -77,10 +77,10 @@ structural. The derived index records which flags are manual (`srManual`,
 ## 3. Reporting and output
 
 - A flag term reads as its owner with a sign: `foo +fast`, `foo -fast`, `foo
-  flag fast` when either value is in (`PubGrub.Report.Wording.bare`).
+  flag fast` when either value is in (`PubGrub.Cabal.Report.Wording.bare`).
 - A guarded leaf reads "foo >=1 && <2 with +fast depends on bar"; the owner's
   clause reads "foo >=1 && <2 declares flag fast".
-- The driver folds decided flags into their owners (`PubGrub.Value.foldFlags`,
+- The driver folds decided flags into their owners (`PubGrub.Cabal.Value.foldFlags`,
   giving `Resolved = Installed | Built Version FlagAssignment`), so the tree
   shows `tasty 1.5.4 +unix` and the `plan:` lines keep one entry per package.
 

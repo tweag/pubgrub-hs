@@ -16,7 +16,7 @@ This file is about the mechanism and its cost. It is self-contained on purpose.
 > 1. **A walk, at generation time.** `PubGrub.Cabal.Provider.spanningOccurrence` reads the
 >    decided release's neighbours and widens the depender's range while the occurrence
 >    is identical.
-> 2. **A merge, at insert time.** [`PubGrub.Store`](../src/PubGrub/Store.hs) unions the
+> 2. **A merge, at insert time.** [`PubGrub.Store`](../pubgrub/src/PubGrub/Store.hs) unions the
 >    depender terms of two facts that agree about the dependee, as they arrive.
 >
 > §1 and §2 describe them. §3 is the cost and who pays it. §4 records the five options

@@ -26,12 +26,12 @@ import           Bridge.Cabal.Baseline                     (defaultSolverConfig,
                                                             solveWithCabal,
                                                             sourcePackageIndex)
 import           PubGrub.Cabal.Flatten                     (FlagModel (..))
-import           PubGrub.Value                             (Resolved (..),
+import           PubGrub.Cabal.Value                             (Resolved (..),
                                                             Value, foldFlags,
                                                             resolvedInstance,
                                                             singletonValue)
-import           PubGrub.Value                             (Value (..))
-import           PubGrub.Variable                           (Var (..))
+import           PubGrub.Cabal.Value                             (Value (..))
+import           PubGrub.Cabal.Variable                           (Var (..))
 import           Bridge.Hackage                            (IndexState (..),
                                                             IndexStateTooNew (..),
                                                             mkCache,
@@ -89,7 +89,7 @@ import           PubGrub.Incompatibility                   (Cause (..),
                                                             Incompatibility,
                                                             incompCause,
                                                             incompTerms)
-import           PubGrub.InstanceSet                       (HasVersion (version),
+import           PubGrub.Cabal.InstanceSet                       (HasVersion (version),
                                                             Instance (..),
                                                             singletonInstance)
 import           PubGrub.Pretty                            (Pretty (pretty))
@@ -100,7 +100,7 @@ import           PubGrub.Cabal.Report                       (reportConflict,
 import           PubGrub.Solver                            (SolveError (..),
                                                             SolverMsg (..),
                                                             solve)
-import           PubGrub.VersionSet                        (VersionSet,
+import           PubGrub.Cabal.VersionSet                        (VersionSet,
                                                             fromVersionRange)
 import           System.Environment                        (lookupEnv)
 import           System.Exit                               (exitFailure)

@@ -1,0 +1,7 @@
+-- The three packages of this repository, in dependency order: the solver, its
+-- cabal instantiation, and the research harness that compares the two solvers.
+-- The first two are meant for Hackage; the third stays here.
+packages:
+    pubgrub
+    pubgrub-cabal
+    .

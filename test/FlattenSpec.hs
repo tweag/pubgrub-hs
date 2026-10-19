@@ -56,7 +56,7 @@ import           Distribution.Version                         (earlierVersion,
                                                                intersectVersionRanges,
                                                                mkVersion,
                                                                orLaterVersion)
-import           PubGrub.VersionSet                           (VersionSet,
+import           PubGrub.Cabal.VersionSet                           (VersionSet,
                                                                fromVersionRange)
 import           Test.Tasty                                   (TestTree,
                                                                testGroup)
