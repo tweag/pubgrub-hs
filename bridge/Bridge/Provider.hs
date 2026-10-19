@@ -53,13 +53,7 @@ import           Hackage.Security.Client.Repository.Cache     (Cache)
 import           Network.HTTP.Client                          (Manager)
 import           PubGrub.Cabal                                (Cabal, request)
 import           PubGrub.Cabal.Flatten                        (FlagModel (..),
-                                                               PkgConfigPresent,
-                                                               componentDepsStored,
-                                                               componentToolsStored,
-                                                               srFlags, srManual,
-                                                               srSetup,
-                                                               toStored,
-                                                               unbuildableAtDefaultsStored)
+                                                               PkgConfigPresent)
 import           PubGrub.Cabal.Installed                      (mkInstalledDb)
 import           PubGrub.Cabal.Provider                       (ParseError,
                                                                Release (..),
@@ -67,10 +61,11 @@ import           PubGrub.Cabal.Provider                       (ParseError,
                                                                constrainTo,
                                                                mkExpand,
                                                                noPreference,
+                                                               releaseOf,
+                                                               releaseOfStored,
                                                                widenTo)
 import           PubGrub.Incompatibility                      (Incompatibility)
 import           PubGrub.Provider                             (Provider (..))
-import           PubGrub.Cabal.Variable                             (Flag (..))
 import qualified PubGrub.Cabal.Version                              as V
 import           PubGrub.Cabal.VersionSet                           (VersionSet)
 import           UnliftIO                                     (MonadUnliftIO,
@@ -199,14 +194,9 @@ withWorld cache manager state act =
                 , wPkgConfig = pkgConfig
                 }
 
--- | What the provider needs from a release's description — and all it keeps.
---
--- Both components are independent of the flag assignment: the declared flags with
--- their defaults, and the dependencies as flag-guarded groups with the fixed
--- environment already resolved. So they are derived once per release and reused
--- for every assignment tried against it.
-
 -- | A memoising reader for 'Release', with a @(parsed, decoded, reused)@ count.
+-- The reduction itself is 'PubGrub.Cabal.Provider.releaseOf'; this adds where the
+-- description comes from, and the memo.
 --
 -- Do not memoise the 'GenericPackageDescription' instead. Retaining every
 -- description a solve touches cost 27.2 s and 904 MB on @pandoc@, against
@@ -272,16 +262,7 @@ releaseReader model platform cInfo pkgConfig handle store = do
                     parsed <- fmap reduce <$> ihLookupGPD handle pn v
                     pure (parsed, False)
 
-        fromStored sr =
-            Release
-                { relAutomatic = case model of
-                    FixedFlags   -> []
-                    FlagPackages -> [Flag f d | (f, d) <- srFlags sr, f `notElem` srManual sr]
-                , relGuarded = componentDepsStored model platform cInfo sr
-                , relUnbuildable = unbuildableAtDefaultsStored (pkgConfigPresent pkgConfig) platform cInfo sr
-                , relTools = componentToolsStored model platform cInfo sr
-                , relSetup = srSetup sr
-                }
-
-        reduce = fromStored . toStored
+        present = pkgConfigPresent pkgConfig
+        fromStored = releaseOfStored model platform cInfo present
+        reduce = releaseOf model platform cInfo present
     pure (readRelease, (\(_, p, d, reused) -> (p, d, reused)) <$> readIORef ref)

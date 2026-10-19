@@ -27,6 +27,8 @@ module PubGrub.Cabal.Provider
       -- * What it is given
     , ReleaseSource (..)
     , Release (..)
+    , releaseOf
+    , releaseOfStored
     , ParseError (..)
 
       -- * Slots
@@ -63,8 +65,17 @@ import           PubGrub.Cabal                  (Cabal, UnbuildableReason,
                                                  constraint, declaresFlag,
                                                  fromDependency, onlyInstalled,
                                                  unbuildable)
-import           PubGrub.Cabal.Flatten          (GuardedDeps, GuardedTools,
-                                                 expandGuard)
+import           Distribution.Compiler          (CompilerInfo)
+import           Distribution.System            (Platform)
+import           Distribution.Types.GenericPackageDescription (GenericPackageDescription)
+import           PubGrub.Cabal.Flatten          (FlagModel (..), GuardedDeps,
+                                                 GuardedTools,
+                                                 PkgConfigPresent,
+                                                 StoredRelease (..),
+                                                 componentDepsStored,
+                                                 componentToolsStored,
+                                                 expandGuard, toStored,
+                                                 unbuildableAtDefaultsStored)
 import           PubGrub.Cabal.Installed        (InstalledDb (..),
                                                  InstalledEdge (..),
                                                  closureEdges,
@@ -120,6 +131,49 @@ data Release = Release
     , relSetup :: [Dependency]
     -- ^ the @setup-depends@, likewise ('PubGrub.Cabal.Flatten.setupDeps')
     }
+
+-- | The reduction of a parsed description to what the rule reads: the one
+-- route from a @.cabal@ file to a 'Release', for any tool that holds the
+-- descriptions itself and builds a 'ReleaseSource' out of them.
+--
+-- The machine is an argument and never read here: the platform and compiler
+-- resolve the @os@\/@arch@\/@impl@ conditions, and the @pkg-config@ predicate
+-- decides buildability. The flag model decides which flags stay symbolic:
+-- under 'FixedFlags' every flag is its declared default and 'relAutomatic' is
+-- empty; under 'FlagPackages' each automatic flag is a solver variable and the
+-- guards name it. A caller that keeps releases in their pre-environment form
+-- goes through 'releaseOfStored' instead, which is the same function over that
+-- form.
+releaseOf
+    :: FlagModel
+    -> Platform
+    -> CompilerInfo
+    -> PkgConfigPresent
+    -> GenericPackageDescription
+    -> Release
+releaseOf model platform compiler present = releaseOfStored model platform compiler present . toStored
+
+-- | 'releaseOf' over the pre-environment form a derived index keeps
+-- ('PubGrub.Cabal.Flatten.StoredRelease'). Everything a 'Release' holds is
+-- independent of the flag assignment, so it is derived once per release and
+-- reused for every assignment tried against it.
+releaseOfStored
+    :: FlagModel
+    -> Platform
+    -> CompilerInfo
+    -> PkgConfigPresent
+    -> StoredRelease
+    -> Release
+releaseOfStored model platform compiler present sr =
+    Release
+        { relAutomatic = case model of
+            FixedFlags   -> []
+            FlagPackages -> [Flag f d | (f, d) <- srFlags sr, f `notElem` srManual sr]
+        , relGuarded = componentDepsStored model platform compiler sr
+        , relUnbuildable = unbuildableAtDefaultsStored present platform compiler sr
+        , relTools = componentToolsStored model platform compiler sr
+        , relSetup = srSetup sr
+        }
 
 -- | What a solve prefers, when the offered set admits it: for a package, a
 -- version and an assignment of its automatic flags. It is tried before the
