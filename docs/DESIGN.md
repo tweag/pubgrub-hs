@@ -911,6 +911,16 @@ it is the only row that got worse. The proofs kept their 61 sentences.
 `scion-browser` lost its phantom interval, and `hjsonschema`'s proof took a different
 route through `aeson` at the same length.
 
+**The normal form is computed once, at `mkVersion`.** `Eq` and `Ord` read it on
+every comparison, and a solve compares versions far more often than it makes them:
+every cut of every version set, every slot, every installed unit. Deriving it per
+comparison (`reverse . dropWhile (== 0) . reverse`) was a fifth of a large solve's
+time and a third of its allocation in latti's profile of `haskell-language-server`
+under flag search (2026-10-19). Storing it beside the spelling cut allocation by
+30–36% and mutator time by 40–55% on every problem measured, with the search counts
+and the gate unchanged: `yesod` 6.23 → 4.04 GB and 3.04 → 1.81 s, HLS under
+`--flags search` 8.92 → 5.73 GB and 4.25 → 2.29 s.
+
 ## 15. A component that is not buildable contributes no dependencies
 
 `PubGrub.Cabal.Flatten.componentDeps` puts each sub-library's, each foreign

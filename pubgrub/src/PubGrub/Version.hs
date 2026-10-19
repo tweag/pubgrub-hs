@@ -34,16 +34,21 @@ module PubGrub.Version
 
 import           Data.Ord (comparing)
 
--- | Non-empty, non-negative components, as spelled. The constructor is not
--- exported, so 'mkVersion' keeps the invariant.
-newtype Version = Version [Int]
-
--- | The spelling with trailing zeros dropped, keeping at least one component.
--- What 'Eq' and 'Ord' compare.
-normalForm :: Version -> [Int]
-normalForm (Version ns) = case reverse (dropWhile (== 0) (reverse ns)) of
-    [] -> [0]
-    ms -> ms
+-- | The spelling and its normal form, both non-empty and non-negative. The
+-- constructor is not exported: 'mkVersion' keeps the invariant and computes
+-- the normal form __once__, because 'Eq' and 'Ord' read it on every
+-- comparison and a solve compares versions far more often than it makes them
+-- (every cut of every version set, every slot, every installed unit). Deriving
+-- it on each comparison measured at a fifth of a large solve's time and a third
+-- of its allocation.
+data Version = Version
+    { versionNumbers :: ![Int]
+    -- ^ the components as spelled — @[1,2,0,0]@ for @1.2.0.0@, not the normal
+    -- form
+    , normalForm     :: ![Int]
+    -- ^ the spelling with trailing zeros dropped, keeping at least one
+    -- component. What 'Eq' and 'Ord' compare.
+    }
 
 instance Eq Version where
     a == b = normalForm a == normalForm b
@@ -53,19 +58,20 @@ instance Ord Version where
 
 -- | Like Cabal's: @mkVersion [1,2,0]@, so a trace reads the same either way.
 instance Show Version where
-    showsPrec d (Version ns) =
-        showParen (d > 10) (showString "mkVersion " . showsPrec 11 ns)
+    showsPrec d v =
+        showParen (d > 10) (showString "mkVersion " . showsPrec 11 (versionNumbers v))
 
 -- | Build from components. An empty list is the version @0@, and a negative
 -- component, which Cabal's parser never produces, is taken as @0@.
 mkVersion :: [Int] -> Version
-mkVersion [] = Version [0]
-mkVersion ns = Version (map (max 0) ns)
-
--- | The components as spelled — @[1,2,0,0]@ for @1.2.0.0@, not the normal form.
-versionNumbers :: Version -> [Int]
-versionNumbers (Version ns) = ns
+mkVersion [] = version0
+mkVersion ns = Version spelled normal
+  where
+    spelled = map (max 0) ns
+    normal = case reverse (dropWhile (== 0) (reverse spelled)) of
+        [] -> [0]
+        ms -> ms
 
 -- | The lowest version. Every version set's universe starts here.
 version0 :: Version
-version0 = Version [0]
+version0 = Version [0] [0]
