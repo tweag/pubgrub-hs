@@ -94,6 +94,22 @@ longer lives in the set (§3):
   `PubGrub.Cabal.Provider` consults reality, and it enumerates from the index and filters by
   `memberInstance`. So "non-empty" means non-empty in version space, which is why a
   test over a finite sample of versions can check the predicates only one way.
+- **Subset and disjointness are answered without building a set.** `relation` asks
+  them of every term of every clause on every visit, which is most of what a solve
+  does, and the `SetOps` defaults (`isEmpty` of the difference, of the intersection)
+  built two sets per term: a fifth of a large solve's time and two fifths of its
+  allocation in latti's profile of `haskell-language-server` under flag search
+  (2026-10-19). They are class methods now. A version set answers each by one sweep
+  over its intervals, an instance set and a value set by halves, a term by cases on
+  polarity, and `VersionSetSpec` and `InstanceSetSpec` hold every direct form to the
+  default it replaces as an equality. With the version normal form stored once
+  ([§14](#14-versions-compare-with-trailing-zeros-insignificant)), the store's
+  keys cached ([§5](#5-dependency-facts-collapse-in-two-places)) and
+  `incompRelation` a strict fold over the clause's terms rather than a walk over
+  their list, HLS under `--flags search` went from 8.92 GB allocated to 2.84 GB and
+  `yesod` from 6.23 GB to 2.15 GB, with mutator time down 42% and 41% in
+  interleaved runs and every search count and the gate unchanged. Five commits on
+  2026-10-19, prompted by latti's profile.
 
 **A version set remembers how it was spelled.** `VersionSet` carries the declared
 `VersionRange` it was built from beside its canonical intervals. Only
@@ -250,6 +266,16 @@ of pairwise merging.
 dominates propagation cost here, so prepending new knowledge is load-bearing.
 An earlier dedup memo, which kept the clause list but looked facts up before
 prepending, cost 22%.
+
+**The store keeps each clause's key beside it.** Finding the clause to merge into
+walked the list comparing keys, and recomputed the key of every clause passed: 9.2
+million key constructions for 14,088 inserts on `haskell-language-server` under flag
+search, a tenth of the solve's allocation. Since 2026-10-19 a key is computed once,
+on insert, and kept in a list in lockstep with the clauses; a merge keeps the key,
+because the rule rebuilds the clause through the constructor the key was read from.
+Allocation fell 8% on HLS and 6% on `yesod`, with the search unchanged; finding the
+target in one pass over keys and clauses, instead of an `elemIndex` and a rebuild,
+took another 4%.
 
 **The rule is weaker than the spec's, in one direction.** The walk establishes a run
 by reading every release in it, so the span is real. A release the walk stopped at is
