@@ -75,6 +75,17 @@ class (Ord (VarOf d), SetOps (SetOf d)) => Domain d where
 -- pieces, and 'mergeWith' is the one clause that holds both. The key type is
 -- the domain's own business, hence the existential; "PubGrub.Store" only ever
 -- compares keys.
+--
+-- __The law.__ A merged clause has the key its halves had: whenever
+-- @mergeKey a == Just k@ and @mergeKey b == Just k@,
+--
+-- @
+-- mergeKey (mergeWith a b) == Just k
+-- @
+--
+-- The store files the merged clause under @k@ without asking again, so a rule
+-- that breaks this leaves a key naming a clause that no longer has it. Nothing
+-- else is required: a merge may change which variables the clause mentions.
 data MergeRule d = forall k. Ord k => MergeRule
     { mergeKey  :: Incompatibility d -> Maybe k
       -- ^ the key of a clause that may take part in a merge

@@ -1,0 +1,160 @@
+{-# LANGUAGE TypeFamilies #-}
+
+-- | 'PubGrub.Store' as a data structure: its invariants ('valid') under any
+-- merge rule that keeps 'MergeRule''s law, not only under cabal's.
+--
+-- Cabal's rule widens a depender term and never changes which variables a
+-- clause mentions. The rules here do what it does not: one replaces a clause by
+-- whatever arrived, so a merge can drop variables and add others, and one
+-- unions the two clauses' terms, so a merge can only add them. A rule that
+-- breaks the law is here too, to show that 'valid' catches it.
+module StoreInvariantsSpec (tests) where
+
+import           Data.List               (nub)
+import           Data.Maybe              (fromMaybe)
+import qualified Data.IntSet             as IntSet
+import qualified Data.Map.Strict         as Map
+import           Data.Set                (Set)
+import qualified Data.Set                as Set
+import           PubGrub.Incompatibility (Cause (..), Domain (..),
+                                          Incompatibility (..), MergeRule (..),
+                                          noMerging)
+import           PubGrub.Store           (Store, clausesOf, emptyStoreWith,
+                                          insertClause, insertClauses,
+                                          storeClauses, takeDirty, touch,
+                                          valid)
+import           PubGrub.Term            (Term (..))
+import           Test.Tasty              (TestTree, testGroup)
+import           Test.Tasty.HUnit        (testCase, (@?=))
+import           Test.Tasty.QuickCheck   (Arbitrary (..), Property, choose,
+                                          frequency, listOf, sublistOf,
+                                          testProperty, vectorOf, (===))
+
+-- --------------------------------------------------------------------------
+-- The domain
+-- --------------------------------------------------------------------------
+
+newtype V = V Int
+    deriving (Eq, Ord, Show)
+
+-- | The domain: variables are small numbers, and a fact is a tag the rules
+-- key on.
+data Lab
+
+instance Domain Lab where
+    type VarOf Lab = V
+    type ValueOf Lab = Int
+    type SetOf Lab = Set Int
+    type FactOf Lab = Int
+    singleton _ = Set.singleton
+
+-- | A clause, as data a counterexample can print: its tag, whether it carries
+-- a key ('Fact') or not ('Seed'), and its terms.
+data Spec = Spec
+    { spTag   :: Int
+    , spKeyed :: Bool
+    , spTerms :: [(Int, Bool, [Int])]
+    }
+    deriving (Show)
+
+clause :: Spec -> Incompatibility Lab
+clause Spec{spTag, spKeyed, spTerms} =
+    Incompatibility
+        (Map.fromList [(V v, (if pos then Positive else Negative) (Set.fromList vs)) | (v, pos, vs) <- spTerms])
+        ((if spKeyed then Fact else Seed) spTag)
+
+instance Arbitrary Spec where
+    arbitrary = do
+        tag <- choose (0, 4)
+        keyed <- frequency [(4, pure True), (1, pure False)]
+        n <- choose (0, 3)
+        terms <- vectorOf n ((,,) <$> choose (0, 5) <*> arbitrary <*> sublistOf [0 .. 3])
+        pure (Spec tag keyed terms)
+
+-- | What a test does to a store.
+data Op
+    = Insert Spec
+    | InsertMany [Spec]
+    | Touch Int
+    | TakeDirty
+    deriving (Show)
+
+instance Arbitrary Op where
+    arbitrary =
+        frequency
+            [ (6, Insert <$> arbitrary)
+            , (2, InsertMany <$> listOf arbitrary)
+            , (1, Touch <$> choose (0, 5))
+            , (1, pure TakeDirty)
+            ]
+
+apply :: Store Lab -> Op -> Store Lab
+apply store op = case op of
+    Insert s      -> insertClause (clause s) store
+    InsertMany ss -> insertClauses (map clause ss) store
+    Touch v       -> touch (V v) store
+    TakeDirty     -> snd (takeDirty store)
+
+-- --------------------------------------------------------------------------
+-- The rules
+-- --------------------------------------------------------------------------
+
+keyOf :: Incompatibility Lab -> Maybe Int
+keyOf i = case incompCause i of
+    Fact t -> Just t
+    _      -> Nothing
+
+-- | The arriving clause replaces the existing one: a merge may drop any
+-- variable and add any other.
+replacing :: MergeRule Lab
+replacing = MergeRule{mergeKey = keyOf, mergeWith = \_ new -> new}
+
+-- | The merged clause mentions every variable either half did.
+widening :: MergeRule Lab
+widening =
+    MergeRule
+        { mergeKey = keyOf
+        , mergeWith = \old new -> Incompatibility (Map.union (incompTerms old) (incompTerms new)) (incompCause old)
+        }
+
+-- | Breaks the law: the merged clause has another key.
+rekeying :: MergeRule Lab
+rekeying = MergeRule{mergeKey = keyOf, mergeWith = \_ new -> new{incompCause = Fact (100 + fromMaybe 0 (keyOf new))}}
+
+-- | Every store along the way is valid.
+validThroughout :: MergeRule Lab -> [Op] -> Bool
+validThroughout rule ops = all valid (scanl apply (emptyStoreWith rule) ops)
+
+-- | Under a rule that merges by key, a store holds one clause per key and one
+-- per clause without a key.
+oneClausePerKey :: MergeRule Lab -> [Spec] -> Property
+oneClausePerKey rule specs =
+    length (storeClauses (foldl (flip insertClause) (emptyStoreWith rule) (map clause specs)))
+        === length (nub [spTag s | s <- specs, spKeyed s]) + length (filter (not . spKeyed) specs)
+
+-- --------------------------------------------------------------------------
+-- Tests
+-- --------------------------------------------------------------------------
+
+tests :: TestTree
+tests =
+    testGroup
+        "the store under any lawful merge rule"
+        [ testProperty "valid throughout, merging nothing" (validThroughout noMerging)
+        , testProperty "valid throughout, a merge replacing the clause" (validThroughout replacing)
+        , testProperty "valid throughout, a merge widening the clause" (validThroughout widening)
+        , testProperty "one clause per key, replacing" (oneClausePerKey replacing)
+        , testProperty "one clause per key, widening" (oneClausePerKey widening)
+        , testCase "a variable the merged clause stops mentioning leaves the index" $ do
+            let store =
+                    insertClause (clause (Spec 0 True [(2, True, [1])])) $
+                        insertClause (clause (Spec 0 True [(1, True, [1])])) (emptyStoreWith replacing)
+            clausesOf (V 1) store @?= IntSet.empty
+            clausesOf (V 2) store @?= IntSet.singleton 0
+            valid store @?= True
+        , testCase "a rule that changes the key is caught" $ do
+            let store =
+                    insertClause (clause (Spec 0 True [(1, True, [1])])) $
+                        insertClause (clause (Spec 0 True [(1, True, [2])])) (emptyStoreWith rekeying)
+            valid store @?= False
+        ]
