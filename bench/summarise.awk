@@ -12,7 +12,7 @@
 # which is what generation-time depender collapsing exists to avoid.
 /^Deciding /             { deciding++ }
 /^Chose /                { chose++ }
-/^No version available / { noversion++ }
+/^No value available / { noversion++ }
 /^Conflict /             { conflicts++; depth = 0; inres = 1 }
 /^  resolving at /       { if (inres) depth++; resolving++ }
 /^Learned /              { learned++; hist[depth]++; inres = 0 }
