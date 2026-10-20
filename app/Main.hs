@@ -41,7 +41,7 @@ import           Bridge.Provider                           (World (..),
                                                             withWorld)
 import           Colog                                     (HasLog (..),
                                                             LogAction (..),
-                                                            cmap, logMsg)
+                                                            cmapMaybe, logMsg)
 import           Control.Monad                             (when)
 import           Control.Monad.Reader                      (MonadReader, asks,
                                                             ReaderT, runReaderT)
@@ -164,21 +164,26 @@ solverLogAction :: Verbosity -> Maybe (IORef Stats) -> LogAction App (SolverMsg 
 solverLogAction verbosity counters = trace <> maybe mempty countInto counters
   where
     trace = case verbosity of
-        Verbose -> cmap renderSolverMsg toStdout
+        Verbose -> cmapMaybe renderSolverMsg toStdout
         Normal  -> mempty
 
-renderSolverMsg :: SolverMsg Cabal -> Text
-renderSolverMsg (Deciding pn is) = T.pack "Deciding " <> pretty pn <> T.pack " among " <> pretty is
-renderSolverMsg (Chose pn i) = T.pack "Chose " <> pretty pn <> T.pack " as " <> pretty i
+-- | A trace line, or 'Nothing' for an event that is counted but not traced.
+-- 'Judged' fires once per propagation round, which is far more often than
+-- anything a reader of the trace wants, and leaving it out keeps a @-v@ trace
+-- byte-comparable across a change to how much propagation judges.
+renderSolverMsg :: SolverMsg Cabal -> Maybe Text
+renderSolverMsg (Deciding pn is) = Just (T.pack "Deciding " <> pretty pn <> T.pack " among " <> pretty is)
+renderSolverMsg (Chose pn i) = Just (T.pack "Chose " <> pretty pn <> T.pack " as " <> pretty i)
 renderSolverMsg (Conflict incompatibility) =
-    T.pack "Conflict " <> prettyIncompat incompatibility
+    Just (T.pack "Conflict " <> prettyIncompat incompatibility)
 renderSolverMsg (Resolving pn incompatibility) =
-    T.pack "  resolving at " <> pretty pn <> T.pack " -> " <> prettyIncompat incompatibility
+    Just (T.pack "  resolving at " <> pretty pn <> T.pack " -> " <> prettyIncompat incompatibility)
 renderSolverMsg (Learned incompatibility) =
-    T.pack "Learned " <> prettyIncompat incompatibility
-renderSolverMsg (Backtracked level) = T.pack ("Backtracked to level " <> show level)
+    Just (T.pack "Learned " <> prettyIncompat incompatibility)
+renderSolverMsg (Backtracked level) = Just (T.pack ("Backtracked to level " <> show level))
 renderSolverMsg (NoVersionFor pn is) =
-    T.pack "No value available for " <> pretty pn <> T.pack " in " <> pretty is
+    Just (T.pack "No value available for " <> pretty pn <> T.pack " in " <> pretty is)
+renderSolverMsg (Judged _) = Nothing
 
 -- | An incompatibility on one line, as its terms. Deliberately not
 -- 'PubGrub.Report.reportConflict', which renders a whole numbered proof — that is
@@ -203,6 +208,11 @@ prettyIncompat i =
 -- The depth histogram needs one bit of state, exactly as the awk keeps it: a
 -- 'Resolving' between a 'Conflict' and its 'Learned' deepens that resolution,
 -- and one outside is counted but deepens nothing.
+--
+-- Two counters have no awk twin, because 'Judged' is not traced: @judged@, the
+-- clauses propagation judged in all, and @rejudged@, the share of them judged
+-- in the round right after a 'Backtracked'. The second is what a backtrack
+-- costs propagation. It takes a bit of state of the same kind as the histogram.
 data Stats = Stats
     { stDeciding     :: !Int
     , stChose        :: !Int
@@ -218,6 +228,11 @@ data Stats = Stats
     , stHistogram    :: !(Map Int Int)
     -- ^ resolution depth, read off at each 'Learned', to how many resolutions
     -- reached exactly that depth
+    , stJudged       :: !Int
+    , stRejudged     :: !Int
+    -- ^ judgements in the first round after each 'Backtracked'
+    , stAfterBacktrack :: !Bool
+    -- ^ a 'Backtracked' has arrived and its round has not
     }
 
 emptyStats :: Stats
@@ -233,6 +248,9 @@ emptyStats =
         , stDepth = 0
         , stInResolution = False
         , stHistogram = Map.empty
+        , stJudged = 0
+        , stRejudged = 0
+        , stAfterBacktrack = False
         }
 
 count :: SolverMsg Cabal -> Stats -> Stats
@@ -252,7 +270,13 @@ count msg st = case msg of
             , stHistogram = Map.insertWith (+) (stDepth st) 1 (stHistogram st)
             , stInResolution = False
             }
-    Backtracked {} -> st {stBacktracked = stBacktracked st + 1}
+    Backtracked {} -> st {stBacktracked = stBacktracked st + 1, stAfterBacktrack = True}
+    Judged n ->
+        st
+            { stJudged = stJudged st + n
+            , stRejudged = if stAfterBacktrack st then stRejudged st + n else stRejudged st
+            , stAfterBacktrack = False
+            }
 
 -- | Fold every message into the counters. The 'IORef' is the seam: the solver
 -- already hands each 'SolverMsg' to a 'LogAction', and updating a strict record
@@ -278,6 +302,8 @@ renderStats st =
             , "resolving=" ++ show (stResolving st)
             , "backtracked=" ++ show (stBacktracked st)
             , "noversion=" ++ show (stNoVersion st)
+            , "judged=" ++ show (stJudged st)
+            , "rejudged=" ++ show (stRejudged st)
             , "depth=" ++ intercalate "," [show k ++ ":" ++ show c | (k, c) <- Map.toAscList (stHistogram st)]
             ]
 

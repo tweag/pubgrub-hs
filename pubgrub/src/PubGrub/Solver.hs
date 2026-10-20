@@ -415,11 +415,12 @@ unitPropagation logA store0 ps0 =
      in settle dirty IntSet.empty store ps0
   where
     -- Judge the dirty clauses, then act on the newest actionable one.
-    settle dirty actionable store ps =
+    settle dirty actionable store ps = do
+        logA <& (Judged (IntSet.size dirty) :: SolverMsg d)
         let actionable' = IntSet.foldl' (judge store ps) actionable dirty
-         in case IntSet.maxView actionable' of
-                Nothing -> pure (Right (store, ps))
-                Just (c, rest) -> act c rest store ps
+        case IntSet.maxView actionable' of
+            Nothing -> pure (Right (store, ps))
+            Just (c, rest) -> act c rest store ps
 
     judge store ps acc c = case clauseAt store c of
         Just i | actionableRelation (psRelation ps i) -> IntSet.insert c acc
@@ -519,6 +520,11 @@ data SolverMsg d
       Learned (Incompatibility d)
     | -- | backtracked to this decision level
       Backtracked Int
+    | -- | one round of propagation judged this many clauses against the
+      -- partial solution: the ones the store had marked dirty. The round right
+      -- after a 'Backtracked' is the one that re-judges after the backtrack, so
+      -- the sum of those is what a backtrack costs propagation.
+      Judged Int
 
 -- | Solve for the seeds, one 'PubGrub.Incompatibility.request' per target, by
 -- alternating 'unitPropagation' with decisions: take the first

@@ -174,7 +174,7 @@ pubgrub -v 'aeson <2' | awk -f bench/summarise.awk
 the provider's `read N .cabal files …` line:
 
 ```
-stats: deciding=309 chose=308 conflicts=58 learned=57 resolving=104 backtracked=57 noversion=1 depth=0:40,1:9,...
+stats: deciding=319 chose=319 conflicts=58 learned=57 resolving=89 backtracked=57 noversion=0 judged=37653 rejudged=12768 depth=0:48,2:5,3:2,5:1,23:1
 phases: world=0.412 index=0.000 solve=0.331 render=0.008
 ```
 
@@ -185,6 +185,13 @@ the search; `render` is printing the answer. Under `--cabal` the stats line is
 `stats: steps=N`, cabal's log-step count. `-v` and `--stats` compose.
 `scripts/check-stats.sh` holds `--stats` to the awk, number for number, on all 26
 problems.
+
+`judged` and `rejudged` count propagation's work rather than the search. `judged` is
+every clause propagation judged against the partial solution, one per clause per
+round; `rejudged` is the part of it judged in the round right after a backtrack.
+Neither has a trace line, so the awk cannot count them and `check-stats.sh` does not
+compare them, and a `-v` trace is the same with or without them. On the 26 problems at
+the pin, `rejudged` is 68,271 of 210,440 judgements, 32%.
 
 `bench/summarise.awk` turns a `-v` trace into the same event counts plus the
 **resolution-depth histogram**. The histogram counts the `Resolving` events between a `Conflict` and its

@@ -695,14 +695,18 @@ benchmarkReport cfg env results =
        , "## Search counts"
        , ""
        , "Our solver's counts on the same runs. `parses` must be zero: a non-zero count"
-       , "means the derived index is behind the Hackage index."
+       , "means the derived index is behind the Hackage index. `judged` is every clause"
+       , "propagation judged, and `after backtrack` the part of it judged in the round"
+       , "that follows a backtrack."
        , "" ]
     ++ table
-        [ "problem", "decisions", "conflicts", "no-version", "decoded", "parses" ]
+        [ "problem", "decisions", "conflicts", "no-version", "judged", "after backtrack", "decoded", "parses" ]
         [ [ tick (probText p)
           , count (statInt "deciding" ours)
           , count (statInt "conflicts" ours)
           , count (statInt "noversion" ours)
+          , count (statInt "judged" ours)
+          , count (statInt "rejudged" ours)
           , count (rdDecoded <$> mReads ours)
           , count (rdParses <$> mReads ours)
           ]
