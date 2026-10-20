@@ -342,7 +342,7 @@ worth.
 ## 6. The derived index makes a read a decode
 
 `cabal run pubgrub-index` parses all 153,496 releases once, in about 4 minutes, and
-writes `_cache/derived-index.cbor` (94.5 MB) plus a 2.5 MB index keyed by tar block.
+writes `_cache/derived-index.cbor` (94.8 MB) plus a 2.5 MB index keyed by tar block.
 `Bridge.Provider` consults it first and falls back to parsing on any miss.
 
 Four properties to know before you touch
@@ -394,6 +394,12 @@ Four properties to know before you touch
   that decoded 6,292 releases to serve 3,612. Keying by block cut allocation by 16% on
   `haskell-language-server`, `yesod` and `pandoc`, and peak residency at `-A256k` by
   11%, 28% and 29%, with the search unchanged.
+- **Test suites and benchmarks are deferred.** Each is a CBOR byte string holding its
+  own encoding, so decoding an entry steps over it by its length, and the field is a
+  thunk that decodes when forced. The driver reads no stanzas, and they are 29% of
+  the store's bytes. A thunk cannot fall back to parsing, so bytes that fail to decode
+  there throw `StoreCorrupt`, which only damage to the file can cause. Deferring them
+  cut allocation by a further 12%, 15% and 16% on the same three problems.
 
 **The derived index does not make a solve faster on its own.** Parsing was 0.3–0.6 s
 of runs taking 0.7–6.8 s. Its whole value is that it changed the price of a

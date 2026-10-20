@@ -26,8 +26,12 @@ import           PubGrub.Cabal.Flatten                  (FlagModel (..),
                                                          toStored,
                                                          unbuildableAtDefaults,
                                                          unbuildableAtDefaultsStored)
-import           Bridge.Hackage.Store                   ()
-import           Codec.Serialise                        (deserialise, serialise)
+import           Bridge.Hackage.Store                   (StoreCorrupt (..))
+import           Codec.Serialise                        (deserialise,
+                                                         deserialiseOrFail,
+                                                         serialise)
+import           Control.Exception                      (evaluate, try)
+import qualified Data.ByteString                        as BS
 import qualified Data.ByteString.Lazy.Char8             as BL
 import           Distribution.Compiler                  (AbiTag (NoAbiTag),
                                                          CompilerFlavor (GHC),
@@ -87,11 +91,46 @@ agrees name src = testCase name $ do
         componentToolsStored FixedFlags stanzas testPlatform testCompiler stored
             @?= componentToolsAtDefaults stanzas testPlatform testCompiler gpd
 
+-- | The test suites and benchmarks are skipped, not decoded. An entry whose
+-- deferred sections are not CBOR at all still decodes, and reads right without
+-- stanzas, and only forcing the test suites finds the damage.
+deferredSkipped :: TestTree
+deferredSkipped = testCase "test suites and benchmarks are decoded only when forced" $ do
+    gpd <-
+        gpdOf $
+            unlines
+                [ "name: p"
+                , "version: 1.0"
+                , "library"
+                , "  build-depends: base"
+                , "test-suite spec"
+                , "  type: exitcode-stdio-1.0"
+                , "  main-is: Spec.hs"
+                , "  build-depends: base, p, hspec"
+                ]
+    let stored = toStored gpd
+        garbage = BS.pack [0xff]
+        -- The layout of a stored release, spelt as a tuple so that the deferred
+        -- sections can be bytes that are not CBOR.
+        damaged =
+            serialise
+                (srFlags stored, srManual stored, srLibrary stored, srOthers stored, garbage, garbage, srSetup stored)
+    case deserialiseOrFail damaged of
+        Left err -> assertFailure ("the entry around the damage did not decode: " <> show err)
+        Right (sr :: StoredRelease) -> do
+            componentDepsAtDefaultsStored noStanzas testPlatform testCompiler sr
+                @?= componentDepsAtDefaults noStanzas testPlatform testCompiler gpd
+            forced <- try (evaluate (length (srTests sr)))
+            case forced of
+                Left (StoreCorrupt _) -> pure ()
+                Right _               -> assertFailure "forcing damaged test suites did not throw"
+
 tests :: TestTree
 tests =
     testGroup
         "Bridge.Hackage.Store (derived index entries)"
-        [ agrees "plain library" $
+        [ deferredSkipped
+        , agrees "plain library" $
             unlines
                 [ "name: p"
                 , "version: 1.0"

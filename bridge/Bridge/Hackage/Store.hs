@@ -66,6 +66,7 @@ module Bridge.Hackage.Store
     , withStore
     , buildStore
     , storeFormatVersion
+    , StoreCorrupt (..)
     ) where
 
 import           PubGrub.Cabal.Flatten                  (Branch (..),
@@ -76,10 +77,11 @@ import           PubGrub.Cabal.Flatten                  (Branch (..),
 import           Codec.Serialise                        (Serialise (..),
                                                          deserialiseOrFail,
                                                          serialise)
-import           Codec.Serialise.Decoding               (decodeListLen)
-import           Codec.Serialise.Encoding               (encodeListLen)
-import           Control.Exception                      (SomeException, try)
-import           Control.Monad                          (foldM)
+import           Codec.Serialise.Decoding               (decodeBytes, decodeListLen)
+import           Codec.Serialise.Encoding               (encodeBytes, encodeListLen)
+import           Control.Exception                      (Exception, SomeException,
+                                                         throw, try)
+import           Control.Monad                          (foldM, when)
 import           Data.Bits                              (shiftL, (.|.))
 import qualified Data.ByteString                        as BS
 import qualified Data.ByteString.Builder                as BB
@@ -132,7 +134,7 @@ import           System.IO                               (Handle, IOMode (..), h
 -- 'Bridge.Hackage.readVersionCache' does: a generic encoding is positional, so
 -- reordering a constructor silently changes its meaning.
 storeFormatVersion :: Int
-storeFormatVersion = 9
+storeFormatVersion = 10
 
 -- These are orphans. They belong here rather than in Cabal-syntax, and wrapping
 -- every type in a newtype to avoid the orphan would cost more clarity than it
@@ -190,7 +192,63 @@ instance Serialise a => Serialise (Tree a)
 instance Serialise ExeDependency
 instance Serialise LibNode
 instance Serialise Node
-instance Serialise StoredRelease
+
+-- | Hand-written, unlike its neighbours, so that the test suites and benchmarks
+-- can be skipped. Each is a CBOR byte string holding its own CBOR encoding. The
+-- byte string's header carries its length, so decoding the entry steps over it
+-- without building it, and the field is a thunk that decodes the bytes when
+-- forced. A driver that reads no stanzas never forces them, and they are 29% of
+-- the store's bytes.
+--
+-- The thunk cannot answer 'Nothing' the way a lookup does, because the lookup has
+-- returned by the time it runs. Bytes that fail to decode there throw
+-- 'StoreCorrupt', and only damage to the file can cause that: the entry around
+-- them decoded, and was written by the same encoder.
+instance Serialise StoredRelease where
+    encode sr =
+        encodeListLen 7
+            <> encode (srFlags sr)
+            <> encode (srManual sr)
+            <> encode (srLibrary sr)
+            <> encode (srOthers sr)
+            <> deferred (srTests sr)
+            <> deferred (srBenchmarks sr)
+            <> encode (srSetup sr)
+      where
+        deferred x = encodeBytes (BL.toStrict (serialise x))
+    decode = do
+        n <- decodeListLen
+        when (n /= 7) (fail "a stored release with the wrong number of fields")
+        flags <- decode
+        manual <- decode
+        library <- decode
+        others <- decode
+        tests <- undefer <$> decodeBytes
+        benchmarks <- undefer <$> decodeBytes
+        setup <- decode
+        pure
+            StoredRelease
+                { srFlags = flags
+                , srManual = manual
+                , srLibrary = library
+                , srOthers = others
+                , srTests = tests
+                , srBenchmarks = benchmarks
+                , srSetup = setup
+                }
+      where
+        undefer bytes = case deserialiseOrFail (BL.fromStrict bytes) of
+            Right x  -> x
+            Left err -> throw (StoreCorrupt (show err))
+
+-- | A deferred section of a stored release failed to decode when it was forced.
+newtype StoreCorrupt = StoreCorrupt String
+
+instance Show StoreCorrupt where
+    show (StoreCorrupt err) =
+        "the derived index is damaged (" <> err <> "); delete _cache/derived-index.* or run pubgrub-index again"
+
+instance Exception StoreCorrupt
 
 -- --------------------------------------------------------------------------
 -- On disk
