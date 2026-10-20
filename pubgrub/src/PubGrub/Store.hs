@@ -65,9 +65,10 @@
 -- A clause's relation to the partial solution depends only on the accumulated
 -- terms of the variables it mentions. So after an assignment to @v@ only the
 -- clauses that mention @v@ can change their relation, and after a merge only the
--- merged clause can. The store keeps the index that turns that into a worklist:
--- which clauses mention each variable ('clausesOf'), and which clauses have been
--- inserted, merged or 'touch'ed since propagation last looked ('takeDirty').
+-- merged clause can. The store keeps the index that turns that into a worklist,
+-- which clauses mention each variable ('clausesOf'), and an insert answers with
+-- the id the clause landed at, new or merged into. Which clauses are still to
+-- be judged is propagation's business, not the store's ("PubGrub.Solver").
 --
 -- == What the store assumes of its rule, and what it does not
 --
@@ -87,8 +88,6 @@ module PubGrub.Store
     , clauseAt
     , clausesOf
     , allClauses
-    , touch
-    , takeDirty
     , valid
     ) where
 
@@ -106,13 +105,11 @@ import           PubGrub.Incompatibility (Domain (..), Incompatibility (..),
 type ClauseId = Int
 
 -- | The clauses by id, the index from a variable to the clauses that mention it,
--- the merge rule with the clause each of its keys names, and the clauses
--- propagation has not judged since they changed.
+-- and the merge rule with the clause each of its keys names.
 data Store d = Store
     { stClauses :: !(IntMap (Incompatibility d))
     , stIndex   :: !(Map (VarOf d) IntSet)
     , stMerging :: !(MergeIndex d)
-    , stDirty   :: !IntSet
     , stNext    :: !ClauseId
     }
 
@@ -137,7 +134,6 @@ emptyStoreWith MergeRule{mergeKey, mergeWith} =
         { stClauses = IntMap.empty
         , stIndex = Map.empty
         , stMerging = MergeIndex{miTargets = Map.empty, miKey = mergeKey, miMerge = mergeWith}
-        , stDirty = IntSet.empty
         , stNext = 0
         }
 
@@ -161,19 +157,21 @@ storeClauses :: Store d -> [Incompatibility d]
 storeClauses Store{stClauses} = IntMap.foldl (flip (:)) [] stClauses
 
 -- | Add a clause: merge it into the fact it agrees with, or put it at the front.
--- Either way the clause that results is dirty.
-insertClause :: Domain d => Incompatibility d -> Store d -> Store d
-insertClause i store@Store{stClauses, stIndex, stMerging, stDirty, stNext} =
+-- Either way, the id of the clause that results: the one merged into, or a new
+-- one.
+insertClause :: Domain d => Incompatibility d -> Store d -> (ClauseId, Store d)
+insertClause i store@Store{stClauses, stIndex, stMerging, stNext} =
     case place stNext i stMerging of
-        Left target -> mergeInto target
+        Left target -> (target, mergeInto target)
         Right merging ->
-            store
+            ( stNext
+            , store
                 { stClauses = IntMap.insert stNext i stClauses
                 , stIndex = index stNext (incompTerms i) stIndex
                 , stMerging = merging
-                , stDirty = IntSet.insert stNext stDirty
                 , stNext = stNext + 1
                 }
+            )
   where
     -- Replace the clause at @target@ with the merge of it and @i@, in place: the
     -- id, and so the scan position, is the one the existing clause had. The
@@ -189,17 +187,17 @@ insertClause i store@Store{stClauses, stIndex, stMerging, stDirty, stNext} =
                 Just existing ->
                     let m = mergeOf stMerging existing i
                      in (m, reindex target (incompTerms existing) (incompTerms m) stIndex)
-         in store
-                { stClauses = IntMap.insert target merged stClauses
-                , stIndex = ix
-                , stDirty = IntSet.insert target stDirty
-                }
+         in store{stClauses = IntMap.insert target merged stClauses, stIndex = ix}
 
 -- | Insert several clauses, preserving their order at the front: @insertClauses
 -- [a,b,c]@ leaves the store scanning @a@, @b@, @c@, then what was there before,
--- except that a clause merged into an older one keeps that one's place.
-insertClauses :: Domain d => [Incompatibility d] -> Store d -> Store d
-insertClauses is store = foldr insertClause store is
+-- except that a clause merged into an older one keeps that one's place. Answers
+-- with the ids they landed at.
+insertClauses :: Domain d => [Incompatibility d] -> Store d -> (IntSet, Store d)
+insertClauses is store = foldr step (IntSet.empty, store) is
+  where
+    step i (!ids, !s) = case insertClause i s of
+        (c, s') -> (IntSet.insert c ids, s')
 
 -- | The clause with this id, if there is one.
 clauseAt :: Store d -> ClauseId -> Maybe (Incompatibility d)
@@ -213,36 +211,23 @@ clausesOf v Store{stIndex} = Map.findWithDefault IntSet.empty v stIndex
 allClauses :: Store d -> IntSet
 allClauses Store{stClauses} = IntMap.keysSet stClauses
 
--- | The variable's accumulated term changed: every clause that mentions it is
--- dirty. What the solver calls after a decision; a derivation during
--- propagation is handled there.
-touch :: Domain d => VarOf d -> Store d -> Store d
-touch v store@Store{stDirty} = store{stDirty = IntSet.union (clausesOf v store) stDirty}
-
--- | The clauses inserted, merged or touched since the last call, and the store
--- with none outstanding.
-takeDirty :: Store d -> (IntSet, Store d)
-takeDirty store@Store{stDirty} = (stDirty, store{stDirty = IntSet.empty})
-
 -- | Every invariant the store keeps, for the tests:
 --
 -- * the index is exactly the variables the clauses mention, each mapped to the
 --   clauses that mention it, so no variable maps to no clause;
 -- * the merge index is exactly the clauses that have a key, by key, so a key
 --   names a clause that is there and no two clauses share a key;
--- * the dirty clauses are clauses, and every id is below the next one.
+-- * every id is below the next one.
 --
 -- The second holds only under a rule that keeps its law (see t'MergeRule'): a
 -- merge that changes the key leaves the old key naming the merged clause.
 valid :: Domain d => Store d -> Bool
-valid Store{stClauses, stIndex, stMerging = MergeIndex{miTargets, miKey}, stDirty, stNext} =
+valid Store{stClauses, stIndex, stMerging = MergeIndex{miTargets, miKey}, stNext} =
     stIndex == mentions
         && length keyed == Map.size miTargets
         && Map.fromList keyed == miTargets
-        && stDirty `IntSet.isSubsetOf` ids
-        && maybe True ((< stNext) . fst) (IntSet.maxView ids)
+        && maybe True ((< stNext) . fst) (IntMap.lookupMax stClauses)
   where
-    ids = IntMap.keysSet stClauses
     clauses = IntMap.toList stClauses
     mentions = Map.fromListWith IntSet.union [(v, IntSet.singleton c) | (c, i) <- clauses, v <- Map.keys (incompTerms i)]
     keyed = [(k, c) | (c, i) <- clauses, Just k <- [miKey i]]

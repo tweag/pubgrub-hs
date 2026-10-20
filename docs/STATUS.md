@@ -377,7 +377,7 @@ time.
 
 ### 5.2 Measured and rejected
 
-Both are recorded so nobody re-derives them.
+Each is recorded so nobody re-derives it.
 
 **Narrowing declared ranges to published versions.** `PubGrub.Cabal.Provider.widen` puts a
 declared range into a term verbatim, so version space no release occupies survives.
@@ -405,6 +405,13 @@ deciding the package with the fewest versions first. It cuts `futhark` decisions
 **Reopened by `yesod`**, which is satisfiable and therefore prints no proof at all, so
 the reason for reverting does not apply to it. See
 [DESIGN.md §12](DESIGN.md#12-decision-order-is-discovery-order-and-yesod-is-the-bill).
+
+**Re-judging only what a backtrack moved.** After a conflict, propagation re-judges
+the whole store. Re-judging only the clauses of the variables the backtrack undid
+gives the same search and cuts the post-backtrack judgements by 23% (46% on
+`haskell-language-server`), and allocation moves by under 0.1%: a judgement is too
+cheap for the count to matter. Built and reverted on 2026-10-20; the numbers are in
+[DESIGN.md §5](DESIGN.md#5-dependency-facts-collapse-in-two-places).
 
 ---
 

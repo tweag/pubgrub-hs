@@ -191,7 +191,9 @@ every clause propagation judged against the partial solution, one per clause per
 round; `rejudged` is the part of it judged in the round right after a backtrack.
 Neither has a trace line, so the awk cannot count them and `check-stats.sh` does not
 compare them, and a `-v` trace is the same with or without them. On the 26 problems at
-the pin, `rejudged` is 68,271 of 210,440 judgements, 32%.
+the pin, `rejudged` is 68,271 of 210,440 judgements, 32%. Read either next to
+allocation: a judgement costs about 50 bytes, so even a large cut in `judged` can be
+noise in the run ([DESIGN.md](DESIGN.md) §5).
 
 `bench/summarise.awk` turns a `-v` trace into the same event counts plus the
 **resolution-depth histogram**. The histogram counts the `Resolving` events between a `Conflict` and its

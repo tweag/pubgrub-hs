@@ -280,11 +280,25 @@ assignment, restarting from the front: 1.9 million clause judgements for 1,009
 propagation rounds on `haskell-language-server` under flag search, 12.7 million in
 latti's larger problem, and more than half of a large solve's time either way. The
 store now gives each clause an id in insertion order, keeps the index from a variable
-to the clauses that mention it, and marks dirty what was inserted, merged or
-assigned since propagation last looked; propagation re-judges the dirty clauses,
-keeps the set of actionable ones, and acts on the newest — the clause the full
-scan found first, every time. A backtrack moves every variable at once, so after one
-the whole store is dirty, which happens once per conflict. The merge key names a
+to the clauses that mention it, and answers an insert with the id the clause landed
+at. Propagation is handed the clauses inserted, merged or assigned since it last
+looked, re-judges them, keeps the set of actionable ones, and acts on the newest —
+the clause the full scan found first, every time. Which clauses are still to be
+judged is propagation's state, not the store's.
+
+**After a backtrack the whole store is re-judged**, once per conflict, and that is
+measured, not overlooked. A backtrack changes the term of every variable with an
+assignment above the level it goes back to and of no other, so re-judging only those
+variables' clauses, the learned clause and the conflict gives the same actionable
+set. It was built on 2026-10-20 and not kept. It cut the post-backtrack judgements
+from 68,271 to 52,348 over the 26 problems at the pin (a third of all judgements to
+a quarter), and on `haskell-language-server` from 74,857 to 40,313, with the trace
+and every other count identical. Allocation moved by under 0.1% either way: a
+judgement costs about 50 bytes, the 34,544 it saved on HLS were 0.08% of the run, and
+collecting the undone variables' clauses cost about as much. Backjumps go far enough
+that those variables mention most of the store anyway.
+
+The merge key names a
 clause id, so a merge is a lookup rather than a walk down the list comparing keys
 (9 million comparisons for 14,088 inserts on HLS before). The search trace on HLS
 is byte-identical, every `stats:` count is unchanged, the judgements fell from

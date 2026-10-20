@@ -38,8 +38,9 @@ import           PubGrub.SetOps                 (SetOps (isEmpty), equivalent)
 import           PubGrub.Cabal.Value                  (ValueSet (..), instanceSet)
 import           PubGrub.Cabal.Variable               (Flag (..), Var (..))
 import           PubGrub.Term                   (Term (..))
-import           PubGrub.Store                  (emptyStore, insertClause,
-                                                 insertClauses, storeClauses)
+import           PubGrub.Store                  (Store, emptyStore,
+                                                 storeClauses)
+import qualified PubGrub.Store                  as Store
 import qualified PubGrub.Cabal.VersionSet             as VersionSet
 import           Test.Tasty                     (TestTree, testGroup)
 import           Test.Tasty.HUnit               (assertBool, assertFailure,
@@ -48,6 +49,14 @@ import           Test.Tasty.HUnit               (assertBool, assertFailure,
 -- --------------------------------------------------------------------------
 -- Fixtures
 -- --------------------------------------------------------------------------
+
+-- | The store after the inserts. These tests are about what the store holds,
+-- not about where each clause landed.
+insertClause :: Incompatibility Cabal -> Store Cabal -> Store Cabal
+insertClause i = snd . Store.insertClause i
+
+insertClauses :: [Incompatibility Cabal] -> Store Cabal -> Store Cabal
+insertClauses is = snd . Store.insertClauses is
 
 pkgA, pkgB, pkgQ :: PackageName
 pkgA = mkPackageName "a"

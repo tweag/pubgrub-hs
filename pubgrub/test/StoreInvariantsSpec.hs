@@ -19,10 +19,9 @@ import qualified Data.Set                as Set
 import           PubGrub.Incompatibility (Cause (..), Domain (..),
                                           Incompatibility (..), MergeRule (..),
                                           noMerging)
-import           PubGrub.Store           (Store, clausesOf, emptyStoreWith,
-                                          insertClause, insertClauses,
-                                          storeClauses, takeDirty, touch,
-                                          valid)
+import           PubGrub.Store           (Store, allClauses, clausesOf,
+                                          emptyStoreWith, insertClause,
+                                          insertClauses, storeClauses, valid)
 import           PubGrub.Term            (Term (..))
 import           Test.Tasty              (TestTree, testGroup)
 import           Test.Tasty.HUnit        (testCase, (@?=))
@@ -75,25 +74,15 @@ instance Arbitrary Spec where
 data Op
     = Insert Spec
     | InsertMany [Spec]
-    | Touch Int
-    | TakeDirty
     deriving (Show)
 
 instance Arbitrary Op where
-    arbitrary =
-        frequency
-            [ (6, Insert <$> arbitrary)
-            , (2, InsertMany <$> listOf arbitrary)
-            , (1, Touch <$> choose (0, 5))
-            , (1, pure TakeDirty)
-            ]
+    arbitrary = frequency [(3, Insert <$> arbitrary), (1, InsertMany <$> listOf arbitrary)]
 
 apply :: Store Lab -> Op -> Store Lab
 apply store op = case op of
-    Insert s      -> insertClause (clause s) store
-    InsertMany ss -> insertClauses (map clause ss) store
-    Touch v       -> touch (V v) store
-    TakeDirty     -> snd (takeDirty store)
+    Insert s      -> snd (insertClause (clause s) store)
+    InsertMany ss -> snd (insertClauses (map clause ss) store)
 
 -- --------------------------------------------------------------------------
 -- The rules
@@ -125,11 +114,22 @@ rekeying = MergeRule{mergeKey = keyOf, mergeWith = \_ new -> new{incompCause = F
 validThroughout :: MergeRule Lab -> [Op] -> Bool
 validThroughout rule ops = all valid (scanl apply (emptyStoreWith rule) ops)
 
+-- | An insert answers with the id of a clause that is in the store afterwards:
+-- the one it merged into, or a new one exactly when nothing had its key.
+landsWhereItSays :: MergeRule Lab -> [Spec] -> Spec -> Bool
+landsWhereItSays rule before s =
+    IntSet.member c (allClauses after) && isNew == not merges
+  where
+    store = foldl (\st x -> snd (insertClause (clause x) st)) (emptyStoreWith rule) before
+    (c, after) = insertClause (clause s) store
+    isNew = not (IntSet.member c (allClauses store))
+    merges = spKeyed s && any ((== Just (spTag s)) . keyOf) (storeClauses store)
+
 -- | Under a rule that merges by key, a store holds one clause per key and one
 -- per clause without a key.
 oneClausePerKey :: MergeRule Lab -> [Spec] -> Property
 oneClausePerKey rule specs =
-    length (storeClauses (foldl (flip insertClause) (emptyStoreWith rule) (map clause specs)))
+    length (storeClauses (foldl (\st x -> snd (insertClause x st)) (emptyStoreWith rule) (map clause specs)))
         === length (nub [spTag s | s <- specs, spKeyed s]) + length (filter (not . spKeyed) specs)
 
 -- --------------------------------------------------------------------------
@@ -143,18 +143,20 @@ tests =
         [ testProperty "valid throughout, merging nothing" (validThroughout noMerging)
         , testProperty "valid throughout, a merge replacing the clause" (validThroughout replacing)
         , testProperty "valid throughout, a merge widening the clause" (validThroughout widening)
+        , testProperty "an insert answers where the clause landed, replacing" (landsWhereItSays replacing)
+        , testProperty "an insert answers where the clause landed, widening" (landsWhereItSays widening)
         , testProperty "one clause per key, replacing" (oneClausePerKey replacing)
         , testProperty "one clause per key, widening" (oneClausePerKey widening)
         , testCase "a variable the merged clause stops mentioning leaves the index" $ do
             let store =
-                    insertClause (clause (Spec 0 True [(2, True, [1])])) $
+                    snd . insertClause (clause (Spec 0 True [(2, True, [1])])) . snd $
                         insertClause (clause (Spec 0 True [(1, True, [1])])) (emptyStoreWith replacing)
             clausesOf (V 1) store @?= IntSet.empty
             clausesOf (V 2) store @?= IntSet.singleton 0
             valid store @?= True
         , testCase "a rule that changes the key is caught" $ do
             let store =
-                    insertClause (clause (Spec 0 True [(1, True, [1])])) $
+                    snd . insertClause (clause (Spec 0 True [(1, True, [1])])) . snd $
                         insertClause (clause (Spec 0 True [(1, True, [2])])) (emptyStoreWith rekeying)
             valid store @?= False
         ]

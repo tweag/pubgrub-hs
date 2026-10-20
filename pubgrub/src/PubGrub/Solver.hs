@@ -46,7 +46,9 @@ module PubGrub.Solver
 import           Colog.Core                     (LogAction, (<&))
 import           Control.Applicative            (Alternative (..))
 import           Control.Monad                  (foldM)
+import           Data.Bifunctor                 (first)
 import           Data.Foldable                  (Foldable (..))
+import           Data.IntSet                    (IntSet)
 import qualified Data.IntSet                    as IntSet
 import           Data.List                      (sortOn)
 import           Data.Map.Strict                (Map)
@@ -66,8 +68,7 @@ import           PubGrub.Provider               (Provider (..))
 import           PubGrub.SetOps                 (SetOps (..))
 import           PubGrub.Store                  (Store, allClauses, clauseAt,
                                                  clausesOf, emptyStore,
-                                                 insertClause, insertClauses,
-                                                 takeDirty, touch)
+                                                 insertClause, insertClauses)
 import           PubGrub.Term                   (Term (..), anyTerm,
                                                  intersectTerm, negateTerm)
 
@@ -392,27 +393,27 @@ closeWithSeeds logA ps = go
 -- on, which is what gives dependency facts about one pair of packages the chance
 -- to merge ('PubGrub.Store').
 --
--- Which clauses are judged is the store's worklist, not the store. A clause's
--- relation depends only on the accumulated terms of the variables it mentions,
--- and a call starts from a fixpoint — nothing was actionable when the last one
+-- Which clauses are judged is a worklist, not the store. A clause's relation
+-- depends only on the accumulated terms of the variables it mentions, and a
+-- call starts from a fixpoint — nothing was actionable when the last one
 -- returned — so the only clauses whose relation can have changed are the ones
--- the store marks dirty: inserted, merged or 'touch'ed since then, and after a
--- derivation on @q@ the clauses that mention @q@ ('clausesOf'). Those are
--- re-judged and the set of actionable clauses kept up to date; everything else
--- keeps the judgement it had. A backtrack changes every variable's term at
--- once, so after one the whole store is dirty and the set is rebuilt. The clause
--- chosen is therefore the one a full scan would choose, every time: the search
--- does not depend on the worklist, and the number of judgements is proportional
--- to what changed.
+-- the caller names: the ones inserted or merged into since then, and the ones
+-- mentioning a variable it decided. Within the call, after a derivation on @q@
+-- they are the clauses that mention @q@ ('clausesOf'). Those are re-judged and
+-- the set of actionable clauses kept up to date; everything else keeps the
+-- judgement it had. After a backtrack every clause is re-judged, once per
+-- conflict. The clause chosen is therefore the one a full scan would choose,
+-- every time: the search does not depend on the worklist, and between
+-- conflicts the number of judgements is proportional to what changed.
 unitPropagation
     :: forall d m. (Domain d, Monad m)
     => LogAction m (SolverMsg d)
+    -> IntSet
+    -- ^ the clauses whose relation may have changed since the last fixpoint
     -> Store d
     -> PartialSolution d
     -> m (Either (SolveError d) (Store d, PartialSolution d))
-unitPropagation logA store0 ps0 =
-    let (dirty, store) = takeDirty store0
-     in settle dirty IntSet.empty store ps0
+unitPropagation logA pending store0 ps0 = settle pending IntSet.empty store0 ps0
   where
     -- Judge the dirty clauses, then act on the newest actionable one.
     settle dirty actionable store ps = do
@@ -447,9 +448,11 @@ unitPropagation logA store0 ps0 =
                         -- 'Backtracked' carries only a level, which does not
                         -- determine @d@, so the message's type is annotated.
                         logA <& (Backtracked (psLevel ps') :: SolverMsg d)
-                        -- Backtracking moved every variable: judge everything
-                        -- again, learned clause included.
-                        let (_, store') = takeDirty (insertClause rootCause store)
+                        -- Judge everything again, learned clause included. Only
+                        -- the clauses of the variables the backtrack moved can
+                        -- have changed, but judging just those saves nothing
+                        -- measurable (DESIGN §5), and this needs no argument.
+                        let (_, store') = insertClause rootCause store
                         settle (allClauses store') IntSet.empty store' (addDerivation almostVar rootCause ps')
             IAlmostSatisfied q ->
                 settle (clausesOf q store) actionable store (addDerivation q i ps)
@@ -540,10 +543,10 @@ solve
     -> [Incompatibility d]
     -> m (Either (SolveError d) (Map (VarOf d) (ValueOf d)))
 solve logA provider seeds =
-    go (insertClauses seeds emptyStore) emptyPS
+    uncurry go (insertClauses seeds emptyStore) emptyPS
     where
-        go incompats ps =
-            unitPropagation logA incompats ps >>= \case
+        go pending incompats ps =
+            unitPropagation logA pending incompats ps >>= \case
                 Left err -> pure (Left err)
                 Right (incompats', ps') ->
                     case undecidedPositive ps' of
@@ -553,10 +556,13 @@ solve logA provider seeds =
                             expand provider p range >>= \case
                                 (Just i, incs) -> do
                                     logA <& Chose p i
-                                    go (touch p (insertClauses incs incompats')) (addDecision p i ps')
+                                    let (inserted, store) = insertClauses incs incompats'
+                                    go (inserted <> clausesOf p store) store (addDecision p i ps')
                                 (Nothing, facts) -> do
                                     logA <& NoVersionFor p range
-                                    go (insertClauses facts (banRest p range facts incompats')) ps'
+                                    let (banned, store) = banRest p range facts incompats'
+                                        (inserted, store') = insertClauses facts store
+                                    go (banned <> inserted) store' ps'
 
         -- The provider has nothing to offer in @range@, and may have said why:
         -- clauses banning the releases it rejected on the way
@@ -575,11 +581,12 @@ solve logA provider seeds =
             -- Said nothing: the range itself, untouched. A @difference@ against the
             -- empty set would give an equivalent but differently shaped DNF, and so
             -- change the search for every provider that states no facts.
-            | [] <- stated = insertClause (noValues p range)
-            | isEmpty leftover = id
-            | otherwise = insertClause (noValues p leftover)
+            | [] <- stated = landed (noValues p range)
+            | isEmpty leftover = (,) IntSet.empty
+            | otherwise = landed (noValues p leftover)
           where
             leftover = case stated of
                 []       -> range
                 (s : ss) -> range `difference` foldr union s ss
             stated = [s | inc <- facts, Just (Positive s) <- [incompGet p inc]]
+            landed inc = first IntSet.singleton . insertClause inc
