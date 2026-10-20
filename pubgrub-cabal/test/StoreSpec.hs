@@ -163,9 +163,9 @@ mergeTests =
         case map incompCause (storeClauses store) of
             [Fact (CauseDependency p _ _ (q, _))] -> (p, q) @?= (pkgA, pkgQ)
             _ -> assertFailure "expected a single CauseDependency leaf"
-    , -- Clause position dominates propagation cost, so a merge must not move the
-      -- clause it merges into: the store here is [newest … oldest] and the merged
-      -- fact stays where the fact it absorbed was.
+    , -- Scan position decides which clause fires first, so a merge must not move
+      -- the clause it merges into: the store here is [newest … oldest] and the
+      -- merged fact stays where the fact it absorbed was.
       testCase "merging leaves the scan order alone" $ do
         let other = ban pkgB (sourceOnly (halfOpen 1 2))
             store =

@@ -47,6 +47,7 @@ import           Colog.Core                     (LogAction, (<&))
 import           Control.Applicative            (Alternative (..))
 import           Control.Monad                  (foldM)
 import           Data.Foldable                  (Foldable (..))
+import qualified Data.IntSet                    as IntSet
 import           Data.List                      (sortOn)
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
@@ -63,9 +64,10 @@ import           PubGrub.Incompatibility        (Domain (..),
                                                  isSeed, noValues, priorCause)
 import           PubGrub.Provider               (Provider (..))
 import           PubGrub.SetOps                 (SetOps (..))
-import           PubGrub.Store                  (Store, emptyStore,
+import           PubGrub.Store                  (Store, allClauses, clauseAt,
+                                                 clausesOf, emptyStore,
                                                  insertClause, insertClauses,
-                                                 storeClauses)
+                                                 takeDirty, touch)
 import           PubGrub.Term                   (Term (..), anyTerm,
                                                  intersectTerm, negateTerm)
 
@@ -384,24 +386,52 @@ closeWithSeeds logA ps = go
 -- the terminal incompatibility on unsolvable input, or the (possibly grown)
 -- store and updated solution.
 --
--- The worklist is 'storeClauses' — the store's own scan order, newest first —
--- and a learned clause goes back through 'insertClause' rather than being consed
+-- The clause acted on is the __newest__ clause that is satisfied or almost
+-- satisfied — the first one a scan of the store from the front would find — and
+-- a learned clause goes back through 'insertClause' rather than being consed
 -- on, which is what gives dependency facts about one pair of packages the chance
 -- to merge ('PubGrub.Store').
+--
+-- Which clauses are judged is the store's worklist, not the store. A clause's
+-- relation depends only on the accumulated terms of the variables it mentions,
+-- and a call starts from a fixpoint — nothing was actionable when the last one
+-- returned — so the only clauses whose relation can have changed are the ones
+-- the store marks dirty: inserted, merged or 'touch'ed since then, and after a
+-- derivation on @q@ the clauses that mention @q@ ('clausesOf'). Those are
+-- re-judged and the set of actionable clauses kept up to date; everything else
+-- keeps the judgement it had. A backtrack changes every variable's term at
+-- once, so after one the whole store is dirty and the set is rebuilt. The clause
+-- chosen is therefore the one a full scan would choose, every time: the search
+-- does not depend on the worklist, and the number of judgements is proportional
+-- to what changed.
 unitPropagation
     :: forall d m. (Domain d, Monad m)
     => LogAction m (SolverMsg d)
     -> Store d
     -> PartialSolution d
     -> m (Either (SolveError d) (Store d, PartialSolution d))
-unitPropagation logA = scan
+unitPropagation logA store0 ps0 =
+    let (dirty, store) = takeDirty store0
+     in settle dirty IntSet.empty store ps0
   where
-    scan store ps = step store ps (storeClauses store)
+    -- Judge the dirty clauses, then act on the newest actionable one.
+    settle dirty actionable store ps =
+        let actionable' = IntSet.foldl' (judge store ps) actionable dirty
+         in case IntSet.maxView actionable' of
+                Nothing -> pure (Right (store, ps))
+                Just (c, rest) -> act c rest store ps
 
-    -- Walk the worklist of incompatibilities once; on any action, restart scan.
-    step incompats ps [] = pure (Right (incompats, ps))
-    step incompats ps (i : rest) =
-        case psRelation ps i of
+    judge store ps acc c = case clauseAt store c of
+        Just i | actionableRelation (psRelation ps i) -> IntSet.insert c acc
+        _ -> IntSet.delete c acc
+
+    actionableRelation ISatisfied          = True
+    actionableRelation (IAlmostSatisfied _) = True
+    actionableRelation _                   = False
+
+    act c actionable store ps = case clauseAt store c of
+        Nothing -> settle IntSet.empty actionable store ps
+        Just i -> case psRelation ps i of
             ISatisfied -> do
                 -- 'conflictResolution' is pure, so both of its events are logged
                 -- from here: the conflict before it runs, and the level it landed
@@ -416,10 +446,16 @@ unitPropagation logA = scan
                         -- 'Backtracked' carries only a level, which does not
                         -- determine @d@, so the message's type is annotated.
                         logA <& (Backtracked (psLevel ps') :: SolverMsg d)
-                        scan (insertClause rootCause incompats) (addDerivation almostVar rootCause ps')
+                        -- Backtracking moved every variable: judge everything
+                        -- again, learned clause included.
+                        let (_, store') = takeDirty (insertClause rootCause store)
+                        settle (allClauses store') IntSet.empty store' (addDerivation almostVar rootCause ps')
             IAlmostSatisfied q ->
-                scan incompats (addDerivation q i ps)
-            _ -> step incompats ps rest
+                settle (clausesOf q store) actionable store (addDerivation q i ps)
+            -- Not actionable after all: unreachable while the actionable set is
+            -- kept right, and harmless if it is not — the clause is dropped from
+            -- the set and the next newest is tried.
+            _ -> settle IntSet.empty actionable store ps
 
 
 -- | Conflict resolution: satisfier search over 'varHistory', 'priorCause'
@@ -511,7 +547,7 @@ solve logA provider seeds =
                             expand provider p range >>= \case
                                 (Just i, incs) -> do
                                     logA <& Chose p i
-                                    go (insertClauses incs incompats') (addDecision p i ps')
+                                    go (touch p (insertClauses incs incompats')) (addDecision p i ps')
                                 (Nothing, facts) -> do
                                     logA <& NoVersionFor p range
                                     go (insertClauses facts (banRest p range facts incompats')) ps'

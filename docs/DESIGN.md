@@ -104,7 +104,8 @@ longer lives in the set (§3):
   polarity, and `VersionSetSpec` and `InstanceSetSpec` hold every direct form to the
   default it replaces as an equality. With the version normal form stored once
   ([§14](#14-versions-compare-with-trailing-zeros-insignificant)), the store's
-  keys cached ([§5](#5-dependency-facts-collapse-in-two-places)) and
+  merge keys computed once (since superseded by the clause index,
+  [§5](#5-dependency-facts-collapse-in-two-places)) and
   `incompRelation` a strict fold over the clause's terms rather than a walk over
   their list, HLS under `--flags search` went from 8.92 GB allocated to 2.84 GB and
   `yesod` from 6.23 GB to 2.15 GB, with mutator time down 42% and 41% in
@@ -262,20 +263,41 @@ resolving the narrow facts against each other. That produces derived nodes, and 
 nodes *are* the proof lines this exists to remove. `conduit <1.3` was once 1061 lines
 of pairwise merging.
 
-**A merge replaces the existing clause where it already sits.** Clause position
-dominates propagation cost here, so prepending new knowledge is load-bearing.
-An earlier dedup memo, which kept the clause list but looked facts up before
-prepending, cost 22%.
+**A merge replaces the existing clause where it already sits.** The scan order
+decides *which* clause propagation acts on when more than one could fire, and
+through it which derivation is recorded first, which satisfier a conflict finds,
+and so the shape of a proof. New knowledge goes to the front, and a merge keeps the
+position of the clause it merged into, so learning that two facts were one does not
+reorder anything the search has already settled on. Every count the gate holds
+rests on that order being what it was.
 
-**The store keeps each clause's key beside it.** Finding the clause to merge into
-walked the list comparing keys, and recomputed the key of every clause passed: 9.2
-million key constructions for 14,088 inserts on `haskell-language-server` under flag
-search, a tenth of the solve's allocation. Since 2026-10-19 a key is computed once,
-on insert, and kept in a list in lockstep with the clauses; a merge keeps the key,
-because the rule rebuilds the clause through the constructor the key was read from.
-Allocation fell 8% on HLS and 6% on `yesod`, with the search unchanged; finding the
-target in one pass over keys and clauses, instead of an `elemIndex` and a rebuild,
-took another 4%.
+**Propagation judges what changed, not the store.** A clause's relation to the
+partial solution depends only on the accumulated terms of the variables it mentions,
+and a propagation call starts from a fixpoint, so after an assignment to `v` only the
+clauses that mention `v` can change their relation, and after a merge only the
+merged clause. Until 2026-10-20 `unitPropagation` re-judged every clause after every
+assignment, restarting from the front: 1.9 million clause judgements for 1,009
+propagation rounds on `haskell-language-server` under flag search, 12.7 million in
+latti's larger problem, and more than half of a large solve's time either way. The
+store now gives each clause an id in insertion order, keeps the index from a variable
+to the clauses that mention it, and marks dirty what was inserted, merged or
+assigned since propagation last looked; propagation re-judges the dirty clauses,
+keeps the set of actionable ones, and acts on the newest — the clause the full
+scan found first, every time. A backtrack moves every variable at once, so after one
+the whole store is dirty, which happens once per conflict. The merge key names a
+clause id, so a merge is a lookup rather than a walk down the list comparing keys
+(9 million comparisons for 14,088 inserts on HLS before). The search trace on HLS
+is byte-identical, every `stats:` count is unchanged, the judgements fell from
+1,906,033 to 36,123, and `solve` went from 2.9–3.3 s to 0.94 s with allocation
+2.83 → 1.91 GB; `yesod` 2.03 → 1.58 GB, `pandoc` 1.41 →
+1.34 GB, the smaller gains where the provider's reads were already the larger
+share. With propagation at 6% of the solve, the provider is now two thirds of it:
+the derived index's decode, and the neighbour walk's membership test over a
+release's dependency list. This is `references/pubgrub.md:302`'s "index them by the names of the
+packages they refer to", with one difference: the spec iterates the clauses of a
+`changed` set and acts as it goes, which may act on an older clause while a newer
+one is also actionable; ours keeps the newest-first choice the scan made, so the
+proofs do not move.
 
 **The rule is weaker than the spec's, in one direction.** The walk establishes a run
 by reading every release in it, so the span is real. A release the walk stopped at is

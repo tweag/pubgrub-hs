@@ -236,7 +236,9 @@ wrong edit is, not the argument. Read the section before you touch the code.
   *with its declared default*. Do not put flags back into the value, and do not key
   a flag variable by release.
 - **`PubGrub.Store` merges on insert and keeps scan position** — DESIGN §5. A merge
-  replaces the clause where it sits, and the merged clause stays a leaf.
+  replaces the clause where it sits, and the merged clause stays a leaf. Propagation
+  judges only the dirty clauses and acts on the newest actionable one; mark every
+  change to a variable's term or a clause's terms dirty, or the search changes.
 - **The derived index is a cache that follows the index by block** — DESIGN §6. It
   stores the pre-environment form; raise `storeFormatVersion` on any encoding change.
 - **Memoise the reduced form, never the parse tree** — DESIGN §11.
