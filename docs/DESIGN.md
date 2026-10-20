@@ -341,8 +341,8 @@ worth.
 
 ## 6. The derived index makes a read a decode
 
-`cabal run pubgrub-index` parses all 152,987 releases once, in 201 s, and writes
-`_cache/derived-index.cbor` (62.5 MB) plus a 0.4 MB package-keyed offset map.
+`cabal run pubgrub-index` parses all 153,496 releases once, in about 4 minutes, and
+writes `_cache/derived-index.cbor` (94.5 MB) plus a 2.5 MB index keyed by tar block.
 `Bridge.Provider` consults it first and falls back to parsing on any miss.
 
 Four properties to know before you touch
@@ -383,10 +383,17 @@ Four properties to know before you touch
   change shape with that package. `storeFormatVersion` went to 7 with this change.
 - **CBOR, not `binary`.** 410 B per release against 1040, so 62.5 MB against 159 MB.
   `binary` decodes 2.5× faster, but decode stopped being the scarce resource.
-- **Granularity is the package, not the release.** One slice holds every version, so
-  walking a release's neighbours touches data already decoded. The decoded-slice
-  cache holds **one** package. Measured when the walk was off, an unbounded cache cost
-  `pandoc` 39.6 MB of peak residency where holding one cost 23.0 MB.
+- **Granularity is the release, and the key is the block.** The index is a sorted
+  table of fixed-width `(block, offset, length)` records, searched in place, and a
+  lookup reads and decodes one entry. The block is what the caller already holds and
+  names one revision, so finding it is the validity check. Each entry also carries its
+  package and version, compared on read, so a store built against another tar misses
+  rather than answers wrongly. A record occupies `recordBytes`, and the reader finds
+  one by that arithmetic. Until format 9 the granularity was the package, decoded
+  whole on first touch for the neighbour walk's sake. On `haskell-language-server`
+  that decoded 6,292 releases to serve 3,612. Keying by block cut allocation by 16% on
+  `haskell-language-server`, `yesod` and `pandoc`, and peak residency at `-A256k` by
+  11%, 28% and 29%, with the search unchanged.
 
 **The derived index does not make a solve faster on its own.** Parsing was 0.3–0.6 s
 of runs taking 0.7–6.8 s. Its whole value is that it changed the price of a

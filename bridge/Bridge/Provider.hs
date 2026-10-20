@@ -25,7 +25,7 @@ import           Bridge.Hackage                               (IndexHandle (..),
                                                                cacheDirOf,
                                                                withHackageIndex)
 import           Bridge.Hackage.Store                         (StoreReader (..),
-                                                               openStore)
+                                                               withStore)
 import           Colog                                        (LogAction (..),
                                                                WithLog, logMsg)
 import           Data.IORef                                   (atomicModifyIORef',
@@ -69,7 +69,7 @@ import           PubGrub.Incompatibility                      (Incompatibility)
 import           PubGrub.Provider                             (Provider (..))
 import qualified PubGrub.Cabal.Version                              as V
 import           PubGrub.Cabal.VersionSet                           (VersionSet)
-import           UnliftIO                                     (MonadUnliftIO,
+import           UnliftIO                                     (MonadUnliftIO (..),
                                                                liftIO)
 
 -- | Cabal's normal verbosity. From Cabal 3.18 a 'Verbosity.Verbosity' also
@@ -101,16 +101,16 @@ withProvider
     :: (MonadUnliftIO m, WithLog env Text m)
     => Cache -> Manager -> IndexState -> FlagModel -> [(PackageName, VersionSet)] -> [(PackageName, VersionSet)] -> (Provider Cabal m -> [Incompatibility Cabal] -> m a) -> m a
 withProvider cache manager state model targets constraints act =
-    withWorld cache manager state $ \world -> do
+    withWorld cache manager state $ \world ->
+        -- The derived index, when one has been built here. It is a cache and not
+        -- a source of truth: 'withStore' answers 'Nothing' for a missing,
+        -- unreadable or stale-format store, and every miss falls back to parsing,
+        -- so its absence costs speed and never correctness.
+        withRunInIO $ \runInIO -> withStore (cacheDirOf cache) $ \store -> runInIO $ do
         let handle = wIndex world
             platform = wPlatform world
             cInfo = wCompiler world
             installed = reduceIndex (wInstalled world)
-        -- The derived index, when one has been built here. It is a cache and not
-        -- a source of truth: 'openStore' answers 'Nothing' for a missing,
-        -- unreadable or stale-format store, and every miss falls back to parsing,
-        -- so its absence costs speed and never correctness.
-        store <- liftIO (openStore (cacheDirOf cache))
         (readRelease, lookupStats) <-
             liftIO (releaseReader model platform cInfo (wPkgConfig world) handle store)
         let installedDb = mkInstalledDb installed

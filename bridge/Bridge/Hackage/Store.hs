@@ -34,19 +34,26 @@
 --
 -- == Layout
 --
--- Two files, and the granularity is the __package__, not the release:
+-- Two files, and the granularity is the __release__:
 --
--- * @derived-index.cbor@ — for each package, one CBOR-encoded slice holding all
---   of its releases, each tagged with the tar block it was parsed from;
--- * @derived-index.idx@ — @(formatVersion, Map PackageName (offset, length))@,
---   read whole at startup.
+-- * @derived-index.cbor@ — one CBOR entry per release, @(package, version,
+--   'StoredRelease')@, one after another;
+-- * @derived-index.idx@ — the format version, then one fixed-width record per
+--   entry, @(block, offset, length)@, sorted by block. It is read whole at
+--   startup and searched as it lies, with nothing decoded.
 --
--- Package granularity is deliberate, and is what Dart's pub does: its
--- @\<name\>-versions.json@ carries every version's manifest, so walking a
--- release's neighbours touches data already in hand. One slice averages ~8
--- releases and ~3.2 KB, so a neighbour walk costs one read and one decode for the
--- whole package rather than one per release. It also keeps the resident index at
--- 19,419 entries instead of 152,987.
+-- The key is the tar block the entry was parsed from, which names one revision
+-- of one @.cabal@, and is what the caller already holds
+-- ('Bridge.Hackage.ihBlockOf'). Finding the block is therefore the whole
+-- validity check, and the package and version stored in the entry are compared
+-- only so that a store built against some other tar is a miss and not a wrong
+-- answer.
+--
+-- A slice per package, decoded whole on the first lookup, would put a
+-- neighbour walk's releases in hand, but it decodes far more than it serves:
+-- on @haskell-language-server@, 6,292 releases to serve 3,612, and the decode
+-- was half the solve's allocation. Every release is read at most once anyway,
+-- since 'Bridge.Provider.releaseReader' memoises the 'Release' it derives.
 --
 -- The store is a __cache, not a source of truth__: 'srLookup' answers
 -- 'Nothing' for anything it does not have, and the caller falls back to parsing.
@@ -56,7 +63,7 @@ module Bridge.Hackage.Store
     ( StorePaths (..)
     , storePaths
     , StoreReader (..)
-    , openStore
+    , withStore
     , buildStore
     , storeFormatVersion
     ) where
@@ -72,17 +79,19 @@ import           Codec.Serialise                        (Serialise (..),
 import           Codec.Serialise.Decoding               (decodeListLen)
 import           Codec.Serialise.Encoding               (encodeListLen)
 import           Control.Exception                      (SomeException, try)
-import           Data.ByteString.Lazy                   (ByteString)
+import           Control.Monad                          (foldM)
+import           Data.Bits                              (shiftL, (.|.))
+import qualified Data.ByteString                        as BS
+import qualified Data.ByteString.Builder                as BB
 import qualified Data.ByteString.Lazy                   as BL
-import           Data.IORef                             (atomicModifyIORef',
-                                                         newIORef, readIORef)
 import           Data.Int                               (Int64)
+import           Data.List                              (sortOn)
 import           Data.List.NonEmpty                     (NonEmpty (..))
 import           Data.Map.Strict                        (Map)
 import qualified Data.Map.Strict                        as Map
 import           Data.Set                               (Set)
 import qualified Data.Set                               as Set
-import           Data.Word                              (Word32)
+import           Data.Word                              (Word32, Word64)
 import qualified Distribution.Compat.NonEmptySet        as NES
 import           Distribution.Compiler                  (CompilerFlavor)
 import           Distribution.System                    (Arch, OS)
@@ -110,9 +119,8 @@ import           Distribution.Types.Version              (Version, mkVersion,
 import           Distribution.Types.VersionRange         (VersionRange)
 import           System.Directory                        (doesFileExist,
                                                           renameFile)
-import           System.IO                               (IOMode (..), hClose,
-                                                          hSeek, SeekMode (..),
-                                                          openBinaryFile,
+import           System.IO                               (Handle, IOMode (..), hSeek,
+                                                          SeekMode (..),
                                                           withBinaryFile)
 
 -- --------------------------------------------------------------------------
@@ -124,7 +132,7 @@ import           System.IO                               (IOMode (..), hClose,
 -- 'Bridge.Hackage.readVersionCache' does: a generic encoding is positional, so
 -- reordering a constructor silently changes its meaning.
 storeFormatVersion :: Int
-storeFormatVersion = 8
+storeFormatVersion = 9
 
 -- These are orphans. They belong here rather than in Cabal-syntax, and wrapping
 -- every type in a newtype to avoid the orphan would cost more clarity than it
@@ -201,99 +209,102 @@ storePaths dir =
         }
 
 -- | What a solve reads the store through.
-data StoreReader = StoreReader
+newtype StoreReader = StoreReader
     { srLookup :: PackageName -> Version -> Word32 -> IO (Maybe StoredRelease)
     -- ^ 'Nothing' when the store has no entry, which the caller answers by
-    -- parsing. Decoding a package's slice is memoised, so the second release of
-    -- a package — and every neighbour of it — costs a map lookup.
+    -- parsing. Each call reads and decodes one entry and keeps nothing:
+    -- 'Bridge.Provider.releaseReader' memoises what it derives.
     --
     -- The 'Word32' is the tar block of the revision the caller wants
-    -- ('Bridge.Hackage.ihBlockOf'), and an entry is served only if it was
-    -- parsed from that block. A release revised after the store was built, or
-    -- read at an index-state before its latest revision, is therefore a miss
-    -- and not a wrong answer.
-    , srStats  :: IO (Int, Int)
-    -- ^ @(slices decoded, entries served)@.
+    -- ('Bridge.Hackage.ihBlockOf'), and it is the key: an entry is served only
+    -- if it was parsed from that block. A release revised after the store was
+    -- built, or read at an index-state before its latest revision, is therefore
+    -- a miss and not a wrong answer.
+    --
+    -- One thread at a time: a lookup is a seek and then a read on one handle.
     }
 
--- | Open a store, or answer 'Nothing' if there is none here, it is unreadable, or
--- it was written by a different 'storeFormatVersion'.
-openStore :: FilePath -> IO (Maybe StoreReader)
-openStore dir = do
+-- | The index file opens with the format version in 8 bytes.
+headerBytes :: Int
+headerBytes = 8
+
+-- | What one index record occupies: the block in 4 bytes, the entry's offset in
+-- 8 and its length in 4, all big-endian. The reader finds a record by this
+-- arithmetic, so a change to the layout must change both, and
+-- 'storeFormatVersion' too.
+recordBytes :: Int
+recordBytes = 16
+
+-- | Run an action with the store here, or with 'Nothing' if there is none, it is
+-- unreadable, or it was written by a different 'storeFormatVersion'.
+--
+-- The data file stays open for the length of the action. Opening it per lookup
+-- cost ~19 KB of handle buffers each, 70 MB of allocation on
+-- @haskell-language-server@.
+withStore :: FilePath -> (Maybe StoreReader -> IO a) -> IO a
+withStore dir act = do
     let StorePaths{spBlob, spIndex} = storePaths dir
     haveBoth <- (&&) <$> doesFileExist spBlob <*> doesFileExist spIndex
-    if not haveBoth
-        then pure Nothing
-        else do
-            raw <- try (BL.readFile spIndex) :: IO (Either SomeException ByteString)
-            case raw of
-                Left _ -> pure Nothing
-                Right bytes -> case deserialiseOrFail bytes of
-                    Left _ -> pure Nothing
-                    Right (v :: Int, offsets :: Map PackageName (Int64, Int64))
-                        | v /= storeFormatVersion -> pure Nothing
-                        | otherwise -> Just <$> mkReader spBlob offsets
+    records <- if haveBoth then readIndex spIndex else pure Nothing
+    case records of
+        Nothing -> act Nothing
+        Just rs -> withBinaryFile spBlob ReadMode $ \h -> act (Just (mkReader h rs))
 
--- | The decoded-slice cache holds __one package__, not every package touched.
---
--- Decoding a slice yields every version of that package, which is what makes a
--- neighbour walk cheap — but retaining all of them for every package a solve
--- touches is pure cost, because 'Bridge.Provider.releaseReader' already memoises
--- the 'Release' it derives per @(package, version)@. Measured on @pandoc@, which
--- touches ~150 packages and barely more than one version of each, an unbounded
--- slice cache costs __39.6 MB of peak residency where holding one costs 23.0__.
---
--- One slot is enough because the access pattern that needs it is package-local:
--- a walk asks for a release's neighbours, and those are all in the slice just
--- decoded. Interleaving packages costs a re-decode, not a wrong answer.
-mkReader :: FilePath -> Map PackageName (Int64, Int64) -> IO StoreReader
-mkReader blob offsets = do
-    cacheRef <- newIORef (Nothing :: Maybe (PackageName, Map Version (Word32, StoredRelease)))
-    statsRef <- newIORef (0 :: Int, 0 :: Int)
-    let slice pn = do
-            cached <- readIORef cacheRef
-            case cached of
-                Just (pn', m) | pn' == pn -> pure (Just m)
-                _ -> case Map.lookup pn offsets of
-                    Nothing -> pure Nothing
-                    Just (off, len) -> do
-                        bytes <- readSlice blob off len
-                        case deserialiseOrFail bytes of
-                            Left _ -> pure Nothing
-                            Right entries -> do
-                                let m = Map.fromList [(v, (blk, sr)) | (v, blk, sr) <- entries]
-                                atomicModifyIORef' cacheRef (const (Just (pn, m), ()))
-                                atomicModifyIORef' statsRef (\(d, s) -> ((d + 1, s), ()))
-                                pure (Just m)
-    pure
-        StoreReader
-            { srLookup = \pn v blk -> do
-                found <- slice pn
-                let hit = case found >>= Map.lookup v of
-                        Just (blk', sr) | blk' == blk -> Just sr
-                        _                             -> Nothing
-                case hit of
-                    Just _ -> atomicModifyIORef' statsRef (\(d, s) -> ((d, s + 1), ()))
-                    Nothing -> pure ()
-                pure hit
-            , srStats = readIORef statsRef
-            }
+-- | The index's records, once the header and the length check out.
+readIndex :: FilePath -> IO (Maybe BS.ByteString)
+readIndex path = do
+    raw <- try (BS.readFile path) :: IO (Either SomeException BS.ByteString)
+    pure $ case raw of
+        Right bytes
+            | BS.length bytes >= headerBytes
+            , wordAt 8 bytes 0 == fromIntegral storeFormatVersion
+            , (BS.length bytes - headerBytes) `mod` recordBytes == 0 ->
+                Just (BS.drop headerBytes bytes)
+        _ -> Nothing
 
-readSlice :: FilePath -> Int64 -> Int64 -> IO ByteString
-readSlice path off len = do
-    h <- openBinaryFile path ReadMode
+-- | A reader over the index records, searched in place, and the open data file.
+mkReader :: Handle -> BS.ByteString -> StoreReader
+mkReader blob records =
+    StoreReader
+        { srLookup = \pn v blk -> case findBlock records blk of
+            Nothing -> pure Nothing
+            Just (off, len) -> do
+                bytes <- readEntry blob off len
+                pure $ case deserialiseOrFail (BL.fromStrict bytes) of
+                    Right (pn', v', sr :: StoredRelease) | pn' == pn && v' == v -> Just sr
+                    _ -> Nothing
+        }
+
+-- | Binary search for a block's record: the entry's offset and length.
+findBlock :: BS.ByteString -> Word32 -> Maybe (Int64, Int)
+findBlock records blk = go 0 (BS.length records `div` recordBytes)
+  where
+    go lo hi
+        | lo >= hi = Nothing
+        | otherwise =
+            let mid = (lo + hi) `div` 2
+                at = mid * recordBytes
+             in case compare (fromIntegral (wordAt 4 records at)) blk of
+                    LT -> go (mid + 1) hi
+                    GT -> go lo mid
+                    EQ -> Just (fromIntegral (wordAt 8 records (at + 4)), fromIntegral (wordAt 4 records (at + 12)))
+
+-- | The big-endian word of @n@ bytes at @i@. Short at the end of the input
+-- rather than partial, though 'readIndex' checks the length first.
+wordAt :: Int -> BS.ByteString -> Int -> Word64
+wordAt n bytes i = BS.foldl' (\acc b -> acc `shiftL` 8 .|. fromIntegral b) 0 (BS.take n (BS.drop i bytes))
+
+readEntry :: Handle -> Int64 -> Int -> IO BS.ByteString
+readEntry h off len = do
     hSeek h AbsoluteSeek (fromIntegral off)
-    bytes <- BL.hGet h (fromIntegral len)
-    -- Force before closing: BL.hGet is lazy and the handle must outlive the read.
-    BL.length bytes `seq` hClose h
-    pure bytes
+    BS.hGet h len
 
 -- | Build the store from a reader of parsed releases, each with the tar block
 -- it was parsed from, which is what 'srLookup' checks a request against.
 --
 -- Written to temporary names and renamed at the end, so an interrupted build
 -- leaves the previous store intact rather than a half-written one that
--- 'openStore' would have to detect.
+-- 'withStore' would have to detect.
 buildStore
     :: FilePath
     -> Map PackageName (Set Version)
@@ -307,28 +318,31 @@ buildStore dir versions readOne progress = do
         tmpIndex = spIndex <> ".tmp"
         pkgs = Map.toList versions
         total = length pkgs
-    offsets <- withBinaryFile tmpBlob WriteMode $ \h -> do
-        let go :: Int64 -> Map PackageName (Int64, Int64) -> Int -> [(PackageName, Set Version)] -> IO (Map PackageName (Int64, Int64))
-            go !_off !acc !done [] = do
+    records <- withBinaryFile tmpBlob WriteMode $ \h -> do
+        let go :: Int64 -> [(Word32, Int64, Int64)] -> Int -> [(PackageName, Set Version)] -> IO [(Word32, Int64, Int64)]
+            go !_off acc !done [] = do
                 progress done total
                 pure acc
-            go !off !acc !done ((pn, vs) : rest) = do
-                entries <-
-                    sequence
-                        [ fmap (\(blk, sr) -> (v, blk, sr)) <$> readOne pn v
-                        | v <- Set.toList vs
-                        ]
-                let kept = [e | Just e <- entries]
-                    bytes = serialise kept
-                    len = BL.length bytes
-                BL.hPut h bytes
-                let acc' = if null kept then acc else Map.insert pn (off, len) acc
+            go !off acc !done ((pn, vs) : rest) = do
+                (off', acc') <- foldM (entry pn) (off, acc) (Set.toList vs)
                 progress' done total
-                go (off + len) acc' (done + 1) rest
+                go off' acc' (done + 1) rest
+            entry pn (!off, acc) v =
+                readOne pn v >>= \case
+                    Nothing -> pure (off, acc)
+                    Just (blk, sr) -> do
+                        let bytes = serialise (pn, v, sr)
+                            len = BL.length bytes
+                        BL.hPut h bytes
+                        pure (off + len, (blk, off, len) : acc)
             progress' done t
                 | done `mod` 500 == 0 = progress done t
                 | otherwise = pure ()
-        go 0 Map.empty 0 pkgs
-    BL.writeFile tmpIndex (serialise (storeFormatVersion, offsets))
+        go 0 [] 0 pkgs
+    BL.writeFile tmpIndex . BB.toLazyByteString $
+        BB.word64BE (fromIntegral storeFormatVersion)
+            <> foldMap
+                (\(blk, off, len) -> BB.word32BE blk <> BB.int64BE off <> BB.word32BE (fromIntegral len))
+                (sortOn (\(blk, _, _) -> blk) records)
     renameFile tmpBlob spBlob
     renameFile tmpIndex spIndex
