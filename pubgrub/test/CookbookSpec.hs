@@ -7,7 +7,8 @@ module CookbookSpec (tests) where
 import qualified Data.Map.Strict  as Map
 import qualified Data.Text        as T
 import           DocCode          (codeMatches)
-import           PubGrub          (fullVersionSet, mkVersion,
+import           PubGrub          (Incompatibility (..), MergeRule (..),
+                                   Pretty (..), fullVersionSet, mkVersion,
                                    singletonVersionSet)
 import           Test.Tasty       (TestTree, testGroup)
 import           Test.Tasty.HUnit (testCase, (@?=))
@@ -31,10 +32,13 @@ tests =
                 @?= Just (Map.fromList [(app, mkVersion [1]), (lib, mkVersion [2]), (util, mkVersion [2])])
         , testCase "an explanation in the domain's words" $
             T.lines (why example [request app fullVersionSet, constrain util (range [3] [4])])
-                @?= [ "Because app >=1 depends on lib >=1 && <2.1 which depends on util >=1 && <3, app >=1 requires util >=1 && <3."
-                    , "And because no version of app <1 exists, app >=0 requires util >=1 && <3."
+                @?= [ "Because app >=0 depends on lib >=1 && <2.1 which depends on util >=1 && <3, app >=0 requires util >=1 && <3."
                     , "So, because app >=0 is requested and util >=3 && <4 is required by a constraint, version solving failed."
                     ]
+        , testCase "two dependencies over touching slots merge into one" $
+            let dep x = dependsOn lib (slot (map fst (example Map.! lib)) x) util (range [1] [3])
+             in pretty (incompTerms (mergeWith sameDependency (dep (mkVersion [1])) (dep (mkVersion [2]))) Map.! lib)
+                    @?= "<2.1"
         , testCase "a release passed over, with its reason" $
             why example [request lib (singletonVersionSet (mkVersion [2, 1]))]
                 @?= "So, because lib >=2.1 cannot be used: it does not build here and lib ==2.1 is requested, version solving failed."
@@ -45,9 +49,6 @@ tests =
                     , "learned: lib >=2 && <2.1 requires util >=1 && <3"
                     , "back to level 1"
                     , "lib 1"
-                    , "learned: app >=1 requires util >=1 && <3"
-                    , "back to level 0"
-                    , "no app in <1"
                     ]
         , testCase "a lock released where it took part in a failure" $
             either (const Nothing) Just

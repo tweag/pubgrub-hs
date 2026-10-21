@@ -56,7 +56,11 @@ data Release = Release
 type Index = Map Name [(Version, Release)]
 
 slot :: [Version] -> Version -> VersionSet
-slot versions x = halfOpenVersionSet x (find (> x) versions)
+slot versions x
+    | all (>= x) versions = belowVersionSet next
+    | otherwise = halfOpenVersionSet x next
+  where
+    next = find (> x) versions
 
 dependsOn :: Name -> VersionSet -> Name -> VersionSet -> Incompatibility Repo
 dependsOn p ps q qs =
@@ -103,6 +107,17 @@ plan index seeds = case runIdentity (solve mempty (provider index) seeds) of
     Right solution -> Just solution
     Left _         -> Nothing
 
+sameDependency :: MergeRule Repo
+sameDependency =
+    MergeRule
+        { mergeKey = \i -> case incompCause i of
+            Fact (DependsOn p _ q qs) -> Just (p, q, qs)
+            _                         -> Nothing
+        , mergeWith = \old new -> case (incompCause old, incompCause new) of
+            (Fact (DependsOn p ps q qs), Fact (DependsOn _ ps' _ _)) -> dependsOn p (ps `union` ps') q qs
+            _ -> old
+        }
+
 name :: Name -> VersionSet -> Text
 name (Name p) s = p <> " " <> pretty s
 
@@ -133,17 +148,6 @@ why index seeds = case runIdentity (solve mempty (provider index) seeds) of
     Right _                -> "There is a plan."
     Left (NoSolution root) -> reportConflict formatter root
     Left _                 -> "The solver failed unexpectedly."
-
-sameDependency :: MergeRule Repo
-sameDependency =
-    MergeRule
-        { mergeKey = \i -> case incompCause i of
-            Fact (DependsOn p _ q qs) -> Just (p, q, qs)
-            _                         -> Nothing
-        , mergeWith = \old new -> case (incompCause old, incompCause new) of
-            (Fact (DependsOn p ps q qs), Fact (DependsOn _ ps' _ _)) -> dependsOn p (ps `union` ps') q qs
-            _ -> old
-        }
 
 searchLog :: Index -> [Incompatibility Repo] -> [Text]
 searchLog index seeds = fst (solve logger (Provider expandLogged) seeds)

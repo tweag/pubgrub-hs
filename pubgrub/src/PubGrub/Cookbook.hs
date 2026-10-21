@@ -6,8 +6,11 @@
 --
 -- The recipes share one example: a domain of packages with versions and
 -- ranges, an index of releases, and a provider over it. Their code is one
--- module, @Cookbook.hs@, which each recipe adds to; the GHCi sessions use all of
--- it. It needs @pubgrub@, @containers@, @text@ and @co-log-core@, and starts:
+-- module, @Cookbook.hs@, which the recipes build up in order: each uses only
+-- what the recipes before it added, so the module compiles after every one of
+-- them, and a GHCi session at the end of a recipe runs on what there is so
+-- far. It needs @pubgrub@, @containers@, @text@ and @co-log-core@, and starts
+-- with every import the recipes will use:
 --
 -- > {-# LANGUAGE OverloadedStrings #-}
 -- > {-# LANGUAGE TypeFamilies      #-}
@@ -37,11 +40,11 @@ module PubGrub.Cookbook
       -- * How to write a provider over an index of releases
       -- $provider
 
-      -- * How to explain a failure in your domain's words
-      -- $explaining
-
       -- * How to merge facts that say the same thing
       -- $merging
+
+      -- * How to explain a failure in your domain's words
+      -- $explaining
 
       -- * How to watch the search
       -- $watching
@@ -75,12 +78,12 @@ import           PubGrub
 -- >     type SetOf Repo = VersionSet
 -- >     type FactOf Repo = Said
 -- >     singleton _ = singletonVersionSet
--- >     mergeRule = sameDependency
 --
 -- The fact type is what explanations are made from: give it one constructor
 -- per kind of fact the provider states, carrying what a sentence about it
--- needs. 'mergeRule' is optional; this domain's is in
--- [How to merge facts that say the same thing](#g:5).
+-- needs. The four constructors here are the four kinds of fact the recipes
+-- state. A domain can also say which facts merge, which is one more line in
+-- this instance; [How to merge facts that say the same thing](#g:4) adds it.
 --
 -- Build ranges from their bounds. @'halfOpenVersionSet' lo ('Just' hi)@ is
 -- @>=lo && \<hi@, and 'aboveVersionSet', 'belowVersionSet',
@@ -116,18 +119,9 @@ import           PubGrub
 --
 -- Give both to 'solve' in one list. A constraint narrows the choice for a
 -- package the plan needs, and does not bring into the plan a package nothing
--- requires.
--- With @plan@ and @example@ from the next recipe:
---
--- @
--- ghci> plan example [request app fullVersionSet, constrain util (range [1] [2])]
--- Just (fromList [(Name \"app\",mkVersion [1]),(Name \"lib\",mkVersion [2]),(Name \"util\",mkVersion [1])])
--- ghci> plan example [request app fullVersionSet, constrain extra (range [2] [3])]
--- Just (fromList [(Name \"app\",mkVersion [1]),(Name \"lib\",mkVersion [2]),(Name \"util\",mkVersion [2])])
--- @
---
--- A conflict among the seeds alone ends the solve, and the explanation's last
--- line names the requests and constraints it rests on.
+-- requires. A conflict among the seeds alone ends the solve, and the
+-- explanation's last line names the requests and constraints it rests on. The
+-- next recipe solves with both.
 
 -- $provider
 --
@@ -142,14 +136,20 @@ import           PubGrub
 -- >
 -- > type Index = Map Name [(Version, Release)]
 --
--- State each dependency over the release's /slot/, the range from its version up
--- to the next release in the index, rather than over the version alone. The
--- slot holds the same releases, but the slots of neighbouring releases touch,
--- so their facts can merge into one
--- ([How to merge facts that say the same thing](#g:5)):
+-- State each dependency over the release's /slot/ rather than over its version
+-- alone: the range from its version up to the next release in the index, and
+-- for the first release everything up to the next one, since nothing is
+-- published below it. A slot holds the same releases as the version, but the
+-- slots of neighbouring releases touch, so facts over them can merge into one
+-- (the next recipe), and a proof says @lib \<2@ rather than
+-- @lib >=1 && \<2@ of a first release:
 --
 -- > slot :: [Version] -> Version -> VersionSet
--- > slot versions x = halfOpenVersionSet x (find (> x) versions)
+-- > slot versions x
+-- >     | all (>= x) versions = belowVersionSet next
+-- >     | otherwise = halfOpenVersionSet x next
+-- >   where
+-- >     next = find (> x) versions
 -- >
 -- > dependsOn :: Name -> VersionSet -> Name -> VersionSet -> Incompatibility Repo
 -- > dependsOn p ps q qs =
@@ -204,22 +204,76 @@ import           PubGrub
 -- >     Right solution -> Just solution
 -- >     Left _         -> Nothing
 --
+-- A request alone, then with a constraint on a package the plan needs, then
+-- with one on a package nothing requires:
+--
 -- @
 -- ghci> plan example [request app fullVersionSet]
+-- Just (fromList [(Name \"app\",mkVersion [1]),(Name \"lib\",mkVersion [2]),(Name \"util\",mkVersion [2])])
+-- ghci> plan example [request app fullVersionSet, constrain util (range [1] [2])]
+-- Just (fromList [(Name \"app\",mkVersion [1]),(Name \"lib\",mkVersion [2]),(Name \"util\",mkVersion [1])])
+-- ghci> plan example [request app fullVersionSet, constrain extra (range [2] [3])]
 -- Just (fromList [(Name \"app\",mkVersion [1]),(Name \"lib\",mkVersion [2]),(Name \"util\",mkVersion [2])])
 -- @
 --
 -- This provider runs in 'Data.Functor.Identity.Identity'. One that reads its
 -- index from disk runs in 'IO', and so does 'solve' then.
 
+-- $merging
+--
+-- A provider that states the same dependency for each of several releases gives
+-- the solver several facts where one would do. A t'MergeRule' tells the solver
+-- which incompatibilities say the same thing: those with the same key are merged
+-- as they arrive. Here, two dependencies with the same depender and the same
+-- dependee range merge into one over both depender ranges:
+--
+-- > sameDependency :: MergeRule Repo
+-- > sameDependency =
+-- >     MergeRule
+-- >         { mergeKey = \i -> case incompCause i of
+-- >             Fact (DependsOn p _ q qs) -> Just (p, q, qs)
+-- >             _                         -> Nothing
+-- >         , mergeWith = \old new -> case (incompCause old, incompCause new) of
+-- >             (Fact (DependsOn p ps q qs), Fact (DependsOn _ ps' _ _)) -> dependsOn p (ps `union` ps') q qs
+-- >             _ -> old
+-- >         }
+--
+-- Name the rule in the domain's instance, as 'mergeRule': add this line to the
+-- @instance Domain Repo@ of the first recipe, after 'singleton':
+--
+-- >     mergeRule = sameDependency
+--
+-- Check two things. The merged fact replaces both, so it must say exactly what
+-- the two said together; a union of depender ranges does, since \"@lib@ in @a@
+-- or @b@ needs @util@ in @r@\" is both \"@lib@ in @a@ needs @util@ in @r@\" and
+-- \"@lib@ in @b@ needs @util@ in @r@\". And the merged fact must have the key
+-- its parts had.
+--
+-- The dependencies of @lib@ 1 and @lib@ 2 on @util@ are stated over their
+-- slots, which touch, so the merged fact is one range:
+--
+-- @
+-- ghci> let dep x = dependsOn lib (slot (map fst (example Map.! lib)) x) util (range [1] [3])
+-- ghci> pretty (incompTerms (mergeWith sameDependency (dep (mkVersion [1])) (dep (mkVersion [2]))) Map.! lib)
+-- \"\<2.1\"
+-- @
+--
+-- The plans of the previous recipe are the same with the rule as without it;
+-- what it buys is a shorter search and, in the next recipe, a proof that
+-- states the dependency once.
+
 -- $explaining
 --
 -- When there is no plan, 'solve' answers with the incompatibility the proof
 -- ends with, and 'reportConflict' writes the proof out in the sentences a
--- t'Formatter' gives it. Give a sentence for each kind of fact, one for the
--- solver's finding that a package has no version in a set, and take the
--- conclusions from 'summaryWith', which needs only how to name a package with a
--- set of versions:
+-- t'Formatter' gives it. Three of its fields are the domain's words: a sentence
+-- for each kind of fact, one for the solver's finding that a package has no
+-- version in a set, and one for what a set of terms concludes, which
+-- 'summaryWith' makes from how to name a package with a set of versions. The
+-- other three are hooks for rules of your own, described in "PubGrub.Report":
+-- a pass over the proof before it is written ('id' for none), rules that say a
+-- line, and rules that say two facts as one premise. This domain adds one of
+-- the last kind, below:
 --
 -- > name :: Name -> VersionSet -> Text
 -- > name (Name p) s = p <> " " <> pretty s
@@ -240,7 +294,9 @@ import           PubGrub
 -- >         }
 --
 -- A sentence is a fragment: no capital letter, no full stop, and no leading
--- \"because\" or \"and\", since the proof adds its own connectives.
+-- \"because\" or \"and\", since the proof adds its own connectives. The second
+-- argument of 'sayFact', ignored here, is the incompatibility the fact is the
+-- cause of, for a sentence that depends on which of its terms survived.
 --
 -- A clause rule says two facts as one premise where that reads better. This one
 -- writes \"a depends on b which depends on c\" rather than naming @b@ twice. It
@@ -267,42 +323,15 @@ import           PubGrub
 -- @
 -- ghci> import qualified Data.Text.IO as T
 -- ghci> T.putStrLn (why example [request app fullVersionSet, constrain util (range [3] [4])])
--- Because app >=1 depends on lib >=1 && \<2.1 which depends on util >=1 && \<3, app >=1 requires util >=1 && \<3.
--- And because no version of app \<1 exists, app >=0 requires util >=1 && \<3.
+-- Because app >=0 depends on lib >=1 && \<2.1 which depends on util >=1 && \<3, app >=0 requires util >=1 && \<3.
 -- So, because app >=0 is requested and util >=3 && \<4 is required by a constraint, version solving failed.
 -- ghci> T.putStrLn (why example [request lib (singletonVersionSet (mkVersion [2, 1]))])
 -- So, because lib >=2.1 cannot be used: it does not build here and lib ==2.1 is requested, version solving failed.
 -- @
-
--- $merging
 --
--- A provider that states the same dependency for each of several releases gives
--- the solver several facts where one would do. A t'MergeRule' tells the solver
--- which incompatibilities say the same thing: those with the same key are merged
--- as they arrive. Here, two dependencies with the same depender and the same
--- dependee range merge into one over both depender ranges:
---
--- > sameDependency :: MergeRule Repo
--- > sameDependency =
--- >     MergeRule
--- >         { mergeKey = \i -> case incompCause i of
--- >             Fact (DependsOn p _ q qs) -> Just (p, q, qs)
--- >             _                         -> Nothing
--- >         , mergeWith = \old new -> case (incompCause old, incompCause new) of
--- >             (Fact (DependsOn p ps q qs), Fact (DependsOn _ ps' _ _)) -> dependsOn p (ps `union` ps') q qs
--- >             _ -> old
--- >         }
---
--- Name the rule in the domain's instance, as 'mergeRule'. Check two things.
--- The merged fact replaces both, so it must say exactly what the two said
--- together; a union of depender ranges does, since \"@lib@ in @a@ or @b@ needs
--- @util@ in @r@\" is both \"@lib@ in @a@ needs @util@ in @r@\" and \"@lib@ in @b@
--- needs @util@ in @r@\". And the merged fact must have the key its parts had.
---
--- The first explanation in
--- [How to explain a failure in your domain's words](#g:4) shows what it buys:
--- @lib >=1 && \<2.1 depends on util >=1 && \<3@ is the dependency of @lib@ 1 and
--- of @lib@ 2, over their touching slots, stated once.
+-- The first proof names the dependency of @lib@ on @util@ once: the merged
+-- fact of the previous recipe covers @lib@ 1 and @lib@ 2 together, and the
+-- clause rule joins it to @app@'s dependency on @lib@.
 
 -- $watching
 --
@@ -332,9 +361,6 @@ import           PubGrub
 -- learned: lib >=2 && \<2.1 requires util >=1 && \<3
 -- back to level 1
 -- lib 1
--- learned: app >=1 requires util >=1 && \<3
--- back to level 0
--- no app in \<1
 -- @
 --
 -- Each @learned@ line is an incompatibility the solver derived from a conflict
