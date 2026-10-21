@@ -195,6 +195,7 @@ renderFailure :: SolveError Cabal -> Text
 renderFailure (NoSolution i) = reportConflict i
 renderFailure (NoSatisfier p _) =
     T.pack ("internal error: no satisfier for " <> show p)
+renderFailure _ = T.pack "internal error"
 
 -- | Assert the rendered proof of an unsatisfiable world against a golden file.
 --

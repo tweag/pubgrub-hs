@@ -244,7 +244,9 @@ import           PubGrub
 -- incompatibility @root@ carries the whole chain of reasoning that led to the
 -- failure, and 'reportConflict' writes it out as a numbered proof. It needs a
 -- t'Formatter': the words for each fact, and for the solver's own finding that a
--- package has none of a set of versions. Add:
+-- package has none of a set of versions. Any other 'Left' is not a verdict on
+-- the world but a bug, in our provider or in the solver, and @why@ says only
+-- that. Add:
 --
 -- > versions :: Set Int -> Text
 -- > versions vs = T.intercalate " or " (map (T.pack . show) (Set.toList vs))
@@ -269,7 +271,7 @@ import           PubGrub
 -- > why w seeds = case runIdentity (solve mempty (provider w) seeds) of
 -- >     Right _                -> "There is a plan."
 -- >     Left (NoSolution root) -> reportConflict formatter root
--- >     Left (NoSatisfier _ _) -> "The solver failed unexpectedly."
+-- >     Left _                 -> "The solver failed unexpectedly."
 -- >
 -- > explain :: World -> [Incompatibility Toy] -> IO ()
 -- > explain w seeds = T.putStrLn (why w seeds)

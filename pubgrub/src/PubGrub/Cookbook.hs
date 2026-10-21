@@ -94,9 +94,10 @@ import           PubGrub
 
 -- $requests
 --
--- The request is a list of incompatibilities whose cause is 'Seed'. To require
--- a package to have a version in a set, state that its having none there is
--- impossible, with a single 'Negative' term:
+-- The request is a list of incompatibilities whose cause is 'Seed', each of
+-- exactly one term; 'solve' refuses any other seed with 'BadSeed'. To require a
+-- package to have a version in a set, state that its having none there is
+-- impossible, with a 'Negative' term:
 --
 -- > request :: Name -> VersionSet -> Incompatibility Repo
 -- > request p s = Incompatibility (Map.singleton p (Negative s)) (Seed (Requested p s))
@@ -253,13 +254,14 @@ import           PubGrub
 -- >     guard (q == q' && qs `isSubsetOf` qs')
 -- >     pure (name p ps <> " depends on " <> name q qs <> " which depends on " <> name r rs)
 --
--- Then render a failure:
+-- Then render a failure. Any 'Left' other than 'NoSolution' is a bug, in the
+-- provider or in the solver, not a verdict on the index:
 --
 -- > why :: Index -> [Incompatibility Repo] -> Text
 -- > why index seeds = case runIdentity (solve mempty (provider index) seeds) of
 -- >     Right _                -> "There is a plan."
 -- >     Left (NoSolution root) -> reportConflict formatter root
--- >     Left (NoSatisfier _ _) -> "The solver failed unexpectedly."
+-- >     Left _                 -> "The solver failed unexpectedly."
 --
 -- @
 -- ghci> import qualified Data.Text.IO as T

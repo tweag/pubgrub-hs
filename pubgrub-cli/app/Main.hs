@@ -610,6 +610,10 @@ report _ _ _ (Left (NoSolution incompat)) = do
     logMsg (style (wrapProof width (reportConflict incompat)))
 report _ _ _ (Left (NoSatisfier p _)) =
     logMsg (T.pack "internal error: no satisfier for " <> pretty p)
+report _ _ _ (Left (BadSeed i)) =
+    logMsg (T.pack "internal error: a seed that is not a request or a constraint: " <> reportConflict i)
+report _ _ _ (Left (BadValue p v _)) =
+    logMsg (T.pack "internal error: the provider chose " <> pretty v <> T.pack " for " <> pretty p <> T.pack " outside the set it was offered")
 report shape targets provider (Right decided) = do
     logMsg (T.pack "Solution:")
     -- The solver's answer has a decision per variable: the flags it decided are

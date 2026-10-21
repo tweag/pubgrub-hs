@@ -80,6 +80,7 @@ renderFailure :: SolveError Cabal -> Text
 renderFailure (NoSolution i) = reportConflict i
 renderFailure (NoSatisfier p _) =
     T.pack ("internal error: no satisfier for " <> show p)
+renderFailure _ = T.pack "internal error"
 
 -- | The expected answer, as the solver states it.
 solutionOf :: [(PackageName, Instance)] -> Map.Map Var Value

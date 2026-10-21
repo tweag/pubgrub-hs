@@ -131,7 +131,7 @@ why :: Index -> [Incompatibility Repo] -> Text
 why index seeds = case runIdentity (solve mempty (provider index) seeds) of
     Right _                -> "There is a plan."
     Left (NoSolution root) -> reportConflict formatter root
-    Left (NoSatisfier _ _) -> "The solver failed unexpectedly."
+    Left _                 -> "The solver failed unexpectedly."
 
 sameDependency :: MergeRule Repo
 sameDependency =

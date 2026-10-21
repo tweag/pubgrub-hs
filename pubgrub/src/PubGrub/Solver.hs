@@ -282,7 +282,8 @@ conflictResolution logA = loop
                     loop next ps
 
 
--- | Why 'solve' found no solution.
+-- | Why 'solve' found no solution. Only 'NoSolution' is a verdict on the
+-- problem; the others say the solve was given something it cannot work with.
 data SolveError d
     = -- | There is none. The incompatibility is the end of the proof: normally
       -- one with no terms, which can never be satisfied, derived from the seeds
@@ -290,6 +291,18 @@ data SolveError d
       -- tree is the argument for why; "PubGrub.Report" writes it out and
       -- "PubGrub.Derivation" reads it.
       NoSolution (Incompatibility d)
+    | -- | This seed is not a request or a constraint: its cause is not
+      -- 'PubGrub.Incompatibility.Seed', or it has more or fewer than one term.
+      -- The solve is refused before it starts. A seed with two negative terms,
+      -- say, asks for one of two variables to have a value without saying
+      -- which, and the search would never decide either: the answer would be a
+      -- plan that violates the seed.
+      BadSeed (Incompatibility d)
+    | -- | The provider chose a value outside the set it was offered: the
+      -- variable, the value, and the set. The solver stops at once, because
+      -- recording such a decision contradicts what it had already derived and
+      -- the search would never end. This is a bug in the provider.
+      BadValue (VarOf d) (ValueOf d) (SetOf d)
     | -- | The solver broke an invariant of its own: conflict resolution found a
       -- term of a violated incompatibility that nothing it had recorded about
       -- the variable accounts for. This is a bug in the solver, returned as a
@@ -329,13 +342,15 @@ data SolverMsg d
 -- The seeds are the request, incompatibilities whose cause is
 -- 'PubGrub.Incompatibility.Seed': @{p: Negative s}@ asks for @p@ to have a
 -- value in @s@, and @{p: Positive f}@ forbids @p@ the values in @f@ (see
--- t'Incompatibility'). The solver alternates two steps. It derives everything
--- that what it knows implies about each variable; then, of the variables that
--- must have a value and have none yet, it takes the one the search reached
--- first, and asks the provider for a value ('PubGrub.Provider.expand'). The
--- requested variables come first, in the order of the seeds. When no variable
--- is left without a value, the solve is done; when a conflict rests on the
--- seeds alone, there is no solution.
+-- t'Incompatibility'). Those are the only two shapes: a seed with any other
+-- cause, or with more or fewer than one term, is answered with 'BadSeed'
+-- before the search starts. The solver alternates two steps. It derives
+-- everything that what it knows implies about each variable; then, of the
+-- variables that must have a value and have none yet, it takes the one the
+-- search reached first, and asks the provider for a value
+-- ('PubGrub.Provider.expand'). The requested variables come first, in the
+-- order of the seeds. When no variable is left without a value, the solve is
+-- done; when a conflict rests on the seeds alone, there is no solution.
 --
 -- The answer maps each variable the solver decided to its value: those the
 -- request requires, directly or through what the provider stated. A variable
@@ -349,9 +364,13 @@ solve
     -> Provider d m
     -> [Incompatibility d]
     -> m (Either (SolveError d) (Map (VarOf d) (ValueOf d)))
-solve logA provider seeds =
-    uncurry go (insertClauses seeds emptyStore) emptyPS
+solve logA provider seeds
+    | (bad : _) <- filter (not . wellFormedSeed) seeds = pure (Left (BadSeed bad))
+    | otherwise = uncurry go (insertClauses seeds emptyStore) emptyPS
     where
+        -- A request or a constraint: one term, marked as a seed.
+        wellFormedSeed i = isSeed i && Map.size (incompTerms i) == 1
+
         go pending incompats ps =
             unitPropagation logA pending incompats ps >>= \case
                 Left err -> pure (Left err)
@@ -361,6 +380,13 @@ solve logA provider seeds =
                         ((p, range) : _) -> do
                             logA <& Deciding p range
                             expand provider p range >>= \case
+                                -- The provider's contract, checked: a decision
+                                -- outside the offered set would contradict the
+                                -- derivation that offered it, and the search
+                                -- would not terminate.
+                                (Just i, _)
+                                    | not (singleton p i `isSubsetOf` range) ->
+                                        pure (Left (BadValue p i range))
                                 (Just i, incs) -> do
                                     logA <& Chose p i
                                     let (inserted, store) = insertClauses incs incompats'

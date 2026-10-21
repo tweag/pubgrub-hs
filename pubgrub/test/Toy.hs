@@ -97,7 +97,7 @@ why :: World -> [Incompatibility Toy] -> Text
 why w seeds = case runIdentity (solve mempty (provider w) seeds) of
     Right _                -> "There is a plan."
     Left (NoSolution root) -> reportConflict formatter root
-    Left (NoSatisfier _ _) -> "The solver failed unexpectedly."
+    Left _                 -> "The solver failed unexpectedly."
 
 explain :: World -> [Incompatibility Toy] -> IO ()
 explain w seeds = T.putStrLn (why w seeds)

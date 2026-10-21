@@ -28,9 +28,10 @@ newtype Provider d m = Provider
       -- __The value must be in the set.__ The set is everything the solver
       -- has derived about the variable, and the solver records the value as a
       -- decision at once, so a value outside it contradicts what the solver
-      -- already knows and corrupts the search. A value in the set that turns
-      -- out wrong is not an error: on a later conflict the solver backtracks
-      -- and asks again with a smaller set.
+      -- already knows. The solver checks, and stops the solve with
+      -- 'PubGrub.Solver.BadValue' rather than go on. A value in the set that
+      -- turns out wrong is not an error: on a later conflict the solver
+      -- backtracks and asks again with a smaller set.
       --
       -- Answer 'Nothing' when no value in the set can be chosen. The solver
       -- then states that the variable takes no value in the set, so the same
@@ -41,7 +42,10 @@ newtype Provider d m = Provider
       -- whatever has been decided so far. They need not mention the chosen
       -- value. So a provider that passes over values on the way to its answer
       -- may say why it passed them over, and those facts prune the search and
-      -- explain a failure like any other.
+      -- explain a failure like any other. A fact should have a positive term,
+      -- or a single negative one: a fact of two or more negative terms and
+      -- nothing else says that one of several variables must have a value
+      -- without saying which, and the search never acts on it.
       --
       -- This matters most when the answer is 'Nothing'. If every value in the
       -- set was rejected for a reason (it cannot be built here, it needs

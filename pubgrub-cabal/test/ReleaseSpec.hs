@@ -99,6 +99,7 @@ solveFor target provider =
   where
     render (NoSolution i) = reportConflict i
     render (NoSatisfier p _) = T.pack ("internal error: no satisfier for " <> show p)
+    render _                 = T.pack "internal error"
 
 -- | A library package whose test suite depends on the package itself, on a
 -- package of its own, and under a flag on a third; a benchmark too.

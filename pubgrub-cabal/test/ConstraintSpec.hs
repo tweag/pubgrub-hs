@@ -111,6 +111,7 @@ planOf rootNeeds = either (Left . proofOf) Right . run rootNeeds
 proofOf :: SolveError Cabal -> Text
 proofOf (NoSolution i)    = reportConflict i
 proofOf (NoSatisfier p _) = T.pack ("internal error: no satisfier for " <> show p)
+proofOf _                 = T.pack "internal error"
 
 plan :: [(PackageName, Instance)] -> Map.Map Var Value
 plan entries = Map.fromList [(PackageVar p, PackageValue i) | (p, i) <- entries]
