@@ -3,13 +3,13 @@
 -- New to the library? "PubGrub.Tutorial" takes you from an empty file to a
 -- plan, and to an explanation of a failure.
 --
--- The solver is 'solve': hand it a 'Provider' for your domain and the seeds —
+-- The solver is 'solve': hand it a t'Provider' for your domain and the seeds —
 -- the incompatibilities the solve is asked for — and it answers with a value
--- per variable, or with the terminal 'Incompatibility' whose derivation
+-- per variable, or with the terminal t'Incompatibility' whose derivation
 -- explains why there is none. A domain is an instance of 'Domain': what a
 -- variable, a value, a set of values and an external fact are. The derivation
 -- is read with "PubGrub.Derivation" and rendered as a numbered proof with
--- "PubGrub.Report", in words a 'Formatter' supplies.
+-- "PubGrub.Report", in words a t'Formatter' supplies.
 --
 -- The algorithm is PubGrub's unit propagation, decision making and conflict
 -- resolution, as published; the cabal instantiation lives in the

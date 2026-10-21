@@ -1,5 +1,12 @@
-module PubGrub.SetOps where
-
+-- | Sets of values: what a term ranges over.
+--
+-- A domain's set type ('PubGrub.Incompatibility.SetOf') is an instance of
+-- 'SetOps'. 'Set' is one, for values that can be listed, and
+-- "PubGrub.VersionSet" is one for ranges of versions.
+module PubGrub.SetOps
+    ( SetOps (..)
+    , equivalent
+    ) where
 
 import           Data.Set (Set)
 import qualified Data.Set as Set
@@ -11,29 +18,35 @@ import qualified Data.Set as Set
 -- SetOps
 -- ---------------------------------------------------------------------------
 
--- | The operations the solver needs from a set of values: the empty set, closure
--- under intersection, union and difference, and an emptiness test — a /ring of
--- sets/, not a Boolean algebra.
+-- | The operations the solver needs from a set of values: the empty set,
+-- intersection, union, difference and an emptiness test. Each must mean what
+-- it says of the values a set holds.
 --
--- Deliberately absent: @complement@. A complement needs a universe of values,
--- and nothing here wants one: the only place negation is needed is
--- 'PubGrub.Term.Term', where it is a polarity flip that costs nothing. Pairing
--- a set with a polarity turns this ring into a Boolean algebra. (A domain may
--- well know its universe, but the algebra never has to ask for it.)
+-- There is no complement, so a set type needs no universe of all values. The
+-- solver negates terms, not sets: 'PubGrub.Term.Negative' is the negation of
+-- 'PubGrub.Term.Positive' over the same set.
 --
--- The two tests are methods with defaults so that a set type can answer them
--- without building the difference or the intersection first. They are what
--- 'PubGrub.Relation.relation' asks of every term of every clause on every
--- visit, which is most of what a solve does. An instance that overrides them
--- must answer exactly as the defaults would.
+-- 'isSubsetOf' and 'isDisjoint' have defaults in terms of the other methods.
+-- An instance may override them to answer without building a set, and must
+-- then answer exactly as the defaults would.
 class SetOps a where
+    -- | The set with no values.
     empty       :: a
+    -- | The values in both sets.
     intersect   :: a -> a -> a
+    -- | The values in either set.
     union       :: a -> a -> a
+    -- | The values in the first set and not in the second.
     difference  :: a -> a -> a
+    -- | Does the set hold no value?
     isEmpty     :: a -> Bool
 
-    -- | @a ⊆ b@ iff removing @b@ from @a@ leaves nothing.
+    -- The two tests are methods because the solver asks them of every term it
+    -- judges. Building the difference or the intersection first, as the
+    -- defaults do, measured at a fifth of a large solve's time and two fifths
+    -- of its allocation.
+
+    -- | @a ⊆ b@: removing @b@ from @a@ leaves nothing.
     --
     -- >>> Set.fromList [3,4] `isSubsetOf` Set.fromList [1..9]
     -- True
@@ -43,7 +56,7 @@ class SetOps a where
     isSubsetOf :: a -> a -> Bool
     isSubsetOf a b = isEmpty (a `difference` b)
 
-    -- | @a ∩ b = ∅@.
+    -- | @a ∩ b = ∅@: no value is in both.
     --
     -- >>> Set.fromList [1,2] `isDisjoint` Set.fromList [3,4]
     -- True
@@ -53,9 +66,15 @@ class SetOps a where
     isDisjoint :: a -> a -> Bool
     isDisjoint xs ys = isEmpty (xs `intersect` ys)
 
+-- | Do two sets hold the same values? Two subset tests, so it needs neither
+-- 'Eq' nor a canonical form.
+--
+-- >>> equivalent (Set.fromList [1,2]) (Set.fromList [2,1])
+-- True
 equivalent :: SetOps s => s -> s -> Bool
 equivalent x y = x `isSubsetOf` y && y `isSubsetOf` x
 
+-- | Sets whose values can be listed.
 instance Ord a => SetOps (Set a) where
     empty = Set.empty
     intersect = Set.intersection

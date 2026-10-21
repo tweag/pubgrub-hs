@@ -26,7 +26,7 @@
 -- A rule is a @do@ block in 'Maybe', written in the vocabulary of
 -- "PubGrub.Derivation": each line reads a view of the tree or states a guard,
 -- and the last says the premise and names the sub-derivation, if any, the line
--- continues ('Line'). Two facts named together in one premise are joined by a
+-- continues (@Line@). Two facts named together in one premise are joined by a
 -- second table, the clause rules, in the same language.
 --
 -- Two rules keep the proof short, and both are PubGrub's own. Neither is

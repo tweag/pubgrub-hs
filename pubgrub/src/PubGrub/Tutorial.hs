@@ -119,7 +119,7 @@ import           PubGrub
 
 -- $facts
 --
--- Everything the solver knows is an 'Incompatibility': a set of terms, one per
+-- Everything the solver knows is an t'Incompatibility': a set of terms, one per
 -- variable, that cannot /all/ be true at once. A term is either
 -- 'Positive', \"the package is picked, at a version in this set\", or
 -- 'Negative', \"the package is not picked at a version in this set\". Each
@@ -179,7 +179,7 @@ import           PubGrub
 -- $provider
 --
 -- The solver never sees the world. When it needs a package, it asks a
--- 'Provider': here is the package, and here is the set of versions still
+-- t'Provider': here is the package, and here is the set of versions still
 -- allowed; pick one, and tell me what that choice entails. Add:
 --
 -- > provider :: World -> Provider Toy Identity
@@ -192,8 +192,8 @@ import           PubGrub
 --
 -- Our provider picks the newest version the set allows, and states that
 -- version's dependencies with @needs@. If no version is allowed, it answers
--- 'Nothing'. It runs in 'Identity' because it needs no effects; a provider that
--- reads files would run in 'IO'.
+-- 'Nothing'. It runs in 'Data.Functor.Identity.Identity' because it needs no
+-- effects; a provider that reads files would run in 'IO'.
 --
 -- Reload, and ask it the question the solver will ask about @lib@:
 --
@@ -243,7 +243,7 @@ import           PubGrub
 -- When there is no plan, 'solve' answers @'Left' ('NoSolution' root)@. The
 -- incompatibility @root@ carries the whole chain of reasoning that led to the
 -- failure, and 'reportConflict' writes it out as a numbered proof. It needs a
--- 'Formatter': the words for each fact, and for the solver's own finding that a
+-- t'Formatter': the words for each fact, and for the solver's own finding that a
 -- package has none of a set of versions. Add:
 --
 -- > versions :: Set Int -> Text
@@ -305,7 +305,7 @@ import           PubGrub
 --
 -- * "PubGrub" is the library's front page, with everything this tutorial used.
 -- * "PubGrub.Provider" states what a provider must and may do.
--- * "PubGrub.Report" describes the rest of 'Formatter', for wording proofs in a
+-- * "PubGrub.Report" describes the rest of t'Formatter', for wording proofs in a
 --   domain's own terms.
 -- * "PubGrub.Version" and "PubGrub.VersionSet" are ready-made values and sets
 --   for a domain whose values are versions with ranges.

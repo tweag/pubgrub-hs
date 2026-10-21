@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 
--- | Solving: 'solve' runs PubGrub over a 'PubGrub.Provider.Provider' and the
+-- | Solving: 'solve' runs PubGrub over a t'PubGrub.Provider.Provider' and the
 -- incompatibilities it is asked to satisfy, and answers with a value for every
 -- variable it decided, or with the incompatibility that proves there is none.
 module PubGrub.Solver
@@ -65,7 +65,7 @@ satisfierOf ps p startTerm = go anyTerm (varHistory ps p)
       where
         acc' = intersect acc (assignmentTerm a)
 
--- | 'maximumBy' on a key, total. Ties keep the earlier element, which never
+-- | 'Data.List.maximumBy' on a key, total. Ties keep the earlier element, which never
 -- arises here: the key is @aIndex@, and indices are unique.
 maximumOn :: Ord b => (a -> b) -> [a] -> Maybe a
 maximumOn f = foldl' pick Nothing
@@ -282,53 +282,67 @@ conflictResolution logA = loop
                     loop next ps
 
 
--- | Failure. Either the problem has no solution, or an invariant the solver
--- relies on did not hold — the latter cannot happen for a consistent partial
--- solution, and exists so that if it ever does, it arrives as a value to
--- report instead of an exception from inside a pure function.
+-- | Why 'solve' found no solution.
 data SolveError d
-    = -- | no solution; carries the terminal incompatibility (the root of the
-      -- derivation tree, for reporting)
+    = -- | There is none. The incompatibility is the end of the proof: normally
+      -- one with no terms, which can never be satisfied, derived from the seeds
+      -- and from facts the provider stated. Its 'PubGrub.Incompatibility.Cause'
+      -- tree is the argument for why; "PubGrub.Report" writes it out and
+      -- "PubGrub.Derivation" reads it.
       NoSolution (Incompatibility d)
-    | -- | conflict resolution found a term of a satisfied incompatibility
-      -- whose variable has no satisfier in the partial solution
+    | -- | The solver broke an invariant of its own: conflict resolution found a
+      -- term of a violated incompatibility that nothing it had recorded about
+      -- the variable accounts for. This is a bug in the solver, returned as a
+      -- value so that a caller can report it.
       NoSatisfier (VarOf d) (Incompatibility d)
 
--- | Structured progress events emitted during resolution.
+-- | What the solver is doing, one message per step of the search. 'solve'
+-- sends them to the log action it is given.
 data SolverMsg d
-    = -- | about to choose an element for p within this range
+    = -- | About to ask the provider for a value of the variable in the set.
       Deciding (VarOf d) (SetOf d)
-    | -- | picked this element for p
+    | -- | The provider chose this value, and the solver decided it.
       Chose (VarOf d) (ValueOf d)
-    | -- | no element available in range (forces a conflict next)
+    | -- | The provider had no value in the set. A conflict follows.
       NoVersionFor (VarOf d) (SetOf d)
-    | -- | this incompatibility is satisfied (a conflict)
+    | -- | This incompatibility is violated by what has been decided: a
+      -- conflict, which conflict resolution starts from.
       Conflict (Incompatibility d)
-    | -- | one step of conflict resolution: the satisfier it located, and the
-      -- prior cause derived from it. Fires once per iteration in which the
-      -- satisfier and the previous satisfier share a decision level, so the
-      -- count of these between a 'Conflict' and its 'Backtracked' /is/ the depth
-      -- of that resolution — which nothing else reports.
+    | -- | One step of conflict resolution: the variable it resolved on, and
+      -- the incompatibility it derived. The number of these between a
+      -- 'Conflict' and its 'Backtracked' is how deep that resolution went.
       Resolving (VarOf d) (Incompatibility d)
-    | -- | the root cause conflict resolution settled on, about to be added to
-      -- the store. Distinct from the 'Conflict' that started it: that one was
-      -- already known, this one is what was learned.
+    | -- | The incompatibility conflict resolution learned, which the solver now
+      -- keeps. The 'Conflict' that started it was already known; this is new.
       Learned (Incompatibility d)
-    | -- | backtracked to this decision level
+    | -- | The solver undid every decision above this level. A level is the
+      -- number of decisions in force.
       Backtracked Int
-    | -- | one round of propagation judged this many clauses against the
-      -- partial solution: the ones the store had marked dirty. The round right
-      -- after a 'Backtracked' is the one that re-judges after the backtrack, so
-      -- the sum of those is what a backtrack costs propagation.
+    | -- | One round of propagation examined this many incompatibilities, the
+      -- ones that may have changed since the last. The round right after a
+      -- 'Backtracked' re-examines what the backtrack undid.
       Judged Int
 
--- | Solve for the seeds, one 'PubGrub.Incompatibility.request' per target, by
--- alternating 'unitPropagation' with decisions: take the first
--- 'undecidedPositive' variable and ask the 'Provider' to 'expand' its range
--- into a value and the incompatibilities that value entails.
+-- | Solve: find a value for every variable the request needs, or prove that
+-- there is none.
 --
--- The seeds go in first and in order, so their derivations are the oldest
--- assignments and the targets are decided in the order they were asked for.
+-- The seeds are the request, incompatibilities whose cause is
+-- 'PubGrub.Incompatibility.Seed': @{p: Negative s}@ asks for @p@ to have a
+-- value in @s@, and @{p: Positive f}@ forbids @p@ the values in @f@ (see
+-- t'Incompatibility'). The solver alternates two steps. It derives everything
+-- that what it knows implies about each variable; then, of the variables that
+-- must have a value and have none yet, it takes the one the search reached
+-- first, and asks the provider for a value ('PubGrub.Provider.expand'). The
+-- requested variables come first, in the order of the seeds. When no variable
+-- is left without a value, the solve is done; when a conflict rests on the
+-- seeds alone, there is no solution.
+--
+-- The answer maps each variable the solver decided to its value: those the
+-- request requires, directly or through what the provider stated. A variable
+-- nothing requires is not in it.
+--
+-- The first argument receives a 'SolverMsg' at each step, a @LogAction@ from
+-- co-log-core; 'mempty' discards them.
 solve
     :: (Domain d, Monad m)
     => LogAction m (SolverMsg d)

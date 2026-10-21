@@ -1,10 +1,9 @@
--- | Lightweight rendering to 'Text' for conflict reports. Distinct from Cabal's
--- @Distribution.Pretty.Pretty@ (which targets 'Doc'/'String').
+-- | Compact rendering to 'Text', for messages and explanations: version sets
+-- as ranges, finite sets in braces, negative terms as @¬(…)@.
 --
--- Kept separate from 'Show' on purpose: 'Show' stays derived, showing
--- constructors as they are — which is what you want when chasing a canonicity
--- bug — while 'pretty' is the compact notation (version sets as ranges,
--- finite sets in braces, negative terms as @¬(…)@).
+-- It is separate from 'Show' on purpose. 'Show' stays derived and shows the
+-- constructors as they are, which is what debugging wants; 'pretty' is what a
+-- person reads.
 module PubGrub.Pretty (Pretty (..), AsPretty (..)) where
 
 import           Data.Maybe         (fromMaybe)
@@ -16,10 +15,12 @@ import           PubGrub.Term       (Term (..))
 import           PubGrub.Version    (Version, versionNumbers)
 import           PubGrub.VersionSet (VersionSet, declared, renderVersionSet)
 
+-- | Types with a compact rendering.
 class Pretty a where
+    -- | The rendering.
     pretty :: a -> Text
 
--- | Adapter for the repl and doctests: 'show' goes through 'pretty'.
+-- | Shows a value through 'pretty', for GHCi and examples.
 newtype AsPretty a = AsPretty {getAsPretty :: a}
 
 instance Pretty a => Show (AsPretty a) where

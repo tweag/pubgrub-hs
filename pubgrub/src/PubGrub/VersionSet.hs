@@ -4,30 +4,28 @@
 
 -- | A version set: a canonical, sorted, disjoint, non-adjacent collection of
 -- version intervals over 'PubGrub.Version.Version', each interval a pair of
--- bound positions ('Cut'). 'Eq' compares the intervals alone, so structural
+-- bound positions (@Cut@). 'Eq' compares the intervals alone, so structural
 -- equality coincides with semantic equality.
 --
 -- Beside the intervals, a set remembers the __declared spelling__ it was built
 -- from, when it was built from one. That tag is a display hint and nothing more:
 -- only 'declare' sets it, every operation below drops it, 'Eq' and 'Ord' cannot
--- see it, and 'Pretty' hands it back so a report quotes a range the way its
+-- see it, and 'PubGrub.Pretty.Pretty' hands it back so a report quotes a range the way its
 -- author wrote it — @^>=4.13.0.0@ rather than @>=4.13.0.0 && <4.14@: the same
 -- intervals as a plain range, plus the knowledge of how it was spelled. A
 -- derived term has no author, and prints canonically ('renderVersionSet').
 --
 -- Union, intersection and complement are computed /directly on the intervals/,
--- as one pass of comparisons between bound positions. No syntax tree is built
--- and the result is canonical by construction, so nothing is re-derived after an
--- operation. Range syntax is a domain's business: a domain folds a declared range
--- into a set with the operations below.
+-- as one pass of comparisons between bound positions, and the result is
+-- canonical by construction. Parsing range syntax is a domain's business: a
+-- domain builds a set from a declared range with the constructors and
+-- operations below, and tags it with 'declare'.
 --
--- The version order is ours, not Cabal's: trailing zeros are insignificant
--- ('PubGrub.Version'). So @^>=4.13.0.0 || ^>=4.14.0.0@ is __one__ interval here,
--- and @>=0.3 && <0.3.0.0@ is empty, where Cabal's order leaves a hole below
--- @4.14.0.0@ and a live-looking interval below @0.3.0.0@ that no release ever
--- occupies.
+-- Versions compare with trailing zeros insignificant ("PubGrub.Version"), so
+-- @>=4.13 && <4.14 || >=4.14.0.0 && <4.15@ is __one__ interval, and
+-- @>=0.3 && <0.3.0.0@ is empty.
 module PubGrub.VersionSet (
-    -- The constructor is hidden so that every 'VersionSet' stays canonical.
+    -- The constructor is hidden, so that every 'VersionSet' stays canonical.
     VersionSet,
     Cut (..),
     Side (..),
@@ -116,9 +114,12 @@ fromCuts cs = VersionSet (filter nonEmpty cs) Nothing
     nonEmpty (Unbounded, _) = False -- a lower bound above every version: empty
     nonEmpty (lo, hi)       = lo < hi
 
+-- | A set of versions: a list of intervals, and the spelling it was declared
+-- with, if any. Build one with the functions below; it is canonical, so 'Eq'
+-- is equality of sets.
 data VersionSet = VersionSet
     { intervals :: [(Cut, Cut)]
-    -- ^ The canonical interval list, as cut pairs (for testing / reporting).
+    -- ^ The intervals, in order, each as its lower and upper bound.
     , declared  :: Maybe Text
     -- ^ The spelling this set was built from by 'declare', if it was, and
     -- 'Nothing' for anything an operation produced. It always denotes exactly
@@ -160,15 +161,11 @@ instance Ord VersionSet where
 declare :: Text -> VersionSet -> VersionSet
 declare spelling vs = vs{declared = Just spelling}
 
--- | The canonical intervals as text, in cabal's range syntax: @>=a && <b@
--- pieces joined by @||@, a one-version interval as @==v@, a lower bound at @0@
--- omitted, everything as @>=0@ and nothing as @<0@. A major bound that went
--- through the intervals therefore comes back as @>=v && <v'@; the declared
--- spelling, where there is one, is how @^>=v@ survives, and 'Pretty' prefers it.
---
--- This is one spelling among the possible ones, chosen because it is what
--- Cabal's own printer writes for the same intervals, so a proof reads the same
--- whether a range was declared or derived.
+-- | The intervals as text: @>=a && <b@ pieces joined by @||@, a one-version
+-- interval as @==v@, a lower bound at @0@ left out, every version as @>=0@ and
+-- none as @<0@. The 'PubGrub.Pretty.Pretty' instance prefers the 'declared'
+-- spelling where there is one, so a range is quoted the way its author wrote
+-- it, and uses this otherwise.
 renderVersionSet :: VersionSet -> Text
 renderVersionSet vs = case map interval (cutsOf vs) of
     [] -> "<0"
@@ -193,9 +190,11 @@ renderVersionSet vs = case map interval (cutsOf vs) of
 
     spell = T.pack . intercalate "." . map show . versionNumbers
 
+-- | No versions.
 emptyVersionSet :: VersionSet
 emptyVersionSet = VersionSet [] Nothing
 
+-- | Every version.
 fullVersionSet :: VersionSet
 fullVersionSet = fromCuts [(Cut version0 Before, Unbounded)]
 
@@ -204,7 +203,7 @@ singletonVersionSet :: Version -> VersionSet
 singletonVersionSet v = fromCuts [(Cut v Before, Cut v After)]
 
 -- | The half-open interval @[lo, hi)@, unbounded above when there is no @hi@.
--- Empty if @hi <= lo@ ('fromCuts' drops it).
+-- Empty if @hi <= lo@.
 --
 -- This is the shape to reach for when naming /one release/ out of an index whose
 -- version list you know: pass the release and the next existing release above it.
@@ -212,10 +211,10 @@ singletonVersionSet v = fromCuts [(Cut v Before, Cut v After)]
 -- instances as @'singletonVersionSet' lo@ over anything that can actually be
 -- offered — but unlike the singleton it __touches its neighbour__, and touching
 -- intervals coalesce (see 'unionVersionSet'). So @[v1,v2)@ and @[v2,v3)@ join into
--- @[v1,v3)@ on their own, while @{v1}@ and @{v2}@ stay two fragments forever, and
--- removing @[v1,v2)@ leaves no empty @(v1,v2)@ hole behind to be learned about
--- later. Both matter to a solver: singleton fragments cannot express a depender
--- term such as @>=1.0 && <1.3@, and each hole in a range is refuted on its own.
+-- @[v1,v3)@ on their own, where @{v1}@ and @{v2}@ stay two pieces, and removing
+-- @[v1,v2)@ leaves no empty @(v1,v2)@ behind for the solver to learn about
+-- separately. A fact stated over such slots for each of several neighbouring
+-- releases therefore merges into one fact over a single range.
 halfOpenVersionSet :: Version -> Maybe Version -> VersionSet
 halfOpenVersionSet lo hi = fromCuts [(Cut lo Before, maybe Unbounded (`Cut` Before) hi)]
 
@@ -287,17 +286,14 @@ snapToVersions universe vs = fromCuts (mapMaybe tighten (cutsOf vs))
 -- This is the other half of 'snapToVersions', and the half that is safe to show
 -- an author: a declared @>=4.7 && <5@ is left alone, while @>=1.0 && <1.2 ||
 -- >=1.3 && <2@ against a package with nothing published in @[1.2, 1.3)@
--- becomes @>=1.0 && <2@. Consecutive @^>=@ windows leave no hole for this to
--- fill, because trailing zeros are insignificant in this order; what is left is
--- a gap somebody wrote.
+-- becomes @>=1.0 && <2@.
 --
 -- A single interval costs nothing here. Each gap costs one ordered lookup.
 --
 -- It is not meant for declared ranges, because a filled set has to drop its
--- 'declared' spelling, and a proof should quote the author's own spelling.
--- Where it belongs is a __derived__ term, which nobody wrote and which prints
--- canonically anyway; that needs the universe at report time, which the core
--- does not have yet.
+-- 'declared' spelling, and an explanation should quote the author's own
+-- spelling. It suits a __derived__ set, which nobody wrote and which prints
+-- canonically anyway.
 fillGaps :: Set Version -> VersionSet -> VersionSet
 fillGaps universe vs = fromCuts (go (cutsOf vs))
   where
@@ -338,7 +334,7 @@ unionVersionSet a b = fromCuts (coalesce (merge (cutsOf a) (cutsOf b)))
     coalesce [] = []
 
 -- | Sweep both lists together, taking the overlap of the pair in hand and
--- advancing whichever interval ends first. Empty overlaps fall out in 'fromCuts'.
+-- advancing whichever interval ends first. Empty overlaps are dropped.
 intersectionVersionSet :: VersionSet -> VersionSet -> VersionSet
 intersectionVersionSet a b = fromCuts (go (cutsOf a) (cutsOf b))
   where
@@ -362,8 +358,9 @@ complementVersionSet vs = fromCuts (go (Cut version0 Before) (cutsOf vs))
         | hi == Unbounded = [(prev, lo)]
         | otherwise = (prev, lo) : go hi rest
 
--- | The class asks for no complement, because not every payload has one.
--- Version ranges do, so 'difference' is computed through it here.
+-- | Version sets as the solver's sets. 'difference' goes through
+-- 'complementVersionSet', which a version set has because versions have a
+-- lowest one and no highest.
 instance SetOps VersionSet where
     empty = emptyVersionSet
     intersect = intersectionVersionSet

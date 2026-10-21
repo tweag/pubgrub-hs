@@ -1,16 +1,15 @@
--- | Reading a derivation: the views of the tree a failed solve hands back, over
+-- | Reading a derivation: views of the tree a failed solve hands back, over
 -- any 'Domain'.
 --
--- A terminal incompatibility carries the derivation that produced it
--- ('PubGrub.Incompatibility.Cause'): a tree whose leaves are external facts
--- and whose nodes each follow from their two children. Everything here reads
--- that shape and nothing inside a fact, so it is written once; what a leaf
--- /says/ is the domain's business, and a renderer such as 'PubGrub.Report' asks
--- the domain for the words.
+-- The incompatibility a failed solve ends with carries the derivation that
+-- produced it ('PubGrub.Incompatibility.Cause'): a tree whose leaves are
+-- external facts and whose nodes each follow from their two children.
+-- Everything here reads that shape and nothing inside a fact; what a leaf
+-- /says/ is the domain's business.
 --
--- The views are written as 'Rule's — partial functions in 'Maybe' — so that a
--- renderer's own rules compose with them in one @do@ block: a line reads a view,
--- states a guard, and says a sentence.
+-- The views are 'Rule's, functions that may decline, so that they compose in
+-- one @do@ block in 'Maybe' with a renderer's own rules ("PubGrub.Report"): a
+-- line reads a view, states a guard, and says a sentence.
 module PubGrub.Derivation
     ( -- * Rules
       Rule
@@ -60,6 +59,7 @@ symmetric rule (x, y) = rule (x, y) <|> rule (y, x)
 -- Views of a node
 -- --------------------------------------------------------------------------
 
+-- | Was this derived by the solver, rather than stated?
 isDerived :: Incompatibility d -> Bool
 isDerived c = case incompCause c of
     Derived _ _ -> True

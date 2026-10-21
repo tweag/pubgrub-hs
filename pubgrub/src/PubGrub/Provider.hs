@@ -1,65 +1,51 @@
-module PubGrub.Provider where
-
+-- | The provider: how the solver learns about the world, one variable at a
+-- time.
+module PubGrub.Provider
+    ( Provider (..)
+    ) where
 
 import           PubGrub.Incompatibility (Domain (..), Incompatibility)
 
 
-
--- | The seam between a problem domain (for cabal: a package index, @.cabal@
--- files, flags) and the solver, which only ever sees variables, values and
--- incompatibilities. This callback /is/ the seam: there is deliberately no
--- neutral problem type handed over up front, because materialising one would
--- mean reading every candidate's @.cabal@ — including the all-but-one that get
--- discarded.
+-- | What the solver asks of the world. It never sees the world itself, only
+-- variables, sets of values and incompatibilities, and it asks about one
+-- variable when it needs to: there is no problem description handed over up
+-- front, so a provider reads only what the search reaches.
 --
--- The provider owns the value domain, but cannot /enumerate/ it: a set of
--- values may be symbolic (for cabal, a version range). So it works the other
--- way round: from the offered set, pick one value the set admits, read what
--- that choice entails, and state it as incompatibilities. Data flows one way:
--- the provider /writes/ incompatibilities and never reads the solver's store.
+-- The question is always the same: here is a variable, and the set of values
+-- it may still take; commit to one of them, and say what that choice entails.
+-- The set may be symbolic, a range rather than a list, so the provider is not
+-- asked to enumerate it: it picks a value the set admits, by whatever
+-- preference it has (the newest version, an installed one, a default).
 --
--- 'expand' makes the choice ("newest", "prefer installed", flag defaults) and
--- reports its consequences in one step, so the solver never holds one without
--- the other.
+-- @m@ is the provider's own monad: 'Data.Functor.Identity.Identity' for a world
+-- held in memory, 'IO' for one read from disk.
 newtype Provider d m = Provider
     { expand :: VarOf d -> SetOf d -> m (Maybe (ValueOf d), [Incompatibility d])
-      -- ^ Pick one value of the variable to commit to, and report what was
-      -- learned on the way — /both/ regardless of whether a value was found.
-      -- For a cabal flag variable the value is the declared default where the
-      -- set admits it, the other value otherwise, and nothing is reported.
+      -- ^ Pick a value of the variable from the set, and state what is known
+      -- on the way: typically the chosen value's dependencies.
       --
-      -- Contract, which the solver depends on: the returned value MUST be a
-      -- member of the given set (the accumulated constraint on the
-      -- variable — a hard precondition, not a hint). The solver immediately
-      -- records it as a positive decision, so an out-of-range value
-      -- contradicts the derivations that produced the set and corrupts the
-      -- search. Answer 'Nothing' iff no value in the set qualifies. A
-      -- wrong-but-in-range guess is not an error: on a later conflict the solver
-      -- backtracks and re-asks with a strictly smaller set.
+      -- __The value must be in the set.__ The set is everything the solver
+      -- has derived about the variable, and the solver records the value as a
+      -- decision at once, so a value outside it contradicts what the solver
+      -- already knows and corrupts the search. A value in the set that turns
+      -- out wrong is not an error: on a later conflict the solver backtracks
+      -- and asks again with a smaller set.
       --
-      -- For cabal the incompatibilities are the instance's dependencies, widened
-      -- from version ranges to instance sets, under the flags they are guarded
-      -- by, plus one clause per automatic flag the release declares.
+      -- Answer 'Nothing' when no value in the set can be chosen. The solver
+      -- then states that the variable takes no value in the set, so the same
+      -- set is never offered twice.
       --
-      -- They need not be /only/ that, and this is why the list sits outside the
-      -- 'Maybe'. The solver adds them to its store unexamined and never requires
-      -- them to mention the decided value, and incompatibilities are
-      -- context-independent by construction (each one is true of every
-      -- solution, whatever has been decided so far) — so a provider that
-      -- rejects candidates on the way to its answer may report /why/ it
-      -- rejected them, and those facts prune and explain like any other.
-      -- What it must not do is /decide/ a value it knows to be inadmissible.
+      -- __The incompatibilities are facts.__ The solver adds them to what it
+      -- knows without examining them, and each must be true of every solution,
+      -- whatever has been decided so far. They need not mention the chosen
+      -- value. So a provider that passes over values on the way to its answer
+      -- may say why it passed them over, and those facts prune the search and
+      -- explain a failure like any other.
       --
-      -- __Answering @Nothing@ with facts is the case that matters.__ A release
-      -- skipped because it cannot be built here is stated as an incompatibility,
-      -- as PubGrub asks of any version that cannot be selected; when the
-      -- offered set holds nothing /but/ such releases there is no instance to
-      -- carry those statements out, and dropping them is what makes a report say
-      -- \"no version for hpqtypes in >=1.13\" where the truth is that every
-      -- release in that range needs a C library this machine lacks. That case is
-      -- not a corner: on real Hackage problems it is the commonest way a popular
-      -- package fails to resolve.
-      --
-      -- The solver still guarantees progress itself, and does not take the
-      -- provider's word for coverage — see 'PubGrub.Solver.solve'.
+      -- This matters most when the answer is 'Nothing'. If every value in the
+      -- set was rejected for a reason (it cannot be built here, it needs
+      -- something missing), state the reasons: the solver uses them, and
+      -- states \"no value\" only for what they do not cover. A failure is then
+      -- explained by what was wrong with the values, not by their absence.
     }

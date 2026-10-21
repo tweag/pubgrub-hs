@@ -1,27 +1,19 @@
--- | The solver's version type.
+-- | Versions: a list of numbers, such as @1.2.0@, ordered component by
+-- component, for a domain whose values are versions. "PubGrub.VersionSet" is
+-- the matching set type.
 --
--- A version is spelled the way Hackage names the release — @1.2@, @1.2.0@ or
--- @1.2.0.0@ — and __ordered with trailing zeros insignificant__, so those three
--- spellings are one version. The spelling is kept for display only: 'Eq' and
--- 'Ord' compare the 'normalForm', which is the spelling with its trailing zeros
--- dropped and at least one component kept. This is the same move as
--- 'PubGrub.VersionSet.declared': a tag the lawful part of the type ignores.
+-- __Trailing zeros are insignificant__: @1.2@, @1.2.0@ and @1.2.0.0@ are one
+-- version, equal under 'Eq' and 'Ord'. Each keeps its spelling for display
+-- ('versionNumbers'), and the comparisons read the 'normalForm', the spelling
+-- with its trailing zeros dropped.
 --
--- Cabal's own 'Distribution.Types.Version.Version' orders @1.2 < 1.2.0 <
--- 1.2.0.0@, which puts version space between spellings of one version that
--- nothing published ever occupies. Every set operation then has to carry that
--- space: @^>=4.13.0.0 || ^>=4.14.0.0@ is two intervals with the hole
--- @[4.14, 4.14.0.0)@ between them, and the difference between a declared
--- @>=0.3@ and the slot of the release @0.3.0.0@ is a live-looking
--- @>=0.3 && <0.3.0.0@ that the search discovers empty one @no version for@ at
--- a time. The deviation from Cabal's order is small and goes the way an
--- author plainly means it: a bound @time >=1.8.0@ admits the release
--- @time 1.8@, which Cabal's order excludes. Two releases that spell one version
--- differently are one version here, so a caller has to keep one of them.
---
--- Conversions to and from Cabal's type are exact in both directions, because
--- the spelling survives; they live with the cabal domain
--- (@PubGrub.Cabal.Version@), as this module knows nothing of Cabal.
+-- An order in which @1.2 < 1.2.0@ would put room between two spellings of one
+-- version, where no version can ever be, and every set would have to carry
+-- it: @>=1.2 && <1.2.0@ would be a range that looks open and holds nothing,
+-- which a search can only discover by asking. With trailing zeros
+-- insignificant there is no such range, and a bound @>=1.8.0@ admits the
+-- version spelled @1.8@, as its author means. Two values that spell one version
+-- differently are one value here, so a domain that has both has to keep one.
 module PubGrub.Version
     ( Version
     , mkVersion
@@ -32,13 +24,7 @@ module PubGrub.Version
 
 import           Data.Ord (comparing)
 
--- | The spelling and its normal form, both non-empty and non-negative. The
--- constructor is not exported: 'mkVersion' keeps the invariant and computes
--- the normal form __once__, because 'Eq' and 'Ord' read it on every
--- comparison and a solve compares versions far more often than it makes them
--- (every cut of every version set, every slot, every installed unit). Deriving
--- it on each comparison cost a fifth of a large solve's time and a third of its
--- allocation.
+-- | A version: its spelling, and its normal form. Build one with 'mkVersion'.
 data Version = Version
     { versionNumbers :: ![Int]
     -- ^ the components as spelled — @[1,2,0,0]@ for @1.2.0.0@, not the normal
@@ -48,19 +34,24 @@ data Version = Version
     -- component. What 'Eq' and 'Ord' compare.
     }
 
+-- The normal form is a field, computed once by 'mkVersion', because 'Eq' and
+-- 'Ord' read it on every comparison and a solve compares versions far more
+-- often than it makes them. Deriving it on each comparison cost a fifth of a
+-- large solve's time and a third of its allocation.
+
 instance Eq Version where
     a == b = normalForm a == normalForm b
 
 instance Ord Version where
     compare = comparing normalForm
 
--- | Like Cabal's: @mkVersion [1,2,0]@, so a trace reads the same either way.
+-- | As the expression that makes it: @mkVersion [1,2,0]@.
 instance Show Version where
     showsPrec d v =
         showParen (d > 10) (showString "mkVersion " . showsPrec 11 (versionNumbers v))
 
--- | Build from components. An empty list is the version @0@, and a negative
--- component, which Cabal's parser never produces, is taken as @0@.
+-- | A version from its components, as spelled. An empty list is the version
+-- @0@, and a negative component is taken as @0@.
 mkVersion :: [Int] -> Version
 mkVersion [] = version0
 mkVersion ns = Version spelled normal
@@ -70,6 +61,6 @@ mkVersion ns = Version spelled normal
         [] -> [0]
         ms -> ms
 
--- | The lowest version. Every version set's universe starts here.
+-- | The version @0@, the lowest there is. Every version set starts here.
 version0 :: Version
 version0 = Version [0] [0]
