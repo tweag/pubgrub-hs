@@ -118,9 +118,9 @@ styleProof = T.intercalate "\n" . go False . T.lines
     -- and "1. And because"; a continuation line has none.
     openerOf ws = case ws of
         (n : "And" : "because" : _) | isNumber n -> 3
-        ("And" : "because" : _) -> 2
-        ("Because" : _) -> 1
-        _ -> 0
+        ("And" : "because" : _)                  -> 2
+        ("Because" : _)                          -> 1
+        _                                        -> 0
     isNumber n = case T.unsnoc n of
         Just (ds, '.') -> not (T.null ds) && T.all isDigit ds
         _              -> False

@@ -3,16 +3,16 @@
 module Bridge.Hackage where
 
 import           Colog                                        (WithLog, logMsg)
-import           Control.Monad                                (when)
 import           Control.Exception                            (Exception (..))
-import           Control.Monad                                (forM_)
+import           Control.Monad                                (forM_, when)
 import           Data.Array.IO                                (IOUArray,
                                                                newArray,
                                                                writeArray)
 import           Data.Array.Unboxed                           (UArray, (!))
 import           Data.Array.Unsafe                            (unsafeFreeze)
 import           Data.Binary                                  (get, put)
-import           Data.Binary.Get                              (Get, runGetOrFail,
+import           Data.Binary.Get                              (Get,
+                                                               runGetOrFail,
                                                                skip)
 import           Data.Binary.Put                              (Put, runPut)
 import qualified Data.ByteString.Lazy                         as BSL
@@ -40,22 +40,21 @@ import qualified Network.URI
 import           UnliftIO                                     (MonadIO (..),
                                                                MonadUnliftIO,
                                                                SomeException,
-                                                               throwIO,
-                                                               tryIO)
+                                                               throwIO, tryIO)
 
 import           Distribution.PackageDescription.Parsec       (parseGenericPackageDescription,
                                                                runParseResult)
 #if MIN_VERSION_Cabal_syntax(3,18,0)
 import           Distribution.Parsec.Error                    (PErrorWithSource (..))
 #endif
-import           PubGrub.Cabal.Provider                       (ParseError (..))
 import           Distribution.Pretty                          (prettyShow)
 import           Distribution.Types.Flag                      (PackageFlag (..))
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
 import           Distribution.Types.PackageId                 (PackageIdentifier (..))
 import           Distribution.Types.PackageName               (PackageName)
 import           Distribution.Types.Version                   (Version)
-import qualified PubGrub.Cabal.Version                              as V
+import           PubGrub.Cabal.Provider                       (ParseError (..))
+import qualified PubGrub.Cabal.Version                        as V
 
 
 import qualified Bridge.Hackage.Unlifted                      as U
@@ -144,13 +143,13 @@ data Index = Index
     }
 
 data Package = Package
-    { pkgVersions :: Set Version
+    { pkgVersions       :: Set Version
     -- ^ lazy on purpose, and the one lazy field in this file. The set is built
     -- from an ascending list the first time a package is asked about, and a
     -- solve asks about a few hundred of ~19k packages, so the rest stay as
     -- lists at 24 bytes a release instead of set nodes at 40. That is 2.4 MB
     -- of a peak residency of about 22 MB.
-    , pkgOffset   :: !Int
+    , pkgOffset         :: !Int
     , pkgSolverVersions :: Set V.Version
     -- ^ the same releases in the solver's order, one per version: where two
     -- spellings name one version (@0.1@ and @0.1.0@, 44 packages on Hackage),

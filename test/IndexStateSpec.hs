@@ -8,16 +8,15 @@ module IndexStateSpec (tests) where
 
 import           Bridge.Hackage                 (EpochTime, IndexState (..),
                                                  getRecordAt, parseIndexState,
-                                                 solverVersionsFrom,
                                                  putRecord, showIndexState,
-                                                 toEpoch)
+                                                 solverVersionsFrom, toEpoch)
 import           Data.Binary.Get                (runGetOrFail)
 import           Data.Binary.Put                (runPut)
+import qualified Data.Set                       as Set
 import           Data.Word                      (Word32)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
-import qualified Data.Set                       as Set
 import           Distribution.Types.Version     (Version, mkVersion)
-import qualified PubGrub.Cabal.Version                as V
+import qualified PubGrub.Cabal.Version          as V
 import           Test.Tasty                     (TestTree, testGroup)
 import           Test.Tasty.HUnit               (assertBool, assertFailure,
                                                  testCase, (@?=))

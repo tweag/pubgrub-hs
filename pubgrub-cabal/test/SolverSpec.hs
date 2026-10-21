@@ -12,22 +12,19 @@ import           Data.Ord                       (comparing)
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
-import           PubGrub.Cabal                  (Cabal,
-                                                 fromDependency,
-                                                 request)
-import           PubGrub.Cabal.InstanceSet            (HasVersion (version),
+import           PubGrub.Cabal                  (Cabal, fromDependency, request)
+import           PubGrub.Cabal.InstanceSet      (HasVersion (version),
                                                  Instance (..), InstanceSet,
                                                  emptyInstanceSet,
                                                  memberInstance,
                                                  singletonInstance)
-import           PubGrub.Provider               (Provider (..))
 import           PubGrub.Cabal.Report           (reportConflict)
+import           PubGrub.Cabal.Value            (Value (..), ValueSet (..))
+import           PubGrub.Cabal.Variable         (Var (..))
+import           PubGrub.Cabal.Version          (mkVersion)
+import           PubGrub.Provider               (Provider (..))
 import           PubGrub.SetOps                 (union)
-import           PubGrub.Solver                 (SolveError (..),
-                                                 solve)
-import           PubGrub.Cabal.Value                  (Value (..), ValueSet (..))
-import           PubGrub.Cabal.Variable               (Var (..))
-import           PubGrub.Cabal.Version                (mkVersion)
+import           PubGrub.Solver                 (SolveError (..), solve)
 import           Test.Tasty                     (TestTree, testGroup)
 import           Test.Tasty.HUnit               (assertBool, testCase, (@?=))
 

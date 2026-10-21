@@ -39,15 +39,15 @@ import           Distribution.Types.Flag        (FlagAssignment,
                                                  mkFlagAssignment,
                                                  showFlagAssignment)
 import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Cabal.PreInstalled     (PreInstalledPackage)
-import           PubGrub.Cabal.InstanceSet            (Instance (..), InstanceSet,
+import           PubGrub.Cabal.InstanceSet      (Instance (..), InstanceSet,
                                                  emptyInstanceSet,
                                                  memberInstance,
                                                  singletonInstance)
+import           PubGrub.Cabal.PreInstalled     (PreInstalledPackage)
+import           PubGrub.Cabal.Variable         (Flag (..), Var (..))
+import           PubGrub.Cabal.Version          (Version)
 import           PubGrub.Pretty                 (Pretty (..))
 import           PubGrub.SetOps                 (SetOps (..))
-import           PubGrub.Cabal.Variable               (Flag (..), Var (..))
-import           PubGrub.Cabal.Version                (Version)
 
 -- --------------------------------------------------------------------------
 -- Values
@@ -168,7 +168,7 @@ resolvedInstance (Built v _)     = BuildSource v
 
 instance Pretty Resolved where
     pretty (Installed pip) = pretty (UsePreInstalled pip)
-    pretty (Built v fa) = pretty v <> T.pack (showFlagAssignment fa)
+    pretty (Built v fa)    = pretty v <> T.pack (showFlagAssignment fa)
 
 -- | Fold the solver's answer into one entry per package: each decided flag
 -- goes into the flag assignment of its owner, which must be a source release.

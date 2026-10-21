@@ -36,21 +36,20 @@ import qualified Data.Map.Strict                as Map
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Cabal                  (Cabal,
-                                                 CabalFact (..))
-import           PubGrub.Incompatibility        (Cause (..),
-                                                 Incompatibility (..))
-import           PubGrub.Cabal.InstanceSet            (InstanceSet)
-import           PubGrub.Pretty                 (Pretty (..))
+import           PubGrub.Cabal                  (Cabal, CabalFact (..))
+import           PubGrub.Cabal.InstanceSet      (InstanceSet)
 import           PubGrub.Cabal.Report.Rule
 import           PubGrub.Cabal.Report.Wording   (bare, bareP, leaf, listing,
                                                  namedP)
+import           PubGrub.Cabal.Value            (ValueSet (..))
+import           PubGrub.Cabal.Variable         (Var (..))
+import           PubGrub.Cabal.Version          (Version)
+import           PubGrub.Incompatibility        (Cause (..),
+                                                 Incompatibility (..))
+import           PubGrub.Pretty                 (Pretty (..))
 import           PubGrub.SetOps                 (SetOps (intersect, union),
                                                  isSubsetOf)
 import           PubGrub.Term                   (Term (..), unionTerm)
-import           PubGrub.Cabal.Value                  (ValueSet (..))
-import           PubGrub.Cabal.Variable               (Var (..))
-import           PubGrub.Cabal.Version                (Version)
 
 -- | The headline of a proof whose holes have been absorbed
 -- ('PubGrub.Cabal.Report.collapseNoInstances').
@@ -102,9 +101,9 @@ walled :: Incompatibility Cabal -> [PackageName]
 walled root = nub (concat [wallPackage c | c <- externals root])
   where
     wallPackage c = case incompCause c of
-        Fact (CauseOnlyInstalled p _) -> [p]
+        Fact (CauseOnlyInstalled p _)   -> [p]
         Fact (CauseUnbuildable p _ _ _) -> [p]
-        _                             -> []
+        _                               -> []
 
 -- --------------------------------------------------------------------------
 -- The wall story

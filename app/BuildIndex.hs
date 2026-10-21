@@ -23,17 +23,13 @@
 -- falls back to parsing.
 module Main (main) where
 
-import           PubGrub.Cabal.Flatten      (toStored)
-import           Bridge.Hackage             (IndexHandle (..),
-                                             IndexState (..),
+import           Bridge.Hackage             (IndexHandle (..), IndexState (..),
                                              IndexStateInfo (..),
-                                             IndexStateTooNew (..),
-                                             cacheDirOf, mkCache,
-                                             parseIndexState,
-                                             showIndexState,
-                                             withHackageIndex)
-import           Bridge.Hackage.Store       (buildStore, storePaths,
-                                             StorePaths (..))
+                                             IndexStateTooNew (..), cacheDirOf,
+                                             mkCache, parseIndexState,
+                                             showIndexState, withHackageIndex)
+import           Bridge.Hackage.Store       (StorePaths (..), buildStore,
+                                             storePaths)
 import           Colog                      (HasLog (..), LogAction (..),
                                              logMsg)
 import           Control.Monad.Reader       (MonadReader, ReaderT, runReaderT)
@@ -49,12 +45,13 @@ import           Options.Applicative        (Parser, eitherReader, execParser,
                                              fullDesc, header, help, helper,
                                              info, long, metavar, option,
                                              progDesc, value, (<**>))
+import           PubGrub.Cabal.Flatten      (toStored)
 import           System.Directory           (getFileSize)
 import           System.Exit                (exitFailure)
 import           System.IO                  (hPutStrLn, stderr)
 import           Text.Printf                (printf)
-import           UnliftIO                   (MonadIO (liftIO), MonadUnliftIO)
 import qualified UnliftIO
+import           UnliftIO                   (MonadIO (liftIO), MonadUnliftIO)
 
 newtype Env = Env {envText :: LogAction App Text}
 

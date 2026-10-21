@@ -39,63 +39,77 @@ module PubGrub.Cabal.Provider
     , slotInstances
     ) where
 
-import           Colog.Core                     (LogAction, (<&))
-import           Control.Exception              (SomeException)
-import           Data.List                      (find, sortOn)
-import           Data.List.NonEmpty             (NonEmpty)
-import qualified Data.List.NonEmpty             as NE
-import qualified Data.Map.Strict                as Map
-import           Data.Map.Strict                (Map)
-import           Data.Maybe                     (catMaybes, fromMaybe,
-                                                 listToMaybe)
-import           Data.Ord                       (Down (..))
-import           Data.Set                       (Set)
-import qualified Data.Set                       as Set
-import           Data.Text                      (Text)
-import qualified Data.Text                      as T
-import           Distribution.Parsec.Error      (PError)
-import           Distribution.Pretty            (prettyShow)
-import           Distribution.Types.Condition   (Condition (..))
-import           Distribution.Types.Dependency  (Dependency, depPkgName,
-                                                 depVerRange)
-import           Distribution.Types.Flag        (FlagName)
-import           Distribution.Types.PackageName (PackageName)
-import qualified Distribution.Types.Version     as Cabal
-import           PubGrub.Cabal                  (Cabal, UnbuildableReason,
-                                                 constraint, declaresFlag,
-                                                 fromDependency, onlyInstalled,
-                                                 unbuildable)
-import           Distribution.Compiler          (CompilerInfo)
-import           Distribution.System            (Platform)
+import           Colog.Core                                   (LogAction, (<&))
+import           Control.Exception                            (SomeException)
+import           Data.List                                    (find, sortOn)
+import           Data.List.NonEmpty                           (NonEmpty)
+import qualified Data.List.NonEmpty                           as NE
+import           Data.Map.Strict                              (Map)
+import qualified Data.Map.Strict                              as Map
+import           Data.Maybe                                   (catMaybes,
+                                                               fromMaybe,
+                                                               listToMaybe)
+import           Data.Ord                                     (Down (..))
+import           Data.Set                                     (Set)
+import qualified Data.Set                                     as Set
+import           Data.Text                                    (Text)
+import qualified Data.Text                                    as T
+import           Distribution.Compiler                        (CompilerInfo)
+import           Distribution.Parsec.Error                    (PError)
+import           Distribution.Pretty                          (prettyShow)
+import           Distribution.System                          (Platform)
+import           Distribution.Types.Condition                 (Condition (..))
+import           Distribution.Types.Dependency                (Dependency,
+                                                               depPkgName,
+                                                               depVerRange)
+import           Distribution.Types.Flag                      (FlagName)
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription)
-import           PubGrub.Cabal.Flatten          (FlagModel (..), Guard,
-                                                 GuardedDeps, GuardedTools,
-                                                 PkgConfigPresent, Stanzas,
-                                                 StoredRelease (..),
-                                                 componentDepsStored,
-                                                 componentToolsStored,
-                                                 expandGuard, toStored,
-                                                 unbuildableStored)
-import           PubGrub.Cabal.Installed        (InstalledDb (..),
-                                                 InstalledEdge (..),
-                                                 closureEdges,
-                                                 installedInstancesOf,
-                                                 isNonReinstallable,
-                                                 toPreInstalled)
-import           PubGrub.Incompatibility        (Incompatibility)
-import           PubGrub.Cabal.PreInstalled     (PreInstalledPackage (..))
-import           PubGrub.Cabal.InstanceSet            (HasVersion (..), Instance (..),
-                                                 InstanceSet (..),
-                                                 memberInstance,
-                                                 singletonInstance,
-                                                 sourceInstances)
-import           PubGrub.Pretty                 (Pretty (pretty))
-import           PubGrub.Cabal.Value                  (Value (..), ValueSet (..),
-                                                 instanceSet, memberBool)
-import           PubGrub.Cabal.Variable               (Flag (..), Var (..))
-import           PubGrub.Cabal.Version                (Version)
-import           PubGrub.Cabal.VersionSet             (VersionSet, contains)
-import qualified PubGrub.Cabal.VersionSet             as VersionSet
+import           Distribution.Types.PackageName               (PackageName)
+import qualified Distribution.Types.Version                   as Cabal
+import           PubGrub.Cabal                                (Cabal,
+                                                               UnbuildableReason,
+                                                               constraint,
+                                                               declaresFlag,
+                                                               fromDependency,
+                                                               onlyInstalled,
+                                                               unbuildable)
+import           PubGrub.Cabal.Flatten                        (FlagModel (..),
+                                                               Guard,
+                                                               GuardedDeps,
+                                                               GuardedTools,
+                                                               PkgConfigPresent,
+                                                               Stanzas,
+                                                               StoredRelease (..),
+                                                               componentDepsStored,
+                                                               componentToolsStored,
+                                                               expandGuard,
+                                                               toStored,
+                                                               unbuildableStored)
+import           PubGrub.Cabal.Installed                      (InstalledDb (..),
+                                                               InstalledEdge (..),
+                                                               closureEdges,
+                                                               installedInstancesOf,
+                                                               isNonReinstallable,
+                                                               toPreInstalled)
+import           PubGrub.Cabal.InstanceSet                    (HasVersion (..),
+                                                               Instance (..),
+                                                               InstanceSet (..),
+                                                               memberInstance,
+                                                               singletonInstance,
+                                                               sourceInstances)
+import           PubGrub.Cabal.PreInstalled                   (PreInstalledPackage (..))
+import           PubGrub.Cabal.Value                          (Value (..),
+                                                               ValueSet (..),
+                                                               instanceSet,
+                                                               memberBool)
+import           PubGrub.Cabal.Variable                       (Flag (..),
+                                                               Var (..))
+import           PubGrub.Cabal.Version                        (Version)
+import           PubGrub.Cabal.VersionSet                     (VersionSet,
+                                                               contains)
+import qualified PubGrub.Cabal.VersionSet                     as VersionSet
+import           PubGrub.Incompatibility                      (Incompatibility)
+import           PubGrub.Pretty                               (Pretty (pretty))
 
 -- | A @.cabal@ file that could not be read: Cabal-syntax's own errors, with the
 -- @cabal-version@ it managed to read, or whatever the source threw on the way to
@@ -109,10 +123,10 @@ data ParseError
     deriving Show
 
 data Release = Release
-    { relAutomatic :: [Flag]
+    { relAutomatic   :: [Flag]
     -- ^ the automatic flags, each a solver variable of its own. Empty under
     -- 'FixedFlags', where every flag is treated as manual.
-    , relGuarded   :: GuardedDeps
+    , relGuarded     :: GuardedDeps
     -- ^ the dependencies as flag-guarded groups; a guard mentions automatic
     -- flags only, everything else having been resolved
     , relUnbuildable :: [(Guard, NonEmpty UnbuildableReason)]
@@ -124,11 +138,11 @@ data Release = Release
     -- fall, such as @Lit True@, rules the release out; any other rules out the
     -- flag values that reach it, and the rule states it as a guarded unit
     -- clause when it offers the release.
-    , relTools :: GuardedTools
+    , relTools       :: GuardedTools
     -- ^ the build tools, flag-guarded. The rule does not read them: a planner
     -- solves the tools in a namespace of their own, from this list
     -- ('PubGrub.Cabal.Flatten.GuardedTools').
-    , relSetup :: [Dependency]
+    , relSetup       :: [Dependency]
     -- ^ the @setup-depends@, likewise ('PubGrub.Cabal.Flatten.setupDeps')
     }
 
@@ -544,7 +558,7 @@ mkExpand logA preference installedDb source = expand'
     -- the same defaults: the flag variables are named by both, so a neighbour that
     -- changed a default has different variables and must not be spanned. An
     -- unconditional occurrence does not care.
-    sameFlags (Lit True) _ _ = True
+    sameFlags (Lit True) _ _    = True
     sameFlags _ flags neighbour = relAutomatic neighbour == flags
 
     -- The range to name a release's neighbours by: walk out from @v@ in both

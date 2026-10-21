@@ -33,8 +33,8 @@ import           Data.Map.Strict  (Map)
 import qualified Data.Map.Strict  as Map
 import           PubGrub.Relation (Relation (..), relation)
 import           PubGrub.SetOps   (SetOps (..))
-import           PubGrub.Term     (Term (..), anyTerm, intersectTerm,
-                                   isTopTerm, unionTerm)
+import           PubGrub.Term     (Term (..), anyTerm, intersectTerm, isTopTerm,
+                                   unionTerm)
 
 -- --------------------------------------------------------------------------
 -- Domain

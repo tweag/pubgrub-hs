@@ -46,19 +46,17 @@ import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Pretty            (prettyShow)
 import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Cabal                  (Cabal,
-                                                 CabalFact (..),
-                                                 Guard,
+import           PubGrub.Cabal                  (Cabal, CabalFact (..), Guard,
                                                  UnbuildableReason (..))
+import           PubGrub.Cabal.InstanceSet      (InstanceSet, isEveryVersion)
+import           PubGrub.Cabal.Value            (BoolSet (..), ValueSet (..))
+import           PubGrub.Cabal.Variable         (Flag, Var (..))
 import           PubGrub.Incompatibility        (Incompatibility (..))
-import           PubGrub.Cabal.InstanceSet            (InstanceSet, isEveryVersion)
 import           PubGrub.Pretty                 (Pretty (..))
-import           PubGrub.Report                 (Formatter (..), anyOf,
-                                                 listing, summaryWith)
+import           PubGrub.Report                 (Formatter (..), anyOf, listing,
+                                                 summaryWith)
 import qualified PubGrub.Report                 as Report
 import           PubGrub.Term                   (Term)
-import           PubGrub.Cabal.Value                  (BoolSet (..), ValueSet (..))
-import           PubGrub.Cabal.Variable               (Flag, Var (..))
 
 -- | The cabal domain's words, with no rules and no pass: the half of a
 -- 'Formatter' that this module owns. "PubGrub.Cabal.Report" adds the rest.

@@ -26,9 +26,9 @@ import qualified Data.Set                       as Set
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.UnitId      (UnitId)
 import           Distribution.Version           (Version)
+import           PubGrub.Cabal.InstanceSet      (Instance (..))
 import           PubGrub.Cabal.PreInstalled     (PreInstalledPackage (..))
-import           PubGrub.Cabal.InstanceSet            (Instance (..))
-import           PubGrub.Cabal.Version                (fromCabalVersion)
+import           PubGrub.Cabal.Version          (fromCabalVersion)
 
 -- | One installed unit, reduced to what the solver models: its id, name, version
 -- and direct dependencies. The compiler's own 'Version' type, since it is the

@@ -10,10 +10,10 @@
 -- breaks the law is here too, to show that 'valid' catches it.
 module StoreInvariantsSpec (tests) where
 
-import           Data.List               (nub)
-import           Data.Maybe              (fromMaybe)
 import qualified Data.IntSet             as IntSet
+import           Data.List               (nub)
 import qualified Data.Map.Strict         as Map
+import           Data.Maybe              (fromMaybe)
 import           Data.Set                (Set)
 import qualified Data.Set                as Set
 import           PubGrub.Incompatibility (Cause (..), Domain (..),

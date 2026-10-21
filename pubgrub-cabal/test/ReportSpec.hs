@@ -9,45 +9,46 @@
 -- what the proof claims.
 module ReportSpec (tests) where
 
-import           Data.List                       (isInfixOf)
-import qualified Data.List.NonEmpty              as NE
-import qualified Data.Map.Strict                 as Map
-import           Distribution.Types.Flag         (mkFlagName)
-import qualified Data.Set                        as Set
-import           Distribution.Types.PackageName  (PackageName, mkPackageName)
-import           Distribution.Types.PkgconfigDependency (PkgconfigDependency (..))
-import           Distribution.Types.PkgconfigName (mkPkgconfigName)
+import           Data.List                                (isInfixOf)
+import qualified Data.List.NonEmpty                       as NE
+import qualified Data.Map.Strict                          as Map
+import qualified Data.Set                                 as Set
+import qualified Data.Text                                as T
+import           Distribution.Types.Flag                  (mkFlagName)
+import           Distribution.Types.PackageName           (PackageName,
+                                                           mkPackageName)
+import           Distribution.Types.PkgconfigDependency   (PkgconfigDependency (..))
+import           Distribution.Types.PkgconfigName         (mkPkgconfigName)
 import           Distribution.Types.PkgconfigVersionRange (anyPkgconfigVersion)
-import qualified Distribution.Types.Version      as Cabal
-import           PubGrub.Cabal.Version                 (Version)
-import qualified PubGrub.Cabal.Version                 as V
-import           Distribution.Types.VersionRange (earlierVersion,
-                                                  orLaterVersion)
-import           PubGrub.Cabal                   (Cabal,
-                                                  CabalFact (..),
-                                                  UnbuildableReason (..),
-                                                  fromDependency,
-                                                  onlyInstalled,
-                                                  request,
-                                                  unbuildable)
-import           PubGrub.Incompatibility         (Cause (..),
-                                                  Incompatibility (..),
-                                                  noValues,
-                                                  priorCause)
-import           PubGrub.Cabal.InstanceSet             (InstanceSet (..))
-import           PubGrub.Cabal.Value                   (instanceSet)
-import           PubGrub.Cabal.Variable                (Flag (..), Var (..))
-import           PubGrub.Cabal.Report            (collapseNoInstances,
-                                                  reportConflict,
-                                                  reportHeadline, styleProof,
-                                                  wrapProof)
-import           PubGrub.SetOps                  (equivalent)
-import           PubGrub.Term                    (Term (..))
-import qualified Data.Text                       as T
-import qualified PubGrub.Cabal.VersionSet              as VersionSet
-import           Test.Tasty                      (TestTree, testGroup)
-import           Test.Tasty.HUnit                (assertBool, assertFailure,
-                                                  testCase, (@?=))
+import qualified Distribution.Types.Version               as Cabal
+import           Distribution.Types.VersionRange          (earlierVersion,
+                                                           orLaterVersion)
+import           PubGrub.Cabal                            (Cabal,
+                                                           CabalFact (..),
+                                                           UnbuildableReason (..),
+                                                           fromDependency,
+                                                           onlyInstalled,
+                                                           request, unbuildable)
+import           PubGrub.Cabal.InstanceSet                (InstanceSet (..))
+import           PubGrub.Cabal.Report                     (collapseNoInstances,
+                                                           reportConflict,
+                                                           reportHeadline,
+                                                           styleProof,
+                                                           wrapProof)
+import           PubGrub.Cabal.Value                      (instanceSet)
+import           PubGrub.Cabal.Variable                   (Flag (..), Var (..))
+import           PubGrub.Cabal.Version                    (Version)
+import qualified PubGrub.Cabal.Version                    as V
+import qualified PubGrub.Cabal.VersionSet                 as VersionSet
+import           PubGrub.Incompatibility                  (Cause (..),
+                                                           Incompatibility (..),
+                                                           noValues, priorCause)
+import           PubGrub.SetOps                           (equivalent)
+import           PubGrub.Term                             (Term (..))
+import           Test.Tasty                               (TestTree, testGroup)
+import           Test.Tasty.HUnit                         (assertBool,
+                                                           assertFailure,
+                                                           testCase, (@?=))
 
 -- --------------------------------------------------------------------------
 -- Fixtures
@@ -580,10 +581,10 @@ soundness =
     sameTerm _ _                              = False
 
 describe :: Cause Cabal -> String
-describe (Seed f)     = "Seed " ++ fact f
-describe (Fact f)     = "Fact " ++ fact f
-describe NoValues{}   = "NoValues"
-describe Derived{}    = "Derived"
+describe (Seed f)   = "Seed " ++ fact f
+describe (Fact f)   = "Fact " ++ fact f
+describe NoValues{} = "NoValues"
+describe Derived{}  = "Derived"
 
 fact :: CabalFact -> String
 fact CauseRequest{}       = "CauseRequest"

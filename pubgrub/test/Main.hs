@@ -1,7 +1,7 @@
 module Main (main) where
 
-import           Test.Tasty    (defaultMain, testGroup)
 import qualified StoreInvariantsSpec
+import           Test.Tasty          (defaultMain, testGroup)
 import qualified ToyDomainSpec
 
 main :: IO ()

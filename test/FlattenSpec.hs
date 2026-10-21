@@ -12,25 +12,8 @@
 -- 'depsAt' is given an assignment.
 module FlattenSpec (tests) where
 
-import           PubGrub.Cabal.Flatten                        (Stanzas (..),
-                                                               allStanzas,
-                                                               buildableCondition,
-                                                               noStanzas,
-                                                               componentTools,
-                                                               componentToolsAtDefaults,
-                                                               setupDeps,
-                                                               toolsAt,
-                                                               componentDeps,
-                                                               componentDepsAtDefaults,
-                                                               defaultFlags,
-                                                               depsAt,
-                                                               expandGuard,
-                                                               flattenDeps,
-                                                               unbuildableAtDefaults)
-import           Bridge.Hackage                                (parseGPD)
-import           Bridge.Provider                               (pkgConfigPresent)
-import           PubGrub.Cabal.Provider                        (ParseError (..))
-import           Distribution.Solver.Types.PkgConfigDb        (pkgConfigDbFromList)
+import           Bridge.Hackage                               (parseGPD)
+import           Bridge.Provider                              (pkgConfigPresent)
 import qualified Data.ByteString.Lazy.Char8                   as BL
 import           Data.List                                    (isInfixOf)
 import qualified Data.Map.Strict                              as Map
@@ -39,27 +22,44 @@ import           Distribution.Compiler                        (AbiTag (NoAbiTag)
                                                                CompilerId (..),
                                                                CompilerInfo,
                                                                unknownCompilerInfo)
+import           Distribution.Solver.Types.PkgConfigDb        (pkgConfigDbFromList)
 import           Distribution.System                          (Arch (X86_64),
                                                                OS (Linux),
                                                                Platform (..))
 import           Distribution.Types.Condition                 (Condition (..))
+import           Distribution.Types.Dependency                (depPkgName)
+import           Distribution.Types.ExeDependency             (ExeDependency (..))
 import           Distribution.Types.Flag                      (FlagAssignment,
                                                                mkFlagAssignment,
                                                                mkFlagName)
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription)
-import           Distribution.Types.Dependency                (depPkgName)
-import           Distribution.Types.ExeDependency              (ExeDependency (..))
 import           Distribution.Types.PackageName               (unPackageName)
-import           Distribution.Types.UnqualComponentName        (unUnqualComponentName)
-import           Distribution.Types.PkgconfigDependency        (PkgconfigDependency (..))
-import           Distribution.Types.PkgconfigName              (mkPkgconfigName)
-import           Distribution.Types.PkgconfigVersionRange      (anyPkgconfigVersion)
-import           PubGrub.Cabal                                (UnbuildableReason (..))
+import           Distribution.Types.PkgconfigDependency       (PkgconfigDependency (..))
+import           Distribution.Types.PkgconfigName             (mkPkgconfigName)
+import           Distribution.Types.PkgconfigVersionRange     (anyPkgconfigVersion)
+import           Distribution.Types.UnqualComponentName       (unUnqualComponentName)
 import           Distribution.Version                         (earlierVersion,
                                                                intersectVersionRanges,
                                                                mkVersion,
                                                                orLaterVersion)
-import           PubGrub.Cabal.VersionSet                           (VersionSet,
+import           PubGrub.Cabal                                (UnbuildableReason (..))
+import           PubGrub.Cabal.Flatten                        (Stanzas (..),
+                                                               allStanzas,
+                                                               buildableCondition,
+                                                               componentDeps,
+                                                               componentDepsAtDefaults,
+                                                               componentTools,
+                                                               componentToolsAtDefaults,
+                                                               defaultFlags,
+                                                               depsAt,
+                                                               expandGuard,
+                                                               flattenDeps,
+                                                               noStanzas,
+                                                               setupDeps,
+                                                               toolsAt,
+                                                               unbuildableAtDefaults)
+import           PubGrub.Cabal.Provider                       (ParseError (..))
+import           PubGrub.Cabal.VersionSet                     (VersionSet,
                                                                fromVersionRange)
 import           Test.Tasty                                   (TestTree,
                                                                testGroup)

@@ -26,10 +26,6 @@
 -- dependency.
 module FlagSolveSpec (tests) where
 
-import           PubGrub.Cabal.Flatten          (FlagModel (..))
-import           PubGrub.Cabal.Installed        (InstalledPkg (..), mkInstalledDb)
-import qualified PubGrub.Cabal.Provider         as BP
-import           PubGrub.Cabal.Provider         (ParseError (..))
 import           Control.Exception              (toException)
 import           Control.Monad.IO.Class         (liftIO)
 import           Data.Either                    (fromLeft, isLeft)
@@ -51,27 +47,30 @@ import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.UnitId      (mkUnitId)
 import           Distribution.Types.Version     (mkVersion)
 import           Distribution.Version           (anyVersion, thisVersion)
-import           PubGrub.Cabal                  (Cabal,
-                                                 CabalFact (..),
+import           PubGrub.Cabal                  (Cabal, CabalFact (..),
                                                  UnbuildableReason (..),
                                                  flagConstraint, request)
-import           PubGrub.Incompatibility        (Cause (..),
-                                                 Incompatibility (..))
-import           PubGrub.Cabal.PreInstalled     (PreInstalledPackage (..))
-import           PubGrub.Cabal.InstanceSet            (Instance (..),
+import           PubGrub.Cabal.Flatten          (FlagModel (..))
+import           PubGrub.Cabal.Installed        (InstalledPkg (..),
+                                                 mkInstalledDb)
+import           PubGrub.Cabal.InstanceSet      (Instance (..),
                                                  InstanceSet (..),
                                                  singletonInstance,
                                                  sourceInstances)
-import           PubGrub.Provider               (Provider (Provider, expand))
+import           PubGrub.Cabal.PreInstalled     (PreInstalledPackage (..))
+import           PubGrub.Cabal.Provider         (ParseError (..))
+import qualified PubGrub.Cabal.Provider         as BP
 import           PubGrub.Cabal.Report           (reportConflict)
-import           PubGrub.Solver                 (SolveError (..),
-                                                 solve)
-import           PubGrub.Cabal.Value                  (Resolved (..), Value (..),
+import           PubGrub.Cabal.Value            (Resolved (..), Value (..),
                                                  foldFlags, instanceSet)
-import           PubGrub.Cabal.Variable               (Flag (..), Var (..))
-import           PubGrub.Cabal.Version                (Version)
-import qualified PubGrub.Cabal.Version                as V
-import qualified PubGrub.Cabal.VersionSet             as VersionSet
+import           PubGrub.Cabal.Variable         (Flag (..), Var (..))
+import           PubGrub.Cabal.Version          (Version)
+import qualified PubGrub.Cabal.Version          as V
+import qualified PubGrub.Cabal.VersionSet       as VersionSet
+import           PubGrub.Incompatibility        (Cause (..),
+                                                 Incompatibility (..))
+import           PubGrub.Provider               (Provider (Provider, expand))
+import           PubGrub.Solver                 (SolveError (..), solve)
 import           Test.Tasty                     (TestTree, testGroup)
 import           Test.Tasty.HUnit               (assertBool, assertFailure,
                                                  testCase, (@?=))

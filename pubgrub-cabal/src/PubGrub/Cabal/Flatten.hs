@@ -125,67 +125,68 @@ module PubGrub.Cabal.Flatten (
     setupDeps,
 ) where
 
-import           Control.Applicative                          (Alternative (..))
-import           GHC.Generics                                 (Generic)
-import           Data.Bool                                    (bool)
-import           Data.Char                                    (isAlphaNum, toLower)
-import           Data.List.NonEmpty                           (NonEmpty)
-import qualified Data.List.NonEmpty                           as NE
-import qualified Data.Map.Merge.Strict                        as Map
-import           Data.Map.Strict                              (Map)
-import qualified Data.Map.Strict                              as Map
-import           Data.Maybe                                   (catMaybes,
-                                                               fromMaybe,
-                                                               mapMaybe,
-                                                               maybeToList)
-import           Distribution.Compat.CharParsing              (CharParsing (..),
-                                                               between, munch1,
-                                                               sepByNonEmpty,
-                                                               spaces)
-import qualified Distribution.Compat.CharParsing              as P
-import           Distribution.Compiler                        (CompilerId (..),
-                                                               CompilerInfo,
-                                                               compilerInfoId)
-import           Distribution.Parsec                          (CabalParsing,
-                                                               Parsec (..))
-import           Distribution.System                          (Platform (..))
-import           Distribution.Types.Condition                 (Condition (..),
-                                                               cAnd, cNot,
-                                                               simplifyCondition)
+import           Control.Applicative                           (Alternative (..))
+import           Data.Bool                                     (bool)
+import           Data.Char                                     (isAlphaNum,
+                                                                toLower)
+import           Data.List.NonEmpty                            (NonEmpty)
+import qualified Data.List.NonEmpty                            as NE
+import qualified Data.Map.Merge.Strict                         as Map
+import           Data.Map.Strict                               (Map)
+import qualified Data.Map.Strict                               as Map
+import           Data.Maybe                                    (catMaybes,
+                                                                fromMaybe,
+                                                                mapMaybe,
+                                                                maybeToList)
+import           Distribution.Compat.CharParsing               (CharParsing (..),
+                                                                between, munch1,
+                                                                sepByNonEmpty,
+                                                                spaces)
+import qualified Distribution.Compat.CharParsing               as P
+import           Distribution.Compiler                         (CompilerId (..),
+                                                                CompilerInfo,
+                                                                compilerInfoId)
 import           Distribution.PackageDescription.Configuration (addBuildableCondition)
-import           Distribution.Types.Executable                (Executable (buildInfo))
+import           Distribution.Parsec                           (CabalParsing,
+                                                                Parsec (..))
+import           Distribution.System                           (Platform (..))
+import           Distribution.Types.Benchmark                  (Benchmark (benchmarkBuildInfo))
+import           Distribution.Types.BuildInfo                  (BuildInfo (..))
+import           Distribution.Types.Condition                  (Condition (..),
+                                                                cAnd, cNot,
+                                                                simplifyCondition)
+import           Distribution.Types.CondTree                   (CondBranch (..),
+                                                                CondTree (..))
+import           Distribution.Types.ConfVar                    (ConfVar (..))
+import           Distribution.Types.Dependency                 (Dependency,
+                                                                depPkgName,
+                                                                depVerRange)
+import           Distribution.Types.Executable                 (Executable (buildInfo))
 import           Distribution.Types.ExeDependency              (ExeDependency (..))
+import           Distribution.Types.Flag                       (FlagAssignment,
+                                                                FlagName,
+                                                                PackageFlag (..),
+                                                                lookupFlagAssignment,
+                                                                mkFlagName,
+                                                                unFlagName)
+import           Distribution.Types.ForeignLib                 (ForeignLib (foreignLibBuildInfo))
+import           Distribution.Types.GenericPackageDescription  (GenericPackageDescription (..))
 import           Distribution.Types.LegacyExeDependency        (LegacyExeDependency (..))
+import           Distribution.Types.Library                    (Library (..))
 import           Distribution.Types.PackageDescription         (PackageDescription (..))
 import           Distribution.Types.PackageId                  (PackageIdentifier (..))
-import           Distribution.Types.SetupBuildInfo             (SetupBuildInfo (..))
-import           Distribution.Types.UnqualComponentName        (UnqualComponentName,
-                                                               mkUnqualComponentName)
-import           Distribution.Types.ForeignLib                (ForeignLib (foreignLibBuildInfo))
-import           Distribution.Types.TestSuite                 (TestSuite (testBuildInfo))
-import           Distribution.Types.Benchmark                 (Benchmark (benchmarkBuildInfo))
-import           Distribution.Types.BuildInfo                 (BuildInfo (..))
-import           Distribution.Types.CondTree                  (CondBranch (..),
-                                                               CondTree (..))
-import           Distribution.Types.ConfVar                   (ConfVar (..))
-import           Distribution.Types.Dependency                (Dependency,
-                                                               depPkgName,
-                                                               depVerRange)
-import           Distribution.Types.Flag                      (FlagAssignment,
-                                                               FlagName,
-                                                               PackageFlag (..),
-                                                               lookupFlagAssignment,
-                                                               mkFlagName,
-                                                               unFlagName)
-import           Distribution.Types.Library                   (Library (..))
+import           Distribution.Types.PackageName                (PackageName,
+                                                                mkPackageName)
 import           Distribution.Types.PkgconfigDependency        (PkgconfigDependency (..))
-import           Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
-import           Distribution.Types.PackageName               (PackageName,
-                                                               mkPackageName)
-import           Distribution.Version                         (withinRange)
-import           PubGrub.Cabal                                (UnbuildableReason (..))
-import           PubGrub.Cabal.VersionSet                           (VersionSet)
-import qualified PubGrub.Cabal.VersionSet                           as VS
+import           Distribution.Types.SetupBuildInfo             (SetupBuildInfo (..))
+import           Distribution.Types.TestSuite                  (TestSuite (testBuildInfo))
+import           Distribution.Types.UnqualComponentName        (UnqualComponentName,
+                                                                mkUnqualComponentName)
+import           Distribution.Version                          (withinRange)
+import           GHC.Generics                                  (Generic)
+import           PubGrub.Cabal                                 (UnbuildableReason (..))
+import           PubGrub.Cabal.VersionSet                      (VersionSet)
+import qualified PubGrub.Cabal.VersionSet                      as VS
 
 type Guard = Condition FlagName
 
@@ -718,19 +719,19 @@ data Node = Node
 -- ('Tree'), so the resolvers over them are the existing walk rather than a
 -- paraphrase of it.
 data StoredRelease = StoredRelease
-    { srFlags   :: [(FlagName, Bool)]
-    , srManual  :: [FlagName]
+    { srFlags      :: [(FlagName, Bool)]
+    , srManual     :: [FlagName]
     -- ^ the flags declared @manual: True@, which stay at their defaults even
     -- when automatic flags are searched
-    , srLibrary :: Maybe (Tree LibNode)
-    , srOthers  :: [Tree Node]
+    , srLibrary    :: Maybe (Tree LibNode)
+    , srOthers     :: [Tree Node]
     -- ^ the sub-libraries, foreign libraries and executables, each gated on its
     -- own buildability
-    , srTests   :: [Tree Node]
+    , srTests      :: [Tree Node]
     -- ^ the test suites, gated likewise; read only under 'withTests'
     , srBenchmarks :: [Tree Node]
     -- ^ the benchmarks, gated likewise; read only under 'withBenchmarks'
-    , srSetup   :: [Dependency]
+    , srSetup      :: [Dependency]
     -- ^ 'setupDeps'
     }
     deriving (Eq, Show, Generic)

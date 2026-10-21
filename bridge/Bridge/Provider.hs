@@ -18,59 +18,58 @@ module Bridge.Provider
     , pkgConfigPresent
     ) where
 
-import           Bridge.Cabal.InstalledPkg                    (getInstalledPackageIndex,
-                                                               reduceIndex)
-import           Bridge.Hackage                               (IndexHandle (..),
-                                                               IndexState,
-                                                               cacheDirOf,
-                                                               withHackageIndex)
-import           Bridge.Hackage.Store                         (StoreReader (..),
-                                                               withStore)
-import           Colog                                        (LogAction (..),
-                                                               WithLog, logMsg)
-import           Data.IORef                                   (atomicModifyIORef',
-                                                               newIORef,
-                                                               readIORef)
-import qualified Data.Map.Strict                              as Map
-import           Data.Maybe                                   (fromMaybe)
-import           Data.Text                                    (Text)
-import qualified Data.Text                                    as T
-import           Distribution.Compiler                        (CompilerInfo)
-import           Distribution.Simple.Compiler                 (compilerInfo)
-import           Distribution.Simple.GHC                      (configure)
-import           Distribution.Simple.PackageIndex             (InstalledPackageIndex)
-import           Distribution.Simple.Program.Db               (defaultProgramDb)
-import           Distribution.Solver.Types.PkgConfigDb        (PkgConfigDb,
-                                                               pkgConfigPkgIsPresent,
-                                                               readPkgConfigDb)
-import           Distribution.System                          (Platform,
-                                                               buildPlatform)
-import           Distribution.Types.PackageName               (PackageName)
-import           Distribution.Types.PkgconfigDependency       (PkgconfigDependency (..))
-import qualified Distribution.Types.Version                   as Cabal
-import qualified Distribution.Verbosity                       as Verbosity
-import           Hackage.Security.Client.Repository.Cache     (Cache)
-import           Network.HTTP.Client                          (Manager)
-import           PubGrub.Cabal                                (Cabal, request)
-import           PubGrub.Cabal.Flatten                        (FlagModel (..),
-                                                               PkgConfigPresent,
-                                                               noStanzas)
-import           PubGrub.Cabal.Installed                      (mkInstalledDb)
-import           PubGrub.Cabal.Provider                       (ParseError,
-                                                               Release (..),
-                                                               ReleaseSource (..),
-                                                               constrainTo,
-                                                               mkExpand,
-                                                               noPreference,
-                                                               releaseOf,
-                                                               releaseOfStored,
-                                                               widenTo)
-import           PubGrub.Incompatibility                      (Incompatibility)
-import           PubGrub.Provider                             (Provider (..))
-import qualified PubGrub.Cabal.Version                              as V
-import           PubGrub.Cabal.VersionSet                           (VersionSet)
-import           UnliftIO                                     (MonadUnliftIO (..),
-                                                               liftIO)
+import           Bridge.Cabal.InstalledPkg                (getInstalledPackageIndex,
+                                                           reduceIndex)
+import           Bridge.Hackage                           (IndexHandle (..),
+                                                           IndexState,
+                                                           cacheDirOf,
+                                                           withHackageIndex)
+import           Bridge.Hackage.Store                     (StoreReader (..),
+                                                           withStore)
+import           Colog                                    (LogAction (..),
+                                                           WithLog, logMsg)
+import           Data.IORef                               (atomicModifyIORef',
+                                                           newIORef, readIORef)
+import qualified Data.Map.Strict                          as Map
+import           Data.Maybe                               (fromMaybe)
+import           Data.Text                                (Text)
+import qualified Data.Text                                as T
+import           Distribution.Compiler                    (CompilerInfo)
+import           Distribution.Simple.Compiler             (compilerInfo)
+import           Distribution.Simple.GHC                  (configure)
+import           Distribution.Simple.PackageIndex         (InstalledPackageIndex)
+import           Distribution.Simple.Program.Db           (defaultProgramDb)
+import           Distribution.Solver.Types.PkgConfigDb    (PkgConfigDb,
+                                                           pkgConfigPkgIsPresent,
+                                                           readPkgConfigDb)
+import           Distribution.System                      (Platform,
+                                                           buildPlatform)
+import           Distribution.Types.PackageName           (PackageName)
+import           Distribution.Types.PkgconfigDependency   (PkgconfigDependency (..))
+import qualified Distribution.Types.Version               as Cabal
+import qualified Distribution.Verbosity                   as Verbosity
+import           Hackage.Security.Client.Repository.Cache (Cache)
+import           Network.HTTP.Client                      (Manager)
+import           PubGrub.Cabal                            (Cabal, request)
+import           PubGrub.Cabal.Flatten                    (FlagModel (..),
+                                                           PkgConfigPresent,
+                                                           noStanzas)
+import           PubGrub.Cabal.Installed                  (mkInstalledDb)
+import           PubGrub.Cabal.Provider                   (ParseError,
+                                                           Release (..),
+                                                           ReleaseSource (..),
+                                                           constrainTo,
+                                                           mkExpand,
+                                                           noPreference,
+                                                           releaseOf,
+                                                           releaseOfStored,
+                                                           widenTo)
+import qualified PubGrub.Cabal.Version                    as V
+import           PubGrub.Cabal.VersionSet                 (VersionSet)
+import           PubGrub.Incompatibility                  (Incompatibility)
+import           PubGrub.Provider                         (Provider (..))
+import           UnliftIO                                 (MonadUnliftIO (..),
+                                                           liftIO)
 
 -- | Cabal's normal verbosity. From Cabal 3.18 a 'Verbosity.Verbosity' also
 -- carries the handles it prints to, and 'Verbosity.normal' is the flags alone.

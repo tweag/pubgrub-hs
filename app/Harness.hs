@@ -25,35 +25,42 @@
 -- the text, exactly as @scripts/gate.sh@ reads it.
 module Main (main) where
 
-import Control.Exception (IOException, try)
-import Control.Monad (forM, forM_, unless, when)
-import Data.ByteString qualified as BS
-import Data.Char (isAlphaNum, isDigit)
-import Data.List (dropWhileEnd, nub, sort)
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe, isNothing, mapMaybe)
-import Data.Set (Set)
-import Data.Set qualified as Set
-import Data.Text (Text)
-import Data.Text qualified as T
-import Data.Text.Encoding qualified as TE
-import Data.Text.Encoding.Error (lenientDecode)
-import Data.Time (defaultTimeLocale, formatTime, getZonedTime)
-import GHC.IO.Handle (hDuplicate)
-import Numeric (showFFloat)
-import Options.Applicative (Parser, auto, eitherReader, execParser, fullDesc, header,
-                            help, helper, info, long, many, metavar, option, optional,
-                            progDesc, showDefault, strArgument, strOption, value)
-import System.Directory (createDirectoryIfMissing, doesFileExist, getModificationTime)
-import System.Environment (lookupEnv)
-import System.Exit (ExitCode (..), exitFailure)
-import System.FilePath ((</>))
-import System.IO (IOMode (..), hPutStrLn, hSetEncoding, stderr, stdout, utf8,
-                  withBinaryFile)
-import System.Process (CreateProcess (..), StdStream (..), createProcess, proc,
-                       readProcess, readProcessWithExitCode, waitForProcess)
-import Text.Read (readMaybe)
+import           Control.Exception        (IOException, try)
+import           Control.Monad            (forM, forM_, unless, when)
+import qualified Data.ByteString          as BS
+import           Data.Char                (isAlphaNum, isDigit)
+import           Data.List                (dropWhileEnd, nub, sort)
+import           Data.Map.Strict          (Map)
+import qualified Data.Map.Strict          as Map
+import           Data.Maybe               (fromMaybe, isNothing, mapMaybe)
+import           Data.Set                 (Set)
+import qualified Data.Set                 as Set
+import           Data.Text                (Text)
+import qualified Data.Text                as T
+import qualified Data.Text.Encoding       as TE
+import           Data.Text.Encoding.Error (lenientDecode)
+import           Data.Time                (defaultTimeLocale, formatTime,
+                                           getZonedTime)
+import           GHC.IO.Handle            (hDuplicate)
+import           Numeric                  (showFFloat)
+import           Options.Applicative      (Parser, auto, eitherReader,
+                                           execParser, fullDesc, header, help,
+                                           helper, info, long, many, metavar,
+                                           option, optional, progDesc,
+                                           showDefault, strArgument, strOption,
+                                           value)
+import           System.Directory         (createDirectoryIfMissing,
+                                           doesFileExist, getModificationTime)
+import           System.Environment       (lookupEnv)
+import           System.Exit              (ExitCode (..), exitFailure)
+import           System.FilePath          ((</>))
+import           System.IO                (IOMode (..), hPutStrLn, hSetEncoding,
+                                           stderr, stdout, utf8, withBinaryFile)
+import           System.Process           (CreateProcess (..), StdStream (..),
+                                           createProcess, proc, readProcess,
+                                           readProcessWithExitCode,
+                                           waitForProcess)
+import           Text.Read                (readMaybe)
 
 -- --------------------------------------------------------------------------
 -- Options
@@ -198,19 +205,19 @@ data PlanLine = PlanLine
     deriving (Eq, Show)
 
 data Run = Run
-    { runVerdict   :: Verdict
-    , runWall      :: Maybe Double          -- ^ seconds, from @/usr/bin/time %e@
-    , runRss       :: Maybe Integer         -- ^ KB, from @/usr/bin/time %M@
-    , runAlloc     :: Maybe Integer         -- ^ bytes, from @+RTS -s@
-    , runResidency :: Maybe Integer         -- ^ bytes, from @+RTS -s@
-    , runStats     :: Maybe [(Text, Text)]  -- ^ the @stats:@ line, as key=value pairs
-    , runPhases    :: Maybe [(Text, Double)]
-    , runReads     :: Maybe Reads
+    { runVerdict    :: Verdict
+    , runWall       :: Maybe Double          -- ^ seconds, from @/usr/bin/time %e@
+    , runRss        :: Maybe Integer         -- ^ KB, from @/usr/bin/time %M@
+    , runAlloc      :: Maybe Integer         -- ^ bytes, from @+RTS -s@
+    , runResidency  :: Maybe Integer         -- ^ bytes, from @+RTS -s@
+    , runStats      :: Maybe [(Text, Text)]  -- ^ the @stats:@ line, as key=value pairs
+    , runPhases     :: Maybe [(Text, Double)]
+    , runReads      :: Maybe Reads
     , runIndexState :: Maybe Text           -- ^ the child's @index-state:@ line: the state the run was really at
-    , runPlan      :: Maybe [PlanLine]      -- ^ 'Nothing' when no @plan:@ line was printed
-    , runHeadline  :: [Text]                -- ^ the block above our proof: the request and the walls, and the package the search gave up on; wrapped lines included
-    , runProof     :: [Text]                -- ^ our proof as printed: sentences, their continuation lines, and the blank line between branches
-    , runMessage   :: [Text]                -- ^ cabal's @Could not resolve dependencies:@ block
+    , runPlan       :: Maybe [PlanLine]      -- ^ 'Nothing' when no @plan:@ line was printed
+    , runHeadline   :: [Text]                -- ^ the block above our proof: the request and the walls, and the package the search gave up on; wrapped lines included
+    , runProof      :: [Text]                -- ^ our proof as printed: sentences, their continuation lines, and the blank line between branches
+    , runMessage    :: [Text]                -- ^ cabal's @Could not resolve dependencies:@ block
     }
     deriving (Show)
 
@@ -375,21 +382,21 @@ runChild cfg prob solver rep = do
 -- Summarising the repetitions of one (problem, solver)
 
 data Measured = Measured
-    { mVerdict   :: Verdict
-    , mWall      :: Maybe Double            -- ^ median seconds
-    , mRss       :: Maybe Double            -- ^ median KB
-    , mAlloc     :: Maybe Double            -- ^ median bytes
-    , mResidency :: Maybe Double            -- ^ median bytes
-    , mPhases    :: Maybe [(Text, Double)]  -- ^ median per phase
-    , mStats     :: Maybe [(Text, Text)]
-    , mReads     :: Maybe Reads
+    { mVerdict    :: Verdict
+    , mWall       :: Maybe Double            -- ^ median seconds
+    , mRss        :: Maybe Double            -- ^ median KB
+    , mAlloc      :: Maybe Double            -- ^ median bytes
+    , mResidency  :: Maybe Double            -- ^ median bytes
+    , mPhases     :: Maybe [(Text, Double)]  -- ^ median per phase
+    , mStats      :: Maybe [(Text, Text)]
+    , mReads      :: Maybe Reads
     , mIndexState :: Maybe Text            -- ^ the state the runs were really at, as the driver said
-    , mPlan      :: Maybe [PlanLine]
-    , mHeadline  :: [Text]
-    , mProof     :: [Text]
-    , mMessage   :: [Text]
-    , mMissing   :: [Text]                  -- ^ contract lines the driver did not print
-    , mVaried    :: [Text]                  -- ^ deterministic values that varied across reps
+    , mPlan       :: Maybe [PlanLine]
+    , mHeadline   :: [Text]
+    , mProof      :: [Text]
+    , mMessage    :: [Text]
+    , mMissing    :: [Text]                  -- ^ contract lines the driver did not print
+    , mVaried     :: [Text]                  -- ^ deterministic values that varied across reps
     }
 
 -- | The middle of the sorted list, or the mean of the two middles. Written by

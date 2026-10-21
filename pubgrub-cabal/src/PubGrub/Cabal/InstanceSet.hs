@@ -30,11 +30,11 @@ import qualified Data.Set                   as Set
 import qualified Data.Text                  as T
 import           PubGrub.Cabal.PreInstalled (PreInstalledPackage (..))
 import           PubGrub.Cabal.Pretty       ()
+import           PubGrub.Cabal.Version      (Version)
+import           PubGrub.Cabal.VersionSet   (VersionSet)
+import qualified PubGrub.Cabal.VersionSet   as VersionSet
 import           PubGrub.Pretty             (Pretty (..))
 import           PubGrub.SetOps             (SetOps (..))
-import           PubGrub.Cabal.Version            (Version)
-import           PubGrub.Cabal.VersionSet         (VersionSet)
-import qualified PubGrub.Cabal.VersionSet         as VersionSet
 
 -- | A pre-installed unit carries a version, and so does an 'Instance' — this is
 -- what lets the 'PubGrub.Provider.Provider' turn a @.cabal@ dependency's

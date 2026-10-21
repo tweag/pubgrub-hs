@@ -26,11 +26,8 @@
 -- for the differences that remain and which known gap each belongs to.
 module PaperSpec (tests) where
 
-import           PubGrub.Cabal.Provider         (ParseError (..))
-import           PubGrub.Cabal.Installed        (mkInstalledDb)
-import qualified PubGrub.Cabal.Provider         as BP
-import qualified Data.ByteString.Lazy          as BL
 import           Control.Exception              (toException)
+import qualified Data.ByteString.Lazy           as BL
 import           Data.Functor.Identity          (Identity, runIdentity)
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
@@ -41,23 +38,23 @@ import qualified Data.Text.Encoding             as T
 import           Distribution.Types.Condition   (Condition (Lit))
 import           Distribution.Types.Dependency  (mainLibSet, mkDependency)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
-import           Distribution.Version           (VersionRange,
-                                                 earlierVersion,
+import           Distribution.Version           (VersionRange, earlierVersion,
                                                  intersectVersionRanges,
                                                  mkVersion, orLaterVersion)
-import           PubGrub.Cabal.InstanceSet            (Instance (BuildSource))
-import           PubGrub.Cabal.Value                  (Value (..))
-import           PubGrub.Cabal.Variable               (Var (..))
-import           PubGrub.Cabal.Version                (Version)
-import qualified PubGrub.Cabal.Version                as V
-import           PubGrub.Provider               (Provider (Provider))
-import           PubGrub.Cabal                  (Cabal,
-                                                 request)
-import           PubGrub.Incompatibility        (Incompatibility)
+import           PubGrub.Cabal                  (Cabal, request)
+import           PubGrub.Cabal.Installed        (mkInstalledDb)
+import           PubGrub.Cabal.InstanceSet      (Instance (BuildSource))
+import           PubGrub.Cabal.Provider         (ParseError (..))
+import qualified PubGrub.Cabal.Provider         as BP
 import           PubGrub.Cabal.Report           (reportConflict)
-import qualified PubGrub.Cabal.VersionSet             as VersionSet
-import           PubGrub.Solver                 (SolveError (..),
-                                                 solve)
+import           PubGrub.Cabal.Value            (Value (..))
+import           PubGrub.Cabal.Variable         (Var (..))
+import           PubGrub.Cabal.Version          (Version)
+import qualified PubGrub.Cabal.Version          as V
+import qualified PubGrub.Cabal.VersionSet       as VersionSet
+import           PubGrub.Incompatibility        (Incompatibility)
+import           PubGrub.Provider               (Provider (Provider))
+import           PubGrub.Solver                 (SolveError (..), solve)
 import           Test.Tasty                     (TestName, TestTree, testGroup)
 import           Test.Tasty.Golden              (goldenVsString)
 import           Test.Tasty.HUnit               (testCase, (@?=))

@@ -49,15 +49,14 @@ module PubGrub.Cabal.Report.Rule
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Cabal                  (Cabal,
-                                                 CabalFact (..))
+import           PubGrub.Cabal                  (Cabal, CabalFact (..))
+import           PubGrub.Cabal.InstanceSet      (InstanceSet)
+import           PubGrub.Cabal.Value            (ValueSet (..))
+import           PubGrub.Cabal.Variable         (Var (..))
 import           PubGrub.Derivation
 import           PubGrub.Incompatibility        (Incompatibility (..))
-import           PubGrub.Cabal.InstanceSet            (InstanceSet)
 import           PubGrub.SetOps                 (SetOps (union))
 import           PubGrub.Term                   (Term (..))
-import           PubGrub.Cabal.Value                  (ValueSet (..))
-import           PubGrub.Cabal.Variable               (Var (..))
 
 -- --------------------------------------------------------------------------
 -- Views of an external fact

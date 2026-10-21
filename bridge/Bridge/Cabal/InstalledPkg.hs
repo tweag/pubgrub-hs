@@ -18,8 +18,8 @@ import           Distribution.Simple.PackageIndex        (InstalledPackageIndex,
 import           Distribution.Simple.Program.Db          (ProgramDb)
 import           Distribution.Types.InstalledPackageInfo (InstalledPackageInfo (..))
 import           Distribution.Types.PackageId            (PackageIdentifier (..))
-import           PubGrub.Cabal.Installed                 (InstalledPkg (..))
 import           Distribution.Verbosity                  (Verbosity)
+import           PubGrub.Cabal.Installed                 (InstalledPkg (..))
 
 
 getInstalledPackages :: Verbosity -> Compiler -> ProgramDb -> IO [InstalledPkg]

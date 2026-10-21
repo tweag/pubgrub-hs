@@ -25,25 +25,23 @@ module InstanceSetSpec (tests) where
 import qualified Data.Set                   as Set
 import           Distribution.Types.UnitId  (mkUnitId)
 import           Distribution.Version       (earlierVersion, orLaterVersion)
-import           PubGrub.Cabal.PreInstalled (PreInstalledPackage (..))
-import           PubGrub.Cabal.InstanceSet        (Instance (..), InstanceSet (..),
+import           PubGrub.Cabal.InstanceSet  (Instance (..), InstanceSet (..),
                                              emptyInstanceSet, memberInstance,
                                              singletonInstance)
+import           PubGrub.Cabal.PreInstalled (PreInstalledPackage (..))
+import           PubGrub.Cabal.Value        (BoolSet (..), Value (..), boolSet,
+                                             flagSet, instanceSet, memberValue,
+                                             singletonValue)
+import           PubGrub.Cabal.Version      (Version, mkVersion, toCabalVersion)
+import           PubGrub.Cabal.VersionSet   (VersionSet, emptyVersionSet,
+                                             fromVersionRange, fullVersionSet,
+                                             singletonVersionSet)
 import           PubGrub.Relation           (Relation (..), relation)
 import           PubGrub.SetOps             (SetOps (..), equivalent,
                                              isDisjoint, isSubsetOf)
 import           PubGrub.Term               (Term (..), intersectTerm,
                                              isBottomTerm, isTopTerm,
                                              negateTerm, unionTerm)
-import           PubGrub.Cabal.Value              (BoolSet (..), Value (..),
-                                             boolSet,
-                                             flagSet, instanceSet,
-                                             memberValue, singletonValue)
-import           PubGrub.Cabal.Version            (Version, mkVersion,
-                                             toCabalVersion)
-import           PubGrub.Cabal.VersionSet         (VersionSet, emptyVersionSet,
-                                             fromVersionRange, fullVersionSet,
-                                             singletonVersionSet)
 import           Test.Tasty                 (TestTree, testGroup)
 import           Test.Tasty.QuickCheck      (Arbitrary (..), Gen, elements,
                                              oneof, sized, sublistOf,

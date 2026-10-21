@@ -41,58 +41,59 @@ module Bridge.Cabal.Baseline
     , preferences
     ) where
 
-import           PubGrub.Cabal.Flatten            (FlagModel (..))
-import           PubGrub.Cabal.Provider           (ParseError)
-import           Bridge.Hackage                   (IndexHandle (..),
-                                                   markFlagsManual)
-import           Data.Word                        (Word32)
-import           PubGrub.Cabal.Installed          (nonReinstallablePackages)
-import qualified Data.Map.Strict                  as Map
-import           Data.Set                         (Set)
-import qualified Data.Set                         as Set
-import           Distribution.Compiler            (CompilerInfo)
-import           Distribution.Pretty              (prettyShow)
-import           Distribution.Simple.PackageIndex (InstalledPackageIndex)
-import           Distribution.Types.GenericPackageDescription (GenericPackageDescription)
-import           Distribution.Solver.Modular      (PruneAfterFirstSuccess (..),
-                                                   SolverConfig (..),
-                                                   modularResolver)
-import           Distribution.Solver.Types.ConstraintSource (ConstraintSource (..))
-import           Distribution.Solver.Types.InstalledPreference (InstalledPreference (..))
+import           Bridge.Hackage                                     (IndexHandle (..),
+                                                                     markFlagsManual)
+import qualified Data.Map.Strict                                    as Map
+import           Data.Set                                           (Set)
+import qualified Data.Set                                           as Set
+import           Data.Word                                          (Word32)
+import           Distribution.Compiler                              (CompilerInfo)
+import           Distribution.Pretty                                (prettyShow)
+import           Distribution.Simple.PackageIndex                   (InstalledPackageIndex)
+import           Distribution.Solver.Modular                        (PruneAfterFirstSuccess (..),
+                                                                     SolverConfig (..),
+                                                                     modularResolver)
+import           Distribution.Solver.Types.ConstraintSource         (ConstraintSource (..))
+import           Distribution.Solver.Types.InstalledPreference      (InstalledPreference (..))
 import           Distribution.Solver.Types.LabeledPackageConstraint (LabeledPackageConstraint (..))
-import           Distribution.Solver.Types.PackageConstraint (ConstraintScope (..),
-                                                              PackageConstraint (..),
-                                                              PackageProperty (..),
-                                                              scopeToplevel)
-import           Distribution.Solver.Types.PackageIndex (PackageIndex)
-import           Distribution.Solver.Types.PkgConfigDb (PkgConfigDb)
-import qualified Distribution.Solver.Types.PackageIndex as SolverIndex
-import           Distribution.Solver.Types.PackagePreferences (PackagePreferences (..))
-import           Distribution.Solver.Types.Progress (Progress, foldProgress)
+import           Distribution.Solver.Types.PackageConstraint        (ConstraintScope (..),
+                                                                     PackageConstraint (..),
+                                                                     PackageProperty (..),
+                                                                     scopeToplevel)
+import           Distribution.Solver.Types.PackageIndex             (PackageIndex)
+import qualified Distribution.Solver.Types.PackageIndex             as SolverIndex
+import           Distribution.Solver.Types.PackagePreferences       (PackagePreferences (..))
+import           Distribution.Solver.Types.PkgConfigDb              (PkgConfigDb)
+import           Distribution.Solver.Types.Progress                 (Progress,
+                                                                     foldProgress)
+import           Distribution.Types.GenericPackageDescription       (GenericPackageDescription)
+import           PubGrub.Cabal.Flatten                              (FlagModel (..))
+import           PubGrub.Cabal.Installed                            (nonReinstallablePackages)
+import           PubGrub.Cabal.Provider                             (ParseError)
 #if MIN_VERSION_cabal_install_solver(3,18,0)
-import           Distribution.Solver.Modular.Message (renderSummarizedMessage)
-import           Distribution.Solver.Types.SummarizedMessage (SummarizedMessage)
+import           Distribution.Solver.Modular.Message                (renderSummarizedMessage)
+import           Distribution.Solver.Types.SummarizedMessage        (SummarizedMessage)
 #endif
-import           Distribution.Solver.Types.ResolverPackage (ResolverPackage (..))
-import           Distribution.Solver.Types.Settings (AvoidReinstalls (..),
-                                                     CountConflicts (..),
-                                                     EnableBackjumping (..),
-                                                     FineGrainedConflicts (..),
-                                                     IndependentGoals (..),
-                                                     MinimizeConflictSet (..),
-                                                     OnlyConstrained (..),
-                                                     ReorderGoals (..),
-                                                     ShadowPkgs (..),
-                                                     SolveExecutables (..),
-                                                     StrongFlags (..))
-import           Distribution.Solver.Types.SourcePackage (SourcePackage (..))
-import           Distribution.System              (Platform)
-import           Distribution.Types.PackageId    (PackageIdentifier (..))
-import           Distribution.Types.PackageName  (PackageName)
-import           Distribution.Types.Version      (Version)
-import           Distribution.Types.VersionRange (VersionRange)
-import qualified Distribution.Verbosity          as Verbosity
-import           System.IO.Unsafe                (unsafeInterleaveIO)
+import           Distribution.Solver.Types.ResolverPackage          (ResolverPackage (..))
+import           Distribution.Solver.Types.Settings                 (AvoidReinstalls (..),
+                                                                     CountConflicts (..),
+                                                                     EnableBackjumping (..),
+                                                                     FineGrainedConflicts (..),
+                                                                     IndependentGoals (..),
+                                                                     MinimizeConflictSet (..),
+                                                                     OnlyConstrained (..),
+                                                                     ReorderGoals (..),
+                                                                     ShadowPkgs (..),
+                                                                     SolveExecutables (..),
+                                                                     StrongFlags (..))
+import           Distribution.Solver.Types.SourcePackage            (SourcePackage (..))
+import           Distribution.System                                (Platform)
+import           Distribution.Types.PackageId                       (PackageIdentifier (..))
+import           Distribution.Types.PackageName                     (PackageName)
+import           Distribution.Types.Version                         (Version)
+import           Distribution.Types.VersionRange                    (VersionRange)
+import qualified Distribution.Verbosity                             as Verbosity
+import           System.IO.Unsafe                                   (unsafeInterleaveIO)
 
 -- | Run cabal's solver for these targets. The result is its 'Progress': a stream
 -- of log lines ending in either its failure message or a plan.

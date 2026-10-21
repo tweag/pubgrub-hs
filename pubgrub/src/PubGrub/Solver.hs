@@ -43,34 +43,32 @@ module PubGrub.Solver
     , solve
     ) where
 
-import           Colog.Core                     (LogAction, (<&))
-import           Control.Applicative            (Alternative (..))
-import           Control.Monad                  (foldM)
-import           Data.Bifunctor                 (first)
-import           Data.Foldable                  (Foldable (..))
-import           Data.IntSet                    (IntSet)
-import qualified Data.IntSet                    as IntSet
-import           Data.List                      (sortOn)
-import           Data.Map.Strict                (Map)
-import qualified Data.Map.Strict                as Map
-import           Data.Maybe                     (fromMaybe, mapMaybe)
-import           Data.Sequence                  (Seq)
-import qualified Data.Sequence                  as Seq
-import           Data.List.NonEmpty             (nonEmpty)
-import qualified Data.List.NonEmpty             as NE
-import           PubGrub.Incompatibility        (Domain (..),
-                                                 IncompatRelation (..),
-                                                 Incompatibility (..),
-                                                 VarTerm (..),
-                                                 incompGet, incompRelation,
-                                                 isSeed, noValues, priorCause)
-import           PubGrub.Provider               (Provider (..))
-import           PubGrub.SetOps                 (SetOps (..))
-import           PubGrub.Store                  (Store, allClauses, clauseAt,
-                                                 clausesOf, emptyStore,
-                                                 insertClause, insertClauses)
-import           PubGrub.Term                   (Term (..), anyTerm,
-                                                 intersectTerm, negateTerm)
+import           Colog.Core              (LogAction, (<&))
+import           Control.Applicative     (Alternative (..))
+import           Control.Monad           (foldM)
+import           Data.Bifunctor          (first)
+import           Data.Foldable           (Foldable (..))
+import           Data.IntSet             (IntSet)
+import qualified Data.IntSet             as IntSet
+import           Data.List               (sortOn)
+import           Data.List.NonEmpty      (nonEmpty)
+import qualified Data.List.NonEmpty      as NE
+import           Data.Map.Strict         (Map)
+import qualified Data.Map.Strict         as Map
+import           Data.Maybe              (fromMaybe, mapMaybe)
+import           Data.Sequence           (Seq)
+import qualified Data.Sequence           as Seq
+import           PubGrub.Incompatibility (Domain (..), IncompatRelation (..),
+                                          Incompatibility (..), VarTerm (..),
+                                          incompGet, incompRelation, isSeed,
+                                          noValues, priorCause)
+import           PubGrub.Provider        (Provider (..))
+import           PubGrub.SetOps          (SetOps (..))
+import           PubGrub.Store           (Store, allClauses, clauseAt,
+                                          clausesOf, emptyStore, insertClause,
+                                          insertClauses)
+import           PubGrub.Term            (Term (..), anyTerm, intersectTerm,
+                                          negateTerm)
 
 
 -- --------------------------------------------------------------------------
@@ -80,10 +78,10 @@ import           PubGrub.Term                   (Term (..), anyTerm,
 -- | A single entry in the partial solution: one variable, at one decision
 -- level, with the reason it is there.
 data Assignment d = Assignment
-    { aIndex   :: !Int
-    , aLevel   :: !Int
-    , aVar :: VarOf d
-    , aKind    :: AssignmentKind d
+    { aIndex :: !Int
+    , aLevel :: !Int
+    , aVar   :: VarOf d
+    , aKind  :: AssignmentKind d
     }
 
 -- | Why an assignment is in the partial solution, and what it asserts: a
@@ -103,13 +101,13 @@ data AssignmentKind d
 -- singleton.
 assignmentTerm :: Domain d => Assignment d -> Term (SetOf d)
 assignmentTerm a = case aKind a of
-    Decision i   -> Positive (singleton (aVar a) i)
+    Decision i     -> Positive (singleton (aVar a) i)
     Derivation t _ -> t
 
 -- | The value a decision decides; 'Nothing' for a derivation.
 decidedValue :: Assignment d -> Maybe (ValueOf d)
 decidedValue a = case aKind a of
-    Decision i -> Just i
+    Decision i   -> Just i
     Derivation{} -> Nothing
 
 -- | The assignment as "one term about one variable".
@@ -136,7 +134,7 @@ data VarAssignments d = VarAssignments
 -- without reversing; @psLevel@ is the current decision level; @psNextIndex@ is
 -- a monotone counter giving chronological order /across/ variables.
 data PartialSolution d = PartialSolution
-    { psVariables  :: Map (VarOf d) (VarAssignments d)
+    { psVariables :: Map (VarOf d) (VarAssignments d)
     , psLevel     :: !Int
     , psNextIndex :: !Int
     }
@@ -333,7 +331,7 @@ seedAssignments ps p = [a | a <- varHistory ps p, fromSeed a]
   where
     fromSeed a = case aKind a of
         Derivation _ cause -> isSeed cause
-        Decision _       -> False
+        Decision _         -> False
 
 -- | Is the incompatibility satisfied by the seeds' own derivations alone? Then
 -- no decision took part in the conflict, so nothing can be backtracked and
@@ -422,16 +420,16 @@ unitPropagation logA pending store0 ps0 = settle pending IntSet.empty store0 ps0
         logA <& (Judged (IntSet.size dirty) :: SolverMsg d)
         let actionable' = IntSet.foldl' (judge store ps) actionable dirty
         case IntSet.maxView actionable' of
-            Nothing -> pure (Right (store, ps))
+            Nothing        -> pure (Right (store, ps))
             Just (c, rest) -> act c rest store ps
 
     judge store ps acc c = case clauseAt store c of
         Just i | actionableRelation (psRelation ps i) -> IntSet.insert c acc
-        _ -> IntSet.delete c acc
+        _                                             -> IntSet.delete c acc
 
-    actionableRelation ISatisfied          = True
+    actionableRelation ISatisfied           = True
     actionableRelation (IAlmostSatisfied _) = True
-    actionableRelation _                   = False
+    actionableRelation _                    = False
 
     act c actionable store ps = case clauseAt store c of
         Nothing -> settle IntSet.empty actionable store ps

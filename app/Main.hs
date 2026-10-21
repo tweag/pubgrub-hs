@@ -21,98 +21,103 @@
 -- rendered (see 'Stats').
 module Main (main) where
 
-import           Bridge.Cabal.Baseline                     (defaultSolverConfig,
-                                                            outcome,
-                                                            solveWithCabal,
-                                                            sourcePackageIndex)
-import           PubGrub.Cabal.Flatten                     (FlagModel (..))
-import           PubGrub.Cabal.Value                             (Resolved (..),
-                                                            Value, foldFlags,
-                                                            resolvedInstance,
-                                                            singletonValue)
-import           PubGrub.Cabal.Value                             (Value (..))
-import           PubGrub.Cabal.Variable                           (Var (..))
-import           Bridge.Hackage                            (IndexState (..),
-                                                            IndexStateTooNew (..),
-                                                            mkCache,
-                                                            parseIndexState)
-import           Bridge.Provider                           (World (..),
-                                                            withProvider,
-                                                            withWorld)
-import           Colog                                     (HasLog (..),
-                                                            LogAction (..),
-                                                            cmapMaybe, logMsg)
-import           Control.Monad                             (when)
-import           Control.Monad.Reader                      (MonadReader, asks,
-                                                            ReaderT, runReaderT)
-import           Data.IORef                                (IORef,
-                                                            atomicModifyIORef',
-                                                            newIORef, readIORef)
-import           Data.List                                 (intercalate, sortOn)
-import           Data.Map.Strict                           (Map)
-import qualified Data.Map.Strict                           as Map
-import           Data.Set                                  (Set)
-import qualified Data.Set                                  as Set
-import           Data.Text                                 (Text)
-import qualified Data.Text                                 as T
-import qualified Data.Text.IO                              as TIO
-import           Distribution.Package                      (packageId)
-import           Distribution.Parsec                       (eitherParsec)
-import           Distribution.Pretty                       (prettyShow)
-import qualified Distribution.Solver.Types.ComponentDeps   as CD
-import           Distribution.Solver.Types.ResolverPackage (ResolverPackage (..))
-import           Distribution.Solver.Types.SolverPackage   (SolverPackage (..))
-import           Distribution.Types.Flag                   (showFlagAssignment)
-import           Distribution.Types.PackageId              (pkgName, pkgVersion)
-import           Distribution.Types.PackageName            (PackageName)
+import           Bridge.Cabal.Baseline                       (defaultSolverConfig,
+                                                              outcome,
+                                                              solveWithCabal,
+                                                              sourcePackageIndex)
+import           Bridge.Hackage                              (IndexState (..),
+                                                              IndexStateTooNew (..),
+                                                              mkCache,
+                                                              parseIndexState)
+import           Bridge.Provider                             (World (..),
+                                                              withProvider,
+                                                              withWorld)
+import           Colog                                       (HasLog (..),
+                                                              LogAction (..),
+                                                              cmapMaybe, logMsg)
+import           Control.Applicative                         (many, some)
+import           Control.Monad                               (when)
+import           Control.Monad.Reader                        (MonadReader,
+                                                              ReaderT, asks,
+                                                              runReaderT)
+import           Data.IORef                                  (IORef,
+                                                              atomicModifyIORef',
+                                                              newIORef,
+                                                              readIORef)
+import           Data.List                                   (intercalate,
+                                                              sortOn)
+import           Data.Map.Strict                             (Map)
+import qualified Data.Map.Strict                             as Map
+import           Data.Set                                    (Set)
+import qualified Data.Set                                    as Set
+import           Data.Text                                   (Text)
+import qualified Data.Text                                   as T
+import qualified Data.Text.IO                                as TIO
+import           Data.Version                                (showVersion)
+import           Distribution.Package                        (packageId)
+import           Distribution.Parsec                         (eitherParsec)
+import           Distribution.Pretty                         (prettyShow)
+import qualified Distribution.Solver.Types.ComponentDeps     as CD
+import           Distribution.Solver.Types.ResolverPackage   (ResolverPackage (..))
+import           Distribution.Solver.Types.SolverPackage     (SolverPackage (..))
+import           Distribution.Types.Flag                     (showFlagAssignment)
+import           Distribution.Types.PackageId                (pkgName,
+                                                              pkgVersion)
+import           Distribution.Types.PackageName              (PackageName)
 import           Distribution.Types.PackageVersionConstraint (PackageVersionConstraint (..))
-import           Distribution.Types.VersionRange           (VersionRange,
-                                                            isAnyVersion)
-import           GHC.Clock                                 (getMonotonicTime)
-import           Hackage.Security.Util.Path                (fromFilePath,
-                                                            makeAbsolute)
-import           Network.HTTP.Client                       (defaultManagerSettings,
-                                                            newManager)
-import           Control.Applicative                       (many, some)
-import           Data.Version                              (showVersion)
-import           Options.Applicative                       (Parser, argument,
-                                                            eitherReader,
-                                                            execParser, flag,
-                                                            fullDesc, header,
-                                                            help, helper, info,
-                                                            infoOption,
-                                                            long, metavar,
-                                                            option, progDesc,
-                                                            short, switch,
-                                                            value)
-import qualified Paths_pubgrub_hs                          as Paths
-import           PubGrub.Cabal                             (Cabal,
-                                                            CabalFact (..))
-import           PubGrub.Incompatibility                   (Cause (..),
-                                                            Incompatibility,
-                                                            incompCause,
-                                                            incompTerms)
-import           PubGrub.Cabal.InstanceSet                       (HasVersion (version))
-import           PubGrub.Pretty                            (Pretty (pretty))
-import           PubGrub.Provider                          (Provider (..))
-import           PubGrub.Cabal.Report                       (reportConflict,
-                                                            reportHeadline,
-                                                            styleProof, wrapProof)
-import           PubGrub.Solver                            (SolveError (..),
-                                                            SolverMsg (..),
-                                                            solve)
-import           PubGrub.Cabal.VersionSet                        (VersionSet,
-                                                            fromVersionRange)
-import           System.Environment                        (lookupEnv)
-import           System.Exit                               (exitFailure)
-import           System.IO                                 (hIsTerminalDevice,
-                                                            hPutStrLn, stderr,
-                                                            stdout)
-import           Text.Printf                               (printf)
-import           Text.Read                                 (readMaybe)
-import           UnliftIO                                  (MonadIO (liftIO), handle,
-                                                            MonadUnliftIO,
-                                                            evaluate)
+import           Distribution.Types.VersionRange             (VersionRange,
+                                                              isAnyVersion)
+import           GHC.Clock                                   (getMonotonicTime)
+import           Hackage.Security.Util.Path                  (fromFilePath,
+                                                              makeAbsolute)
+import           Network.HTTP.Client                         (defaultManagerSettings,
+                                                              newManager)
+import           Options.Applicative                         (Parser, argument,
+                                                              eitherReader,
+                                                              execParser, flag,
+                                                              fullDesc, header,
+                                                              help, helper,
+                                                              info, infoOption,
+                                                              long, metavar,
+                                                              option, progDesc,
+                                                              short, switch,
+                                                              value)
+import qualified Paths_pubgrub_hs                            as Paths
+import           PubGrub.Cabal                               (Cabal,
+                                                              CabalFact (..))
+import           PubGrub.Cabal.Flatten                       (FlagModel (..))
+import           PubGrub.Cabal.InstanceSet                   (HasVersion (version))
+import           PubGrub.Cabal.Report                        (reportConflict,
+                                                              reportHeadline,
+                                                              styleProof,
+                                                              wrapProof)
+import           PubGrub.Cabal.Value                         (Resolved (..),
+                                                              Value (..),
+                                                              foldFlags,
+                                                              resolvedInstance,
+                                                              singletonValue)
+import           PubGrub.Cabal.Variable                      (Var (..))
+import           PubGrub.Cabal.VersionSet                    (VersionSet,
+                                                              fromVersionRange)
+import           PubGrub.Incompatibility                     (Cause (..),
+                                                              Incompatibility,
+                                                              incompCause,
+                                                              incompTerms)
+import           PubGrub.Pretty                              (Pretty (pretty))
+import           PubGrub.Provider                            (Provider (..))
+import           PubGrub.Solver                              (SolveError (..),
+                                                              SolverMsg (..),
+                                                              solve)
+import           System.Environment                          (lookupEnv)
+import           System.Exit                                 (exitFailure)
+import           System.IO                                   (hIsTerminalDevice,
+                                                              hPutStrLn, stderr,
+                                                              stdout)
+import           Text.Printf                                 (printf)
+import           Text.Read                                   (readMaybe)
+import           UnliftIO                                    (MonadIO (liftIO),
+                                                              MonadUnliftIO,
+                                                              evaluate, handle)
 
 -- --------------------------------------------------------------------------
 -- The application monad: two log channels rendered to stdout
@@ -214,22 +219,22 @@ prettyIncompat i =
 -- in the round right after a 'Backtracked'. The second is what a backtrack
 -- costs propagation. It takes a bit of state of the same kind as the histogram.
 data Stats = Stats
-    { stDeciding     :: !Int
-    , stChose        :: !Int
-    , stNoVersion    :: !Int
-    , stConflicts    :: !Int
-    , stResolving    :: !Int
-    , stLearned      :: !Int
-    , stBacktracked  :: !Int
-    , stDepth        :: !Int
+    { stDeciding       :: !Int
+    , stChose          :: !Int
+    , stNoVersion      :: !Int
+    , stConflicts      :: !Int
+    , stResolving      :: !Int
+    , stLearned        :: !Int
+    , stBacktracked    :: !Int
+    , stDepth          :: !Int
     -- ^ 'Resolving' events since the last 'Conflict'
-    , stInResolution :: !Bool
+    , stInResolution   :: !Bool
     -- ^ between a 'Conflict' and its 'Learned'
-    , stHistogram    :: !(Map Int Int)
+    , stHistogram      :: !(Map Int Int)
     -- ^ resolution depth, read off at each 'Learned', to how many resolutions
     -- reached exactly that depth
-    , stJudged       :: !Int
-    , stRejudged     :: !Int
+    , stJudged         :: !Int
+    , stRejudged       :: !Int
     -- ^ judgements in the first round after each 'Backtracked'
     , stAfterBacktrack :: !Bool
     -- ^ a 'Backtracked' has arrived and its round has not
@@ -341,22 +346,22 @@ data PlanShape = Tree | Lines
     deriving stock (Eq, Show)
 
 data Options = Options
-    { optVerbosity  :: Verbosity
-    , optStats      :: Bool
-    , optPlan       :: PlanShape
-    , optWhich      :: Which
-    , optIndexState :: IndexState
+    { optVerbosity   :: Verbosity
+    , optStats       :: Bool
+    , optPlan        :: PlanShape
+    , optWhich       :: Which
+    , optIndexState  :: IndexState
     -- ^ which moment of the index both solvers see; 'IndexHead' unless
     -- @--index-state@ says otherwise. It is the one thing that makes a run
     -- repeatable across the weekly refresh.
-    , optFlags      :: FlagModel
+    , optFlags       :: FlagModel
     -- ^ whether automatic flags are searched (@--flags search@) or fixed at
     -- their defaults (the default, @--flags fixed@). Applied to both solvers:
     -- under @fixed@ the baseline's flags are marked manual too.
     , optConstraints :: [(PackageName, VersionRange)]
     -- ^ @--constraint@, repeatable: a range a package must be in /if/ it is chosen,
     -- for both solvers. A constraint on a package nothing depends on is vacuous.
-    , optTargets   :: [(PackageName, VersionRange)]
+    , optTargets     :: [(PackageName, VersionRange)]
     -- ^ what to solve for: one or more packages, each with the range it is
     -- constrained to. Ranges stay 'VersionRange' because cabal's solver takes
     -- them that way and ours converts them to a 'VersionSet', and both must come

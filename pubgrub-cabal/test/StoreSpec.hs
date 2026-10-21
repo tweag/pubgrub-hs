@@ -11,40 +11,44 @@
 -- 'CauseDependency' leaf rather than a derived node).
 module StoreSpec (tests) where
 
-import           Data.List.NonEmpty              (NonEmpty)
-import qualified Data.List.NonEmpty              as NE
-import qualified Data.Map.Strict                 as Map
-import qualified Data.Set                        as Set
-import           Distribution.Types.Flag         (mkFlagName)
-import           Distribution.Types.PackageName  (PackageName, mkPackageName)
-import           Distribution.Types.PkgconfigDependency (PkgconfigDependency (..))
-import           Distribution.Types.PkgconfigName (mkPkgconfigName)
+import           Data.List.NonEmpty                       (NonEmpty)
+import qualified Data.List.NonEmpty                       as NE
+import qualified Data.Map.Strict                          as Map
+import qualified Data.Set                                 as Set
+import           Distribution.Types.Flag                  (mkFlagName)
+import           Distribution.Types.PackageName           (PackageName,
+                                                           mkPackageName)
+import           Distribution.Types.PkgconfigDependency   (PkgconfigDependency (..))
+import           Distribution.Types.PkgconfigName         (mkPkgconfigName)
 import           Distribution.Types.PkgconfigVersionRange (anyPkgconfigVersion)
-import qualified Distribution.Types.Version      as Cabal
-import           PubGrub.Cabal.Version                 (Version)
-import qualified PubGrub.Cabal.Version                 as V
-import           Distribution.Types.VersionRange (earlierVersion,
-                                                  orLaterVersion)
-import           PubGrub.Cabal                  (Cabal,
-                                                 CabalFact (..),
-                                                 UnbuildableReason (..),
-                                                 fromDependency,
-                                                 unbuildable)
-import           PubGrub.Incompatibility        (Cause (..),
-                                                 Incompatibility (..),
-                                                 noValues)
-import           PubGrub.Cabal.InstanceSet            (InstanceSet (..))
-import           PubGrub.SetOps                 (SetOps (isEmpty), equivalent)
-import           PubGrub.Cabal.Value                  (ValueSet (..), instanceSet)
-import           PubGrub.Cabal.Variable               (Flag (..), Var (..))
-import           PubGrub.Term                   (Term (..))
-import           PubGrub.Store                  (Store, emptyStore,
-                                                 storeClauses)
-import qualified PubGrub.Store                  as Store
-import qualified PubGrub.Cabal.VersionSet             as VersionSet
-import           Test.Tasty                     (TestTree, testGroup)
-import           Test.Tasty.HUnit               (assertBool, assertFailure,
-                                                 testCase, (@?=))
+import qualified Distribution.Types.Version               as Cabal
+import           Distribution.Types.VersionRange          (earlierVersion,
+                                                           orLaterVersion)
+import           PubGrub.Cabal                            (Cabal,
+                                                           CabalFact (..),
+                                                           UnbuildableReason (..),
+                                                           fromDependency,
+                                                           unbuildable)
+import           PubGrub.Cabal.InstanceSet                (InstanceSet (..))
+import           PubGrub.Cabal.Value                      (ValueSet (..),
+                                                           instanceSet)
+import           PubGrub.Cabal.Variable                   (Flag (..), Var (..))
+import           PubGrub.Cabal.Version                    (Version)
+import qualified PubGrub.Cabal.Version                    as V
+import qualified PubGrub.Cabal.VersionSet                 as VersionSet
+import           PubGrub.Incompatibility                  (Cause (..),
+                                                           Incompatibility (..),
+                                                           noValues)
+import           PubGrub.SetOps                           (SetOps (isEmpty),
+                                                           equivalent)
+import           PubGrub.Store                            (Store, emptyStore,
+                                                           storeClauses)
+import qualified PubGrub.Store                            as Store
+import           PubGrub.Term                             (Term (..))
+import           Test.Tasty                               (TestTree, testGroup)
+import           Test.Tasty.HUnit                         (assertBool,
+                                                           assertFailure,
+                                                           testCase, (@?=))
 
 -- --------------------------------------------------------------------------
 -- Fixtures
@@ -374,7 +378,7 @@ unbuildableTests =
 bannedBy :: Incompatibility Cabal -> InstanceSet
 bannedBy i = case incompCause i of
     Fact (CauseUnbuildable _ s _ _) -> s
-    _ -> error "not an unbuildable clause"
+    _                               -> error "not an unbuildable clause"
 
 halfOpen :: Int -> Int -> VersionSet.VersionSet
 halfOpen lo hi = VersionSet.halfOpenVersionSet (v lo) (Just (v hi))
@@ -383,7 +387,7 @@ halfOpen lo hi = VersionSet.halfOpenVersionSet (v lo) (Just (v hi))
 dependerOf :: Incompatibility Cabal -> InstanceSet
 dependerOf i = case incompCause i of
     Fact (CauseDependency _ s _ _) -> s
-    _ -> error "not a dependency clause"
+    _                              -> error "not a dependency clause"
 
 -- | Semantic equality, by mutual containment; with a canonical 'InstanceSet'
 -- this is '==', and keeping the semantic form says what is being asked.

@@ -32,24 +32,23 @@ import qualified Data.Map.Strict                as Map
 import           Data.Maybe                     (fromMaybe)
 import           Data.Text                      (Text)
 import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Cabal                  (Cabal,
-                                                 CabalFact (..))
+import           PubGrub.Cabal                  (Cabal, CabalFact (..))
+import           PubGrub.Cabal.InstanceSet      (InstanceSet)
 import           PubGrub.Cabal.Report.Headline  (headline)
 import           PubGrub.Cabal.Report.Layout    (rangeToken, styleProof,
                                                  wrapProof)
 import           PubGrub.Cabal.Report.Rule
 import           PubGrub.Cabal.Report.Wording   (bareP, dep, namedP,
                                                  summaryTerms, wording)
+import           PubGrub.Cabal.Value            (ValueSet (..))
+import           PubGrub.Cabal.Variable         (Var (..))
 import           PubGrub.Incompatibility        (Cause (..),
                                                  Incompatibility (..),
                                                  priorCauseTerms)
-import           PubGrub.Cabal.InstanceSet            (InstanceSet)
 import           PubGrub.Report                 (Formatter (..), Line (..))
 import qualified PubGrub.Report                 as Report
 import           PubGrub.SetOps                 (isSubsetOf)
 import           PubGrub.Term                   (Term (..))
-import           PubGrub.Cabal.Value                  (ValueSet (..))
-import           PubGrub.Cabal.Variable               (Var (..))
 
 -- | The cabal domain's words and rules. The two run rules go before the
 -- algorithm's every-other-step skip because they collapse what the skip would

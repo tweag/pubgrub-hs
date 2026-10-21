@@ -1,7 +1,7 @@
 module PubGrub.Cabal.PreInstalled where
 
-import           Distribution.Types.UnitId  (UnitId)
-import           PubGrub.Cabal.Version            (Version)
+import           Distribution.Types.UnitId (UnitId)
+import           PubGrub.Cabal.Version     (Version)
 
   -- | A package already present in the environment: a unit ID, a version, and
 -- dependencies on other pre-installed units. The 'UnitId' distinguishes

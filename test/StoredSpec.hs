@@ -14,42 +14,43 @@
 -- than in a solve.
 module StoredSpec (tests) where
 
-import           PubGrub.Cabal.Flatten                  (FlagModel (..),
-                                                         allStanzas,
-                                                         noStanzas,
-                                                         StoredRelease (..),
-                                                         componentDepsAtDefaults,
-                                                         componentDepsAtDefaultsStored,
-                                                         componentToolsAtDefaults,
-                                                         componentToolsStored,
-                                                         setupDeps,
-                                                         toStored,
-                                                         unbuildableAtDefaults,
-                                                         unbuildableAtDefaultsStored)
-import           Bridge.Hackage.Store                   (StoreCorrupt (..))
-import           Codec.Serialise                        (deserialise,
-                                                         deserialiseOrFail,
-                                                         serialise)
-import           Control.Exception                      (evaluate, try)
-import qualified Data.ByteString                        as BS
-import qualified Data.ByteString.Lazy.Char8             as BL
-import           Distribution.Compiler                  (AbiTag (NoAbiTag),
-                                                         CompilerFlavor (GHC),
-                                                         CompilerId (..),
-                                                         CompilerInfo,
-                                                         unknownCompilerInfo)
-import           Bridge.Hackage                         (parseGPD)
-import           Bridge.Provider                        (pkgConfigPresent)
-import           Distribution.Solver.Types.PkgConfigDb  (PkgConfigDb,
-                                                         pkgConfigDbFromList)
-import           Distribution.System                    (Arch (X86_64),
-                                                         OS (Linux),
-                                                         Platform (..))
+import           Bridge.Hackage                               (parseGPD)
+import           Bridge.Hackage.Store                         (StoreCorrupt (..))
+import           Bridge.Provider                              (pkgConfigPresent)
+import           Codec.Serialise                              (deserialise,
+                                                               deserialiseOrFail,
+                                                               serialise)
+import           Control.Exception                            (evaluate, try)
+import qualified Data.ByteString                              as BS
+import qualified Data.ByteString.Lazy.Char8                   as BL
+import           Distribution.Compiler                        (AbiTag (NoAbiTag),
+                                                               CompilerFlavor (GHC),
+                                                               CompilerId (..),
+                                                               CompilerInfo,
+                                                               unknownCompilerInfo)
+import           Distribution.Solver.Types.PkgConfigDb        (PkgConfigDb,
+                                                               pkgConfigDbFromList)
+import           Distribution.System                          (Arch (X86_64),
+                                                               OS (Linux),
+                                                               Platform (..))
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription)
-import           Distribution.Version                   (mkVersion)
-import           Test.Tasty                             (TestTree, testGroup)
-import           Test.Tasty.HUnit                       (assertFailure, testCase,
-                                                         (@?=))
+import           Distribution.Version                         (mkVersion)
+import           PubGrub.Cabal.Flatten                        (FlagModel (..),
+                                                               StoredRelease (..),
+                                                               allStanzas,
+                                                               componentDepsAtDefaults,
+                                                               componentDepsAtDefaultsStored,
+                                                               componentToolsAtDefaults,
+                                                               componentToolsStored,
+                                                               noStanzas,
+                                                               setupDeps,
+                                                               toStored,
+                                                               unbuildableAtDefaults,
+                                                               unbuildableAtDefaultsStored)
+import           Test.Tasty                                   (TestTree,
+                                                               testGroup)
+import           Test.Tasty.HUnit                             (assertFailure,
+                                                               testCase, (@?=))
 
 testPlatform :: Platform
 testPlatform = Platform X86_64 Linux

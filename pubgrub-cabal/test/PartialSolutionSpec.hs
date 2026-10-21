@@ -18,21 +18,21 @@ import           Data.Maybe                      (mapMaybe)
 import qualified Data.Set                        as Set
 import           Distribution.Types.PackageName  (mkPackageName)
 import           Distribution.Types.Version      (mkVersion)
-import qualified PubGrub.Cabal.Version                 as V
 import           Distribution.Types.VersionRange (earlierVersion,
                                                   orLaterVersion, thisVersion)
-import           PubGrub.Cabal                   (Cabal,
-                                                  fromDependency,
+import           PubGrub.Cabal                   (Cabal, fromDependency,
                                                   request)
-import           PubGrub.Incompatibility         (Incompatibility,
-                                                  incompGet, noValues)
-import           PubGrub.Cabal.InstanceSet             (Instance (..),
+import           PubGrub.Cabal.InstanceSet       (Instance (..),
                                                   InstanceSet (..),
                                                   singletonInstance)
-import           PubGrub.SetOps                  (equivalent)
-import           PubGrub.Cabal.Value                   (Value (..), ValueSet,
+import           PubGrub.Cabal.Value             (Value (..), ValueSet,
                                                   instanceSet)
-import           PubGrub.Cabal.Variable                (Var (..))
+import           PubGrub.Cabal.Variable          (Var (..))
+import qualified PubGrub.Cabal.Version           as V
+import qualified PubGrub.Cabal.VersionSet        as VersionSet
+import           PubGrub.Incompatibility         (Incompatibility, incompGet,
+                                                  noValues)
+import           PubGrub.SetOps                  (equivalent)
 import           PubGrub.Solver                  (Assignment (..),
                                                   AssignmentKind (..),
                                                   PartialSolution (..),
@@ -40,12 +40,10 @@ import           PubGrub.Solver                  (Assignment (..),
                                                   assignmentTerm, backtrack,
                                                   decidedValue, emptyPS,
                                                   extractSolution,
-                                                  varHistory,
                                                   termIntersectionFor,
-                                                  undecidedPositive)
+                                                  undecidedPositive, varHistory)
 import           PubGrub.Term                    (Term (..), anyTerm,
                                                   intersectTerm, negateTerm)
-import qualified PubGrub.Cabal.VersionSet              as VersionSet
 import           Test.Tasty                      (TestTree, testGroup)
 import           Test.Tasty.QuickCheck           (Arbitrary (..), Gen, Property,
                                                   conjoin, counterexample,

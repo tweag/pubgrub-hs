@@ -34,21 +34,21 @@ import           Data.Set                               (Set)
 import qualified Data.Set                               as Set
 import           Distribution.Types.PackageName         (PackageName)
 import           Distribution.Types.PkgconfigDependency (PkgconfigDependency)
+import           PubGrub.Cabal.InstanceSet              (InstanceSet)
+import           PubGrub.Cabal.Value                    (Value, ValueSet,
+                                                         boolSet, bothValues,
+                                                         flagSet, instanceSet,
+                                                         singletonValue)
+import           PubGrub.Cabal.Variable                 (Flag, Var (..))
+import           PubGrub.Cabal.Version                  (Version)
 import           PubGrub.Incompatibility                (Cause (..),
                                                          Domain (..),
                                                          Incompatibility (..),
                                                          MergeRule (MergeRule))
-import           PubGrub.Cabal.InstanceSet                    (InstanceSet)
 import           PubGrub.SetOps                         (SetOps (..))
 import           PubGrub.Term                           (Term (..),
                                                          intersectTerm,
                                                          isTopTerm)
-import           PubGrub.Cabal.Value                          (Value, ValueSet, boolSet,
-                                                         bothValues, flagSet,
-                                                         instanceSet,
-                                                         singletonValue)
-import           PubGrub.Cabal.Variable                       (Flag, Var (..))
-import           PubGrub.Cabal.Version                        (Version)
 
 -- --------------------------------------------------------------------------
 -- The domain

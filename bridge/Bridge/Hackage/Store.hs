@@ -1,10 +1,10 @@
-{-# LANGUAGE BangPatterns         #-}
-{-# LANGUAGE DeriveAnyClass       #-}
-{-# LANGUAGE DeriveGeneric        #-}
-{-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE LambdaCase           #-}
-{-# LANGUAGE ScopedTypeVariables  #-}
-{-# LANGUAGE TupleSections        #-}
+{-# LANGUAGE BangPatterns        #-}
+{-# LANGUAGE DeriveAnyClass      #-}
+{-# LANGUAGE DeriveGeneric       #-}
+{-# LANGUAGE FlexibleInstances   #-}
+{-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections       #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 -- | A derived index: every release's @.cabal@, parsed once and kept in the
@@ -69,61 +69,64 @@ module Bridge.Hackage.Store
     , StoreCorrupt (..)
     ) where
 
-import           PubGrub.Cabal.Flatten                  (Branch (..),
-                                                         LibNode (..),
-                                                         Node (..),
-                                                         StoredRelease (..),
-                                                         Tree (..))
-import           Codec.Serialise                        (Serialise (..),
-                                                         deserialiseOrFail,
-                                                         serialise)
-import           Codec.Serialise.Decoding               (decodeBytes, decodeListLen)
-import           Codec.Serialise.Encoding               (encodeBytes, encodeListLen)
-import           Control.Exception                      (Exception, SomeException,
-                                                         throw, try)
-import           Control.Monad                          (foldM, when)
-import           Data.Bits                              (shiftL, (.|.))
-import qualified Data.ByteString                        as BS
-import qualified Data.ByteString.Builder                as BB
-import qualified Data.ByteString.Lazy                   as BL
-import           Data.Int                               (Int64)
-import           Data.List                              (sortOn)
-import           Data.List.NonEmpty                     (NonEmpty (..))
-import           Data.Map.Strict                        (Map)
-import qualified Data.Map.Strict                        as Map
-import           Data.Set                               (Set)
-import qualified Data.Set                               as Set
-import           Data.Word                              (Word32, Word64)
-import qualified Distribution.Compat.NonEmptySet        as NES
-import           Distribution.Compiler                  (CompilerFlavor)
-import           Distribution.System                    (Arch, OS)
-import           Distribution.Types.Condition            (Condition (..))
-import           Distribution.Types.ConfVar              (ConfVar (..))
-import           Distribution.Types.Dependency           (Dependency (..))
-import           Distribution.Types.ExeDependency        (ExeDependency)
-import           Distribution.Types.Flag                 (FlagName, mkFlagName,
-                                                          unFlagName)
-import           Distribution.Types.LibraryName          (LibraryName (..))
-import           Distribution.Types.PackageName          (PackageName,
-                                                          mkPackageName,
-                                                          unPackageName)
-import           Distribution.Types.PkgconfigDependency  (PkgconfigDependency (..))
-import           Distribution.Types.PkgconfigName        (PkgconfigName,
-                                                          mkPkgconfigName,
-                                                          unPkgconfigName)
+import           Codec.Serialise                          (Serialise (..),
+                                                           deserialiseOrFail,
+                                                           serialise)
+import           Codec.Serialise.Decoding                 (decodeBytes,
+                                                           decodeListLen)
+import           Codec.Serialise.Encoding                 (encodeBytes,
+                                                           encodeListLen)
+import           Control.Exception                        (Exception,
+                                                           SomeException, throw,
+                                                           try)
+import           Control.Monad                            (foldM, when)
+import           Data.Bits                                (shiftL, (.|.))
+import qualified Data.ByteString                          as BS
+import qualified Data.ByteString.Builder                  as BB
+import qualified Data.ByteString.Lazy                     as BL
+import           Data.Int                                 (Int64)
+import           Data.List                                (sortOn)
+import           Data.List.NonEmpty                       (NonEmpty (..))
+import           Data.Map.Strict                          (Map)
+import qualified Data.Map.Strict                          as Map
+import           Data.Set                                 (Set)
+import qualified Data.Set                                 as Set
+import           Data.Word                                (Word32, Word64)
+import qualified Distribution.Compat.NonEmptySet          as NES
+import           Distribution.Compiler                    (CompilerFlavor)
+import           Distribution.System                      (Arch, OS)
+import           Distribution.Types.Condition             (Condition (..))
+import           Distribution.Types.ConfVar               (ConfVar (..))
+import           Distribution.Types.Dependency            (Dependency (..))
+import           Distribution.Types.ExeDependency         (ExeDependency)
+import           Distribution.Types.Flag                  (FlagName, mkFlagName,
+                                                           unFlagName)
+import           Distribution.Types.LibraryName           (LibraryName (..))
+import           Distribution.Types.PackageName           (PackageName,
+                                                           mkPackageName,
+                                                           unPackageName)
+import           Distribution.Types.PkgconfigDependency   (PkgconfigDependency (..))
+import           Distribution.Types.PkgconfigName         (PkgconfigName,
+                                                           mkPkgconfigName,
+                                                           unPkgconfigName)
 import           Distribution.Types.PkgconfigVersion      (PkgconfigVersion)
 import           Distribution.Types.PkgconfigVersionRange (PkgconfigVersionRange)
-import           Distribution.Types.UnqualComponentName  (UnqualComponentName,
-                                                          mkUnqualComponentName,
-                                                          unUnqualComponentName)
-import           Distribution.Types.Version              (Version, mkVersion,
-                                                          versionNumbers)
-import           Distribution.Types.VersionRange         (VersionRange)
-import           System.Directory                        (doesFileExist,
-                                                          renameFile)
-import           System.IO                               (Handle, IOMode (..), hSeek,
-                                                          SeekMode (..),
-                                                          withBinaryFile)
+import           Distribution.Types.UnqualComponentName   (UnqualComponentName,
+                                                           mkUnqualComponentName,
+                                                           unUnqualComponentName)
+import           Distribution.Types.Version               (Version, mkVersion,
+                                                           versionNumbers)
+import           Distribution.Types.VersionRange          (VersionRange)
+import           PubGrub.Cabal.Flatten                    (Branch (..),
+                                                           LibNode (..),
+                                                           Node (..),
+                                                           StoredRelease (..),
+                                                           Tree (..))
+import           System.Directory                         (doesFileExist,
+                                                           renameFile)
+import           System.IO                                (Handle, IOMode (..),
+                                                           SeekMode (..), hSeek,
+                                                           withBinaryFile)
 
 -- --------------------------------------------------------------------------
 -- Codec

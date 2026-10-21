@@ -11,43 +11,50 @@
 -- solve.
 module ReleaseSpec (tests) where
 
-import           Control.Exception              (toException)
-import qualified Data.ByteString.Char8          as BS
-import qualified Data.Map.Strict                as Map
-import qualified Data.Set                       as Set
-import           Data.Text                      (Text)
-import qualified Data.Text                      as T
-import           Distribution.Compiler          (AbiTag (NoAbiTag),
-                                                 CompilerFlavor (GHC),
-                                                 CompilerId (..),
-                                                 CompilerInfo,
-                                                 unknownCompilerInfo)
-import           Distribution.PackageDescription.Parsec (parseGenericPackageDescription,
-                                                 runParseResult)
-import           Distribution.System            (Arch (X86_64), OS (Linux),
-                                                 Platform (..))
-import           Distribution.Types.Dependency  (depPkgName)
-import           Distribution.Types.Flag        (mkFlagAssignment,
-                                                 mkFlagName)
+import           Control.Exception                            (toException)
+import qualified Data.ByteString.Char8                        as BS
+import qualified Data.Map.Strict                              as Map
+import qualified Data.Set                                     as Set
+import           Data.Text                                    (Text)
+import qualified Data.Text                                    as T
+import           Distribution.Compiler                        (AbiTag (NoAbiTag),
+                                                               CompilerFlavor (GHC),
+                                                               CompilerId (..),
+                                                               CompilerInfo,
+                                                               unknownCompilerInfo)
+import           Distribution.PackageDescription.Parsec       (parseGenericPackageDescription,
+                                                               runParseResult)
+import           Distribution.System                          (Arch (X86_64),
+                                                               OS (Linux),
+                                                               Platform (..))
+import           Distribution.Types.Dependency                (depPkgName)
+import           Distribution.Types.Flag                      (mkFlagAssignment,
+                                                               mkFlagName)
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription)
-import           Distribution.Types.PackageName (PackageName, mkPackageName)
-import qualified Distribution.Types.Version     as Cabal
-import           PubGrub.Cabal                  (Cabal, request)
-import           PubGrub.Cabal.Flatten          (FlagModel (..), Stanzas,
-                                                 allStanzas, noStanzas)
-import           PubGrub.Cabal.Installed        (mkInstalledDb)
-import           PubGrub.Cabal.InstanceSet      (Instance (..),
-                                                 singletonInstance)
-import qualified PubGrub.Cabal.Provider         as BP
-import           PubGrub.Cabal.Report           (reportConflict)
-import           PubGrub.Cabal.Value            (Resolved (..), foldFlags)
-import           PubGrub.Cabal.Version          (Version)
-import qualified PubGrub.Cabal.Version          as V
-import           PubGrub.Provider               (Provider (..))
-import           PubGrub.Solver                 (SolveError (..), solve)
-import           Test.Tasty                     (TestTree, testGroup)
-import           Test.Tasty.HUnit               (assertFailure, testCase,
-                                                 (@?=))
+import           Distribution.Types.PackageName               (PackageName,
+                                                               mkPackageName)
+import qualified Distribution.Types.Version                   as Cabal
+import           PubGrub.Cabal                                (Cabal, request)
+import           PubGrub.Cabal.Flatten                        (FlagModel (..),
+                                                               Stanzas,
+                                                               allStanzas,
+                                                               noStanzas)
+import           PubGrub.Cabal.Installed                      (mkInstalledDb)
+import           PubGrub.Cabal.InstanceSet                    (Instance (..),
+                                                               singletonInstance)
+import qualified PubGrub.Cabal.Provider                       as BP
+import           PubGrub.Cabal.Report                         (reportConflict)
+import           PubGrub.Cabal.Value                          (Resolved (..),
+                                                               foldFlags)
+import           PubGrub.Cabal.Version                        (Version)
+import qualified PubGrub.Cabal.Version                        as V
+import           PubGrub.Provider                             (Provider (..))
+import           PubGrub.Solver                               (SolveError (..),
+                                                               solve)
+import           Test.Tasty                                   (TestTree,
+                                                               testGroup)
+import           Test.Tasty.HUnit                             (assertFailure,
+                                                               testCase, (@?=))
 
 testPlatform :: Platform
 testPlatform = Platform X86_64 Linux

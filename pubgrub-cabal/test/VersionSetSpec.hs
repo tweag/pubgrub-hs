@@ -3,27 +3,29 @@
 
 module VersionSetSpec (tests) where
 
-import           Data.List                         (nub, sort)
-import           Data.Set                          (Set)
-import qualified Data.Text                         as T
-import qualified Data.Set                          as Set
-import           Distribution.Pretty   (prettyShow)
+import           Data.List                  (nub, sort)
+import           Data.Set                   (Set)
+import qualified Data.Set                   as Set
+import qualified Data.Text                  as T
+import           Distribution.Pretty        (prettyShow)
 import qualified Distribution.Types.Version as Cabal
-import           Distribution.Version  (VersionRange, anyVersion,
-                                        earlierVersion, intersectVersionRanges,
-                                        laterVersion, majorBoundVersion,
-                                        majorUpperBound, noVersion,
-                                        orEarlierVersion, orLaterVersion,
-                                        thisVersion, unionVersionRanges)
-import           PubGrub.Pretty        (Pretty (pretty))
-import           PubGrub.SetOps        (SetOps (..))
-import           PubGrub.Cabal.Version       (Version, mkVersion, toCabalVersion,
-                                        versionNumbers)
+import           Distribution.Version       (VersionRange, anyVersion,
+                                             earlierVersion,
+                                             intersectVersionRanges,
+                                             laterVersion, majorBoundVersion,
+                                             majorUpperBound, noVersion,
+                                             orEarlierVersion, orLaterVersion,
+                                             thisVersion, unionVersionRanges)
+import           PubGrub.Cabal.Version      (Version, mkVersion, toCabalVersion,
+                                             versionNumbers)
 import           PubGrub.Cabal.VersionSet
-import           Test.Tasty            (TestTree, testGroup)
-import           Test.Tasty.QuickCheck (Arbitrary (..), Gen, choose, elements,
-                                        forAll, listOf, oneof, property, sized,
-                                        testProperty, (.&&.), (===))
+import           PubGrub.Pretty             (Pretty (pretty))
+import           PubGrub.SetOps             (SetOps (..))
+import           Test.Tasty                 (TestTree, testGroup)
+import           Test.Tasty.QuickCheck      (Arbitrary (..), Gen, choose,
+                                             elements, forAll, listOf, oneof,
+                                             property, sized, testProperty,
+                                             (.&&.), (===))
 
 -- Small bounded version universe: components drawn from 0..3, length 1..3.
 -- Trailing zeros are allowed on purpose: @1.0@ and @1@ are one version here,

@@ -13,11 +13,12 @@
 -- The dbs here are hand-built, so nothing needs a compiler or an index.
 module InstalledSpec (tests) where
 
-import           PubGrub.Cabal.Installed        (InstalledEdge (..), InstalledPkg (..),
-                                                 closureEdges, mkInstalledDb)
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.UnitId      (UnitId, mkUnitId)
 import           Distribution.Version           (mkVersion)
+import           PubGrub.Cabal.Installed        (InstalledEdge (..),
+                                                 InstalledPkg (..),
+                                                 closureEdges, mkInstalledDb)
 import           PubGrub.Cabal.PreInstalled     (PreInstalledPackage (..))
 import           Test.Tasty                     (TestTree, testGroup)
 import           Test.Tasty.HUnit               (assertBool, testCase, (@?=))
