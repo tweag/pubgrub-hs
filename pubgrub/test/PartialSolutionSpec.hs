@@ -162,7 +162,7 @@ step op (ps, m) = case op of
         _                -> (ps, m)
     OpBacktrack k ->
         let level = k `mod` (psLevel ps + 1)
-         in (backtrack level ps, mBacktrack level m)
+         in (snd (backtrack level ps), mBacktrack level m)
 
 -- --------------------------------------------------------------------------
 -- Comparisons
@@ -242,6 +242,18 @@ interleaveBacktracks ops =
         | (n, op) <- zip [0 ..] ops
         ]
 
+-- | 'backtrack' names exactly the variables whose history it shortened: from
+-- every state a script reaches, to every level there is.
+movedAreTheShortened :: [Op] -> Property
+movedAreTheShortened ops =
+    conjoin
+        [ counterexample ("backtracking to " ++ show level ++ " after " ++ show n ++ " ops") $
+            Set.fromList moved == Set.fromList [p | p <- packages, length (varHistory ps' p) < length (varHistory ps p)]
+        | (n, (ps, _)) <- zip [0 :: Int ..] (scanl (flip step) (emptyPS, emptyModel) ops)
+        , level <- [0 .. psLevel ps]
+        , let (moved, ps') = backtrack level ps
+        ]
+
 tests :: TestTree
 tests =
     testGroup
@@ -249,4 +261,5 @@ tests =
         [ testProperty "every query agrees with the naive model, op by op" runScript
         , testProperty "…on scripts that backtrack heavily" $
             runScript . interleaveBacktracks
+        , testProperty "backtrack names exactly the variables it moved" movedAreTheShortened
         ]

@@ -90,6 +90,7 @@ module PubGrub.Store
     , clauseAt
     , clausesOf
     , allClauses
+    , storeSize
     , valid
     ) where
 
@@ -221,6 +222,10 @@ clausesOf v Store{stIndex} = Map.findWithDefault IntSet.empty v stIndex
 -- | Every clause.
 allClauses :: Store d -> IntSet
 allClauses Store{stClauses} = IntMap.keysSet stClauses
+
+-- | How many clauses there are. A pass over them, allocating nothing.
+storeSize :: Store d -> Int
+storeSize Store{stClauses} = IntMap.size stClauses
 
 -- | Every invariant the store keeps, for the tests:
 --

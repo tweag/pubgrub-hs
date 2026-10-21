@@ -36,7 +36,7 @@ import           PubGrub.Relation        (IncompatRelation (..), incompRelation)
 import           PubGrub.SetOps          (SetOps (..))
 import           PubGrub.Store           (Store, allClauses, clauseAt,
                                           clausesOf, emptyStore, insertClause,
-                                          insertClauses)
+                                          insertClauses, storeSize)
 import           PubGrub.Term            (Term (..), anyTerm, intersectTerm,
                                           negateTerm)
 
@@ -213,12 +213,13 @@ closeWithSeeds logA ps = go
 -- returned — so the only clauses whose relation can have changed are the ones
 -- the caller names: the ones inserted or merged into since then, and the ones
 -- mentioning a variable it decided. Within the call, after a derivation on @q@
--- they are the clauses that mention @q@ ('clausesOf'). Those are re-judged and
--- the set of actionable clauses kept up to date; everything else keeps the
--- judgement it had. After a backtrack every clause is re-judged, once per
--- conflict. The clause chosen is therefore the one a full scan would choose,
--- every time: the search does not depend on the worklist, and between
--- conflicts the number of judgements is proportional to what changed.
+-- they are the clauses that mention @q@ ('clausesOf'). After a backtrack they
+-- are the clauses of the variables that lost an assignment, the clause learned,
+-- and the clauses of the variable the learned clause then derives. Those are
+-- re-judged and the set of actionable clauses kept up to date; everything else
+-- keeps the judgement it had. The clause chosen is therefore the one a full
+-- scan would choose, every time: the search does not depend on the worklist,
+-- and the number of judgements is proportional to what changed.
 unitPropagation
     :: forall d m. (Domain d, Monad m)
     => LogAction m (SolverMsg d)
@@ -257,17 +258,37 @@ unitPropagation logA pending store0 ps0 = settle pending IntSet.empty store0 ps0
                 conflictResolution logA i ps >>= \case
                     Left err ->
                         pure (Left err)
-                    Right (almostVar, rootCause, ps') -> do
+                    Right (almostVar, rootCause, (moved, ps')) -> do
                         logA <& Learned rootCause
                         -- 'Backtracked' carries only a level, which does not
                         -- determine @d@, so the message's type is annotated.
                         logA <& (Backtracked (psLevel ps') :: SolverMsg d)
-                        -- Judge everything again, learned clause included. Only
-                        -- the clauses of the variables the backtrack moved can
-                        -- have changed, but judging just those saves nothing
-                        -- measurable (DESIGN §5), and this needs no argument.
-                        let (_, store') = insertClause rootCause store
-                        settle (allClauses store') IntSet.empty store' (addDerivation almostVar rootCause ps')
+                        -- Only the clauses of the variables the backtrack
+                        -- moved, the learned clause (which is the conflict's
+                        -- clause too, where the rule merged them) and the
+                        -- clauses of the variable it derives can have changed
+                        -- relation; every other clause keeps its judgement,
+                        -- actionable or not. How that set is collected is a
+                        -- matter of cost alone, and both ways judge the same
+                        -- clauses. When the moved variables are mentioned by
+                        -- fewer clauses than the store holds, it is their
+                        -- ids read off the index: a shallow backjump touches
+                        -- a few clauses of a store that the full re-judge made
+                        -- quadratic in the number of conflicts. Otherwise it
+                        -- is the whole store, which costs one pass: a far
+                        -- backjump's variables mention most of it, with
+                        -- repeats, and listing their ids cost more than the
+                        -- judging it saved. Counting the mentions allocates
+                        -- nothing, and a union per variable is never built:
+                        -- the ids interleave, so each union rebuilt its
+                        -- accumulator.
+                        let (learned, store') = insertClause rootCause store
+                            changed = almostVar : moved
+                            mentions = sum [IntSet.size (clausesOf v store') | v <- changed]
+                            dirty
+                                | mentions >= storeSize store' = allClauses store'
+                                | otherwise = IntSet.fromList (c : learned : concatMap (IntSet.toList . (`clausesOf` store')) changed)
+                        settle dirty actionable store' (addDerivation almostVar rootCause ps')
             IAlmostSatisfied q ->
                 settle (clausesOf q store) actionable store (addDerivation q i ps)
             -- Not actionable after all: unreachable while the actionable set is
@@ -279,7 +300,8 @@ unitPropagation logA pending store0 ps0 = settle pending IntSet.empty store0 ps0
 -- | Conflict resolution: satisfier search over 'varHistory', 'priorCause'
 -- while satisfier and previous satisfier share a decision level, then
 -- 'backtrack'. Returns the failure (no solution, or a violated invariant), or
--- the pivot variable, the learned root cause, and the backtracked solution.
+-- the pivot variable, the learned root cause, and what 'backtrack' answered:
+-- the variables it moved and the backtracked solution.
 -- It is monadic only to log 'Resolving': the outcome depends on the partial
 -- solution alone.
 conflictResolution
@@ -287,7 +309,7 @@ conflictResolution
     => LogAction m (SolverMsg d)
     -> Incompatibility d
     -> PartialSolution d
-    -> m (Either (SolveError d) (VarOf d, Incompatibility d, PartialSolution d))
+    -> m (Either (SolveError d) (VarOf d, Incompatibility d, ([VarOf d], PartialSolution d)))
 conflictResolution logA = loop
   where
     loop current ps

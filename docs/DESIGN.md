@@ -287,17 +287,32 @@ looked, re-judges them, keeps the set of actionable ones, and acts on the newest
 the clause the full scan found first, every time. Which clauses are still to be
 judged is propagation's state, not the store's.
 
-**After a backtrack the whole store is re-judged**, once per conflict, and that is
-measured, not overlooked. A backtrack changes the term of every variable with an
-assignment above the level it goes back to and of no other, so re-judging only those
-variables' clauses, the learned clause and the conflict gives the same actionable
-set. It was built on 2026-10-20 and not kept. It cut the post-backtrack judgements
-from 68,271 to 52,348 over the 26 problems at the pin (a third of all judgements to
-a quarter), and on `haskell-language-server` from 74,857 to 40,313, with the trace
-and every other count identical. Allocation moved by under 0.1% either way: a
-judgement costs about 50 bytes, the 34,544 it saved on HLS were 0.08% of the run, and
-collecting the undone variables' clauses cost about as much. Backjumps go far enough
-that those variables mention most of the store anyway.
+**After a backtrack, the clauses of the variables it moved are re-judged**, and the
+whole store only when those are most of it. A backtrack changes the term of every
+variable with an assignment above the level it goes back to and of no other, so
+re-judging only those variables' clauses, the learned clause, the conflict and the
+clauses of the variable the learned clause derives gives the same actionable set,
+and `backtrack` answers with the variables it moved. That was first built on
+2026-10-20 and not kept: it cut the post-backtrack judgements from 68,271 to 52,348
+over the 26 problems at the pin and on `haskell-language-server` from 74,857 to
+40,313, with every count identical, but allocation moved by under 0.1% either way,
+because the corpus's backjumps go far enough that the moved variables mention most
+of the store, and collecting their clauses cost about what judging them saved. The
+2026-10-21 review measured the other regime, which the corpus does not have: a
+synthetic chain of N packages whose newer versions each need a package with no
+versions, so that every package costs V−1 one-level backjumps. There the full
+re-judge is conflicts × store, quadratic in N: 2.6 million judgements and 0.6 s at
+N=100, 249 million and 58 s at N=1000. Re-judging the moved variables' clauses
+takes N=300 from 22.6 million judgements, 3.4 s and 3.3 GB to 0.5 million, 0.45 s and
+1.7 GB, and N=1000 from 58 s to 4.7 s. How the set is collected is a cost choice
+between two equal results, and the first two ways tried both lost somewhere: a
+union per variable rebuilds its accumulator because clause ids interleave, which
+cost 5% on a far-backjump chain and 14% on a problem whose duplicate facts give a
+few variables thousands of clauses; one set from every id listed cost that second
+problem 80%. So the mentions are counted first, which allocates nothing, and the
+store is read whole when they are at least its size. On the corpus every count is
+identical, yesod's judgements fall from 36,409 to 33,731, pandoc's single far
+backjump still reads the whole store, and allocation moves by under 0.02%.
 
 The merge key names a
 clause id, so a merge is a lookup rather than a walk down the list comparing keys

@@ -156,25 +156,34 @@ addDerivation p cause ps@PartialSolution{psLevel, psNextIndex} =
     let term = maybe anyTerm negateTerm (incompGet p cause)
      in recordAssignment (Assignment psNextIndex psLevel p (Derivation term cause)) ps
 
--- | Backtrack: drop every assignment strictly above the target level.
+-- | Backtrack: drop every assignment strictly above the target level. Answers
+-- with the variables that lost an assignment, whose accumulated terms are the
+-- only ones that changed, and the solution after.
 --
 -- Levels are non-decreasing along a history (a derivation takes the current
 -- level, a decision the next, and backtracking only lowers it), so what is
 -- dropped is always a suffix — which is why this splits the history from the
 -- right instead of filtering it: a variable that drops nothing keeps its history
--- as it stands, rather than paying to rebuild an identical one.
+-- as it stands, rather than paying to rebuild an identical one. For the same
+-- reason a variable moved exactly when its newest assignment is above the
+-- level, which is one lookup.
 --
 -- A variable that does lose assignments must have both its caches rebuilt from
 -- the survivors — @intersectTerm@ cannot be undone, so the accumulated term is
 -- recomputed, and a dropped decision must stop being remembered. A variable that
 -- loses all of them loses its record.
-backtrack :: Domain d => Int -> PartialSolution d -> PartialSolution d
+backtrack :: Domain d => Int -> PartialSolution d -> ([VarOf d], PartialSolution d)
 backtrack level ps@PartialSolution{psVariables} =
-    ps
+    ( [v | (v, pa) <- Map.toList psVariables, moved pa]
+    , ps
         { psVariables = Map.mapMaybe prune psVariables
         , psLevel = level
         }
+    )
   where
+    moved pa = case vaHistory pa of
+        _ Seq.:|> a -> aLevel a > level
+        Seq.Empty   -> False
     prune pa = case Seq.spanr ((> level) . aLevel) (vaHistory pa) of
         (dropped, kept)
             | Seq.null dropped -> Just pa
