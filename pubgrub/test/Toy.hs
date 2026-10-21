@@ -79,17 +79,11 @@ name :: Pkg -> Set Int -> Text
 name (Pkg p) vs = T.pack p <> " " <> versions vs
 
 formatter :: Formatter Pkg
-formatter =
-    Formatter
-        { sayFact = \fact _ -> case fact of
-            Wants p vs     -> name p vs <> " is requested"
-            Needs p v q ws -> name p (Set.singleton v) <> " depends on " <> name q ws
-        , sayNoValues = \(Pkg p) vs -> T.pack p <> " has no version " <> versions vs
-        , sayTerms = summaryWith name name
-        , prepare = id
-        , lineRules = []
-        , clauseRules = []
-        }
+formatter = mkFormatter says hole name
+  where
+    says (Wants p vs) _     = name p vs <> " is requested"
+    says (Needs p v q ws) _ = name p (Set.singleton v) <> " depends on " <> name q ws
+    hole (Pkg p) vs = T.pack p <> " has no version " <> versions vs
 
 why :: World -> [Incompatibility Pkg] -> Text
 why w seeds = case runIdentity (solve mempty (provider w) seeds) of

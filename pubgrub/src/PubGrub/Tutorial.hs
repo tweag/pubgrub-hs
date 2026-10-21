@@ -243,8 +243,10 @@ import           PubGrub
 -- When there is no plan, 'solve' answers @'Left' ('NoSolution' root)@. The
 -- incompatibility @root@ carries the whole chain of reasoning that led to the
 -- failure, and 'reportConflict' writes it out as a numbered proof. It needs a
--- t'Formatter': the words for each fact, and for the solver's own finding that a
--- package has none of a set of versions. Any other 'Left' is not a verdict on
+-- t'Formatter', which 'mkFormatter' builds from three things: the words for
+-- each fact, the words for the solver's own finding that a package has none
+-- of a set of versions, and how to name a package with a set of versions,
+-- from which the conclusions are made. Any other 'Left' is not a verdict on
 -- the world but a bug, in our provider or in the solver, and @why@ says only
 -- that. Add:
 --
@@ -255,17 +257,11 @@ import           PubGrub
 -- > name (Pkg p) vs = T.pack p <> " " <> versions vs
 -- >
 -- > formatter :: Formatter Pkg
--- > formatter =
--- >     Formatter
--- >         { sayFact = \fact _ -> case fact of
--- >             Wants p vs     -> name p vs <> " is requested"
--- >             Needs p v q ws -> name p (Set.singleton v) <> " depends on " <> name q ws
--- >         , sayNoValues = \(Pkg p) vs -> T.pack p <> " has no version " <> versions vs
--- >         , sayTerms = summaryWith name name
--- >         , prepare = id
--- >         , lineRules = []
--- >         , clauseRules = []
--- >         }
+-- > formatter = mkFormatter says hole name
+-- >   where
+-- >     says (Wants p vs) _     = name p vs <> " is requested"
+-- >     says (Needs p v q ws) _ = name p (Set.singleton v) <> " depends on " <> name q ws
+-- >     hole (Pkg p) vs = T.pack p <> " has no version " <> versions vs
 -- >
 -- > why :: World -> [Incompatibility Pkg] -> Text
 -- > why w seeds = case runIdentity (solve mempty (provider w) seeds) of

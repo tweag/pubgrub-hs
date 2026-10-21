@@ -58,6 +58,7 @@
 module PubGrub.Report
     ( -- * The domain's words
       Formatter (..)
+    , mkFormatter
     , Line (..)
     , leaf
     , summaryWith
@@ -109,6 +110,28 @@ data Formatter v = Formatter
       -- ^ the domain's ways of saying two external facts as one premise, tried
       -- in order; the fallback names them side by side
     }
+
+-- | A formatter from the domain's three sentences, with no rules of its own:
+-- what a fact says, what the solver's own finding that a variable has no
+-- value in a set says, and how to name a variable with a set of its values,
+-- from which 'summaryWith' makes the conclusions. The three other fields add
+-- nothing ('prepare' is 'id', and there are no rules); set them by record
+-- update, as in
+-- @(mkFormatter says hole name){clauseRules = [rule]}@.
+mkFormatter
+    :: (FactOf v -> Incompatibility v -> Text)
+    -> (v -> SetOf v -> Text)
+    -> (v -> SetOf v -> Text)
+    -> Formatter v
+mkFormatter says hole name =
+    Formatter
+        { sayFact = says
+        , sayNoValues = hole
+        , sayTerms = summaryWith name name
+        , prepare = id
+        , lineRules = []
+        , clauseRules = []
+        }
 
 -- | What a rule proposes for one line of the proof.
 data Line v

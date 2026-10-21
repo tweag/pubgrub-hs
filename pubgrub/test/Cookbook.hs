@@ -120,19 +120,14 @@ name :: Name -> VersionSet -> Text
 name (Name p) s = p <> " " <> pretty s
 
 formatter :: Formatter Name
-formatter =
-    Formatter
-        { sayFact = \fact _ -> case fact of
-            Requested p s       -> name p s <> " is requested"
-            Constrained p s     -> name p s <> " is required by a constraint"
-            DependsOn p ps q qs -> name p ps <> " depends on " <> name q qs
-            Unusable p s reason -> name p s <> " cannot be used: " <> reason
-        , sayNoValues = \p s -> "no version of " <> name p s <> " exists"
-        , sayTerms = summaryWith name name
-        , prepare = id
-        , lineRules = []
-        , clauseRules = [whichDependsOn]
-        }
+formatter = (mkFormatter says hole name){clauseRules = [whichDependsOn]}
+  where
+    says said _ = case said of
+        Requested p s       -> name p s <> " is requested"
+        Constrained p s     -> name p s <> " is required by a constraint"
+        DependsOn p ps q qs -> name p ps <> " depends on " <> name q qs
+        Unusable p s reason -> name p s <> " cannot be used: " <> reason
+    hole p s = "no version of " <> name p s <> " exists"
 
 whichDependsOn :: Rule (Incompatibility Name, Incompatibility Name) Text
 whichDependsOn = symmetric $ \(first, second) -> do

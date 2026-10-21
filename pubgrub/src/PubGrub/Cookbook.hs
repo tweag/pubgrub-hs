@@ -265,36 +265,31 @@ import           PubGrub
 --
 -- When there is no plan, 'solve' answers with the incompatibility the proof
 -- ends with, and 'reportConflict' writes the proof out in the sentences a
--- t'Formatter' gives it. Three of its fields are the domain's words: a sentence
--- for each kind of fact, one for the solver's finding that a package has no
--- version in a set, and one for what a set of terms concludes, which
--- 'summaryWith' makes from how to name a package with a set of versions. The
--- other three are hooks for rules of your own, described in "PubGrub.Report":
--- a pass over the proof before it is written ('id' for none), rules that say a
--- line, and rules that say two facts as one premise. This domain adds one of
--- the last kind, below:
+-- t'Formatter' gives it. 'mkFormatter' builds one from the domain's three
+-- sentences: one for each kind of fact, one for the solver's finding that a
+-- package has no version in a set, and how to name a package with a set of
+-- versions, from which 'summaryWith' makes the conclusions. The three other
+-- fields of t'Formatter' are hooks for rules of your own, described in
+-- "PubGrub.Report", which do nothing until set by record update: a pass over
+-- the proof before it is written, rules that say a line, and rules that say two
+-- facts as one premise. This domain sets the last, below:
 --
 -- > name :: Name -> VersionSet -> Text
 -- > name (Name p) s = p <> " " <> pretty s
 -- >
 -- > formatter :: Formatter Name
--- > formatter =
--- >     Formatter
--- >         { sayFact = \fact _ -> case fact of
--- >             Requested p s       -> name p s <> " is requested"
--- >             Constrained p s     -> name p s <> " is required by a constraint"
--- >             DependsOn p ps q qs -> name p ps <> " depends on " <> name q qs
--- >             Unusable p s reason -> name p s <> " cannot be used: " <> reason
--- >         , sayNoValues = \p s -> "no version of " <> name p s <> " exists"
--- >         , sayTerms = summaryWith name name
--- >         , prepare = id
--- >         , lineRules = []
--- >         , clauseRules = [whichDependsOn]
--- >         }
+-- > formatter = (mkFormatter says hole name){clauseRules = [whichDependsOn]}
+-- >   where
+-- >     says said _ = case said of
+-- >         Requested p s       -> name p s <> " is requested"
+-- >         Constrained p s     -> name p s <> " is required by a constraint"
+-- >         DependsOn p ps q qs -> name p ps <> " depends on " <> name q qs
+-- >         Unusable p s reason -> name p s <> " cannot be used: " <> reason
+-- >     hole p s = "no version of " <> name p s <> " exists"
 --
 -- A sentence is a fragment: no capital letter, no full stop, and no leading
 -- \"because\" or \"and\", since the proof adds its own connectives. The second
--- argument of 'sayFact', ignored here, is the incompatibility the fact is the
+-- argument of @says@, ignored here, is the incompatibility the fact is the
 -- cause of, for a sentence that depends on which of its terms survived.
 --
 -- A clause rule says two facts as one premise where that reads better. This one
