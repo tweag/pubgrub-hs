@@ -273,6 +273,11 @@ jobs:
       - name: Build dependencies
         run: cabal build all --only-dependencies -j
 
+      # pubgrub's Haddocks build with no warning and document every export.
+      # pubgrub-cabal joins once its own are clean.
+      - name: Haddock warnings and coverage
+        run: scripts/check-haddock.sh pubgrub
+
       # pubgrub-hs, pubgrub-cli and pubgrub-harness are not published, so
       # their documentation is not built for Hackage.
       - name: Documentation for Hackage

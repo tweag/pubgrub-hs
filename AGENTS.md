@@ -76,6 +76,7 @@ cabal run pubgrub-index -- --index-state "$(cat bench/index-state)"   # the deri
 scripts/gate.sh                      # every check that must not regress
 cabal run pubgrub-harness            # both solvers, both sets; writes bench/output/{benchmark,showcase}.md
 scripts/check-stats.sh               # --stats against bench/summarise.awk, every problem
+scripts/check-haddock.sh pubgrub     # no Haddock warning, every export documented (CI runs it)
 ```
 
 **A target is one argument.** `pubgrub 'aeson <2'`, not `pubgrub aeson '<2'` — the
