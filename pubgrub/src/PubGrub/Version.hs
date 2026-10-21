@@ -14,12 +14,10 @@
 -- @[4.14, 4.14.0.0)@ between them, and the difference between a declared
 -- @>=0.3@ and the slot of the release @0.3.0.0@ is a live-looking
 -- @>=0.3 && <0.3.0.0@ that the search discovers empty one @no version for@ at
--- a time. The deviation from Cabal's order is small: on Hackage on 2026-09-09,
--- 44 of 19,458 packages published two spellings of one version, and 1,404
--- dependency bounds in latest releases admitted a slightly different set of
--- versions, each in the direction the author plainly meant (@time >=1.8.0@
--- against the release @time 1.8@, which Cabal excludes). Where an index has two
--- spellings of one version, its reader has to keep one.
+-- a time. The deviation from Cabal's order is small and goes the way an
+-- author plainly means it: a bound @time >=1.8.0@ admits the release
+-- @time 1.8@, which Cabal's order excludes. Two releases that spell one version
+-- differently are one version here, so a caller has to keep one of them.
 --
 -- Conversions to and from Cabal's type are exact in both directions, because
 -- the spelling survives; they live with the cabal domain
@@ -39,8 +37,8 @@ import           Data.Ord (comparing)
 -- the normal form __once__, because 'Eq' and 'Ord' read it on every
 -- comparison and a solve compares versions far more often than it makes them
 -- (every cut of every version set, every slot, every installed unit). Deriving
--- it on each comparison measured at a fifth of a large solve's time and a third
--- of its allocation.
+-- it on each comparison cost a fifth of a large solve's time and a third of its
+-- allocation.
 data Version = Version
     { versionNumbers :: ![Int]
     -- ^ the components as spelled — @[1,2,0,0]@ for @1.2.0.0@, not the normal

@@ -43,19 +43,22 @@ newtype Provider d m = Provider
       --
       -- They need not be /only/ that, and this is why the list sits outside the
       -- 'Maybe'. The solver adds them to its store unexamined and never requires
-      -- them to mention the decided value, and an incompatibility holds in
-      -- every context by construction, so a provider that rejects candidates on
-      -- the way to its answer may report /why/ it rejected them, and those facts
-      -- prune and explain like any other. What it must not do is /decide/ a
-      -- value it knows to be inadmissible.
+      -- them to mention the decided value, and incompatibilities are
+      -- context-independent by construction (each one is true of every
+      -- solution, whatever has been decided so far) — so a provider that
+      -- rejects candidates on the way to its answer may report /why/ it
+      -- rejected them, and those facts prune and explain like any other.
+      -- What it must not do is /decide/ a value it knows to be inadmissible.
       --
       -- __Answering @Nothing@ with facts is the case that matters.__ A release
-      -- skipped because it cannot be built here is stated as an incompatibility.
-      -- When the offered set holds nothing /but/ such releases, dropping those
-      -- statements would make a report say \"no version for hpqtypes in >=1.13\"
-      -- where the truth is that every release in that range needs a C library
-      -- this machine lacks. On real Hackage problems this is the commonest way a
-      -- popular package fails to resolve.
+      -- skipped because it cannot be built here is stated as an incompatibility,
+      -- as PubGrub asks of any version that cannot be selected; when the
+      -- offered set holds nothing /but/ such releases there is no instance to
+      -- carry those statements out, and dropping them is what makes a report say
+      -- \"no version for hpqtypes in >=1.13\" where the truth is that every
+      -- release in that range needs a C library this machine lacks. That case is
+      -- not a corner: on real Hackage problems it is the commonest way a popular
+      -- package fails to resolve.
       --
       -- The solver still guarantees progress itself, and does not take the
       -- provider's word for coverage — see 'PubGrub.Solver.solve'.

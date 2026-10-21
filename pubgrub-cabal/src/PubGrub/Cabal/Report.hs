@@ -1,16 +1,17 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | The cabal domain's proofs: the reporting algorithm's sentences in cabal's
--- range syntax, over the walker in "PubGrub.Report".
+-- | The cabal domain's proofs: the standard PubGrub sentences in cabal's range
+-- syntax, over the walker in "PubGrub.Report".
 --
 -- 'cabalFormatter' is the domain's half of that contract: the words
 -- ("PubGrub.Cabal.Report.Wording"), a pass over the tree before the walk
 -- ('collapseNoInstances'), and the rules that say a step in fewer lines than
--- the algorithm's cases would. Three of those are not the algorithm's —
--- 'samePairRun', 'wideningRun' and 'collapseNoInstances' — and each carries its
--- soundness argument where it is defined. The two clause rules the algorithm
--- names, 'chainOfTwo' and 'sharedDepender', are here too rather than in the
--- core, because what a dependency is the core does not know.
+-- the PubGrub algorithm's cases would. Three of those are this package's rather
+-- than the algorithm's — 'samePairRun', 'wideningRun' and 'collapseNoInstances' —
+-- and each carries its soundness argument where it is defined. The two clause
+-- rules the algorithm names as special cases, 'chainOfTwo' and 'sharedDepender',
+-- are here too rather than in the core, because what a dependency is the core
+-- does not know.
 --
 -- The headline above the proof is "PubGrub.Cabal.Report.Headline"'s, and the
 -- wrapping and colour the driver puts over both are
@@ -51,8 +52,8 @@ import           PubGrub.Cabal.Value                  (ValueSet (..))
 import           PubGrub.Cabal.Variable               (Var (..))
 
 -- | The cabal domain's words and rules. The two run rules go before the
--- spec's every-other-step skip because they collapse what the skip would print
--- two facts at a time.
+-- algorithm's every-other-step skip because they collapse what the skip would
+-- print two facts at a time.
 cabalFormatter :: Formatter Cabal
 cabalFormatter =
     wording
@@ -77,12 +78,12 @@ reportHeadline = headline . collapseNoInstances
 -- look for a run of steps that all say the same kind of thing: this range of
 -- @p@ depends on @q@, and so does the next range, and the next. That is one
 -- fact about @p@ as a whole, and printing it a range at a time spends a line on
--- each adjacent pair of @q@'s bound history.
+-- every adjacent pair in the history of @p@'s bound on @q@.
 --
--- It is /not/ the algorithm's collapsing of dependencies from adjacent versions,
--- which merges facts with an __identical__ dependee range. Here the dependee
--- ranges differ — that is why the solver had to derive its way along them — and
--- what is printed is their union.
+-- It is /not/ the PubGrub algorithm's collapsing of adjacent versions, which
+-- merges facts with an __identical__ dependee range. Here the dependee ranges
+-- differ — that is why the solver had to derive its way along them — and what
+-- is printed is their union.
 --
 -- Stating the union of the facts is sound on its own — each says @p ∈ Sᵢ@
 -- requires @q ∈ Rᵢ@, so @p ∈ ⋃S@ requires @q ∈ ⋃R@ — but a line may not claim
@@ -193,8 +194,8 @@ joins =
     ]
 
 -- | Two seeds close a proof together: \"baz >=1 && <2 and foo >=1 && <2 are
--- requested\", the algorithm's \"depends on both\" sentence without a depender
--- in front of it.
+-- requested\", the standard \"depends on both\" sentence without a depender in
+-- front of it.
 twoRequests :: Rule (Incompatibility Cabal, Incompatibility Cabal) Text
 twoRequests (c1, c2) = do
     (p1, r1) <- asRequest c1
@@ -203,7 +204,8 @@ twoRequests (c1, c2) = do
 
 -- | A dependency whose dependee range is one the solver has already found
 -- empty. Naming both facts prints that range /twice/ in one sentence, and on a
--- real proof it is not short: haddock 2.29.1's base bound is seven windows.
+-- real proof it is not short: haddock 2.29.1's base bound is seven windows, and
+-- it would appear in full at both ends of the same line.
 --
 -- Saying it once is sound only when the dependency's whole range is inside the
 -- empty one, which is what the 'isSubsetOf' checks. Where it is only partly
@@ -263,8 +265,8 @@ sharedDepender (c1, c2) = do
 -- that dependency with @p@'s term adjusted. The pass therefore does not recompute
 -- anything: it keeps the derived node's terms exactly and re-labels them as the leaf
 -- they are equivalent to. Nothing in the proof gets wider or narrower; a step that
--- said nothing new stops being a step. The vacuous-truth argument is the algorithm's own —
--- a fact about a version that does not exist constrains nothing.
+-- said nothing new stops being a step. The argument is the PubGrub algorithm's
+-- own — a fact about a version that does not exist constrains nothing.
 --
 -- Two cases are deliberately left alone:
 --

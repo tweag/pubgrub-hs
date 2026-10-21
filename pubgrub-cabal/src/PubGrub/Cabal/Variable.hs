@@ -3,11 +3,11 @@
 -- A solver variable is a package name, or one automatic flag of a package. A
 -- flag is identified by its /declaration/: its name together with its declared
 -- default. Two releases that declare @fast@ with the same default share the
--- variable, so a guarded dependency they both carry can be stated once over
--- both, as one incompatibility over a range of releases; a release that
--- changed the default declares a different flag and gets a variable of its
--- own. At most one release of a package is ever in a plan, so the shared
--- variable is always that release's flag.
+-- variable, so a guarded dependency they both carry can be stated once over both,
+-- as one incompatibility over adjacent versions; a release that changed the
+-- default declares a different flag and gets a variable of its own. At most one
+-- release of a package is ever in a plan, so the shared variable is always that
+-- release's flag.
 --
 -- Carrying the default in the identity is what lets the provider offer it first
 -- without knowing which release was decided: it reads the variable and nothing

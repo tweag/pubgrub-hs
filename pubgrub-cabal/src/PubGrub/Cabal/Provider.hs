@@ -3,12 +3,12 @@
 --
 -- A package's instances are its installed units ('UsePreInstalled', from the
 -- compiler's package database) together with its source releases (lazily,
--- through a 'ReleaseSource'). The choice is __strict prefer-installed__: if
--- the offered set admits an installed unit, commit to the newest such unit and
--- pin its whole transitive closure to the exact units it was built against;
--- otherwise pick the newest source release that can be built here and state
--- its dependencies, each widened to the installed units and source releases
--- its range admits.
+-- through a 'ReleaseSource'). After a caller's 'Preference', the choice is
+-- __strict prefer-installed__: if the offered set admits an installed unit,
+-- commit to the newest such unit and pin its whole transitive closure to the
+-- exact units it was built against; otherwise pick the newest source release
+-- that can be built here and state its dependencies, each widened to the
+-- installed units and source releases its range admits.
 --
 -- 'mkExpand' takes its world as arguments, an installed database and a
 -- 'ReleaseSource', so the same rule runs over an in-memory world as over
@@ -226,17 +226,22 @@ data ReleaseSource m = ReleaseSource
 --
 -- Three kinds of question arrive:
 --
---  * __a flag__ ('FlagVar'): answered from the variable alone. The declared
---    default rides in the flag's identity ('PubGrub.Cabal.Variable.Flag'), so it is
---    offered first where the set admits it and the other value otherwise.
---    Nothing is reported: the clause that made the flag a goal, and the guarded
---    dependencies that consult it, went out with its owner.
---  * __a package__ ('PackageVar') whose set admits an installed unit: strict
---    prefer-installed, newest such unit, with the unit's whole transitive closure
---    pinned to the exact units it was built against.
---  * __a package__ otherwise: the newest source release the set admits that can
+--  * __a flag__ ('FlagVar'): answered from the variable alone. The preferred
+--    value, or else the declared default carried in the flag's identity
+--    ('PubGrub.Cabal.Variable.Flag'), is offered first where the set admits it,
+--    and the other value otherwise. No clause is stated: the clause that made
+--    the flag a goal, and the guarded dependencies that consult it, went out
+--    with its owner.
+--  * __a package__ ('PackageVar') with a 'Preference' the set admits: that
+--    source release, if the source has it and it can be built here.
+--  * __a package__ otherwise: the newest installed unit the set admits, with
+--    the unit's whole transitive closure pinned to the exact units it was built
+--    against; failing that, the newest source release the set admits that can
 --    be built here, with its dependencies, each under the flags it is guarded
 --    by, and one 'declaresFlag' clause per automatic flag it declares.
+--
+-- Releases that cannot be built here are stated as 'unbuildable' facts on the
+-- way past, and those facts are returned even when no value is offered.
 mkExpand
     :: forall m
      . Monad m

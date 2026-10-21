@@ -9,11 +9,12 @@
 --
 -- PubGrub states identical dependencies of /adjacent versions of the depender/
 -- as one incompatibility — @{foo >=1.0 && <1.3, not bar >=1.0 && <2}@ rather
--- than one fact per version of @foo@. There are two places to do that, and
--- __both run__. When a fact is generated, the provider walks out from the
--- release it was asked about and reads its neighbours to learn whether they
--- carry the same dependency. That is affordable only because a read is a decode
--- of the derived index rather than a @.cabal@ parse.
+-- than one fact per version of @foo@. There are two places to do that. When a
+-- fact is generated, a provider can walk out from the release it was asked
+-- about and read its neighbours to learn whether they carry the same
+-- dependency, as the cabal provider does
+-- (@PubGrub.Cabal.Provider.spanningOccurrence@); that costs a read per
+-- neighbour.
 --
 -- This module is the other place. The provider emits one fact per
 -- release __slot__ — the half-open range up to the next release in the index —
@@ -22,10 +23,10 @@
 -- touching ranges into one contiguous interval. No neighbour is read /here/,
 -- because the only releases that merge are ones the solver expanded anyway.
 --
--- The rule is weaker than PubGrub's: it collapses the releases the solver
--- expanded, not every release that carries the dependency. But those are the
--- only ones whose clauses exist, so for both things collapsing is for —
--- clauses to propagate, and lines in a proof — it is nearly as good.
+-- The rule is weaker than reading the neighbours: it collapses the releases
+-- the solver expanded, not every release that carries the dependency. But
+-- those are the only ones whose clauses exist, so for both things collapsing
+-- is for — clauses to propagate, and lines in a proof — it is nearly as good.
 --
 -- == Why merging is sound
 --
@@ -48,8 +49,9 @@
 -- stays a leaf cause with the unioned term. The alternative — letting conflict
 -- resolution reach the same range by resolving the narrow facts against each
 -- other — produces derived nodes, and those derived nodes /are/ the proof
--- lines this exists to remove. Merging at insert does not shorten those lines;
--- it stops them existing.
+-- lines this exists to remove: a proof that merges facts pairwise runs to
+-- hundreds of lines. Merging at insert does not shorten those lines; it stops
+-- them existing.
 --
 -- == Scan position is preserved, deliberately
 --

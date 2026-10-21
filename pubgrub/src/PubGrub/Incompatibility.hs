@@ -46,9 +46,9 @@ import           PubGrub.Term     (Term (..), anyTerm, intersectTerm,
 -- and sets only through 'SetOps'. What a variable, a value or a fact /is/
 -- never reaches it.
 --
--- One type fixes the variable, set and cause types together. The variable type
--- is declared injective so that a variable alone names its domain, which is what
--- lets 'singleton' take a variable and nothing else.
+-- One type fixes the variable, set and fact types together. The variable type
+-- is declared injective so that a variable alone names its domain, which is
+-- what lets 'singleton' take a variable and nothing else.
 class (Ord (VarOf d), SetOps (SetOf d)) => Domain d where
     -- | The variables the solver assigns values to.
     type VarOf d = (v :: Type) | v -> d
@@ -149,12 +149,12 @@ data Incompatibility d = Incompatibility
     , incompCause :: Cause d
     }
 
--- | Why an incompatibility holds. PubGrub partitions incompatibilities into the
--- external ones, which state a fact about the world, and the derived ones,
--- which the solver resolved from two others; the derived ones form the
--- derivation graph a failure is explained from. That structure is the solver's
--- own, so it is fixed here, and the domain supplies only what a leaf says
--- ('FactOf').
+-- | Why an incompatibility holds. PubGrub partitions incompatibilities into
+-- the external ones, which state a fact about the world, and the derived ones,
+-- which the solver resolved from two others during conflict resolution; the
+-- derived ones form the derivation graph a failure is explained from, a tree
+-- whose leaves are external. That structure is the solver's own, so it is
+-- fixed here, and the domain supplies only what a leaf says ('FactOf').
 --
 -- A seed is a fact too — it is what the solve was asked for — and it is kept
 -- apart because the solver treats it specially: a conflict that rests on the

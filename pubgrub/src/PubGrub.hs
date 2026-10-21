@@ -8,9 +8,10 @@
 -- is read with "PubGrub.Derivation" and rendered as a numbered proof with
 -- "PubGrub.Report", in words a 'Formatter' supplies.
 --
--- The algorithm is PubGrub as its specification states it; the cabal
--- instantiation lives in the @pubgrub-cabal@ package. "PubGrub.Version" and
--- "PubGrub.VersionSet" are batteries for a domain whose values are versions.
+-- The algorithm is PubGrub's unit propagation, decision making and conflict
+-- resolution, as published; the cabal instantiation lives in the
+-- @pubgrub-cabal@ package. "PubGrub.Version" and "PubGrub.VersionSet" are
+-- batteries for a domain whose values are versions.
 module PubGrub
     ( -- * The domain
       Domain (..)

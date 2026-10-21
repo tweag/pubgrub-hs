@@ -11,14 +11,15 @@
 -- from, when it was built from one. That tag is a display hint and nothing more:
 -- only 'declare' sets it, every operation below drops it, 'Eq' and 'Ord' cannot
 -- see it, and 'Pretty' hands it back so a report quotes a range the way its
--- author wrote it — @^>=4.13.0.0@ rather than @>=4.13.0.0 && <4.14@. A derived
--- term has no author, and prints canonically ('renderVersionSet').
+-- author wrote it — @^>=4.13.0.0@ rather than @>=4.13.0.0 && <4.14@: the same
+-- intervals as a plain range, plus the knowledge of how it was spelled. A
+-- derived term has no author, and prints canonically ('renderVersionSet').
 --
 -- Union, intersection and complement are computed /directly on the intervals/,
--- as one pass of comparisons between bound positions, rather than by building a
--- range syntax tree and re-canonicalising it on every operation. This package
--- parses no range syntax: a domain folds a declared range into a set with the
--- operations below.
+-- as one pass of comparisons between bound positions. No syntax tree is built
+-- and the result is canonical by construction, so nothing is re-derived after an
+-- operation. Range syntax is a domain's business: a domain folds a declared range
+-- into a set with the operations below.
 --
 -- The version order is ours, not Cabal's: trailing zeros are insignificant
 -- ('PubGrub.Version'). So @^>=4.13.0.0 || ^>=4.14.0.0@ is __one__ interval here,
@@ -223,11 +224,12 @@ aboveVersionSet :: Version -> VersionSet
 aboveVersionSet lo = fromCuts [(Cut lo After, Unbounded)]
 
 -- | Everything below @hi@, or everything when there is no @hi@: the slot of a
--- package's __first__ release, which takes no lower bound. Nothing is published
--- below the first release, so the set denotes the same instances as the
--- half-open slot would — but its complement is @>=hi@ and not @<lo || >=hi@, and
--- the @<lo@ piece is a hole the solver would otherwise have to learn is empty,
--- one @no version for@ at a time.
+-- package's __first__ release, which has no lower bound: a proof says
+-- @foo <1.1@, not @foo >=1.0 && <1.1@. Nothing is published below the first
+-- release, so the set denotes the same instances as the half-open slot would —
+-- but its complement is @>=hi@ and not @<lo || >=hi@, and the @<lo@ piece is a
+-- hole the solver would otherwise have to learn is empty, one @no version for@
+-- at a time.
 belowVersionSet :: Maybe Version -> VersionSet
 belowVersionSet hi = fromCuts [(Cut version0 Before, maybe Unbounded (`Cut` Before) hi)]
 
@@ -251,11 +253,11 @@ belowVersionSet hi = fromCuts [(Cut version0 Before, maybe Unbounded (`Cut` Befo
 -- Takes the universe as a 'Set' so each interval costs two ordered lookups rather
 -- than a pass over every version of the package.
 --
--- Nothing calls this, and cost is not the reason: applied to declared dependency
--- ranges it rewrites every quoted range into a closed form nobody wrote — a
--- user's own @lens <4@ comes back as @lens >=0.1 && <=3.10.3@ — and that
--- objection holds at any price. 'fillGaps' is the half of this that does not
--- touch an outer bound.
+-- __Not for declared ranges.__ Applied to them, it rewrites every quoted range
+-- in a closed form nobody wrote: a user's own @lens <4@ comes back as
+-- @lens >=0.1 && <=3.10.3@ on the proof's last line. That objection holds
+-- whatever it would save. 'fillGaps' is the half of this that does not touch an
+-- outer bound.
 snapToVersions :: Set Version -> VersionSet -> VersionSet
 snapToVersions universe vs = fromCuts (mapMaybe tighten (cutsOf vs))
   where
@@ -291,10 +293,11 @@ snapToVersions universe vs = fromCuts (mapMaybe tighten (cutsOf vs))
 --
 -- A single interval costs nothing here. Each gap costs one ordered lookup.
 --
--- Nothing calls this yet. It is not applied to declared ranges, because a filled
--- set drops its 'declared' spelling and the report would lose the author's own.
--- It belongs on a __derived__ term, which nobody wrote and which prints
--- canonically anyway; that needs the version universe at report time.
+-- It is not meant for declared ranges, because a filled set has to drop its
+-- 'declared' spelling, and a proof should quote the author's own spelling.
+-- Where it belongs is a __derived__ term, which nobody wrote and which prints
+-- canonically anyway; that needs the universe at report time, which the core
+-- does not have yet.
 fillGaps :: Set Version -> VersionSet -> VersionSet
 fillGaps universe vs = fromCuts (go (cutsOf vs))
   where

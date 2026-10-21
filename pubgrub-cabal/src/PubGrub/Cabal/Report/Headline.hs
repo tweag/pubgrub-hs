@@ -13,9 +13,9 @@
 --
 --  > No solution for matterhorn ==90000.1.1: base is pinned to 4.21.0.0 (installed).
 --
--- It is not a proof sentence, and opens with none of the proof's connectives,
--- so a count of proof sentences leaves it out, as a count of cabal's leaves out
--- its \"Could not resolve dependencies:\" line.
+-- It is not a proof sentence and opens with no connective, so a count of a
+-- proof's sentences by connective leaves it out — the same footing as cabal's own
+-- \"Could not resolve dependencies:\" line above its own message.
 --
 -- == The second line
 --
@@ -183,9 +183,9 @@ inPlay root = grow [l | l@(d, s, _, _) <- allDeps, or [r `isSubsetOf` s | (p, r)
 --
 -- A step resolves on one package, the pivot, and either keeps a narrowed term
 -- for it or drops it when its two terms union to ⊤. The step that drops @p@ is
--- the proof's own statement that, with the step's remaining terms all in
--- force, no version of @p@ is left — so the terms are named, and the
--- \"together\" is the conjunction the incompatibility is.
+-- the proof's own statement that, with the step's remaining terms all in force,
+-- no version of @p@ is left — so the terms are named, and the \"together\" is the
+-- conjunction the incompatibility is.
 --
 -- Which package. Every pivot is dropped somewhere, and most of them are dropped
 -- at the one step that refutes their whole range in one go. The one worth a

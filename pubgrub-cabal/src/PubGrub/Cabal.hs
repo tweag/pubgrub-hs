@@ -143,7 +143,7 @@ constraint v allowed forbidden =
     Incompatibility (Map.singleton v (Positive forbidden)) (Seed (CauseConstraint v allowed))
 
 -- | A flag held at a value: @p:f@ is @b@ if it is in play at all. A 'constraint'
--- over the flag's own variable, as cabal's @--constraint 'p +f'@ is.
+-- over the flag's own variable, as a user's @--constraint 'p +f'@ is.
 flagConstraint :: PackageName -> Flag -> Bool -> Incompatibility Cabal
 flagConstraint p f b =
     constraint (FlagVar p f) (flagSet (boolSet b)) (flagSet (boolSet (not b)))

@@ -2,7 +2,8 @@
 
 -- | Two layers a caller can put over a rendered proof: wrapping to the
 -- terminal's width, and colour. Neither changes a word. 'PubGrub.Report' itself
--- does neither, so its output stays plain text, one sentence per line.
+-- does neither, so its output stays plain text, one sentence per line, for a
+-- tool that compares proofs or counts their sentences.
 module PubGrub.Cabal.Report.Layout
     ( wrapProof
     , styleProof
@@ -88,7 +89,8 @@ rangeToken u =
 -- stripping the escapes gives the input back.
 --
 -- Whether to apply it is the caller's decision, not this module's; the usual
--- test is a terminal, with @NO_COLOR@ unset and @TERM@ not @dumb@.
+-- test is a terminal, with @NO_COLOR@ unset and @TERM@ not @dumb@. Off a
+-- terminal a proof should stay plain text.
 styleProof :: Text -> Text
 styleProof = T.intercalate "\n" . go False . T.lines
   where

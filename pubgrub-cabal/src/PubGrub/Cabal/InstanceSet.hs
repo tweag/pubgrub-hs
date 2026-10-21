@@ -10,9 +10,10 @@
 -- differ in kind. The installed half is /extensional/: the installed database is
 -- small and fully known, so it is a plain 'Set' of units. The source half is
 -- /intensional/: a dependency's declared range admits versions the index may not
--- even have, so it is kept as one 'VersionSet' and never enumerated. Both halves
--- are canonical, so the set has a lawful 'Eq' and 'Ord', every operation is
--- exact, and 'isEmpty' answers both ways.
+-- even have, so it is kept as one 'VersionSet', a range over versions rather
+-- than a list of them, and never enumerated. Both halves are canonical, so the
+-- set has a lawful 'Eq' and 'Ord', every operation is exact, and 'isEmpty'
+-- answers both ways.
 module PubGrub.Cabal.InstanceSet
     ( HasVersion (..)
     , Instance (..)
@@ -98,7 +99,8 @@ memberInstance (BuildSource v) s       = VersionSet.contains (isSource s) v
 
 -- | Does the set admit every source release of its package? True of an
 -- unconstrained target's request and of a depender that spans the whole
--- version list. The report writes such a set as \"every version of foo\".
+-- version list. The report writes such a set as \"every version of foo\"
+-- rather than \"foo any\".
 isEveryVersion :: InstanceSet -> Bool
 isEveryVersion s = isSource s == VersionSet.fullVersionSet
 

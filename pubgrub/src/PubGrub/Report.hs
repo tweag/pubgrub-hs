@@ -272,24 +272,26 @@ derived fmt final inc out = case bothDerived inc of
 -- The spec's cases
 -- --------------------------------------------------------------------------
 
--- | Case 3: both causes are external. One line, and the only case that opens a
--- line of derivation rather than continuing one.
+-- | Both causes are external. One line, and the only case that opens a line
+-- of derivation rather than continuing one.
 twoFacts :: Formatter d -> Rule (Incompatibility d) (Line d)
 twoFacts fmt step = do
     (c1, c2) <- bothExternal step
     pure (Line (clause fmt c1 c2) Nothing)
 
--- | Case 2.ii — the every-other-step skip. The derived cause's own conclusion
--- is left unsaid and the two external facts are named together here, which is
--- where a long linear chain loses half its lines.
+-- | One cause is derived, from a derived cause and an external fact of its
+-- own: the every-other-step skip. The derived cause's own conclusion is left
+-- unsaid and the two external facts are named together here, which is where a
+-- long linear chain loses half its lines.
 everyOtherStep :: Formatter d -> Rule (Incompatibility d) (Line d)
 everyOtherStep fmt step = do
     (d, e) <- chainStep step
     (dd, de) <- chainStep d
     pure (Line (clause fmt de e) (Just dd))
 
--- | Case 2.iii: the derived cause branches or bottoms out, so it gets its own
--- lines and this one closes with the external fact alone.
+-- | One cause is derived and one external, and the derived cause branches or
+-- bottoms out, so it gets its own lines and this one closes with the external
+-- fact alone.
 oneFact :: Formatter d -> Rule (Incompatibility d) (Line d)
 oneFact fmt step = do
     (d, e) <- chainStep step

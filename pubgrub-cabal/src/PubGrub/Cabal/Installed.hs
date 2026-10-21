@@ -95,9 +95,10 @@ data InstalledEdge = InstalledEdge
 -- an incompatibility whose two terms name the same package collapses to a
 -- single bogus term.
 --
--- A 'UnitId' absent from the db contributes no edge. That is vacuous while only
--- @[GlobalPackageDB]@ is read ('Bridge.Cabal.InstalledPkg.getInstalledPackages'),
--- and is where dependencies would go missing silently if the db set widened.
+-- A 'UnitId' absent from the db contributes no edge. That is vacuous for a db
+-- read whole from the global package db, whose units depend only on each other,
+-- and is where dependencies would go missing silently if a db were assembled from
+-- several package dbs.
 closureEdges :: InstalledDb -> UnitId -> [InstalledEdge]
 closureEdges db root = go (Set.singleton root) (lookupUnit root)
   where
@@ -127,16 +128,15 @@ closureEdges db root = go (Set.singleton root) (lookupUnit root)
 -- buildable source distribution (cabal's own reasons). Planning to build one is
 -- planning something that cannot happen.
 --
--- Verbatim from @Distribution.Client.Dependency.nonReinstallablePackages@ in
--- cabal-install 3.14.2.0, and __both__ solvers read it from here so the comparison
--- cannot drift: our provider through 'isNonReinstallable', the cabal baseline through
--- 'Bridge.Cabal.Baseline.nonReinstallableConstraints'.
+-- Cabal's own list, verbatim, so a plan made here never builds a package cabal
+-- would refuse to build. The provider reads it through 'isNonReinstallable'.
 --
 -- Deliberately a list of names rather than a derivation. How cabal decides
 -- reinstallability is itself in flux, so anything cleverer would be tracking a moving
 -- target; a snapshot that is obviously a snapshot is easier to check and to update.
 -- Note @rts@ is /not/ on cabal's list even though it is equally unbuildable — kept
--- faithful rather than corrected, since the baseline has to agree.
+-- faithful rather than corrected, so that a plan made here and one made by
+-- cabal agree on what may be built.
 nonReinstallablePackages :: Set PackageName
 nonReinstallablePackages =
     Set.fromList

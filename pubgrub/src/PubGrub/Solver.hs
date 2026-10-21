@@ -338,10 +338,12 @@ seedAssignments ps p = [a | a <- varHistory ps p, fromSeed a]
 -- | Is the incompatibility satisfied by the seeds' own derivations alone? Then
 -- no decision took part in the conflict, so nothing can be backtracked and
 -- version solving has failed. This is PubGrub's terminal test stated over the
--- seeds: there the only level-0 derivation is a fixed one, here it is whatever
--- the seeds derived. An empty incompatibility is satisfied by anything, and one
--- whose every term is subsumed by a seed's derivation is satisfied before
--- anything is decided.
+-- seeds. The published algorithm starts from a single root package, so its
+-- only level-0 derivation is the root's, and it stops on an incompatibility
+-- that is empty or names the root alone; here the level-0 derivations are
+-- whatever the seeds derived. An empty incompatibility is satisfied by
+-- anything, and one whose every term is subsumed by a seed's derivation is
+-- satisfied before anything is decided.
 --
 -- Checked before the satisfier search, which is what keeps a seed from ever being
 -- a satisfier's cause: the seeds are the oldest assignments, so a seed derivation
@@ -353,9 +355,9 @@ satisfiedBySeeds ps inc = incompRelation seedTerm inc == ISatisfied
 
 -- | Resolve a terminal incompatibility against the seeds it rests on, one
 -- 'priorCause' per seed, so that the incompatibility handed to the report is the
--- empty one and its derivation ends with the request. A PubGrub proof ends the
--- same way (\"…, version solving failed\"), with the request as the last fact
--- named; here the request is the seeds, and the last step is taken explicitly.
+-- empty one and its derivation ends with the request: a proof's last line names
+-- the request and concludes "version solving failed". Here the request is the
+-- seeds, and the last step is taken explicitly.
 --
 -- Each step is a genuine resolution: 'satisfiedBySeeds' holds, so every term is
 -- subsumed by its seed's derivation and the union over the pivot is ⊤. The

@@ -49,8 +49,8 @@
 --   carries both conditions conjoined; nesting produces a longer formula, not
 --   nested structure.
 -- * /Per release, not per package/. A guard comes from one @.cabal@ file, so it
---   mentions only flags /that/ release declares, and a flag term built from it
---   names one of the depender's own flags.
+--   mentions only flags /that/ release declares, and evaluating it for that
+--   release never meets an undeclared flag.
 --
 -- Note @Lit True@ is a real guard, not the absence of one: every component has an
 -- unconditional block and its guard is exactly @Lit True@.
@@ -65,17 +65,18 @@
 -- derived index keeps; so the two cannot disagree, because they are one walk
 -- rather than two kept in step.
 --
--- Terminology:
+-- Terminology, since what the solver may be told turns on the difference:
 --
 -- * a /flag/ is a declared name with a default;
 -- * a /guard/ is a boolean formula over flag names;
 -- * a /guarded dependency occurrence/ is one guard paired with /one/
---   dependency, the unit an incompatibility is built from;
+--   dependency, the unit an incompatibility may be built from;
 -- * 'GuardedDeps' is the whole flat list for a release.
 --
 -- The same package may appear under several guards (an unconditional @q >=1@ and
--- a guarded @q <3@). 'depsAt' intersects those into one range; the provider
--- states each occurrence as a separate fact.
+-- a guarded @q <3@). 'depsAt' intersects those into one range, which is right for
+-- one release at one assignment; a fact for the solver is built from one guarded
+-- occurrence, never from that intersection.
 module PubGrub.Cabal.Flatten (
     GuardedDeps,
     Stanzas (..),
@@ -197,27 +198,29 @@ type GuardedDeps = [(Guard, [Dependency])]
 -- module of that name is present in a version the range admits.
 --
 -- A predicate rather than a database so that the caller decides where the answer
--- comes from (a @pkg-config@ database, a list in a test) and this module needs
--- nothing but @Cabal-syntax@. __No @pkg-config@ executable is @const False@__,
--- not @const True@: cabal reads the same situation that way, rejecting every
--- @pkgconfig-depends@ when the database is absent, and a missing module still
--- has to be named in the proof.
+-- comes from — cabal's own @pkg-config@ database, a list in a test, a tool's own
+-- reading of @pkg-config@ — and this module needs nothing but @Cabal-syntax@.
+-- __No @pkg-config@ executable is @const False@__, not @const True@: that is
+-- cabal's reading of the same situation (its solver rejects every
+-- @pkgconfig-depends@ when there is no database), and a missing module still has
+-- to be named in the proof.
 type PkgConfigPresent = PkgconfigDependency -> Bool
 
 -- | Which optional stanzas a reduction reads beside the four components cabal
 -- includes unconditionally (library, sub-libraries, foreign libraries,
 -- executables): the test suites, the benchmarks, both or neither.
 --
--- A test suite or benchmark is behind a stanza that a plain @cabal build@ never
--- enables, and a planner enables it __per package__: @cabal test@ resolves the
+-- In cabal's own vocabulary these are /optional stanzas/: a test
+-- suite or benchmark is behind a stanza that a plain @cabal build@ never
+-- enables, and a planner enables it __per package__ — @cabal test@ resolves the
 -- test suites of the local packages and never those of their dependencies. So
 -- the choice is made where a release is reduced, by whoever reduces it, and a
 -- solve for a build plan passes 'noStanzas' for every release. What the stanzas
 -- add is read the same way as the rest: flag-guarded, gated on their own
 -- @buildable:@ ('gateOnBuildable'), their build tools alongside
 -- ('componentTools'). A test suite's dependency on its own package's library
--- is an intra-package edge, which the provider rule drops, as it does for an
--- executable.
+-- is an intra-package edge, resolved inside the package and not a version
+-- constraint on it, so the provider rule drops it, as it does for an executable.
 data Stanzas = Stanzas
     { withTests      :: Bool
     , withBenchmarks :: Bool
@@ -279,9 +282,10 @@ evalCond flags = go
 -- constraints parameter, which is the one this module read. And it keeps the
 -- node's dependencies where Cabal-syntax keeps them, on the @BuildInfo@: that
 -- parameter was only ever a copy of @targetBuildDepends@ (the parser filled it
--- from there, and cabal's own solver reads the field in 3.18 where it read the
--- copy before), so reading the field is the same answer on either side of the
--- change. 'fromCondTree' is the one place the Cabal-syntax version is consulted.
+-- from there, and cabal's solver reads the field in 3.18 where it read the copy
+-- before), so reading the field is the same answer on either side of the
+-- change. 'fromCondTree' is the one place the Cabal-syntax version is
+-- consulted.
 data Tree a = Tree
     { treeData     :: a
     , treeBranches :: [Branch a]
@@ -344,25 +348,23 @@ flattenWith env at = go (Lit True)
 -- dependency trees to flag-guarded groups, resolving OS\/arch\/compiler conditions
 -- against the given platform and compiler.
 --
--- Those four are exactly the components cabal's solver includes
--- unconditionally. Test-suites and benchmarks are read only when the 'Stanzas'
--- ask for them, as they are there: cabal puts them behind a stanza that a plain
--- @cabal build@ never enables, so a solve for a build plan does not drag in a
--- package's own test dependencies, and a planner enables them per local package.
+-- Those four are exactly the components cabal's solver includes unconditionally.
+-- Test-suites and benchmarks are read only when the 'Stanzas' ask for them, as
+-- they are there: cabal puts them behind a stanza that a plain @cabal build@
+-- never enables, so a solve for a build plan does not drag in a package's own
+-- test dependencies, and a planner enables them per local package.
 --
 -- __A component that is not buildable contributes nothing__, and the gate is
--- Cabal-syntax's own 'addBuildableCondition', the function cabal's solver
--- applies to every component before converting it. It rewrites a tree to
--- @if <buildable> then <tree>@, to the empty tree where @buildable:@ is
--- statically @False@, and leaves it alone where it is statically @True@; so the
--- condition joins the guards already being accumulated and costs nothing where
--- nothing is conditional.
+-- Cabal-syntax's own 'addBuildableCondition', the function cabal's solver pipes
+-- every component through as well. It rewrites a tree to @if <buildable> then
+-- <tree>@, to the empty tree where @buildable:@ is statically @False@, and leaves
+-- it alone where it is statically @True@; so the condition joins the guards
+-- already being accumulated and costs nothing where nothing is conditional.
 --
--- Without the gate, a dependency is read out of a stanza that is never built.
+-- Without it a dependency would be read out of a stanza that is never built.
 -- @http2-5.4.4@'s @hpack-encode@ declares @aeson >=2@ and closes with
--- @if flag(devel) … else buildable: False@; with @devel@ off cabal drops the
--- stanza, and keeping it is enough to make @optparse-applicative ==0.15.1.0@
--- alongside @warp@ unsolvable here and solvable for cabal.
+-- @if flag(devel) … else buildable: False@; with @devel@ off the stanza is not
+-- built, and its @aeson >=2@ must not constrain a solve that includes @http2@.
 --
 -- The /library's/ buildability is deliberately not gated here. It is a stronger
 -- fact — an unbuildable library makes the whole release unusable, not merely
@@ -392,6 +394,9 @@ componentDeps stanzas platform compiler = depsWith Left stanzas platform compile
 -- An /undeclared/ flag named by a condition resolves to 'False', matching the
 -- convention 'evalCond' documents. It should not arise — a guard mentions only
 -- flags its own release declares.
+--
+-- This is what cabal's own solver does with a flag marked manual: it pins it to
+-- the same 'flagDefault'.
 componentDepsAtDefaults :: Stanzas -> Platform -> CompilerInfo -> GenericPackageDescription -> GuardedDeps
 componentDepsAtDefaults stanzas platform compiler = componentDepsAtDefaultsStored stanzas platform compiler . toStored
 
@@ -473,7 +478,8 @@ defaultFlags gpd = Map.fromList [(flagName f, flagDefault f) | f <- genPackageFl
 -- == No @pkg-config@ executable means @const False@
 --
 -- Not "assume satisfied". See 'PkgConfigPresent': that is cabal's reading of the
--- same situation.
+-- same situation, and a caller that builds the predicate from cabal's own
+-- database answers exactly as cabal would.
 buildableCondition
     :: PkgConfigPresent
     -> Platform
