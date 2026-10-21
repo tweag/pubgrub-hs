@@ -92,6 +92,7 @@ test-suite pubgrub-test
         PubGrub.Tutorial
         PubGrub.Version
         PubGrub.VersionSet
+        RelationSpec
         StoreInvariantsSpec
         Toy
         ToyDomainSpec
@@ -103,3 +104,15 @@ test-suite pubgrub-test
         , tasty-hunit      >=0.10  && <0.11
         , tasty-quickcheck >=0.11  && <0.12
         , text             >=2.1   && <2.2
+
+-- The @>>>@ examples in the library's Haddocks.
+test-suite pubgrub-doctests
+    import:         warnings, language
+    type:           exitcode-stdio-1.0
+    hs-source-dirs: doctest
+    main-is:        Main.hs
+    ghc-options:    -threaded
+    build-depends:
+        , base             >=4.21  && <4.23
+        , doctest-parallel >=0.4   && <0.5
+        , pubgrub

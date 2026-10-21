@@ -9,6 +9,11 @@ module PubGrub.Term where
 
 import           PubGrub.SetOps
 
+-- $setup
+-- >>> import qualified Data.Set as Set
+-- >>> import Data.Set (Set)
+-- >>> import PubGrub.SetOps
+
 -- ---------------------------------------------------------------------------
 -- Term
 -- ---------------------------------------------------------------------------
@@ -106,18 +111,18 @@ isEmptyTerm (Negative _) = False
 -- False
 --
 -- The empty set of states is ⊥, which is /positive/ ('isBottomTerm').
---
--- 'isSubsetOf' and 'isDisjoint' go by cases on polarity, so that neither
--- builds a term. Each case is the default definition evaluated by hand:
--- @P x ⊆ N y@ is @isEmpty (P (x ∩ y))@, @N x ⊆ N y@ is @isEmpty (P (y \\ x))@,
--- and a negative term is never empty, which is why @N x ⊆ P y@ is 'False' and
--- two negative terms are never disjoint ('isEmptyTerm').
 instance SetOps a => SetOps (Term a) where
     empty = Positive empty
     intersect = intersectTerm
     union = unionTerm
     difference = differenceTerm
     isEmpty = isEmptyTerm
+
+    -- The two tests by cases on polarity, so that neither builds a term. Each
+    -- case is the default definition evaluated by hand: P x ⊆ N y is
+    -- isEmpty (P (x ∩ y)), N x ⊆ N y is isEmpty (P (y \ x)), and a negative
+    -- term is never empty, which is why N x ⊆ P y is False and two negative
+    -- terms are never disjoint.
 
     isSubsetOf (Positive x) (Positive y) = x `isSubsetOf` y
     isSubsetOf (Positive x) (Negative y) = x `isDisjoint` y

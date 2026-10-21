@@ -16,3 +16,8 @@ packages:
 if impl(ghc >= 9.14)
     allow-newer: serialise:*, cborg:*, co-log:*
     constraints: co-log ^>=0.7
+
+-- pubgrub's doctests run the Haddock examples through the GHC API, which finds
+-- the library and its dependencies through a GHC environment file in the
+-- project root (gitignored).
+write-ghc-environment-files: always

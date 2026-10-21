@@ -4,6 +4,9 @@ module PubGrub.SetOps where
 import           Data.Set (Set)
 import qualified Data.Set as Set
 
+-- $setup
+-- >>> import qualified Data.Set as Set
+
 -- ---------------------------------------------------------------------------
 -- SetOps
 -- ---------------------------------------------------------------------------
