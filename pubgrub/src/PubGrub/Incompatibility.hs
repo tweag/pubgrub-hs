@@ -1,5 +1,8 @@
+{-# LANGUAGE DerivingStrategies     #-}
+{-# LANGUAGE StandaloneDeriving     #-}
 {-# LANGUAGE TypeFamilies           #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
+{-# LANGUAGE UndecidableInstances   #-}
 
 -- | Incompatibilities, the solver's only kind of knowledge, and the 'Domain'
 -- they are stated in.
@@ -170,6 +173,15 @@ data Cause d
     | Derived (Incompatibility d) (Incompatibility d)
       -- ^ the resolvent of two incompatibilities, in the order 'priorCause'
       -- took them
+
+-- The instances are structural, over the whole cause tree: two derived
+-- incompatibilities are equal when their terms and their derivations are, and
+-- 'show' prints the tree. They are what a test asserts with and what GHCi
+-- prints; a report of a failure is "PubGrub.Report".
+deriving stock instance (Eq (VarOf d), Eq (SetOf d), Eq (FactOf d)) => Eq (Incompatibility d)
+deriving stock instance (Eq (VarOf d), Eq (SetOf d), Eq (FactOf d)) => Eq (Cause d)
+deriving stock instance (Show (VarOf d), Show (SetOf d), Show (FactOf d)) => Show (Incompatibility d)
+deriving stock instance (Show (VarOf d), Show (SetOf d), Show (FactOf d)) => Show (Cause d)
 
 -- | The term an incompatibility states about @v@, if any.
 incompGet :: Domain d => VarOf d -> Incompatibility d -> Maybe (Term (SetOf d))

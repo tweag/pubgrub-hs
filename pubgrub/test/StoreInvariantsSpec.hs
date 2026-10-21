@@ -159,4 +159,10 @@ tests =
                     snd . insertClause (clause (Spec 0 True [(1, True, [1])])) . snd $
                         insertClause (clause (Spec 0 True [(1, True, [2])])) (emptyStoreWith rekeying)
             valid store @?= False
+        , testCase "a clause compares and shows structurally, cause included" $ do
+            let a = clause (Spec 0 True [(1, True, [1]), (2, False, [2])])
+                b = clause (Spec 1 True [(1, True, [1]), (2, False, [2])])
+            a @?= a
+            (a == b) @?= False
+            show a @?= "Incompatibility {incompTerms = fromList [(V 1,Positive (fromList [1])),(V 2,Negative (fromList [2]))], incompCause = Fact 0}"
         ]

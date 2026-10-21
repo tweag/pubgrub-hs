@@ -1,4 +1,7 @@
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DerivingStrategies   #-}
+{-# LANGUAGE LambdaCase           #-}
+{-# LANGUAGE StandaloneDeriving   #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- | Solving: 'solve' runs PubGrub over a t'PubGrub.Provider.Provider' and the
 -- incompatibilities it is asked to satisfy, and answers with a value for every
@@ -309,6 +312,9 @@ data SolveError d
       -- value so that a caller can report it.
       NoSatisfier (VarOf d) (Incompatibility d)
 
+deriving stock instance (Eq (VarOf d), Eq (ValueOf d), Eq (SetOf d), Eq (FactOf d)) => Eq (SolveError d)
+deriving stock instance (Show (VarOf d), Show (ValueOf d), Show (SetOf d), Show (FactOf d)) => Show (SolveError d)
+
 -- | What the solver is doing, one message per step of the search. 'solve'
 -- sends them to the log action it is given.
 data SolverMsg d
@@ -335,6 +341,9 @@ data SolverMsg d
       -- ones that may have changed since the last. The round right after a
       -- 'Backtracked' re-examines what the backtrack undid.
       Judged Int
+
+deriving stock instance (Eq (VarOf d), Eq (ValueOf d), Eq (SetOf d), Eq (FactOf d)) => Eq (SolverMsg d)
+deriving stock instance (Show (VarOf d), Show (ValueOf d), Show (SetOf d), Show (FactOf d)) => Show (SolverMsg d)
 
 -- | Solve: find a value for every variable the request needs, or prove that
 -- there is none.
