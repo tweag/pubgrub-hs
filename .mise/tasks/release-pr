@@ -49,12 +49,14 @@ for cabal in $cabals; do
   sed -i -E "s/^(version:[[:space:]]+).*/\1$next/" $cabal
 done
 
-# CHANGELOG.md at the top is the one the release notes come from. A package
-# in a subdirectory cannot list ../CHANGELOG.md in extra-doc-files, so it gets
-# a copy.
+# CHANGELOG.md at the top lists every package's changes and is the one the
+# release notes come from. A package in a subdirectory cannot list
+# ../CHANGELOG.md in extra-doc-files, and the one it ships goes to Hackage with
+# it, so it gets a changelog of its own: the same release, from the commits
+# that touched its directory.
 git cliff --tag "v$next" -o CHANGELOG.md
 for cabal in ${(M)cabals:#*/*}; do
-  cp CHANGELOG.md ${cabal:h}/CHANGELOG.md
+  git cliff --tag "v$next" --include-path "${cabal:h}/**" -o ${cabal:h}/CHANGELOG.md
 done
 
 jj describe -m "chore(release): $next"

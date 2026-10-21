@@ -3,15 +3,17 @@ name: CI
 # build compiles the project once per target and GHC, runs its test suites,
 # and uploads the executables as an archive; test unpacks that archive on a
 # separate runner, without a build tree, and runs the executables; sdist
-# makes the source distribution of every package in cabal.project; docs
-# makes the Haddock documentation for Hackage and for GitHub Pages; dist
-# checks the versions of the tested archives, the source distributions and
-# the documentation tarballs, and uploads them with SHA256SUMS as one
-# artifact; commits checks the commit messages of a PR; ci-ok is the one
-# check that the ruleset requires; release publishes dist when the head of
-# main is a release commit, made by `mise run release-pr`; pages then
-# publishes the documentation to GitHub Pages. Nothing is rebuilt after
-# testing.
+# makes the source distribution of every package in cabal.project; hackage
+# builds and tests the two published packages from their source
+# distributions alone, on the GHCs they claim; docs makes the Haddock
+# documentation for Hackage and for GitHub Pages; dist checks the versions of
+# the tested archives, the source distributions and the documentation
+# tarballs, and uploads them with SHA256SUMS as one artifact; format checks
+# that every Haskell file is as stylish-haskell writes it; commits checks the
+# commit messages of a PR; ci-ok is the one check that the ruleset requires;
+# release publishes dist when the head of main is a release commit, made by
+# `mise run release-pr`; pages then publishes the documentation to GitHub
+# Pages. Nothing is rebuilt after testing.
 #
 # A manual run (Actions > CI > Run workflow, or `gh workflow run ci.yml
 # --ref BRANCH`) makes every artifact of a release, in dist, without
@@ -54,6 +56,7 @@ jobs:
       fail-fast: false
       matrix:
         ghc:
+          - 9.12.2
           - 9.14.1
         target:
           - x86_64-linux
@@ -240,6 +243,81 @@ jobs:
           name: sdist
           path: sdist/*.tar.gz
           if-no-files-found: error
+
+  # The two packages meant for Hackage, built and tested from their source
+  # distributions alone: no cabal.project of the repository, so their own
+  # bounds have to solve. They run on the older GHCs their tested-with claims;
+  # 9.14.1 is left to the build matrix. cabal check is what Hackage runs on
+  # upload.
+  hackage:
+    name: Hackage packages, GHC ${{ matrix.ghc }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ghc: 9.10.3
+            packages: pubgrub
+          - ghc: 9.12.2
+            packages: pubgrub pubgrub-cabal
+    env:
+      PACKAGES: ${{ matrix.packages }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: haskell-actions/setup@0f8e8c99d88aeb3fbfd523f1ef2c6f762d10d64d # v2.12.1
+        id: setup
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: ${{ env.CABAL_VERSION }}
+
+      # PACKAGES is a list of names, split into words on purpose.
+      - name: Unpack the source distributions
+        run: |
+          # shellcheck disable=SC2086
+          cabal sdist $PACKAGES -o sdist
+          mkdir unpacked
+          for tarball in sdist/*.tar.gz; do
+            tar -xzf "$tarball" -C unpacked
+          done
+          {
+            echo "packages:"
+            for dir in unpacked/*/; do echo "  $dir"; done
+            echo "tests: True"
+          } > cabal.project.hackage
+          cat cabal.project.hackage
+
+      - name: Plan
+        run: cabal build --project-file=cabal.project.hackage all --dry-run
+
+      - name: Restore cabal store
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: cabal-store-hackage-ghc-${{ matrix.ghc }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+          restore-keys: cabal-store-hackage-ghc-${{ matrix.ghc }}-
+
+      - name: Build dependencies
+        run: cabal build --project-file=cabal.project.hackage all --only-dependencies -j
+
+      - name: Save cabal store
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      - name: Build and test
+        run: |
+          cabal build --project-file=cabal.project.hackage all -j
+          cabal test --project-file=cabal.project.hackage all --test-show-details=direct
+
+      - name: cabal check
+        run: |
+          for dir in unpacked/*/; do
+            (cd "$dir" && cabal check)
+          done
 
   # The documentation of every package with a library, built with
   # RELEASE_GHC: a tarball for Hackage (`cabal upload --documentation`),
@@ -433,7 +511,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [build, test, sdist, docs, dist, commits, format]
+    needs: [build, test, sdist, hackage, docs, dist, commits, format]
     runs-on: ubuntu-latest
     steps:
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')

@@ -63,13 +63,7 @@ Add `@VERSION` to pin a version, for example `github:tweag/pubgrub-hs@0.1.0.0`. 
 
 ### From source
 
-Each release has the source distribution of every package, `PACKAGE-VERSION.tar.gz`. With GHC 9.14 and cabal, unpack the one with the executables and install from it:
-
-```
-tar -xzf pubgrub-hs-VERSION.tar.gz
-cd pubgrub-hs-VERSION
-cabal install exe:pubgrub
-```
+Each release has the source distribution of every package, `PACKAGE-VERSION.tar.gz`. The `pubgrub` executable is in `pubgrub-cli`, which depends on the unpublished `pubgrub-hs`, so a source distribution alone does not install it: build it from a checkout of the release's tag, as in [Build](#build) below, with `cabal install exe:pubgrub`. The source distributions of `pubgrub` and `pubgrub-cabal` are what goes to Hackage.
 
 ## Requirements
 
