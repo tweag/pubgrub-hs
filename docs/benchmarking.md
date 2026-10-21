@@ -3,7 +3,7 @@
 How to reproduce every number in [STATUS.md](STATUS.md), and what each one is worth.
 
 ```sh
-cabal test                    # 229 unit, property and golden tests, ~0.3 s
+cabal test all                # 274 unit, property and golden tests, ~0.5 s
 scripts/gate.sh               # the eight gates that decide whether a change is kept
 cabal run pubgrub-harness     # both solvers over both problem sets; writes the two reports
 scripts/check-stats.sh        # --stats against bench/summarise.awk, on every problem
@@ -34,16 +34,17 @@ sides.
 ## Tests
 
 ```sh
-cabal test                                  # everything
-cabal test --test-show-details=direct       # stream results as they run
+cabal test all                              # everything
+cabal test all --test-show-details=direct   # stream results as they run
 ```
 
-The suite is [tasty], so a substring filter selects a group or a single case:
+Each package with tests has one suite, `pubgrub-test`, `pubgrub-cabal-test` and
+`pubgrub-hs-test`. They are [tasty], so a substring filter selects a group or a case:
 
 ```sh
-cabal run pubgrub-hs-test -- -p InstanceSet          # one module's group
-cabal run pubgrub-hs-test -- -p 'size control'       # one case
-cabal run pubgrub-hs-test -- --quickcheck-tests 1000 # more property cases
+cabal run pubgrub-cabal-test -- -p InstanceSet          # one module's group
+cabal run pubgrub-cabal-test -- -p isSubsetOf           # one property, in each group that has it
+cabal run pubgrub-cabal-test -- --quickcheck-tests 1000 # more property cases
 ```
 
 Three groups repay knowing about.

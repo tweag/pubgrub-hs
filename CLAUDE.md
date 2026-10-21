@@ -62,8 +62,8 @@ design decision per section, with the evidence that earned it.
 ## Build, test, measure
 
 ```sh
-cabal build
-cabal test all                       # 259 tests over the three packages, ~0.5 s
+cabal build all
+cabal test all                       # 274 tests over the three packages that have them, ~0.5 s
 cabal run exe:pubgrub -- aeson              # the driver; add -v for the search trace
 cabal run exe:pubgrub -- 'aeson <2'         # a target is ONE argument: package and range
 cabal run exe:pubgrub -- hlint 'aeson <2'   # several targets, solved together
