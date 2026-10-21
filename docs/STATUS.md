@@ -12,7 +12,7 @@
 > Hindsight bank, one document per decision: `decision-log-index` lists the records in
 > order, and `decision-log-dropped-directions` lists the directions that were dropped.
 >
-> **Checked against the tree on 2026-10-21.** 295 tests pass over the three packages and
+> **Checked against the tree on 2026-10-21.** 300 tests pass over the three packages and
 > [`scripts/gate.sh`](../scripts/gate.sh) passes, at the index-state pinned in
 > [`bench/index-state`](../bench/index-state), `2026-09-09T02:42:09Z`.
 
