@@ -15,7 +15,7 @@
 module ToyDomainSpec (tests) where
 
 import           Data.Functor.Identity   (runIdentity)
-import           Data.List               (sort)
+import           Data.List               (sort, tails)
 import qualified Data.Map.Strict         as Map
 import qualified Data.Set                as Set
 import           Data.Text               (Text)
@@ -28,7 +28,8 @@ import           PubGrub.Provider        (Provider (..))
 import           PubGrub.Solver          (SolveError (..), solve)
 import           PubGrub.Term            (Term (..))
 import           Test.Tasty              (TestTree, testGroup)
-import           Test.Tasty.HUnit        (assertFailure, testCase, (@?=))
+import           Test.Tasty.HUnit        (assertBool, assertFailure, testCase,
+                                          (@?=))
 import           Toy
 
 tests :: TestTree
@@ -65,6 +66,10 @@ tests =
                 plan broken [wants app [1]] @?= Nothing
             , testCase "the explanation" $
                 T.lines (why broken [wants app [1]]) @?= expectedProof
+            , testCase "the README shows its explanation" $ do
+                readme <- T.lines . T.pack <$> readFile "README.md"
+                assertBool "the README quotes the explanation the tutorial prints" $
+                    expectedProof `elem` [take (length expectedProof) rest | rest <- tails readme]
             , testCase "the original world has a plan" $
                 why world [wants app [1]] @?= "There is a plan."
             ]

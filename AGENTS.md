@@ -63,7 +63,7 @@ design decision per section, with the evidence that earned it.
 
 ```sh
 cabal build all
-cabal test all                       # 294 tests over the three packages that have them, and pubgrub's doctests
+cabal test all                       # 295 tests over the three packages that have them, and pubgrub's doctests
 cabal run exe:pubgrub -- aeson              # the driver; add -v for the search trace
 cabal run exe:pubgrub -- 'aeson <2'         # a target is ONE argument: package and range
 cabal run exe:pubgrub -- hlint 'aeson <2'   # several targets, solved together

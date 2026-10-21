@@ -3,7 +3,7 @@
 How to reproduce every number in [STATUS.md](STATUS.md), and what each one is worth.
 
 ```sh
-cabal test all                # 294 unit, property and golden tests, ~0.5 s
+cabal test all                # 295 unit, property and golden tests, ~0.5 s
 scripts/gate.sh               # the eight gates that decide whether a change is kept
 cabal run pubgrub-harness     # both solvers over both problem sets; writes the two reports
 scripts/check-stats.sh        # --stats against bench/summarise.awk, on every problem

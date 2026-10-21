@@ -1,24 +1,45 @@
 # pubgrub
 
-A native Haskell implementation of [PubGrub][], the version-solving algorithm
-behind pub, Cargo's resolver and uv, written once over any domain.
+[PubGrub][] is a version-solving algorithm. Given a request and a way to read
+what each version of each package needs, it finds a version for every package
+the request needs, or proves that there is none, and the proof can be written
+out for a person to read:
 
-- `PubGrub.Incompatibility.Domain` says what a variable, a value, a set of
-  values and an external fact are.
-- `PubGrub.Provider` is the one callback the solver reads the world through:
-  given a variable and the set it is constrained to, commit to one value and
-  state the incompatibilities that choice entails.
-- `PubGrub.Solver.solve` resolves the seeds, or hands back the terminal
-  incompatibility with its whole derivation.
-- `PubGrub.Report` renders that derivation as the numbered proof the
-  specification describes, in words a `Formatter` supplies.
+```
+1. Because lib 1 depends on util 1 and util has no version 1, lib 1 is forbidden.
 
-To get started, follow the tutorial in the `PubGrub.Tutorial` module: it builds
-a small domain, solves in it, and explains a failure.
+Because util has no version 2 and lib 2 depends on util 2, lib 2 is forbidden.
+And because lib 1 is forbidden (1), lib 1 or 2 is forbidden.
+So, because app 1 depends on lib 1 or 2 and app 1 is requested, version solving failed.
+```
 
-The instantiation for cabal packages is the [`pubgrub-cabal`][cabal] package.
-The algorithm follows pub's specification, which the repository vendors as the
-authority.
+This package implements it in Haskell, once, for any domain: the things being
+solved for need not be packages, and their values need not be versions. You
+describe the domain with a type class, answer the solver's questions with a
+callback, and choose the words its explanations use.
+
+## Using it
+
+Add `pubgrub` to your package's `build-depends`, and `import PubGrub`.
+
+## Documentation
+
+The documentation is in the package's modules:
+
+- **[`PubGrub.Tutorial`][tutorial]** — start here. It builds a small domain,
+  solves in it, breaks it, and explains the failure. The proof above is its
+  output.
+- **[`PubGrub.Cookbook`][cookbook]** — how-to guides: versions and ranges,
+  requests and constraints, a provider over an index of releases,
+  explanations in your own words, watching the search, releasing a lock.
+- **[`PubGrub`][front]** — how the solver sees a problem, and the reference
+  for everything the library exports.
+
+The domain of Haskell packages, over Cabal's package descriptions, is the
+[`pubgrub-cabal`][cabal] package.
 
 [PubGrub]: https://github.com/dart-lang/pub/blob/master/doc/solver.md
+[tutorial]: https://hackage.haskell.org/package/pubgrub/docs/PubGrub-Tutorial.html
+[cookbook]: https://hackage.haskell.org/package/pubgrub/docs/PubGrub-Cookbook.html
+[front]: https://hackage.haskell.org/package/pubgrub/docs/PubGrub.html
 [cabal]: https://hackage.haskell.org/package/pubgrub-cabal

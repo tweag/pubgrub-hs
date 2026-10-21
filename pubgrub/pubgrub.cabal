@@ -3,19 +3,19 @@ name:               pubgrub
 version:            0.1.0.0
 synopsis:           The PubGrub version solver, over any domain
 description:
-    A native implementation of PubGrub, the version-solving algorithm behind
-    pub, Cargo's resolver and uv: unit propagation with conflict-driven clause
-    learning, and a proof of why a resolution failed when one does.
+    PubGrub is a version-solving algorithm, the one Dart's pub and Python's uv
+    use: unit propagation with conflict-driven learning, and, when there is no
+    solution, a proof of why that can be written out for a person to read.
 
-    The solver is written once over a @Domain@ — what a variable, a value, a set
-    of values and an external fact are — and reads the world through one
-    callback, @expand@. A failed solve hands back the terminal incompatibility
-    with its whole derivation, and @PubGrub.Report@ renders it as the numbered
-    proof the specification describes, in words a @Formatter@ supplies.
+    This is a Haskell implementation, written once for any domain. A type class
+    says what the variables, values, sets of values and facts are; a callback
+    answers the solver's questions one variable at a time; and the explanation
+    of a failure is worded by the domain.
 
-    The instantiation for cabal packages is the @pubgrub-cabal@ package. The
-    algorithm follows pub's specification, vendored in the repository as the
-    authority.
+    Start with the tutorial in "PubGrub.Tutorial". "PubGrub.Cookbook" has
+    how-to guides, and "PubGrub" explains the model and documents everything
+    the library exports. The domain of Haskell packages is the @pubgrub-cabal@
+    package.
 category:           Distribution
 license:            BSD-3-Clause
 license-file:       LICENSE
