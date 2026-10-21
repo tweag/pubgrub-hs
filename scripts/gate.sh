@@ -225,12 +225,15 @@ fi
 run_tests() {
     local name=$1 pattern=$2
     local log="$OUT/tests.$name.log"
-    # Three packages, three suites: a pattern selects by name in each, and a
-    # suite where it matches nothing passes with zero tests.
+    # A pattern selects by name in each of the three tasty suites, and a suite
+    # where it matches nothing passes with zero tests. pubgrub's doctests take
+    # no pattern, so they run with the whole suite only.
     if [ -z "$pattern" ]; then
         timeout "$TIMEOUT" cabal test all >"$log" 2>&1
     else
-        timeout "$TIMEOUT" cabal test all --test-options="-p $pattern" >"$log" 2>&1
+        timeout "$TIMEOUT" cabal test pubgrub:test:pubgrub-test \
+            pubgrub-cabal:test:pubgrub-cabal-test pubgrub-hs:test:pubgrub-hs-test \
+            --test-options="-p $pattern" >"$log" 2>&1
     fi
     local code=$?
     local count
