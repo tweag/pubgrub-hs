@@ -82,7 +82,7 @@ optionsParser :: Parser Options
 optionsParser =
     Options
         <$> optional (strOption (long "exe" <> metavar "PATH"
-                <> help "The pubgrub driver (default: $PUBGRUB_EXE, else `cabal list-bin pubgrub`)"))
+                <> help "The pubgrub driver (default: $PUBGRUB_EXE, else `cabal list-bin exe:pubgrub`)"))
         <*> option auto (long "reps" <> metavar "N" <> value 3 <> showDefault
                 <> help "Runs per problem and solver; times are medians over them")
         <*> strOption (long "output" <> metavar "DIR" <> value "bench/output" <> showDefault
@@ -938,7 +938,7 @@ resolveExe Nothing = do
     case fromEnv of
         Just path | not (null path) -> pure path
         _ -> do
-            r <- tryIO (readProcess "cabal" ["list-bin", "pubgrub"] "")
+            r <- tryIO (readProcess "cabal" ["list-bin", "exe:pubgrub"] "")
             case r of
                 Right out | not (null (trim out)) -> pure (trim out)
                 _ -> do

@@ -7,7 +7,7 @@
 -- Hackage packages with the native PubGrub solver, over a real (lazily read)
 -- index.
 --
--- @cabal run pubgrub -- aeson@ (each target may carry a version range, quoted as
+-- @cabal run exe:pubgrub -- aeson@ (each target may carry a version range, quoted as
 -- one argument: @... 'aeson >=2'@), and several targets are solved together:
 -- @... 'aeson <2' 'lens >=5'@, which is what a real @cabal build@ asks for and
 -- the only way to reach a conflict between two packages rather than between one
@@ -82,7 +82,7 @@ import           Options.Applicative                         (Parser, argument,
                                                               option, progDesc,
                                                               short, switch,
                                                               value)
-import qualified Paths_pubgrub_hs                            as Paths
+import qualified Paths_pubgrub_cli                           as Paths
 import           PubGrub.Cabal                               (Cabal,
                                                               CabalFact (..))
 import           PubGrub.Cabal.Flatten                       (FlagModel (..))

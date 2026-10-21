@@ -16,8 +16,8 @@
 `pubgrub`, the solver, depends on `base`, `containers`, `text` and `co-log-core`, and
 nothing from the cabal ecosystem. `pubgrub-cabal`, the cabal domain, adds
 `Cabal-syntax` and no more. Neither depends on `cabal-install` or on
-`cabal-install-solver`; the bridge holds that entanglement, and the bridge is a private
-library of the unpublished harness package. Since 2026-10-19 the three are separate
+`cabal-install-solver`; the bridge holds that entanglement, and the bridge is the
+unpublished `pubgrub-hs` package. The three are separate
 packages in one `cabal.project`, the first two with `cabal check` clean, so the split
 is a `build-depends` line rather than a sublibrary's visibility flag.
 
@@ -346,7 +346,7 @@ writes `_cache/derived-index.cbor` (94.8 MB) plus a 2.5 MB index keyed by tar bl
 `Bridge.Provider` consults it first and falls back to parsing on any miss.
 
 Four properties to know before you touch
-[`Bridge.Hackage.Store`](../bridge/Bridge/Hackage/Store.hs):
+[`Bridge.Hackage.Store`](../pubgrub-hs/src/Bridge/Hackage/Store.hs):
 
 - **It is a cache, not a source of truth.** `openStore` answers `Nothing` for a
   missing, unreadable or stale-format store, and every miss parses instead. Removing
@@ -372,7 +372,7 @@ Four properties to know before you touch
   one store stays valid across toolchains.
   `componentDepsAtDefaultsStored` and `buildableAtDefaultsStored` run the *same*
   `flattenWith` over the *same* trees as their description-taking counterparts, so
-  the two paths agree by construction, and `test/StoredSpec.hs` asserts it anyway.
+  the two paths agree by construction, and `pubgrub-hs/test/StoredSpec.hs` asserts it anyway.
 - **The trees are ours, not Cabal-syntax's.** `Flatten.Tree` is Cabal-syntax's
   `CondTree` with each node reduced to what is ever read, and a node's dependencies
   are read off its `BuildInfo` (`targetBuildDepends`) rather than off the tree.
@@ -1066,7 +1066,7 @@ changed cabal's plans but left `futhark` failing exactly as before.
 **All four unconditional components are covered**: library, sub-libraries, foreign
 libraries and executables, the last three gated. Foreign libraries were the last one
 in, added on 2026-09-10 for completeness rather than to fix anything — no corpus
-problem has one, so `test/FlattenSpec.hs` is the only thing holding them. The two
+problem has one, so `pubgrub-hs/test/FlattenSpec.hs` is the only thing holding them. The two
 that stay out of a dependency's reduction, test-suites and benchmarks, are the two
 cabal itself puts behind a `Stanza` that a plain `cabal build` never enables.
 

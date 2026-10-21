@@ -1,0 +1,39 @@
+cabal-version:   3.0
+name:            pubgrub-harness
+version:         0.1.0.0
+license:         BSD-3-Clause
+license-file:    LICENSE
+copyright:       (c) 2026 Tweag I/O by Modus Create
+author:          Andrea Bedini
+maintainer:      andrea.bedini@moduscreate.com
+build-type:      Simple
+extra-doc-files: CHANGELOG.md
+synopsis:        The benchmark and explanation harness for pubgrub
+description:
+    The one command that produces both deliverables. It drives the @pubgrub@
+    executable as a child process and depends on neither solver library.
+
+common warnings
+    ghc-options: -Wall
+
+-- The harness: the one command that produces both deliverables. It drives the
+-- pubgrub executable as a child process, once per solver, per problem, per
+-- repetition, because peak memory is a per-process number, and writes
+-- bench/output/benchmark.md and bench/output/showcase.md. See app/Harness.hs and
+-- docs/benchmarking.md. It measures; scripts/gate.sh decides.
+executable pubgrub-harness
+    import:             warnings
+    hs-source-dirs:     app
+    main-is:            Harness.hs
+    build-depends:
+        , base
+        , bytestring
+        , containers
+        , directory
+        , filepath
+        , optparse-applicative
+        , process
+        , text
+        , time
+    default-language:   GHC2021
+    default-extensions: ImportQualifiedPost

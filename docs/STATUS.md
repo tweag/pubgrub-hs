@@ -22,7 +22,7 @@
 
 | area | state |
 | --- | --- |
-| Packages | `pubgrub` (the solver, over any domain) and `pubgrub-cabal` (the cabal domain) are separate packages with `cabal check` clean, ready for Hackage and not yet uploaded; this package keeps the bridge, the driver and the harness ([DESIGN.md §1](DESIGN.md#1-the-core-knows-nothing-about-cabal)) |
+| Packages | `pubgrub` (the solver, over any domain) and `pubgrub-cabal` (the cabal domain) are separate packages with `cabal check` clean, ready for Hackage and not yet uploaded; three unpublished packages keep the bridge (`pubgrub-hs`), the driver (`pubgrub-cli`) and the harness (`pubgrub-harness`) ([DESIGN.md §1](DESIGN.md#1-the-core-knows-nothing-about-cabal)) |
 | Hackage index | our own reader over the cached `01-index.tar`, through `hackage-security`. No `cabal-install` dependency |
 | Index-state | `--index-state T` gives both solvers the index as it was at `T`, revisions included, with cabal's semantics. A run prints the state it is really at |
 | Derived index | every release parsed once into `_cache/derived-index.cbor`. A read is a CBOR decode, served only for the revision in force |

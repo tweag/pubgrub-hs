@@ -1,0 +1,71 @@
+cabal-version:   3.0
+name:            pubgrub-cli
+version:         0.1.0.0
+license:         BSD-3-Clause
+license-file:    LICENSE
+copyright:       (c) 2026 Tweag I/O by Modus Create
+author:          Andrea Bedini
+maintainer:      andrea.bedini@moduscreate.com
+build-type:      Simple
+extra-doc-files: CHANGELOG.md
+synopsis:        The pubgrub driver and the derived-index builder
+description:
+    The @pubgrub@ executable solves for one or more targets with either solver,
+    pubgrub or cabal's own, over the same index and the same world. The
+    @pubgrub-index@ executable builds the derived index the bridge reads.
+
+common warnings
+    ghc-options: -Wall
+
+executable pubgrub
+    import:             warnings
+    -- -rtsopts so a run can be asked for GC statistics (+RTS -s) or a heap
+    -- profile without rebuilding; peak residency is one of the two things this
+    -- project exists to measure.
+    ghc-options:        -rtsopts
+    hs-source-dirs:     app
+    main-is:            Main.hs
+    other-modules:      Paths_pubgrub_cli
+    autogen-modules:    Paths_pubgrub_cli
+    build-depends:
+        , base
+        , Cabal
+        , cabal-install-solver
+        , Cabal-syntax
+        , co-log
+        , containers
+        , hackage-security
+        , http-client
+        , mtl
+        , optparse-applicative
+        , pubgrub
+        , pubgrub-cabal
+        , pubgrub-hs
+        , text
+        , unliftio
+    default-language:   GHC2021
+    default-extensions: ImportQualifiedPost
+
+-- Builds the derived index the bridge reads: every release parsed once and kept
+-- in the pre-environment form. See app/BuildIndex.hs and Bridge.Hackage.Store.
+executable pubgrub-index
+    import:             warnings
+    ghc-options:        -rtsopts
+    hs-source-dirs:     app
+    main-is:            BuildIndex.hs
+    build-depends:
+        , base
+        , Cabal-syntax
+        , co-log
+        , containers
+        , directory
+        , hackage-security
+        , http-client
+        , mtl
+        , optparse-applicative
+        , pubgrub-cabal
+        , pubgrub-hs
+        , text
+        , unliftio
+    default-language:   GHC2021
+    default-extensions: ImportQualifiedPost

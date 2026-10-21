@@ -377,7 +377,7 @@ space:
   theory, let clingo supply CDCL. If a SAT/UNSAT oracle for differential testing is
   ever built, build it this way, not as a plain encoding.
 - **ASPIF, as boundary discipline.** Their split is grounder | solver. Ours is
-  `bridge` | `pubgrub-hs`, and the mapping is closer than it looks — our `Provider` is
+  `pubgrub-hs` (the bridge) | `pubgrub`, and the mapping is closer than it looks — our `Provider` is
   playing the grounder's role, being the only component that consults the index
   (`expand'` is where reality is consulted). Their argument is that pinning that
   interface down as a narrow explicit format is what let three grounders and a dozen

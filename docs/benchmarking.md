@@ -25,7 +25,7 @@ take is then against a different machine from the one STATUS.md describes.
 
 The store is a cache. Removing `_cache/derived-index.*` costs speed and never
 correctness, because every miss parses instead. Raise `storeFormatVersion` in
-`bridge/Bridge/Hackage/Store.hs` on any encoding change.
+`pubgrub-hs/src/Bridge/Hackage/Store.hs` on any encoding change.
 
 **The cabal baseline does not use it.** `Bridge.Cabal.Baseline` parses every release it
 inspects. That is one of the two reasons the index work is not the same work on the two
@@ -139,7 +139,7 @@ repetition count and the three restrictions. They carry a warning when any run p
 a `.cabal` file, when the driver predates `--stats` and `--plan` (the harness probes
 `--help`), and when anything varied.
 
-Options: `--exe PATH` (default `$PUBGRUB_EXE`, else `cabal list-bin pubgrub`),
+Options: `--exe PATH` (default `$PUBGRUB_EXE`, else `cabal list-bin exe:pubgrub`),
 `--reps N` (3), `--output DIR` (`bench/output`), `--timeout SECONDS` (300),
 `--set bench|corpus|both`, and positional problems.
 

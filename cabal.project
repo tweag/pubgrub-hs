@@ -1,12 +1,15 @@
--- The three packages of this repository, in dependency order: the solver, its
--- cabal instantiation, and the research harness that compares the two solvers.
--- The first two are meant for Hackage; the third stays here.
+-- The five packages of this repository, in dependency order: the solver, its
+-- cabal instantiation, the bridge to Hackage and to cabal's own solver, the
+-- driver, and the research harness that compares the two solvers. The first two
+-- are meant for Hackage; the other three stay here.
 packages:
     pubgrub
     pubgrub-cabal
-    .
+    pubgrub-hs
+    pubgrub-cli
+    pubgrub-harness
 
--- GHC 9.14 ships base 4.22 and containers 0.8, which the harness package's
+-- GHC 9.14 ships base 4.22 and containers 0.8, which the unpublished packages'
 -- serialise 0.2.6.1 (with its cborg) and co-log 0.7.0.0 do not admit yet. Both
 -- build against them; the constraint keeps the solver from escaping to a co-log
 -- old enough to have no such bound. The two published packages need nothing here.

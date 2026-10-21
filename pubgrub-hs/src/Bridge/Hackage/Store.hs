@@ -141,7 +141,7 @@ storeFormatVersion = 11
 
 -- These are orphans. They belong here rather than in Cabal-syntax, and wrapping
 -- every type in a newtype to avoid the orphan would cost more clarity than it
--- buys in a private library.
+-- buys in an unpublished library.
 --
 -- Most go through 'Generic'. The exceptions are the types whose representation is
 -- abstract or lacks a 'Generic' instance, and each of those is encoded through the

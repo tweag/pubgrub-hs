@@ -64,14 +64,14 @@ design decision per section, with the evidence that earned it.
 ```sh
 cabal build
 cabal test all                       # 259 tests over the three packages, ~0.5 s
-cabal run pubgrub -- aeson              # the driver; add -v for the search trace
-cabal run pubgrub -- 'aeson <2'         # a target is ONE argument: package and range
-cabal run pubgrub -- hlint 'aeson <2'   # several targets, solved together
-cabal run pubgrub -- --stats aeson      # + search counts and phase timings, no trace
-cabal run pubgrub -- --cabal aeson      # cabal's solver, same index (the baseline)
-cabal run pubgrub -- --flags search aeson   # search the automatic flags, either solver (default: fixed at defaults)
-cabal run pubgrub -- --constraint 'aeson <2' pandoc   # a range aeson must be in if chosen, either solver; repeatable
-cabal run pubgrub -- --index-state 2026-09-03T00:00:00Z aeson   # the index as it was then, either solver
+cabal run exe:pubgrub -- aeson              # the driver; add -v for the search trace
+cabal run exe:pubgrub -- 'aeson <2'         # a target is ONE argument: package and range
+cabal run exe:pubgrub -- hlint 'aeson <2'   # several targets, solved together
+cabal run exe:pubgrub -- --stats aeson      # + search counts and phase timings, no trace
+cabal run exe:pubgrub -- --cabal aeson      # cabal's solver, same index (the baseline)
+cabal run exe:pubgrub -- --flags search aeson   # search the automatic flags, either solver (default: fixed at defaults)
+cabal run exe:pubgrub -- --constraint 'aeson <2' pandoc   # a range aeson must be in if chosen, either solver; repeatable
+cabal run exe:pubgrub -- --index-state 2026-09-03T00:00:00Z aeson   # the index as it was then, either solver
 cabal run pubgrub-index -- --index-state "$(cat bench/index-state)"   # the derived index at the pin (~120 s, once per refresh)
 scripts/gate.sh                      # every check that must not regress
 cabal run pubgrub-harness            # both solvers, both sets; writes bench/output/{benchmark,showcase}.md
@@ -114,9 +114,9 @@ desktop), total allocation from `+RTS -s` is the stable stand-in for time, and
 
 ## Architecture
 
-Three packages in one `cabal.project`, with a hard dependency boundary. The first two
-are meant for Hackage; the third is this repository's research harness and stays here.
-The cabal-install entanglement is quarantined in the third so the solver and its cabal
+Five packages in one `cabal.project`, with a hard dependency boundary. The first two
+are meant for Hackage; the other three are this repository's research harness and stay
+here. The cabal-install entanglement is quarantined in the third, `pubgrub-hs`, so the solver and its cabal
 instantiation stay lightweight, and another tool can drive the solver over its own
 index with the two published packages alone.
 
@@ -134,22 +134,24 @@ pubgrub-cabal (package) ──── pubgrub, Cabal-syntax, base, containers, te
   installed set (PubGrub.Cabal.Installed), and the provider rule
   (PubGrub.Cabal.Provider.mkExpand) over a ReleaseSource
         ▲  a ReleaseSource and an InstalledDb
-pubgrub-hs (package, unpublished)
-  bridge (private library) ──── cabal-install-solver, Cabal, hackage-security, http-client
-    index acquisition, the derived index, the compiler's world on this machine
-    builds a package index and feeds it to BOTH:
-      ├─ cabal's modularResolver, via Bridge.Cabal.Baseline   (the baseline)
-      └─ our own Provider
-          ▲
+pubgrub-hs (package, unpublished) ──── cabal-install-solver, Cabal, hackage-security, http-client
+  the bridge: index acquisition, the derived index, the compiler's world on this machine
+  builds a package index and feeds it to BOTH:
+    ├─ cabal's modularResolver, via Bridge.Cabal.Baseline   (the baseline)
+    └─ our own Provider
+        ▲
+pubgrub-cli (package, unpublished)
   app/Main.hs — the `pubgrub` driver: --cabal picks the baseline,
                 --stats prints counts and phases, --plan lines prints a diffable plan,
                 --index-state pins the index to a moment, for both solvers
-          ▲
+  app/BuildIndex.hs — `pubgrub-index`: builds the derived index
+        ▲  a child process
+pubgrub-harness (package, unpublished)
   app/Harness.hs — `pubgrub-harness`: runs `pubgrub` as a child process per solver,
                    problem and repetition; writes bench/output/benchmark.md and showcase.md
 ```
 
-**Three packages, eight components:**
+**Five packages, eight components:**
 
 | component | what it is |
 | --- | --- |
@@ -157,11 +159,11 @@ pubgrub-hs (package, unpublished)
 | `pubgrub` test-suite | `pubgrub/test/ToyDomainSpec.hs` — the solver and the walker over a domain that is not cabal's; it imports nothing from `PubGrub.Cabal`, so the core leaning on cabal is a compile error here first |
 | `pubgrub-cabal` library | `pubgrub-cabal/src/` — `PubGrub/Cabal.hs` and `PubGrub/Cabal/{Variable,Value,InstanceSet,PreInstalled,Version,VersionSet,Pretty,Flatten,Installed,Provider,Report}.hs`, `PubGrub/Cabal/Report/{Rule,Wording,Headline,Layout}.hs`. Cabal-syntax only. `cabal check` clean |
 | `pubgrub-cabal` test-suite | `pubgrub-cabal/test/` — 10 spec modules plus `test/golden/` |
-| library `bridge` (private) | `bridge/` — `Bridge/{Hackage,Provider}.hs`, `Bridge/Hackage/{HttpClient,Store,Unlifted}.hs`, `Bridge/Cabal/{Baseline,InstalledPkg}.hs` |
-| executable `pubgrub` | `app/Main.hs` — the CLI driver |
-| executable `pubgrub-index` | `app/BuildIndex.hs` — builds the derived index |
-| executable `pubgrub-harness` | `app/Harness.hs` — the harness. Depends on neither library: it drives the `pubgrub` executable as a child, parses its `stats:`, `phases:` and `plan:` lines, and writes the two reports |
-| `pubgrub-hs` test-suite | `test/` — the 3 spec modules that need the bridge or `cabal-install-solver` |
+| `pubgrub-hs` library | `pubgrub-hs/src/` — the bridge: `Bridge/{Hackage,Provider}.hs`, `Bridge/Hackage/{HttpClient,Store,Unlifted}.hs`, `Bridge/Cabal/{Baseline,InstalledPkg}.hs` |
+| `pubgrub-hs` test-suite | `pubgrub-hs/test/` — the 3 spec modules that need the bridge or `cabal-install-solver` |
+| `pubgrub-cli` executable `pubgrub` | `pubgrub-cli/app/Main.hs` — the CLI driver. Name it `exe:pubgrub` to cabal: plain `pubgrub` is the solver package |
+| `pubgrub-cli` executable `pubgrub-index` | `pubgrub-cli/app/BuildIndex.hs` — builds the derived index |
+| `pubgrub-harness` executable | `pubgrub-harness/app/Harness.hs` — the harness. Depends on neither library: it drives the `pubgrub` executable as a child, parses its `stats:`, `phases:` and `plan:` lines, and writes the two reports |
 
 **What each cabal and bridge module does.**
 
@@ -201,8 +203,8 @@ pubgrub-hs (package, unpublished)
 
 **Dependency boundary.** We avoid `cabal-install` entirely, including for the
 baseline. We do depend on `hackage-security`, and there is no `tar` dependency.
-`cabal-install-solver` is a dependency of `bridge`, of the `pubgrub` executable and of
-this package's test-suite. It is **not** a dependency of `pubgrub` or of
+`cabal-install-solver` is a dependency of `pubgrub-hs` (the bridge) and its
+test-suite, and of the `pubgrub` executable. It is **not** a dependency of `pubgrub` or of
 `pubgrub-cabal`, which is what lets latti depend on those two and nothing else, and
 what lets them go to Hackage.
 
@@ -291,8 +293,7 @@ examples, so a wording change earns its way past them.
 
 ## Conventions
 
-- GHC 9.12 or 9.14 (`base >=4.21 && <4.23`, CI on 9.14.1); `cabal-version: 3.0` in the two published packages,
-  `3.8` in the harness package
+- GHC 9.12 or 9.14 (`base >=4.21 && <4.23`, CI on 9.14.1); `cabal-version: 3.0` in every package
 - `default-language: GHC2021` on every component, with
   `default-extensions: ImportQualifiedPost`. The test-suite is the one stanza that
   lacks the extension.

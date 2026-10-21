@@ -98,19 +98,19 @@ last line of a solve is the tell.
 ## Run
 
 ```sh
-cabal run pubgrub -- [-v|--verbose] [--stats] [--plan tree|lines] TARGET...
+cabal run exe:pubgrub -- [-v|--verbose] [--stats] [--plan tree|lines] TARGET...
 ```
 
 A **target** is a package with an optional version range, as *one* argument — the
 same syntax `cabal build` takes. Give more than one to solve for them together.
 
 ```sh
-cabal run pubgrub -- hashable            # any version
-cabal run pubgrub -- 'aeson >=2'         # constrained (one argument: quote it)
-cabal run pubgrub -- hlint 'aeson <2'    # two targets, solved together
-cabal run pubgrub -- -v 'aeson <2'       # ... plus the solver's search trace
-cabal run pubgrub -- --stats aeson       # ... plus search counts and phase timings, no trace
-cabal run pubgrub -- --cabal aeson       # cabal's own solver, over the same index
+cabal run exe:pubgrub -- hashable            # any version
+cabal run exe:pubgrub -- 'aeson >=2'         # constrained (one argument: quote it)
+cabal run exe:pubgrub -- hlint 'aeson <2'    # two targets, solved together
+cabal run exe:pubgrub -- -v 'aeson <2'       # ... plus the solver's search trace
+cabal run exe:pubgrub -- --stats aeson       # ... plus search counts and phase timings, no trace
+cabal run exe:pubgrub -- --cabal aeson       # cabal's own solver, over the same index
 ```
 
 `--cabal` runs cabal-install's modular solver instead of ours, fed from **the same
@@ -187,7 +187,7 @@ documentation of every package with a library, as
 
 ## Layout
 
-Three packages in one `cabal.project`. The first two are meant for Hackage.
+Five packages in one `cabal.project`. The first two are meant for Hackage.
 
 ```
 pubgrub/            the solver, written once over any domain: the algorithm, the
@@ -197,12 +197,12 @@ pubgrub-cabal/      the cabal domain: packages and flags as variables, the facts
                     .cabal file states, the proof renderer, the .cabal flatten and
                     the rule that picks an instance of a package, over any index and
                     installed set. Cabal-syntax only.
-bridge/Bridge/      the Cabal bridge (private library of this package): reads the
-                    Hackage index, resolves the compiler and installed packages on
-                    this machine, feeds them to the provider, and drives cabal's own
-                    solver over the same index as the baseline.
-app/                the `pubgrub`, `pubgrub-index` and `pubgrub-harness` executables.
-test/               the tests that need the bridge; each package has its own suite.
+pubgrub-hs/         the Cabal bridge, unpublished: reads the Hackage index, resolves
+                    the compiler and installed packages on this machine, feeds them
+                    to the provider, and drives cabal's own solver over the same
+                    index as the baseline. Its tests are the ones that need it.
+pubgrub-cli/        the `pubgrub` driver and the `pubgrub-index` builder, unpublished.
+pubgrub-harness/    the `pubgrub-harness` executable, unpublished.
 docs/               STATUS.md first. See docs/STATUS.md §6 for what each file decides.
 ```
 

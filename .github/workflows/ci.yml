@@ -273,8 +273,8 @@ jobs:
       - name: Build dependencies
         run: cabal build all --only-dependencies -j
 
-      # pubgrub-hs has only a private library and is not published, so its
-      # documentation is not built: Hackage would not take it.
+      # pubgrub-hs, pubgrub-cli and pubgrub-harness are not published, so
+      # their documentation is not built for Hackage.
       - name: Documentation for Hackage
         run: |
           cabal haddock pubgrub pubgrub-cabal --haddock-for-hackage

@@ -24,7 +24,7 @@ OUT=${OUT:-$(mktemp -d)}
 TIMEOUT=${TIMEOUT:-300}
 mkdir -p "$OUT"
 
-EXE=${EXE:-$(cabal list-bin pubgrub 2>/dev/null)}
+EXE=${EXE:-$(cabal list-bin exe:pubgrub 2>/dev/null)}
 # Every run is pinned to the index-state in bench/index-state, so the numbers
 # below stop moving with the weekly refresh. PUBGRUB_INDEX_STATE=<timestamp>
 # overrides it; PUBGRUB_INDEX_STATE=head runs against everything the local index
