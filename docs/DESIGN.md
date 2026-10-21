@@ -1124,7 +1124,8 @@ touching the main plan. The main solve passes `noPreference`.
 (`Distribution.Solver.Modular.IndexConversion.convCondTree`: `getAllToolDependencies`
 minus `isInternal`): `build-tool-depends` as written; the legacy `build-tools` names
 cabal translates to a package of the same name — `hscolour`, `haddock`, `happy`,
-`alex`, `hsc2hs`, `c2hs`, `cpphs`, `greencard`, `hspec-discover`, restated from
+`alex`, `hsc2hs`, `c2hs`, `cpphs`, `hspec-discover` (Cabal 3.16 dropped `greencard`,
+haskell/cabal#10908), restated from
 `Distribution.Simple.BuildToolDepends.desugarBuildToolSimple` because that module is
 in `Cabal` and `pubgrub-cabal` is Cabal-syntax only — and never a tool that is one
 of the release's own executables, which is internal. Test suites and benchmarks

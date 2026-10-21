@@ -619,10 +619,11 @@ prettyMap = unwords . map (\m -> "{" ++ unwords [ bool "-" "+" b ++ unFlagName f
 type GuardedTools = [(Guard, [ExeDependency])]
 
 -- | Cabal's @Distribution.Simple.BuildToolDepends.desugarBuildToolSimple@,
--- restated because that module is in @Cabal@ and this component is Cabal-syntax
+-- restated because that module is in @Cabal@ and this package is Cabal-syntax
 -- only. A legacy @build-tools@ name is one of the release's own executables, or
--- one of nine tools known to be the executable of a package of the same name, or
+-- one of eight tools known to be the executable of a package of the same name, or
 -- nothing a solver can act on: a program found on the @PATH@ at configure time.
+-- The eight are those of Cabal 3.16 and later, which dropped @greencard@.
 desugarBuildTool :: PackageName -> [UnqualComponentName] -> LegacyExeDependency -> Maybe ExeDependency
 desugarBuildTool self exes (LegacyExeDependency name range)
     | tool `elem` exes = Just (ExeDependency self tool range)
@@ -630,7 +631,7 @@ desugarBuildTool self exes (LegacyExeDependency name range)
     | otherwise = Nothing
   where
     tool = mkUnqualComponentName name
-    allowlist = ["hscolour", "haddock", "happy", "alex", "hsc2hs", "c2hs", "cpphs", "greencard", "hspec-discover"]
+    allowlist = ["hscolour", "haddock", "happy", "alex", "hsc2hs", "c2hs", "cpphs", "hspec-discover"]
 
 -- | The build tools one node declares that are another package's.
 toolsOf :: PackageName -> [UnqualComponentName] -> BuildInfo -> [ExeDependency]
