@@ -118,10 +118,10 @@ type ClauseId = Int
 
 -- | The clauses by id, the index from a variable to the clauses that mention it,
 -- and the merge rule with the clause each of its keys names.
-data Store d = Store
-    { stClauses :: !(IntMap (Incompatibility d))
-    , stIndex   :: !(Map (VarOf d) IntSet)
-    , stMerging :: !(MergeIndex d)
+data Store v = Store
+    { stClauses :: !(IntMap (Incompatibility v))
+    , stIndex   :: !(Map (v) IntSet)
+    , stMerging :: !(MergeIndex v)
     , stNext    :: !ClauseId
     }
 
@@ -129,18 +129,18 @@ data Store d = Store
 -- with the rule itself. The key type is the rule's own and existential, as in
 -- t'MergeRule', and only here: the store only ever asks whether a key is
 -- present.
-data MergeIndex d = forall k. Ord k => MergeIndex
+data MergeIndex v = forall k. Ord k => MergeIndex
     { miTargets :: !(Map k ClauseId)
-    , miKey     :: Incompatibility d -> Maybe k
-    , miMerge   :: Incompatibility d -> Incompatibility d -> Incompatibility d
+    , miKey     :: Incompatibility v -> Maybe k
+    , miMerge   :: Incompatibility v -> Incompatibility v -> Incompatibility v
     }
 
 -- | The empty store, under the domain's 'mergeRule'.
-emptyStore :: Domain d => Store d
+emptyStore :: Domain v => Store v
 emptyStore = emptyStoreWith mergeRule
 
 -- | The empty store, under the given rule.
-emptyStoreWith :: MergeRule d -> Store d
+emptyStoreWith :: MergeRule v -> Store v
 emptyStoreWith MergeRule{mergeKey, mergeWith} =
     Store
         { stClauses = IntMap.empty
@@ -152,7 +152,7 @@ emptyStoreWith MergeRule{mergeKey, mergeWith} =
 -- | Where an arriving clause goes: 'Left' the id of the clause it merges into,
 -- or 'Right' the index with the clause registered under its key at the given
 -- id. A clause without a key leaves the index as it was.
-place :: ClauseId -> Incompatibility d -> MergeIndex d -> Either ClauseId (MergeIndex d)
+place :: ClauseId -> Incompatibility v -> MergeIndex v -> Either ClauseId (MergeIndex v)
 place c i mi@(MergeIndex targets key merge) = case key i of
     Nothing -> Right mi
     Just k -> (\targets' -> MergeIndex targets' key merge) <$> Map.alterF slot k targets
@@ -161,17 +161,17 @@ place c i mi@(MergeIndex targets key merge) = case key i of
     slot Nothing       = Right (Just c)
 
 -- | The rule's merge of the existing clause and the arriving one.
-mergeOf :: MergeIndex d -> Incompatibility d -> Incompatibility d -> Incompatibility d
+mergeOf :: MergeIndex v -> Incompatibility v -> Incompatibility v -> Incompatibility v
 mergeOf MergeIndex{miMerge} = miMerge
 
 -- | The clauses in scan order, newest first.
-storeClauses :: Store d -> [Incompatibility d]
+storeClauses :: Store v -> [Incompatibility v]
 storeClauses Store{stClauses} = IntMap.foldl (flip (:)) [] stClauses
 
 -- | Add a clause: merge it into the fact it agrees with, or put it at the front.
 -- Either way, the id of the clause that results: the one merged into, or a new
 -- one.
-insertClause :: Domain d => Incompatibility d -> Store d -> (ClauseId, Store d)
+insertClause :: Domain v => Incompatibility v -> Store v -> (ClauseId, Store v)
 insertClause i store@Store{stClauses, stIndex, stMerging, stNext} =
     case place stNext i stMerging of
         Left target -> (target, mergeInto target)
@@ -205,26 +205,26 @@ insertClause i store@Store{stClauses, stIndex, stMerging, stNext} =
 -- [a,b,c]@ leaves the store scanning @a@, @b@, @c@, then what was there before,
 -- except that a clause merged into an older one keeps that one's place. Answers
 -- with the ids they landed at.
-insertClauses :: Domain d => [Incompatibility d] -> Store d -> (IntSet, Store d)
+insertClauses :: Domain v => [Incompatibility v] -> Store v -> (IntSet, Store v)
 insertClauses is store = foldr step (IntSet.empty, store) is
   where
     step i (!ids, !s) = case insertClause i s of
         (c, s') -> (IntSet.insert c ids, s')
 
 -- | The clause with this id, if there is one.
-clauseAt :: Store d -> ClauseId -> Maybe (Incompatibility d)
+clauseAt :: Store v -> ClauseId -> Maybe (Incompatibility v)
 clauseAt Store{stClauses} c = IntMap.lookup c stClauses
 
 -- | The clauses that mention a variable.
-clausesOf :: Domain d => VarOf d -> Store d -> IntSet
+clausesOf :: Domain v => v -> Store v -> IntSet
 clausesOf v Store{stIndex} = Map.findWithDefault IntSet.empty v stIndex
 
 -- | Every clause.
-allClauses :: Store d -> IntSet
+allClauses :: Store v -> IntSet
 allClauses Store{stClauses} = IntMap.keysSet stClauses
 
 -- | How many clauses there are. A pass over them, allocating nothing.
-storeSize :: Store d -> Int
+storeSize :: Store v -> Int
 storeSize Store{stClauses} = IntMap.size stClauses
 
 -- | Every invariant the store keeps, for the tests:
@@ -237,7 +237,7 @@ storeSize Store{stClauses} = IntMap.size stClauses
 --
 -- The second holds only under a rule that keeps its law (see t'MergeRule'): a
 -- merge that changes the key leaves the old key naming the merged clause.
-valid :: Domain d => Store d -> Bool
+valid :: Domain v => Store v -> Bool
 valid Store{stClauses, stIndex, stMerging = MergeIndex{miTargets, miKey}, stNext} =
     stIndex == mentions
         && length keyed == Map.size miTargets

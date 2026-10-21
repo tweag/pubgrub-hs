@@ -83,8 +83,9 @@ import           Options.Applicative                         (Parser, argument,
                                                               short, switch,
                                                               value)
 import qualified Paths_pubgrub_cli                           as Paths
-import           PubGrub.Cabal                               (Cabal,
-                                                              CabalFact (..))
+import           PubGrub.Cabal                               (CabalFact (..),
+                                                              Var (..),
+                                                              foldFlags)
 import           PubGrub.Cabal.Flatten                       (FlagModel (..))
 import           PubGrub.Cabal.InstanceSet                   (HasVersion (version))
 import           PubGrub.Cabal.Report                        (reportConflict,
@@ -93,10 +94,8 @@ import           PubGrub.Cabal.Report                        (reportConflict,
                                                               wrapProof)
 import           PubGrub.Cabal.Value                         (Resolved (..),
                                                               Value (..),
-                                                              foldFlags,
                                                               resolvedInstance,
                                                               singletonValue)
-import           PubGrub.Cabal.Variable                      (Var (..))
 import           PubGrub.Cabal.VersionSet                    (VersionSet,
                                                               fromVersionRange)
 import           PubGrub.Incompatibility                     (Cause (..),
@@ -137,7 +136,7 @@ data Verbosity = Normal | Verbose
 
 data Env = Env
     { envText   :: LogAction App Text
-    , envSolver :: LogAction App (SolverMsg Cabal)
+    , envSolver :: LogAction App (SolverMsg Var)
     }
 
 newtype App a = App {unApp :: ReaderT Env IO a}
@@ -147,14 +146,14 @@ instance HasLog Env Text App where
     getLogAction = envText
     setLogAction a e = e {envText = a}
 
-instance HasLog Env (SolverMsg Cabal) App where
+instance HasLog Env (SolverMsg Var) App where
     getLogAction = envSolver
     setLogAction a e = e {envSolver = a}
 
 toStdout :: LogAction App Text
 toStdout = LogAction (liftIO . TIO.putStrLn)
 
-runApp :: LogAction App (SolverMsg Cabal) -> App a -> IO a
+runApp :: LogAction App (SolverMsg Var) -> App a -> IO a
 runApp solverLog app = runReaderT (unApp app) Env {envText = toStdout, envSolver = solverLog}
 
 -- | What to do with each 'SolverMsg'. The two switches are independent, so
@@ -165,7 +164,7 @@ runApp solverLog app = runReaderT (unApp app) Env {envText = toStdout, envSolver
 -- 'SolverMsg' (one constructor application, with unforced fields) but nothing
 -- renders it, so the cost that matters for a timed run — pretty-printing an
 -- 'Incompatibility' and writing a line — is gone.
-solverLogAction :: Verbosity -> Maybe (IORef Stats) -> LogAction App (SolverMsg Cabal)
+solverLogAction :: Verbosity -> Maybe (IORef Stats) -> LogAction App (SolverMsg Var)
 solverLogAction verbosity counters = trace <> maybe mempty countInto counters
   where
     trace = case verbosity of
@@ -176,7 +175,7 @@ solverLogAction verbosity counters = trace <> maybe mempty countInto counters
 -- 'Judged' fires once per propagation round, which is far more often than
 -- anything a reader of the trace wants, and leaving it out keeps a @-v@ trace
 -- byte-comparable across a change to how much propagation judges.
-renderSolverMsg :: SolverMsg Cabal -> Maybe Text
+renderSolverMsg :: SolverMsg Var -> Maybe Text
 renderSolverMsg (Deciding pn is) = Just (T.pack "Deciding " <> pretty pn <> T.pack " among " <> pretty is)
 renderSolverMsg (Chose pn i) = Just (T.pack "Chose " <> pretty pn <> T.pack " as " <> pretty i)
 renderSolverMsg (Conflict incompatibility) =
@@ -193,7 +192,7 @@ renderSolverMsg (Judged _) = Nothing
 -- | An incompatibility on one line, as its terms. Deliberately not
 -- 'PubGrub.Report.reportConflict', which renders a whole numbered proof — that is
 -- the right thing for a failure and far too much for a trace event.
-prettyIncompat :: Incompatibility Cabal -> Text
+prettyIncompat :: Incompatibility Var -> Text
 prettyIncompat i =
     T.pack "{"
         <> T.intercalate
@@ -258,7 +257,7 @@ emptyStats =
         , stAfterBacktrack = False
         }
 
-count :: SolverMsg Cabal -> Stats -> Stats
+count :: SolverMsg Var -> Stats -> Stats
 count msg st = case msg of
     Deciding {} -> st {stDeciding = stDeciding st + 1}
     Chose {} -> st {stChose = stChose st + 1}
@@ -286,7 +285,7 @@ count msg st = case msg of
 -- | Fold every message into the counters. The 'IORef' is the seam: the solver
 -- already hands each 'SolverMsg' to a 'LogAction', and updating a strict record
 -- is the cheapest thing such an action can do with it.
-countInto :: IORef Stats -> LogAction App (SolverMsg Cabal)
+countInto :: IORef Stats -> LogAction App (SolverMsg Var)
 countInto ref = LogAction (\msg -> liftIO (atomicModifyIORef' ref (\st -> (count msg st, ()))))
 
 -- | One line, all integers, read by the harness field by name. The read
@@ -461,7 +460,7 @@ ranges rs = [(pn, fromVersionRange vr) | (pn, vr) <- rs]
 -- the counters and the phase timings after it. Those two lines come before the
 -- provider's closing read-counter line, which 'withProvider' prints on the way
 -- out.
-runOurs :: Options -> Double -> Maybe (IORef Stats) -> Provider Cabal App -> [Incompatibility Cabal] -> App ()
+runOurs :: Options -> Double -> Maybe (IORef Stats) -> Provider Var App -> [Incompatibility Var] -> App ()
 runOurs opts t0 counters provider seeds = do
     t1 <- liftIO getMonotonicTime
     logMsg (T.pack ("Solving for " ++ renderTargets (optTargets opts)))
@@ -601,7 +600,7 @@ runBaseline opts t0 world = do
     component (CD.ComponentExe n) = "exe:" ++ prettyShow n
     component c                   = show c
 
-report :: PlanShape -> [PackageName] -> Provider Cabal App -> Either (SolveError Cabal) (Map Var Value) -> App ()
+report :: PlanShape -> [PackageName] -> Provider Var App -> Either (SolveError Var) (Map Var Value) -> App ()
 report _ _ _ (Left (NoSolution incompat)) = do
     width <- liftIO proofWidth
     style <- liftIO proofStyle
@@ -669,7 +668,7 @@ planLines solution =
 -- returns every edge of the unit's /transitive/ closure at once, and those
 -- deeper edges belong under their own depender, which the same walk reaches on
 -- its own turn.
-dependencyMap :: Provider Cabal App -> Map PackageName Resolved -> App (Map PackageName [PackageName])
+dependencyMap :: Provider Var App -> Map PackageName Resolved -> App (Map PackageName [PackageName])
 dependencyMap provider solution =
     Map.fromList <$> mapM childrenOf (Map.toList solution)
   where

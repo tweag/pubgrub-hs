@@ -30,15 +30,15 @@ import           Distribution.Types.PkgconfigVersionRange (anyPkgconfigVersion)
 import qualified Distribution.Types.Version               as Cabal
 import           Distribution.Types.VersionRange          (earlierVersion,
                                                            orLaterVersion)
-import           PubGrub.Cabal                            (Cabal,
-                                                           CabalFact (..),
+import           PubGrub.Cabal                            (CabalFact (..),
+                                                           Flag (..),
                                                            UnbuildableReason (..),
+                                                           Var (..),
                                                            fromDependency,
                                                            unbuildable)
 import           PubGrub.Cabal.InstanceSet                (InstanceSet (..))
 import           PubGrub.Cabal.Value                      (ValueSet (..),
                                                            instanceSet)
-import           PubGrub.Cabal.Variable                   (Flag (..), Var (..))
 import           PubGrub.Cabal.Version                    (Version)
 import qualified PubGrub.Cabal.Version                    as V
 import qualified PubGrub.Cabal.VersionSet                 as VersionSet
@@ -113,19 +113,19 @@ sourceOnly :: VersionSet.VersionSet -> InstanceSet
 sourceOnly vs = InstanceSet{isInstalled = Set.empty, isSource = vs}
 
 -- | An unconditional dependency fact.
-dependency :: PackageName -> InstanceSet -> PackageName -> InstanceSet -> Incompatibility Cabal
+dependency :: PackageName -> InstanceSet -> PackageName -> InstanceSet -> Incompatibility Var
 dependency p s q r = fromDependency p s Map.empty q r
 
 -- | A ban on a range of a package, as the solver mints one.
-ban :: PackageName -> InstanceSet -> Incompatibility Cabal
+ban :: PackageName -> InstanceSet -> Incompatibility Var
 ban p s = noValues (PackageVar p) (instanceSet s)
 
 -- | @a@ over some range depends on @q@ in @1..3@.
-dependsOnQ :: InstanceSet -> Incompatibility Cabal
+dependsOnQ :: InstanceSet -> Incompatibility Var
 dependsOnQ dependers = dependency pkgA dependers pkgQ (range 1 3)
 
 -- | The same, under a flag guard.
-dependsOnQWhen :: Flag -> Bool -> InstanceSet -> Incompatibility Cabal
+dependsOnQWhen :: Flag -> Bool -> InstanceSet -> Incompatibility Var
 dependsOnQWhen f b dependers = fromDependency pkgA dependers (Map.singleton f b) pkgQ (range 1 3)
 
 fast :: Flag
@@ -141,7 +141,7 @@ zlib = NE.singleton (missing "zlib")
 
 -- | A release cannot be built here for want of @libpq@ — the reason every
 -- unbuildable fact below gives unless it says otherwise.
-needsLibpq :: InstanceSet -> Incompatibility Cabal
+needsLibpq :: InstanceSet -> Incompatibility Var
 needsLibpq s = unbuildable pkgA s Map.empty libpq
 
 tests :: TestTree
@@ -392,7 +392,7 @@ unbuildableTests =
 -- --------------------------------------------------------------------------
 
 -- | The instance set an unbuildable fact bans, read off its cause.
-bannedBy :: Incompatibility Cabal -> InstanceSet
+bannedBy :: Incompatibility Var -> InstanceSet
 bannedBy i = case incompCause i of
     Fact (CauseUnbuildable _ s _ _) -> s
     _                               -> error "not an unbuildable clause"
@@ -401,7 +401,7 @@ halfOpen :: Int -> Int -> VersionSet.VersionSet
 halfOpen lo hi = VersionSet.halfOpenVersionSet (v lo) (Just (v hi))
 
 -- | The depender's instance set, read off the clause's cause.
-dependerOf :: Incompatibility Cabal -> InstanceSet
+dependerOf :: Incompatibility Var -> InstanceSet
 dependerOf i = case incompCause i of
     Fact (CauseDependency _ s _ _) -> s
     _                              -> error "not a dependency clause"

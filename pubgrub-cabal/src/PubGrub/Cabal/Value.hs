@@ -1,4 +1,4 @@
--- | The values a 'PubGrub.Cabal.Variable.Var' takes, and sets of them.
+-- | The values a 'PubGrub.Cabal.Var' takes, and sets of them.
 --
 -- A package variable takes an 'Instance'; a flag variable takes a 'Bool'. A
 -- value is therefore a sum, 'Value'. A /set/ of values is not: the subsets of
@@ -28,26 +28,17 @@ module PubGrub.Cabal.Value
       -- * A plan
     , Resolved (..)
     , resolvedInstance
-    , foldFlags
     ) where
 
-import           Data.Map.Strict                (Map)
-import qualified Data.Map.Strict                as Map
-import qualified Data.Text                      as T
-import           Distribution.Types.Flag        (FlagAssignment,
-                                                 insertFlagAssignment,
-                                                 mkFlagAssignment,
-                                                 showFlagAssignment)
-import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Cabal.InstanceSet      (Instance (..), InstanceSet,
-                                                 emptyInstanceSet,
-                                                 memberInstance,
-                                                 singletonInstance)
-import           PubGrub.Cabal.PreInstalled     (PreInstalledPackage)
-import           PubGrub.Cabal.Variable         (Flag (..), Var (..))
-import           PubGrub.Cabal.Version          (Version)
-import           PubGrub.Pretty                 (Pretty (..))
-import           PubGrub.SetOps                 (SetOps (..))
+import qualified Data.Text                  as T
+import           Distribution.Types.Flag    (FlagAssignment, showFlagAssignment)
+import           PubGrub.Cabal.InstanceSet  (Instance (..), InstanceSet,
+                                             emptyInstanceSet, memberInstance,
+                                             singletonInstance)
+import           PubGrub.Cabal.PreInstalled (PreInstalledPackage)
+import           PubGrub.Cabal.Version      (Version)
+import           PubGrub.Pretty             (Pretty (..))
+import           PubGrub.SetOps             (SetOps (..))
 
 -- --------------------------------------------------------------------------
 -- Values
@@ -169,22 +160,3 @@ resolvedInstance (Built v _)     = BuildSource v
 instance Pretty Resolved where
     pretty (Installed pip) = pretty (UsePreInstalled pip)
     pretty (Built v fa)    = pretty v <> T.pack (showFlagAssignment fa)
-
--- | Fold the solver's answer into one entry per package: each decided flag
--- goes into the flag assignment of its owner, which must be a source release.
--- A flag whose owner is not in the answer, or not built from source, is dropped;
--- neither can happen, since a flag is only ever decided under its owner.
-foldFlags :: Map Var Value -> Map PackageName Resolved
-foldFlags decided = Map.foldrWithKey fold owners decided
-  where
-    owners =
-        Map.fromList
-            [ (p, resolved i)
-            | (PackageVar p, PackageValue i) <- Map.toList decided
-            ]
-    resolved (UsePreInstalled pip) = Installed pip
-    resolved (BuildSource v)       = Built v (mkFlagAssignment [])
-    fold (FlagVar p f) (FlagValue b) = Map.adjust (withFlag f b) p
-    fold _ _                         = id
-    withFlag f b (Built v fa) = Built v (insertFlagAssignment (flagName f) b fa)
-    withFlag _ _ r            = r

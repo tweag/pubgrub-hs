@@ -50,7 +50,7 @@ import qualified Distribution.Types.Version               as Cabal
 import qualified Distribution.Verbosity                   as Verbosity
 import           Hackage.Security.Client.Repository.Cache (Cache)
 import           Network.HTTP.Client                      (Manager)
-import           PubGrub.Cabal                            (Cabal, request)
+import           PubGrub.Cabal                            (Var, request)
 import           PubGrub.Cabal.Flatten                    (FlagModel (..),
                                                            PkgConfigPresent,
                                                            noStanzas)
@@ -98,7 +98,7 @@ pkgConfigPresent db (PkgconfigDependency n range) =
 -- boot package has to admit its installed unit.
 withProvider
     :: (MonadUnliftIO m, WithLog env Text m)
-    => Cache -> Manager -> IndexState -> FlagModel -> [(PackageName, VersionSet)] -> [(PackageName, VersionSet)] -> (Provider Cabal m -> [Incompatibility Cabal] -> m a) -> m a
+    => Cache -> Manager -> IndexState -> FlagModel -> [(PackageName, VersionSet)] -> [(PackageName, VersionSet)] -> (Provider Var m -> [Incompatibility Var] -> m a) -> m a
 withProvider cache manager state model targets constraints act =
     withWorld cache manager state $ \world ->
         -- The derived index, when one has been built here. It is a cache and not

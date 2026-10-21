@@ -2,9 +2,9 @@
 --
 -- An instance is one concrete way of having a package: a specific pre-installed
 -- unit, or a source release. Flags are not part of an instance: an automatic
--- flag is a solver variable of its own ('PubGrub.Cabal.Variable.FlagVar'),
--- decided beside the version, and a manual flag is fixed before the solver
--- sees the release.
+-- flag is a solver variable of its own ('PubGrub.Cabal.FlagVar'), decided
+-- beside the version, and a manual flag is fixed before the solver sees the
+-- release.
 --
 -- A set of instances has two halves, represented differently because they
 -- differ in kind. The installed half is /extensional/: the installed database is

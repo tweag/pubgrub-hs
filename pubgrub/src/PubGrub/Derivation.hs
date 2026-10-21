@@ -60,27 +60,27 @@ symmetric rule (x, y) = rule (x, y) <|> rule (y, x)
 -- --------------------------------------------------------------------------
 
 -- | Was this derived by the solver, rather than stated?
-isDerived :: Incompatibility d -> Bool
+isDerived :: Incompatibility v -> Bool
 isDerived c = case incompCause c of
     Derived _ _ -> True
     _           -> False
 
 -- | The two causes of a derived step, in the order the solver joined them.
-derivedFrom :: Rule (Incompatibility d) (Incompatibility d, Incompatibility d)
+derivedFrom :: Rule (Incompatibility v) (Incompatibility v, Incompatibility v)
 derivedFrom inc = case incompCause inc of
     Derived a b -> Just (a, b)
     _           -> Nothing
 
 -- | A step whose causes are both external facts: the only kind of step that
 -- opens a line of derivation.
-bothExternal :: Rule (Incompatibility d) (Incompatibility d, Incompatibility d)
+bothExternal :: Rule (Incompatibility v) (Incompatibility v, Incompatibility v)
 bothExternal inc = do
     (a, b) <- derivedFrom inc
     guard (not (isDerived a) && not (isDerived b))
     pure (a, b)
 
 -- | A step whose causes are both derived: where the derivation branches.
-bothDerived :: Rule (Incompatibility d) (Incompatibility d, Incompatibility d)
+bothDerived :: Rule (Incompatibility v) (Incompatibility v, Incompatibility v)
 bothDerived inc = do
     (a, b) <- derivedFrom inc
     guard (isDerived a && isDerived b)
@@ -88,7 +88,7 @@ bothDerived inc = do
 
 -- | A step with one derived cause and one external fact, the derived cause
 -- first: the step a linear chain is made of and the step every run walks.
-chainStep :: Rule (Incompatibility d) (Incompatibility d, Incompatibility d)
+chainStep :: Rule (Incompatibility v) (Incompatibility v, Incompatibility v)
 chainStep inc = do
     (a, b) <- derivedFrom inc
     case (isDerived a, isDerived b) of
@@ -102,20 +102,20 @@ chainStep inc = do
 
 -- | The domain's fact at a leaf, whether it was a seed or stated by the
 -- provider.
-asFact :: Rule (Incompatibility d) (FactOf d)
+asFact :: Rule (Incompatibility v) (FactOf v)
 asFact c = case incompCause c of
     Seed f -> Just f
     Fact f -> Just f
     _      -> Nothing
 
 -- | A seed: what the solve was asked for.
-asSeed :: Rule (Incompatibility d) (FactOf d)
+asSeed :: Rule (Incompatibility v) (FactOf v)
 asSeed c = case incompCause c of
     Seed f -> Just f
     _      -> Nothing
 
 -- | A hole: a set of a variable's values the solver found nothing in.
-asNoValues :: Rule (Incompatibility d) (VarOf d, SetOf d)
+asNoValues :: Rule (Incompatibility v) (v, SetOf v)
 asNoValues c = case incompCause c of
     NoValues v s -> Just (v, s)
     _            -> Nothing
@@ -125,14 +125,14 @@ asNoValues c = case incompCause c of
 -- --------------------------------------------------------------------------
 
 -- | The external facts at the leaves, in proof order.
-externals :: Incompatibility d -> [Incompatibility d]
+externals :: Incompatibility v -> [Incompatibility v]
 externals inc = case derivedFrom inc of
     Just (a, b) -> externals a ++ externals b
     Nothing     -> [inc]
 
 -- | Every node of the tree the rule fires on, with its depth below the root, in
 -- proof order.
-everywhere :: Rule (Incompatibility d) a -> Incompatibility d -> [(Int, a)]
+everywhere :: Rule (Incompatibility v) a -> Incompatibility v -> [(Int, a)]
 everywhere rule = go 0
   where
     go depth n =
@@ -151,7 +151,7 @@ nearestRoot cs = Just (snd (minimumBy (comparing fst) cs))
 -- itself when there was no run, and otherwise a derived node, since the walk
 -- only descends into a chain step's derived cause) and what the rule read off
 -- each fact, deepest first. An empty list means there was no run.
-runWhile :: Rule (Incompatibility d) a -> Incompatibility d -> (Incompatibility d, [a])
+runWhile :: Rule (Incompatibility v) a -> Incompatibility v -> (Incompatibility v, [a])
 runWhile rule = go []
   where
     go acc node = case chainStep node of
@@ -167,7 +167,7 @@ runWhile rule = go []
 -- earlier values (a lock file, say) reads it to decide which to release before
 -- solving again. A held variable that is not in the set took no part in the
 -- failure, and releasing it cannot help.
-conflictSet :: Domain d => Incompatibility d -> Set (VarOf d)
+conflictSet :: Domain v => Incompatibility v -> Set (v)
 conflictSet inc = Map.keysSet (incompTerms inc) <> case incompCause inc of
     Derived a b -> conflictSet a <> conflictSet b
     _           -> Set.empty

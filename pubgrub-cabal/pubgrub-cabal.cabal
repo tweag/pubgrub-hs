@@ -66,7 +66,7 @@ library
         PubGrub.Cabal.Report.Rule
         PubGrub.Cabal.Report.Wording
         PubGrub.Cabal.Value
-        PubGrub.Cabal.Variable
+
         PubGrub.Cabal.Version
         PubGrub.Cabal.VersionSet
     build-depends:

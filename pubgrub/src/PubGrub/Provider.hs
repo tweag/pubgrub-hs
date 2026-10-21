@@ -20,8 +20,8 @@ import           PubGrub.Incompatibility (Domain (..), Incompatibility)
 --
 -- @m@ is the provider's own monad: 'Data.Functor.Identity.Identity' for a world
 -- held in memory, 'IO' for one read from disk.
-newtype Provider d m = Provider
-    { expand :: VarOf d -> SetOf d -> m (Maybe (ValueOf d), [Incompatibility d])
+newtype Provider v m = Provider
+    { expand :: v -> SetOf v -> m (Maybe (ValueOf v), [Incompatibility v])
       -- ^ Pick a value of the variable from the set, and state what is known
       -- on the way: typically the chosen value's dependencies.
       --

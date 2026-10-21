@@ -51,11 +51,11 @@ import           PubGrub.Term            (Term (..), anyTerm, intersectTerm,
 
 -- | A single entry in the partial solution: one variable, at one decision
 -- level, with the reason it is there.
-data Assignment d = Assignment
+data Assignment v = Assignment
     { aIndex :: !Int
     , aLevel :: !Int
-    , aVar   :: VarOf d
-    , aKind  :: AssignmentKind d
+    , aVar   :: v
+    , aKind  :: AssignmentKind v
     }
 
 -- | Why an assignment is in the partial solution, and what it asserts: a
@@ -67,19 +67,19 @@ data Assignment d = Assignment
 -- @aVar@ across two constructors is what would make the payload fields
 -- partial selectors, and a partial selector is a crash waiting for the wrong
 -- constructor.
-data AssignmentKind d
-    = Decision (ValueOf d)
-    | Derivation (Term (SetOf d)) (Incompatibility d)
+data AssignmentKind v
+    = Decision (ValueOf v)
+    | Derivation (Term (SetOf v)) (Incompatibility v)
 
 -- | The term contributed by an assignment; for a decision, @Positive@ of the
 -- singleton.
-assignmentTerm :: Domain d => Assignment d -> Term (SetOf d)
+assignmentTerm :: Domain v => Assignment v -> Term (SetOf v)
 assignmentTerm a = case aKind a of
     Decision i     -> Positive (singleton (aVar a) i)
     Derivation t _ -> t
 
 -- | The value a decision decides; 'Nothing' for a derivation.
-decidedValue :: Assignment d -> Maybe (ValueOf d)
+decidedValue :: Assignment v -> Maybe (ValueOf v)
 decidedValue a = case aKind a of
     Decision i   -> Just i
     Derivation{} -> Nothing
@@ -93,29 +93,29 @@ decidedValue a = case aKind a of
 -- keeping them is what lets propagation ask about a variable without scanning
 -- the partial solution. Invariant: a record exists only for a variable with a
 -- non-empty history.
-data VarAssignments d = VarAssignments
-    { vaHistory  :: Seq (Assignment d)
-    , vaTerm     :: Term (SetOf d)
-    , vaDecision :: Maybe (ValueOf d)
+data VarAssignments v = VarAssignments
+    { vaHistory  :: Seq (Assignment v)
+    , vaTerm     :: Term (SetOf v)
+    , vaDecision :: Maybe (ValueOf v)
     }
 
 -- | Assignments are indexed by variable, and within a variable stored
 -- oldest-first (chronological), so the satisfier search reads them in order
 -- without reversing; @psLevel@ is the current decision level; @psNextIndex@ is
 -- a monotone counter giving chronological order /across/ variables.
-data PartialSolution d = PartialSolution
-    { psVariables :: Map (VarOf d) (VarAssignments d)
+data PartialSolution v = PartialSolution
+    { psVariables :: Map (v) (VarAssignments v)
     , psLevel     :: !Int
     , psNextIndex :: !Int
     }
 
-emptyPS :: PartialSolution d
+emptyPS :: PartialSolution v
 emptyPS = PartialSolution{psVariables = Map.empty, psLevel = 0, psNextIndex = 0}
 
 -- | Add one assignment to a variable's record, creating the record if this is
 -- the variable's first assignment. The caches move with it: the term folds in
 -- by intersection, the decision is remembered.
-extendVar :: Domain d => Assignment d -> Maybe (VarAssignments d) -> VarAssignments d
+extendVar :: Domain v => Assignment v -> Maybe (VarAssignments v) -> VarAssignments v
 extendVar a Nothing =
     VarAssignments
         { vaHistory = Seq.singleton a
@@ -131,11 +131,11 @@ extendVar a (Just pa) =
 
 -- | Rebuild a record from a history, recomputing both caches. 'Nothing' for an
 -- empty history, which has no record.
-fromHistory :: Domain d => Seq (Assignment d) -> Maybe (VarAssignments d)
+fromHistory :: Domain v => Seq (Assignment v) -> Maybe (VarAssignments v)
 fromHistory = foldl' (\acc a -> Just (extendVar a acc)) Nothing
 
 -- | File an assignment under its variable and consume its index.
-recordAssignment :: Domain d => Assignment d -> PartialSolution d -> PartialSolution d
+recordAssignment :: Domain v => Assignment v -> PartialSolution v -> PartialSolution v
 recordAssignment a ps@PartialSolution{psVariables, psNextIndex} =
     ps
         { psVariables = Map.alter (Just . extendVar a) (aVar a) psVariables
@@ -143,7 +143,7 @@ recordAssignment a ps@PartialSolution{psVariables, psNextIndex} =
         }
 
 -- | Record a decision (a guess); increments the decision level.
-addDecision :: Domain d => VarOf d -> ValueOf d -> PartialSolution d -> PartialSolution d
+addDecision :: Domain v => v -> ValueOf v -> PartialSolution v -> PartialSolution v
 addDecision p i ps@PartialSolution{psLevel, psNextIndex} =
     recordAssignment
         (Assignment psNextIndex (psLevel + 1) p (Decision i))
@@ -151,7 +151,7 @@ addDecision p i ps@PartialSolution{psLevel, psNextIndex} =
 
 -- | Record a derivation: the negation of @cause@'s term for @p@, at the
 -- current level.
-addDerivation :: Domain d => VarOf d -> Incompatibility d -> PartialSolution d -> PartialSolution d
+addDerivation :: Domain v => v -> Incompatibility v -> PartialSolution v -> PartialSolution v
 addDerivation p cause ps@PartialSolution{psLevel, psNextIndex} =
     let term = maybe anyTerm negateTerm (incompGet p cause)
      in recordAssignment (Assignment psNextIndex psLevel p (Derivation term cause)) ps
@@ -172,7 +172,7 @@ addDerivation p cause ps@PartialSolution{psLevel, psNextIndex} =
 -- the survivors — @intersectTerm@ cannot be undone, so the accumulated term is
 -- recomputed, and a dropped decision must stop being remembered. A variable that
 -- loses all of them loses its record.
-backtrack :: Domain d => Int -> PartialSolution d -> ([VarOf d], PartialSolution d)
+backtrack :: Domain v => Int -> PartialSolution v -> ([v], PartialSolution v)
 backtrack level ps@PartialSolution{psVariables} =
     ( [v | (v, pa) <- Map.toList psVariables, moved pa]
     , ps
@@ -191,22 +191,22 @@ backtrack level ps@PartialSolution{psVariables} =
 
 -- | Intersection of all terms recorded for a variable ('Nothing' if the
 -- variable is unmentioned, which judges as 'anyTerm' = ⊤).
-termIntersectionFor :: Domain d => PartialSolution d -> VarOf d -> Maybe (Term (SetOf d))
+termIntersectionFor :: Domain v => PartialSolution v -> v -> Maybe (Term (SetOf v))
 termIntersectionFor PartialSolution{psVariables} p =
     vaTerm <$> Map.lookup p psVariables
 
 -- | Relation of the whole partial solution to an incompatibility.
-psRelation :: Domain d => PartialSolution d -> Incompatibility d -> IncompatRelation (VarOf d)
+psRelation :: Domain v => PartialSolution v -> Incompatibility v -> IncompatRelation v
 psRelation ps = incompRelation (termIntersectionFor ps)
 
 -- | The decisions, as a solution map.
-extractSolution :: PartialSolution d -> Map (VarOf d) (ValueOf d)
+extractSolution :: PartialSolution v -> Map (v) (ValueOf v)
 extractSolution PartialSolution{psVariables} = Map.mapMaybe vaDecision psVariables
 
 -- | Variables that have a positive accumulated term but no decision yet, with
 -- that positive set. Ordered by first mention (oldest first) for
 -- determinism.
-undecidedPositive :: PartialSolution d -> [(VarOf d, SetOf d)]
+undecidedPositive :: PartialSolution v -> [(v, SetOf v)]
 undecidedPositive PartialSolution{psVariables} =
     map snd (sortOn fst (mapMaybe candidate (Map.toList psVariables)))
   where
@@ -219,6 +219,6 @@ undecidedPositive PartialSolution{psVariables} =
 
 -- | All assignments for a variable, oldest first. The satisfier search walks
 -- this list.
-varHistory :: Domain d => PartialSolution d -> VarOf d -> [Assignment d]
+varHistory :: Domain v => PartialSolution v -> v -> [Assignment v]
 varHistory PartialSolution{psVariables} p =
     maybe [] (toList . vaHistory) (Map.lookup p psVariables)

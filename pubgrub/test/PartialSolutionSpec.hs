@@ -32,7 +32,7 @@ import           Test.Tasty              (TestTree, testGroup)
 import           Test.Tasty.QuickCheck   (Arbitrary (..), Gen, Property,
                                           conjoin, counterexample, elements,
                                           frequency, testProperty)
-import           Toy                     (Pkg (..), Toy, needs, wants)
+import           Toy                     (Pkg (..), needs, wants)
 
 -- --------------------------------------------------------------------------
 -- The universe the scripts draw from
@@ -55,7 +55,7 @@ sets = map Set.fromList [[2, 3], [1, 2], [2]]
 -- derive a negative term), \"no versions\" (positive), and real two-package
 -- dependencies — so that deriving for a package the incompatibility does /not/
 -- mention (⊤, the term-absent case) is reachable too.
-incompatibilities :: [Incompatibility Toy]
+incompatibilities :: [Incompatibility Pkg]
 incompatibilities =
     [wants p [i] | p <- packages, i <- instances]
         ++ [noValues p s | p <- packages, s <- sets]
@@ -101,7 +101,7 @@ instance Arbitrary Op where
 
 -- | The model: one flat chronological list of assignments.
 data Model = Model
-    { mAssignments :: [Assignment Toy]
+    { mAssignments :: [Assignment Pkg]
     , mLevel       :: Int
     , mNextIndex   :: Int
     }
@@ -113,7 +113,7 @@ mDecide :: Pkg -> Int -> Model -> Model
 mDecide p i (Model as l n) =
     Model (as ++ [Assignment n (l + 1) p (Decision i)]) (l + 1) (n + 1)
 
-mDerive :: Pkg -> Incompatibility Toy -> Model -> Model
+mDerive :: Pkg -> Incompatibility Pkg -> Model -> Model
 mDerive p cause (Model as l n) =
     Model (as ++ [Assignment n l p (Derivation term cause)]) l (n + 1)
   where
@@ -122,7 +122,7 @@ mDerive p cause (Model as l n) =
 mBacktrack :: Int -> Model -> Model
 mBacktrack level (Model as _ n) = Model (filter ((<= level) . aLevel) as) level n
 
-mHistory :: Model -> Pkg -> [Assignment Toy]
+mHistory :: Model -> Pkg -> [Assignment Pkg]
 mHistory m p = filter ((== p) . aVar) (mAssignments m)
 
 mTerm :: Model -> Pkg -> Maybe (Term (Set Int))
@@ -152,7 +152,7 @@ mUndecidedPositive m =
             | otherwise = go (x : seen) xs
 
 -- | Apply one op to both, so a script drives them in lockstep.
-step :: Op -> (PartialSolution Toy, Model) -> (PartialSolution Toy, Model)
+step :: Op -> (PartialSolution Pkg, Model) -> (PartialSolution Pkg, Model)
 step op (ps, m) = case op of
     OpDecide pi_ ii -> case (atIndex packages pi_, atIndex instances ii) of
         (Just p, Just i) -> (addDecision p i ps, mDecide p i m)
@@ -182,14 +182,14 @@ maybeTermEquiv _ _               = False
 
 -- | An assignment's identity, ignoring the term (compared separately, by
 -- equivalence).
-key :: Assignment Toy -> (Int, Int, Pkg, Maybe Int)
+key :: Assignment Pkg -> (Int, Int, Pkg, Maybe Int)
 key a = (aIndex a, aLevel a, aVar a, decidedValue a)
 
 check :: String -> Bool -> Property
 check what = counterexample ("mismatch: " ++ what)
 
 -- | Every query, on both, for every probe package.
-agree :: PartialSolution Toy -> Model -> Property
+agree :: PartialSolution Pkg -> Model -> Property
 agree ps m =
     conjoin $
         [ check "psLevel" (psLevel ps == mLevel m)

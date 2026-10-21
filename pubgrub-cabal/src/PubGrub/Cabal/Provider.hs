@@ -66,8 +66,9 @@ import           Distribution.Types.Flag                      (FlagName)
 import           Distribution.Types.GenericPackageDescription (GenericPackageDescription)
 import           Distribution.Types.PackageName               (PackageName)
 import qualified Distribution.Types.Version                   as Cabal
-import           PubGrub.Cabal                                (Cabal,
+import           PubGrub.Cabal                                (Flag (..),
                                                                UnbuildableReason,
+                                                               Var (..),
                                                                constraint,
                                                                declaresFlag,
                                                                fromDependency,
@@ -102,8 +103,6 @@ import           PubGrub.Cabal.Value                          (Value (..),
                                                                ValueSet (..),
                                                                instanceSet,
                                                                memberBool)
-import           PubGrub.Cabal.Variable                       (Flag (..),
-                                                               Var (..))
 import           PubGrub.Cabal.Version                        (Version)
 import           PubGrub.Cabal.VersionSet                     (VersionSet,
                                                                contains)
@@ -242,7 +241,7 @@ data ReleaseSource m = ReleaseSource
 --
 --  * __a flag__ ('FlagVar'): answered from the variable alone. The preferred
 --    value, or else the declared default carried in the flag's identity
---    ('PubGrub.Cabal.Variable.Flag'), is offered first where the set admits it,
+--    ('PubGrub.Cabal.Flag'), is offered first where the set admits it,
 --    and the other value otherwise. No clause is stated: the clause that made
 --    the flag a goal, and the guarded dependencies that consult it, went out
 --    with its owner.
@@ -265,10 +264,10 @@ mkExpand
     -> ReleaseSource m
     -> Var
     -> ValueSet
-    -> m (Maybe Value, [Incompatibility Cabal])
+    -> m (Maybe Value, [Incompatibility Var])
 mkExpand logA preference installedDb source = expand'
   where
-    expand' :: Var -> ValueSet -> m (Maybe Value, [Incompatibility Cabal])
+    expand' :: Var -> ValueSet -> m (Maybe Value, [Incompatibility Var])
     expand' (FlagVar p (Flag f dflt)) set =
         let first = fromMaybe dflt (preference p >>= Map.lookup f . snd)
          in pure (listToMaybe [FlagValue b | b <- [first, not first], memberBool b (vsFlags set)], [])
@@ -279,7 +278,7 @@ mkExpand logA preference installedDb source = expand'
     -- rule, over a list of one, so a preferred release that cannot be built here
     -- states why and falls through to the rule with its facts. A non-reinstallable
     -- package has no source release to prefer.
-    expandPackage :: PackageName -> InstanceSet -> m (Maybe Value, [Incompatibility Cabal])
+    expandPackage :: PackageName -> InstanceSet -> m (Maybe Value, [Incompatibility Var])
     expandPackage pn range =
         case preference pn of
             Just (v, _)
@@ -297,7 +296,7 @@ mkExpand logA preference installedDb source = expand'
     -- cannot be enumerated. So enumerate the package's own instances — cheaply,
     -- from the installed db and the index's version map, without parsing any
     -- @.cabal@ — and keep those the offered set admits.
-    expandByRule :: PackageName -> InstanceSet -> m (Maybe Value, [Incompatibility Cabal])
+    expandByRule :: PackageName -> InstanceSet -> m (Maybe Value, [Incompatibility Var])
     expandByRule pn range = do
         let installedHere = [toPreInstalled u | u <- Map.findWithDefault [] pn (idbByName installedDb)]
             admissible = sortOn (Down . version) (filter (`Set.member` isInstalled range) installedHere)
@@ -337,7 +336,7 @@ mkExpand logA preference installedDb source = expand'
     -- and without these facts the report says "no version for hpqtypes in
     -- >=1.13" where cabal says "pkg-config package libpq-any, not found in
     -- the pkg-config database".
-    scan :: PackageName -> InstanceSet -> [Incompatibility Cabal] -> [(Version, Slot)] -> m (Maybe Value, [Incompatibility Cabal])
+    scan :: PackageName -> InstanceSet -> [Incompatibility Var] -> [(Version, Slot)] -> m (Maybe Value, [Incompatibility Var])
     scan _ _ stated [] = pure (Nothing, reverse stated)
     scan pn range stated ((v, slot):rest) = do
         result <- rsReadRelease source pn v
@@ -645,7 +644,7 @@ widenTo installedDb d vs =
 -- range stays admissible; a lock entry held at its version is
 -- @'sourceInstances' (singleton v)@, which bans the installed units too, since
 -- the lock recorded a source package.
-constrainTo :: InstalledDb -> PackageName -> InstanceSet -> Incompatibility Cabal
+constrainTo :: InstalledDb -> PackageName -> InstanceSet -> Incompatibility Var
 constrainTo installedDb p allowed =
     constraint (PackageVar p) (instanceSet allowed) (instanceSet forbidden)
   where

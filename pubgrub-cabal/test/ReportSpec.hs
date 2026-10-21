@@ -23,9 +23,10 @@ import           Distribution.Types.PkgconfigVersionRange (anyPkgconfigVersion)
 import qualified Distribution.Types.Version               as Cabal
 import           Distribution.Types.VersionRange          (earlierVersion,
                                                            orLaterVersion)
-import           PubGrub.Cabal                            (Cabal,
-                                                           CabalFact (..),
+import           PubGrub.Cabal                            (CabalFact (..),
+                                                           Flag (..),
                                                            UnbuildableReason (..),
+                                                           Var (..),
                                                            fromDependency,
                                                            onlyInstalled,
                                                            request, unbuildable)
@@ -36,7 +37,6 @@ import           PubGrub.Cabal.Report                     (collapseNoInstances,
                                                            styleProof,
                                                            wrapProof)
 import           PubGrub.Cabal.Value                      (instanceSet)
-import           PubGrub.Cabal.Variable                   (Flag (..), Var (..))
 import           PubGrub.Cabal.Version                    (Version)
 import qualified PubGrub.Cabal.Version                    as V
 import qualified PubGrub.Cabal.VersionSet                 as VersionSet
@@ -73,11 +73,11 @@ sourceOnly :: VersionSet.VersionSet -> InstanceSet
 sourceOnly vs = InstanceSet{isInstalled = Set.empty, isSource = vs}
 
 -- | An unconditional dependency fact, the shape every fact here has.
-dependency :: PackageName -> InstanceSet -> PackageName -> InstanceSet -> Incompatibility Cabal
+dependency :: PackageName -> InstanceSet -> PackageName -> InstanceSet -> Incompatibility Var
 dependency p s q r = fromDependency p s Map.empty q r
 
 -- | A resolution step on a package.
-resolveOn :: Incompatibility Cabal -> Incompatibility Cabal -> PackageName -> Incompatibility Cabal
+resolveOn :: Incompatibility Var -> Incompatibility Var -> PackageName -> Incompatibility Var
 resolveOn a b p = priorCause a b (PackageVar p)
 
 -- | @[lo, hi)@, the shape a release slot and a declared range both have.
@@ -93,23 +93,23 @@ from :: Int -> InstanceSet
 from lo = sourceOnly (VersionSet.fromVersionRange (orLaterVersion (cv lo)))
 
 -- | @a@ over @dependers@ depends on @q@ in @1..5@.
-dependsOnQ :: InstanceSet -> Incompatibility Cabal
+dependsOnQ :: InstanceSet -> Incompatibility Var
 dependsOnQ dependers = dependency pkgA dependers pkgQ (range 1 5)
 
 -- | The hole the solver learns when a range holds no releases.
-hole :: PackageName -> InstanceSet -> Incompatibility Cabal
+hole :: PackageName -> InstanceSet -> Incompatibility Var
 hole p s = noValues (PackageVar p) (instanceSet s)
 
-causeOf :: Incompatibility Cabal -> Cause Cabal
+causeOf :: Incompatibility Var -> Cause Var
 causeOf = incompCause
 
 -- | Every cause in the tree, so a test can assert that no hole survives.
-causes :: Incompatibility Cabal -> [Cause Cabal]
+causes :: Incompatibility Var -> [Cause Var]
 causes inc = incompCause inc : case incompCause inc of
     Derived c1 c2 -> causes c1 ++ causes c2
     _             -> []
 
-holesIn :: Incompatibility Cabal -> Int
+holesIn :: Incompatibility Var -> Int
 holesIn inc = length [() | NoValues _ _ <- causes inc]
 
 tests :: TestTree
@@ -174,20 +174,20 @@ absorbed =
 -- --------------------------------------------------------------------------
 
 -- | @a@ over @dependers@ depends on @q@ over @dependees@.
-aDependsOn :: InstanceSet -> InstanceSet -> Incompatibility Cabal
+aDependsOn :: InstanceSet -> InstanceSet -> Incompatibility Var
 aDependsOn dependers dependees = dependency pkgA dependers pkgQ dependees
 
 -- | A linear chain of steps, each adding one more range of @a@ with a slightly
 -- wider requirement on @q@ — the shape a proof takes when it walks a
 -- dependency's bound history one adjacent pair at a time.
-chainOf :: [(InstanceSet, InstanceSet)] -> Incompatibility Cabal
+chainOf :: [(InstanceSet, InstanceSet)] -> Incompatibility Var
 chainOf [] = error "chainOf: needs at least two facts"
 chainOf ((s0, r0) : rest) =
     foldl step (aDependsOn s0 r0) rest
   where
     step acc (s, r) = resolveOn acc (aDependsOn s r) pkgA
 
-proofLines :: Incompatibility Cabal -> [String]
+proofLines :: Incompatibility Var -> [String]
 proofLines = map T.unpack . T.lines . reportConflict
 
 sameePairRun :: [TestTree]
@@ -226,14 +226,14 @@ sameePairRun =
 -- | @a@ over @dependers@ depends on @dependee@ over @dependees@ — like
 -- 'aDependsOn', but the dependee is the caller's, which is the whole point of
 -- rule 5.
-aRequires :: InstanceSet -> String -> InstanceSet -> Incompatibility Cabal
+aRequires :: InstanceSet -> String -> InstanceSet -> Incompatibility Var
 aRequires dependers dependee dependees =
     dependency pkgA dependers (mkPackageName dependee) dependees
 
 -- | A chain of steps that all name @a@ as the depender and nothing else in
 -- common: the shape a proof takes when it walks a target's whole version
 -- history, one release and one unrelated dependency at a time.
-mixedChainOf :: [(InstanceSet, String, InstanceSet)] -> Incompatibility Cabal
+mixedChainOf :: [(InstanceSet, String, InstanceSet)] -> Incompatibility Var
 mixedChainOf [] = error "mixedChainOf: needs at least two facts"
 mixedChainOf ((s0, q0, r0) : rest) = foldl step (aRequires s0 q0 r0) rest
   where
@@ -580,7 +580,7 @@ soundness =
     sameTerm (Negative a) (Just (Negative b)) = a `equivalent` b
     sameTerm _ _                              = False
 
-describe :: Cause Cabal -> String
+describe :: Cause Var -> String
 describe (Seed f)   = "Seed " ++ fact f
 describe (Fact f)   = "Fact " ++ fact f
 describe NoValues{} = "NoValues"

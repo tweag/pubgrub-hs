@@ -46,11 +46,11 @@ import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Pretty            (prettyShow)
 import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Cabal                  (Cabal, CabalFact (..), Guard,
-                                                 UnbuildableReason (..))
+import           PubGrub.Cabal                  (CabalFact (..), Flag, Guard,
+                                                 UnbuildableReason (..),
+                                                 Var (..))
 import           PubGrub.Cabal.InstanceSet      (InstanceSet, isEveryVersion)
 import           PubGrub.Cabal.Value            (BoolSet (..), ValueSet (..))
-import           PubGrub.Cabal.Variable         (Flag, Var (..))
 import           PubGrub.Incompatibility        (Incompatibility (..))
 import           PubGrub.Pretty                 (Pretty (..))
 import           PubGrub.Report                 (Formatter (..), anyOf, listing,
@@ -60,7 +60,7 @@ import           PubGrub.Term                   (Term)
 
 -- | The cabal domain's words, with no rules and no pass: the half of a
 -- 'Formatter' that this module owns. "PubGrub.Cabal.Report" adds the rest.
-wording :: Formatter Cabal
+wording :: Formatter Var
 wording =
     Formatter
         { sayFact = fact
@@ -129,12 +129,12 @@ guardedDep p1 r1 g p2 r2
 -- version it is pinned to, since the bound that failed is only legible against
 -- that version and nothing else in the proof states it; and a release that
 -- cannot be built here says so, and why, rather than looking absent.
-leaf :: Incompatibility Cabal -> Text
+leaf :: Incompatibility Var -> Text
 leaf = Report.leaf wording
 
 -- | What a fact says. The clause it is the cause of rides along for the one
 -- case whose sentence depends on it.
-fact :: CabalFact -> Incompatibility Cabal -> Text
+fact :: CabalFact -> Incompatibility Var -> Text
 fact f c = case f of
     CauseRequest p s -> bareP p s <> " is requested"
     CauseConstraint (PackageVar p) s -> pretty p <> " is constrained to " <> pretty (vsInstances s)
@@ -178,7 +178,7 @@ reasons why =
 
 -- | What an incompatibility says: the standard sentences
 -- ('PubGrub.Report.summaryWith') over cabal's names.
-summary :: Incompatibility Cabal -> Text
+summary :: Incompatibility Var -> Text
 summary c = summaryTerms (incompTerms c)
 
 summaryTerms :: Map Var (Term ValueSet) -> Text

@@ -18,7 +18,8 @@ import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import qualified Distribution.Version           as Cabal
-import           PubGrub.Cabal                  (Cabal, fromDependency, request)
+import           PubGrub.Cabal                  (Var (..), fromDependency,
+                                                 request)
 import           PubGrub.Cabal.Installed        (InstalledDb, mkInstalledDb)
 import           PubGrub.Cabal.InstanceSet      (HasVersion (version),
                                                  Instance (..), InstanceSet,
@@ -29,7 +30,6 @@ import           PubGrub.Cabal.InstanceSet      (HasVersion (version),
 import           PubGrub.Cabal.Provider         (constrainTo)
 import           PubGrub.Cabal.Report           (reportConflict)
 import           PubGrub.Cabal.Value            (Value (..), ValueSet (..))
-import           PubGrub.Cabal.Variable         (Var (..))
 import           PubGrub.Cabal.Version          (mkVersion)
 import           PubGrub.Cabal.VersionSet       (fromVersionRange)
 import           PubGrub.Derivation             (conflictSet)
@@ -65,7 +65,7 @@ setOf = foldr (union . singletonInstance) emptyInstanceSet
 -- | The provider: newest instance the range admits, dependencies from a table.
 -- @rootNeeds@ is what @root@ asks of @foo@, so the two worlds below differ in
 -- one entry.
-provider :: [Instance] -> Provider Cabal Maybe
+provider :: [Instance] -> Provider Var Maybe
 provider rootNeeds = Provider expand'
   where
     expand' (PackageVar p) set =
@@ -94,21 +94,21 @@ noInstalled :: InstalledDb
 noInstalled = mkInstalledDb []
 
 -- | @p@ must be in the range if chosen, in cabal's syntax.
-constrained :: PackageName -> Cabal.VersionRange -> Incompatibility Cabal
+constrained :: PackageName -> Cabal.VersionRange -> Incompatibility Var
 constrained p r = constrainTo noInstalled p (sourceInstances (fromVersionRange r))
 
 -- | Solve for @root@ with the given constraints.
-run :: [Instance] -> [Incompatibility Cabal] -> Either (SolveError Cabal) (Map.Map Var Value)
+run :: [Instance] -> [Incompatibility Var] -> Either (SolveError Var) (Map.Map Var Value)
 run rootNeeds constraints =
     case solve mempty (provider rootNeeds) (request root (singletonInstance rootI) : constraints) of
         Nothing -> Left (NoSatisfier (PackageVar root) (request root (singletonInstance rootI)))
         Just r  -> r
 
 -- | 'run' with a failure rendered, so a plan can be compared with '@?='.
-planOf :: [Instance] -> [Incompatibility Cabal] -> Either Text (Map.Map Var Value)
+planOf :: [Instance] -> [Incompatibility Var] -> Either Text (Map.Map Var Value)
 planOf rootNeeds = either (Left . proofOf) Right . run rootNeeds
 
-proofOf :: SolveError Cabal -> Text
+proofOf :: SolveError Var -> Text
 proofOf (NoSolution i)    = reportConflict i
 proofOf (NoSatisfier p _) = T.pack ("internal error: no satisfier for " <> show p)
 proofOf _                 = T.pack "internal error"

@@ -1,8 +1,7 @@
-{-# LANGUAGE DerivingStrategies     #-}
-{-# LANGUAGE StandaloneDeriving     #-}
-{-# LANGUAGE TypeFamilies           #-}
-{-# LANGUAGE TypeFamilyDependencies #-}
-{-# LANGUAGE UndecidableInstances   #-}
+{-# LANGUAGE DerivingStrategies   #-}
+{-# LANGUAGE StandaloneDeriving   #-}
+{-# LANGUAGE TypeFamilies         #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- | Incompatibilities, the solver's only kind of knowledge, and the 'Domain'
 -- they are stated in.
@@ -31,7 +30,6 @@ module PubGrub.Incompatibility
     , priorCauseTerms
     ) where
 
-import           Data.Kind       (Type)
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import           PubGrub.SetOps  (SetOps (..))
@@ -53,29 +51,29 @@ import           PubGrub.Term    (Term (..), anyTerm, intersectTerm, isTopTerm,
 -- 'Ord' and combines sets with 'SetOps'; what a variable, a value or a fact
 -- /is/ never reaches it.
 --
--- @d@ is a type that only names the domain, usually one with no values
--- (@data MyDomain@). The variable type determines it, so that a variable alone
--- names its domain: two domains cannot share a variable type.
-class (Ord (VarOf d), SetOps (SetOf d)) => Domain (d :: Type) where
-    -- | The variables the solver assigns values to.
-    type VarOf d = (v :: Type) | v -> d
+-- The instance is on the type of the /variables/, the things the solver
+-- assigns values to, and that type names the domain everywhere: an
+-- @t'Incompatibility' v@ is one over the domain whose variables are @v@. The
+-- associated types say what a variable's values, its sets of values and the
+-- facts about it are.
+class (Ord v, SetOps (SetOf v)) => Domain v where
     -- | The values a variable takes.
-    type ValueOf d
+    type ValueOf v
     -- | A set of values of one variable: what a 'Term' ranges over.
-    type SetOf d
+    type SetOf v
     -- | An external fact: what the domain knows about the world, recorded as
     -- the 'Cause' of the incompatibility that states it. The solver never reads
     -- it; it is what a failure is explained from.
-    type FactOf d
+    type FactOf v
 
     -- | The set holding exactly one value of the variable. The solver states
     -- a decision with it.
-    singleton :: VarOf d -> ValueOf d -> SetOf d
+    singleton :: v -> ValueOf v -> SetOf v
 
     -- | Which incompatibilities say the same thing, and the one that says it
     -- once. The solver applies it as incompatibilities arrive. The default
     -- merges nothing.
-    mergeRule :: MergeRule d
+    mergeRule :: MergeRule v
     mergeRule = noMerging
 
 -- | A merge rule: two incompatibilities with the same key are one piece of
@@ -106,17 +104,17 @@ class (Ord (VarOf d), SetOps (SetOf d)) => Domain (d :: Type) where
 -- The solver files the merged incompatibility under @k@ without asking again.
 -- Nothing else is required: a merge may change which variables the
 -- incompatibility mentions.
-data MergeRule d = forall k. Ord k => MergeRule
-    { mergeKey  :: Incompatibility d -> Maybe k
+data MergeRule v = forall k. Ord k => MergeRule
+    { mergeKey  :: Incompatibility v -> Maybe k
       -- ^ the key of an incompatibility that may be merged, or 'Nothing' for
       -- one that is never merged
-    , mergeWith :: Incompatibility d -> Incompatibility d -> Incompatibility d
+    , mergeWith :: Incompatibility v -> Incompatibility v -> Incompatibility v
       -- ^ the incompatibility already held and the arriving one, both with the
       -- same key, to the one that replaces them
     }
 
 -- | No two clauses merge.
-noMerging :: MergeRule d
+noMerging :: MergeRule v
 noMerging = MergeRule{mergeKey = const (Nothing :: Maybe ()), mergeWith = const}
 
 -- --------------------------------------------------------------------------
@@ -152,9 +150,9 @@ noMerging = MergeRule{mergeKey = const (Nothing :: Maybe ()), mergeWith = const}
 -- Every incompatibility records why it holds, its 'Cause', which is what a
 -- failure is explained from. The cause never changes what an incompatibility
 -- means.
-data Incompatibility d = Incompatibility
-    { incompTerms :: Map (VarOf d) (Term (SetOf d))
-    , incompCause :: Cause d
+data Incompatibility v = Incompatibility
+    { incompTerms :: Map (v) (Term (SetOf v))
+    , incompCause :: Cause v
     }
 
 -- | Why an incompatibility holds. It is either /external/, a fact the solver
@@ -167,16 +165,16 @@ data Incompatibility d = Incompatibility
 -- A seed is kept apart from other facts because the solver treats it
 -- specially: a conflict that rests on the seeds alone ends the search, since
 -- no decision can be undone to avoid it.
-data Cause d
-    = Seed (FactOf d)
+data Cause v
+    = Seed (FactOf v)
       -- ^ part of the request: what the solve was asked for, or a constraint
       -- on it
-    | Fact (FactOf d)
+    | Fact (FactOf v)
       -- ^ a fact about the world, stated by the provider
-    | NoValues (VarOf d) (SetOf d)
+    | NoValues (v) (SetOf v)
       -- ^ the solver's own fact: the provider had nothing to offer in this
       -- set of the variable's values ('noValues')
-    | Derived (Incompatibility d) (Incompatibility d)
+    | Derived (Incompatibility v) (Incompatibility v)
       -- ^ the resolvent of two incompatibilities, in the order 'priorCause'
       -- took them
 
@@ -184,22 +182,22 @@ data Cause d
 -- incompatibilities are equal when their terms and their derivations are, and
 -- 'show' prints the tree. They are what a test asserts with and what GHCi
 -- prints; a report of a failure is "PubGrub.Report".
-deriving stock instance (Eq (VarOf d), Eq (SetOf d), Eq (FactOf d)) => Eq (Incompatibility d)
-deriving stock instance (Eq (VarOf d), Eq (SetOf d), Eq (FactOf d)) => Eq (Cause d)
-deriving stock instance (Show (VarOf d), Show (SetOf d), Show (FactOf d)) => Show (Incompatibility d)
-deriving stock instance (Show (VarOf d), Show (SetOf d), Show (FactOf d)) => Show (Cause d)
+deriving stock instance (Eq (v), Eq (SetOf v), Eq (FactOf v)) => Eq (Incompatibility v)
+deriving stock instance (Eq (v), Eq (SetOf v), Eq (FactOf v)) => Eq (Cause v)
+deriving stock instance (Show (v), Show (SetOf v), Show (FactOf v)) => Show (Incompatibility v)
+deriving stock instance (Show (v), Show (SetOf v), Show (FactOf v)) => Show (Cause v)
 
 -- | The term an incompatibility states about @v@, if any.
-incompGet :: Domain d => VarOf d -> Incompatibility d -> Maybe (Term (SetOf d))
+incompGet :: Domain v => v -> Incompatibility v -> Maybe (Term (SetOf v))
 incompGet v (Incompatibility m _) = Map.lookup v m
 
 -- | @{v: Positive s}@, caused by 'NoValues': the variable takes no value in
 -- @s@. The solver states it when the provider has no value to offer in @s@.
-noValues :: Domain d => VarOf d -> SetOf d -> Incompatibility d
+noValues :: Domain v => v -> SetOf v -> Incompatibility v
 noValues v s = Incompatibility (Map.singleton v (Positive s)) (NoValues v s)
 
 -- | Is this part of the request: is its cause a 'Seed'?
-isSeed :: Incompatibility d -> Bool
+isSeed :: Incompatibility v -> Bool
 isSeed i = case incompCause i of
     Seed _ -> True
     _      -> False
@@ -208,14 +206,14 @@ isSeed i = case incompCause i of
 -- pivot variable, the one that follows from both. Its terms are
 -- 'priorCauseTerms', and its cause is 'Derived' from the two, in this order.
 priorCause
-    :: Domain d
-    => Incompatibility d
+    :: Domain v
+    => Incompatibility v
     -- ^ the incompatibility being resolved
-    -> Incompatibility d
+    -> Incompatibility v
     -- ^ the incompatibility it is resolved with
-    -> VarOf d
+    -> v
     -- ^ the pivot, which both mention
-    -> Incompatibility d
+    -> Incompatibility v
 priorCause current@(Incompatibility cur _) satCause@(Incompatibility sat _) pivot =
     Incompatibility (priorCauseTerms pivot cur sat) (Derived current satCause)
 
@@ -223,14 +221,14 @@ priorCause current@(Incompatibility cur _) satCause@(Incompatibility sat _) pivo
 -- the intersection of every other variable's, and no term for the pivot where
 -- the union is always true.
 priorCauseTerms
-    :: Domain d
-    => VarOf d
+    :: Domain v
+    => v
     -- ^ the pivot
-    -> Map (VarOf d) (Term (SetOf d))
+    -> Map (v) (Term (SetOf v))
     -- ^ the terms of the incompatibility being resolved
-    -> Map (VarOf d) (Term (SetOf d))
+    -> Map (v) (Term (SetOf v))
     -- ^ the terms of the one it is resolved with
-    -> Map (VarOf d) (Term (SetOf d))
+    -> Map (v) (Term (SetOf v))
 priorCauseTerms pivot cur sat = finalTerms
   where
     merged =

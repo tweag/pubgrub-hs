@@ -38,13 +38,12 @@ newtype V = V Int
 
 -- | The domain: variables are small numbers, and a fact is a tag the rules
 -- key on.
-data Lab
 
-instance Domain Lab where
-    type VarOf Lab = V
-    type ValueOf Lab = Int
-    type SetOf Lab = Set Int
-    type FactOf Lab = Int
+instance Domain V where
+
+    type ValueOf V = Int
+    type SetOf V = Set Int
+    type FactOf V = Int
     singleton _ = Set.singleton
 
 -- | A clause, as data a counterexample can print: its tag, whether it carries
@@ -56,7 +55,7 @@ data Spec = Spec
     }
     deriving (Show)
 
-clause :: Spec -> Incompatibility Lab
+clause :: Spec -> Incompatibility V
 clause Spec{spTag, spKeyed, spTerms} =
     Incompatibility
         (Map.fromList [(V v, (if pos then Positive else Negative) (Set.fromList vs)) | (v, pos, vs) <- spTerms])
@@ -79,7 +78,7 @@ data Op
 instance Arbitrary Op where
     arbitrary = frequency [(3, Insert <$> arbitrary), (1, InsertMany <$> listOf arbitrary)]
 
-apply :: Store Lab -> Op -> Store Lab
+apply :: Store V -> Op -> Store V
 apply store op = case op of
     Insert s      -> snd (insertClause (clause s) store)
     InsertMany ss -> snd (insertClauses (map clause ss) store)
@@ -88,18 +87,18 @@ apply store op = case op of
 -- The rules
 -- --------------------------------------------------------------------------
 
-keyOf :: Incompatibility Lab -> Maybe Int
+keyOf :: Incompatibility V -> Maybe Int
 keyOf i = case incompCause i of
     Fact t -> Just t
     _      -> Nothing
 
 -- | The arriving clause replaces the existing one: a merge may drop any
 -- variable and add any other.
-replacing :: MergeRule Lab
+replacing :: MergeRule V
 replacing = MergeRule{mergeKey = keyOf, mergeWith = \_ new -> new}
 
 -- | The merged clause mentions every variable either half did.
-widening :: MergeRule Lab
+widening :: MergeRule V
 widening =
     MergeRule
         { mergeKey = keyOf
@@ -107,16 +106,16 @@ widening =
         }
 
 -- | Breaks the law: the merged clause has another key.
-rekeying :: MergeRule Lab
+rekeying :: MergeRule V
 rekeying = MergeRule{mergeKey = keyOf, mergeWith = \_ new -> new{incompCause = Fact (100 + fromMaybe 0 (keyOf new))}}
 
 -- | Every store along the way is valid.
-validThroughout :: MergeRule Lab -> [Op] -> Bool
+validThroughout :: MergeRule V -> [Op] -> Bool
 validThroughout rule ops = all valid (scanl apply (emptyStoreWith rule) ops)
 
 -- | An insert answers with the id of a clause that is in the store afterwards:
 -- the one it merged into, or a new one exactly when nothing had its key.
-landsWhereItSays :: MergeRule Lab -> [Spec] -> Spec -> Bool
+landsWhereItSays :: MergeRule V -> [Spec] -> Spec -> Bool
 landsWhereItSays rule before s =
     IntSet.member c (allClauses after) && isNew == not merges
   where
@@ -127,7 +126,7 @@ landsWhereItSays rule before s =
 
 -- | Under a rule that merges by key, a store holds one clause per key and one
 -- per clause without a key.
-oneClausePerKey :: MergeRule Lab -> [Spec] -> Property
+oneClausePerKey :: MergeRule V -> [Spec] -> Property
 oneClausePerKey rule specs =
     length (storeClauses (foldl (\st x -> snd (insertClause x st)) (emptyStoreWith rule) (map clause specs)))
         === length (nub [spTag s | s <- specs, spKeyed s]) + length (filter (not . spKeyed) specs)

@@ -87,10 +87,11 @@ import           PubGrub
 
 -- $domain
 --
--- The solver does not know what it is solving for. We tell it, by naming four
--- types: what a /variable/ is (here, a package), what a /value/ is (a version),
--- what a /set of values/ is, and what a /fact/ about the world is. The fact type
--- is for explanations only; we will use it at the end.
+-- The solver does not know what it is solving for. We tell it, by making the
+-- type of the /variables/ (here, a package) an instance of 'Domain' that names
+-- three more types: what a /value/ is (a version), what a /set of values/ is,
+-- and what a /fact/ about the world is. The fact type is for explanations
+-- only; we will use it at the end.
 --
 -- Add to @Toy.hs@:
 --
@@ -101,18 +102,17 @@ import           PubGrub
 -- >     = Wants Pkg (Set Int)
 -- >     | Needs Pkg Int Pkg (Set Int)
 -- >
--- > data Toy
--- >
--- > instance Domain Toy where
--- >     type VarOf Toy = Pkg
--- >     type ValueOf Toy = Int
--- >     type SetOf Toy = Set Int
--- >     type FactOf Toy = ToyFact
+-- > instance Domain Pkg where
+-- >     type ValueOf Pkg = Int
+-- >     type SetOf Pkg = Set Int
+-- >     type FactOf Pkg = ToyFact
 -- >     singleton _ v = Set.singleton v
 --
--- @Toy@ has no values. It is only a name for this choice of four types, and
--- every other type in the library takes it as a parameter. 'singleton' is the
--- one function the domain has to supply: the set that holds exactly one value.
+-- The variable type names the domain: every other type in the library takes
+-- it as a parameter, and an @Incompatibility Pkg@ is one over this world of
+-- packages. @Pkg@ is a newtype rather than @String@ so that the instance is
+-- ours. 'singleton' is the one function the domain has to supply: the set
+-- that holds exactly one value.
 --
 -- A @ToyFact@ is either a request (/we want @app@ at one of these versions/) or a
 -- dependency (/@lib@ version 1 needs @util@ at one of these versions/).
@@ -127,13 +127,13 @@ import           PubGrub
 --
 -- Add two functions that state our two kinds of fact:
 --
--- > wants :: Pkg -> [Int] -> Incompatibility Toy
+-- > wants :: Pkg -> [Int] -> Incompatibility Pkg
 -- > wants p vs =
 -- >     Incompatibility
 -- >         (Map.singleton p (Negative (Set.fromList vs)))
 -- >         (Seed (Wants p (Set.fromList vs)))
 -- >
--- > needs :: Pkg -> Int -> Pkg -> [Int] -> Incompatibility Toy
+-- > needs :: Pkg -> Int -> Pkg -> [Int] -> Incompatibility Pkg
 -- > needs p v q ws =
 -- >     Incompatibility
 -- >         (Map.fromList [(p, Positive (Set.singleton v)), (q, Negative (Set.fromList ws))])
@@ -182,7 +182,7 @@ import           PubGrub
 -- t'Provider': here is the package, and here is the set of versions still
 -- allowed; pick one, and tell me what that choice entails. Add:
 --
--- > provider :: World -> Provider Toy Identity
+-- > provider :: World -> Provider Pkg Identity
 -- > provider w = Provider $ \p offered ->
 -- >     pure $ case [(v, deps) | (v, deps) <- Map.findWithDefault [] p w, v `Set.member` offered] of
 -- >         [] -> (Nothing, [])
@@ -207,7 +207,7 @@ import           PubGrub
 -- To solve, hand 'solve' the provider and the requests. Its first argument
 -- receives a message at each step of the search; 'mempty' discards them. Add:
 --
--- > plan :: World -> [Incompatibility Toy] -> Maybe (Map Pkg Int)
+-- > plan :: World -> [Incompatibility Pkg] -> Maybe (Map Pkg Int)
 -- > plan w seeds = case runIdentity (solve mempty (provider w) seeds) of
 -- >     Right solution -> Just solution
 -- >     Left _         -> Nothing
@@ -254,7 +254,7 @@ import           PubGrub
 -- > name :: Pkg -> Set Int -> Text
 -- > name (Pkg p) vs = T.pack p <> " " <> versions vs
 -- >
--- > formatter :: Formatter Toy
+-- > formatter :: Formatter Pkg
 -- > formatter =
 -- >     Formatter
 -- >         { sayFact = \fact _ -> case fact of
@@ -267,13 +267,13 @@ import           PubGrub
 -- >         , clauseRules = []
 -- >         }
 -- >
--- > why :: World -> [Incompatibility Toy] -> Text
+-- > why :: World -> [Incompatibility Pkg] -> Text
 -- > why w seeds = case runIdentity (solve mempty (provider w) seeds) of
 -- >     Right _                -> "There is a plan."
 -- >     Left (NoSolution root) -> reportConflict formatter root
 -- >     Left _                 -> "The solver failed unexpectedly."
 -- >
--- > explain :: World -> [Incompatibility Toy] -> IO ()
+-- > explain :: World -> [Incompatibility Pkg] -> IO ()
 -- > explain w seeds = T.putStrLn (why w seeds)
 --
 -- Reload, and ask why the broken world has no plan:

@@ -149,16 +149,16 @@ An **incompatibility** is a set of terms (at most one per package) that cannot a
 In SAT solving this would be called a *clause*. In Answer Set Programming it is a *nogood*. PubGrub uses the word incompatibility throughout.
 
 ```haskell
--- the core: the shape of a derivation, over any domain d
-data Cause d
-  = Seed (FactOf d)                                -- what the solve was asked for
-  | Fact (FactOf d)                                -- a fact the provider stated
-  | NoValues (VarOf d) (SetOf d)                   -- nothing to offer in this set
-  | Derived (Incompatibility d) (Incompatibility d) -- resolved from two others
+-- the core: the shape of a derivation, over any variable type v
+data Cause v
+  = Seed (FactOf v)                                -- what the solve was asked for
+  | Fact (FactOf v)                                -- a fact the provider stated
+  | NoValues v (SetOf v)                           -- nothing to offer in this set
+  | Derived (Incompatibility v) (Incompatibility v) -- resolved from two others
 
-data Incompatibility d = Incompatibility
-  { incompTerms :: Map (VarOf d) (Term (SetOf d))
-  , incompCause :: Cause d
+data Incompatibility v = Incompatibility
+  { incompTerms :: Map v (Term (SetOf v))
+  , incompCause :: Cause v
   }
 
 -- the cabal domain: what a leaf says

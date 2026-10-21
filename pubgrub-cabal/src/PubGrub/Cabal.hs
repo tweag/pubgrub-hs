@@ -2,16 +2,19 @@
 
 -- | The cabal domain: the solver instantiated for cabal packages.
 --
--- A variable is a package name or one automatic flag of a package
--- ('PubGrub.Cabal.Variable'); a value is an instance or a Boolean, and a set of
--- values is a set of instances or a set of Booleans ('PubGrub.Cabal.Value'). The
--- facts are what a @.cabal@ file states and what the request asks for. The
--- constructors here are the only way a fact of this domain is built: the
--- provider states facts through them, and 'PubGrub.Store' rebuilds a merged
--- clause through them, so a clause's cause always agrees with its terms. What
--- the solver learns from the facts is the core's own 'Cause'.
+-- A variable is a package name or one automatic flag of a package; a value is
+-- an instance or a Boolean, and a set of values is a set of instances or a set
+-- of Booleans ('PubGrub.Cabal.Value'). The facts are what a @.cabal@ file states
+-- and what the request asks for. The constructors here are the only way a fact
+-- of this domain is built: the provider states facts through them, and
+-- 'PubGrub.Store' rebuilds a merged clause through them, so a clause's cause
+-- always agrees with its terms. What the solver learns from the facts is the
+-- core's own 'Cause'.
 module PubGrub.Cabal
-    ( Cabal
+    ( -- * Variables
+      Flag (..)
+    , Var (..)
+    , varPackage
       -- * Facts
     , CabalFact (..)
     , Guard
@@ -24,6 +27,8 @@ module PubGrub.Cabal
     , unbuildable
     , fromDependency
     , declaresFlag
+      -- * The answer
+    , foldFlags
     ) where
 
 import           Data.List.NonEmpty                     (NonEmpty)
@@ -32,37 +37,86 @@ import           Data.Map.Strict                        (Map)
 import qualified Data.Map.Strict                        as Map
 import           Data.Set                               (Set)
 import qualified Data.Set                               as Set
+import qualified Data.Text                              as T
+import           Distribution.Types.Flag                (FlagName,
+                                                         insertFlagAssignment,
+                                                         mkFlagAssignment)
 import           Distribution.Types.PackageName         (PackageName)
 import           Distribution.Types.PkgconfigDependency (PkgconfigDependency)
-import           PubGrub.Cabal.InstanceSet              (InstanceSet)
-import           PubGrub.Cabal.Value                    (Value, ValueSet,
+import           PubGrub.Cabal.InstanceSet              (Instance (..),
+                                                         InstanceSet)
+import           PubGrub.Cabal.Pretty                   ()
+import           PubGrub.Cabal.Value                    (Resolved (..),
+                                                         Value (..), ValueSet,
                                                          boolSet, bothValues,
                                                          flagSet, instanceSet,
                                                          singletonValue)
-import           PubGrub.Cabal.Variable                 (Flag, Var (..))
 import           PubGrub.Cabal.Version                  (Version)
 import           PubGrub.Incompatibility                (Cause (..),
                                                          Domain (..),
                                                          Incompatibility (..),
                                                          MergeRule (MergeRule))
+import           PubGrub.Pretty                         (Pretty (..))
 import           PubGrub.SetOps                         (SetOps (..))
 import           PubGrub.Term                           (Term (..),
                                                          intersectTerm,
                                                          isTopTerm)
 
 -- --------------------------------------------------------------------------
+-- Variables
+-- --------------------------------------------------------------------------
+
+
+-- | A flag as a @.cabal@ file declares it: a name and a default. The @manual@
+-- marking is not here because a manual flag never reaches the solver: it is
+-- resolved at its default when a release is flattened.
+--
+-- A flag variable is identified by this /declaration/, not by the release that
+-- declares it. Two releases that declare @fast@ with the same default share the
+-- variable, so a guarded dependency they both carry can be stated once over
+-- both, as one incompatibility over adjacent versions; a release that changed
+-- the default declares a different flag and gets a variable of its own. At most
+-- one release of a package is ever in a plan, so the shared variable is always
+-- that release's flag. Carrying the default in the identity lets the provider
+-- offer it first from the variable alone, without knowing which release was
+-- decided.
+data Flag = Flag
+    { flagName    :: FlagName
+    , flagDefault :: Bool
+    }
+    deriving (Eq, Ord, Show)
+
+-- | A solver variable.
+data Var
+    = PackageVar PackageName
+    | FlagVar PackageName Flag
+      -- ^ an automatic flag of the package, searched alongside its version
+    deriving (Eq, Ord, Show)
+
+-- | The package a variable belongs to: itself, or the owner of the flag.
+varPackage :: Var -> PackageName
+varPackage (PackageVar p) = p
+varPackage (FlagVar p _)  = p
+
+instance Pretty Flag where
+    pretty = pretty . flagName
+
+-- | @foo@, or @foo:fast@ for a flag. The set a flag term ranges over says on or
+-- off; the variable alone only says which flag.
+instance Pretty Var where
+    pretty (PackageVar p) = pretty p
+    pretty (FlagVar p f)  = pretty p <> T.pack ":" <> pretty f
+
+-- --------------------------------------------------------------------------
 -- The domain
 -- --------------------------------------------------------------------------
 
--- | The domain of cabal packages. A type with no values: it names the
--- instantiation, as in @'Incompatibility' Cabal@.
-data Cabal
-
-instance Domain Cabal where
-    type VarOf Cabal = Var
-    type ValueOf Cabal = Value
-    type SetOf Cabal = ValueSet
-    type FactOf Cabal = CabalFact
+-- | The domain of cabal packages: its variables are 'Var', a package or a
+-- flag, and that type names the instantiation, as in @'Incompatibility' Var@.
+instance Domain Var where
+    type ValueOf Var = Value
+    type SetOf Var = ValueSet
+    type FactOf Var = CabalFact
 
     singleton _ = singletonValue
 
@@ -115,7 +169,7 @@ data UnbuildableReason
 -- A seed is a unit clause, so propagation turns it into a derivation at decision
 -- level 0 before anything is decided; 'PubGrub.Solver' recognises a conflict that
 -- rests on those derivations alone as the end of the search.
-request :: PackageName -> InstanceSet -> Incompatibility Cabal
+request :: PackageName -> InstanceSet -> Incompatibility Var
 request p s = Incompatibility (Map.singleton (PackageVar p) (Negative (instanceSet s))) (Seed (CauseRequest p s))
 
 -- | A constraint: if @v@ is in the plan at all, it is in @allowed@. It is
@@ -138,13 +192,13 @@ request p s = Incompatibility (Map.singleton (PackageVar p) (Negative (instanceS
 -- provider side knows. 'PubGrub.Cabal.Provider.constrainTo' computes the
 -- complement from a 'PubGrub.Cabal.Installed.InstalledDb'; 'flagConstraint' is
 -- the two-valued case, which needs nothing.
-constraint :: Var -> ValueSet -> ValueSet -> Incompatibility Cabal
+constraint :: Var -> ValueSet -> ValueSet -> Incompatibility Var
 constraint v allowed forbidden =
     Incompatibility (Map.singleton v (Positive forbidden)) (Seed (CauseConstraint v allowed))
 
 -- | A flag held at a value: @p:f@ is @b@ if it is in play at all. A 'constraint'
 -- over the flag's own variable, as a user's @--constraint 'p +f'@ is.
-flagConstraint :: PackageName -> Flag -> Bool -> Incompatibility Cabal
+flagConstraint :: PackageName -> Flag -> Bool -> Incompatibility Var
 flagConstraint p f b =
     constraint (FlagVar p f) (flagSet (boolSet b)) (flagSet (boolSet (not b)))
 
@@ -167,7 +221,7 @@ flagConstraint p f b =
 -- The provider states it for the non-reinstallable boot packages
 -- ('PubGrub.Cabal.Installed.nonReinstallablePackages'); the core only needs the
 -- shape.
-onlyInstalled :: PackageName -> [Version] -> InstanceSet -> Incompatibility Cabal
+onlyInstalled :: PackageName -> [Version] -> InstanceSet -> Incompatibility Var
 onlyInstalled p installed anySource =
     Incompatibility (Map.singleton (PackageVar p) (Positive (instanceSet anySource))) (Fact (CauseOnlyInstalled p installed))
 
@@ -202,7 +256,7 @@ onlyInstalled p installed anySource =
 -- The reasons are there for the proof only, like the installed versions of
 -- 'onlyInstalled': the clause's terms are the ban, and the reasons are what the
 -- sentence says instead of a bare \"cannot be built\".
-unbuildable :: PackageName -> InstanceSet -> Guard -> NonEmpty UnbuildableReason -> Incompatibility Cabal
+unbuildable :: PackageName -> InstanceSet -> Guard -> NonEmpty UnbuildableReason -> Incompatibility Var
 unbuildable p s guard why =
     Incompatibility
         ( Map.fromList
@@ -241,7 +295,7 @@ unbuildable p s guard why =
 -- rather than of those in @V@. The provider drops a release's dependency on its
 -- own package before it gets here, as cabal does, so this case is the safety
 -- net rather than the rule.
-fromDependency :: PackageName -> InstanceSet -> Guard -> PackageName -> InstanceSet -> Incompatibility Cabal
+fromDependency :: PackageName -> InstanceSet -> Guard -> PackageName -> InstanceSet -> Incompatibility Var
 fromDependency pkgName pkgSet guard depName depSet =
     Incompatibility
         ( Map.fromListWith
@@ -264,7 +318,7 @@ fromDependency pkgName pkgSet guard depName depSet =
 -- term for a flag, so a flag is only ever decided while a release declaring it
 -- is decided, and a learned clause that mentions it under a wider term about
 -- the owner is inert for the owner's other releases.
-declaresFlag :: PackageName -> InstanceSet -> Flag -> Incompatibility Cabal
+declaresFlag :: PackageName -> InstanceSet -> Flag -> Incompatibility Var
 declaresFlag p s f =
     Incompatibility
         ( Map.fromList
@@ -313,7 +367,7 @@ data MergeKey
 -- entry when the dependency is unsatisfiable, and the unit ban that remains does
 -- not say which dependee it came from. The cause still names it, so two such
 -- clauses about the same dependee merge.
-mergeKey :: Incompatibility Cabal -> Maybe MergeKey
+mergeKey :: Incompatibility Var -> Maybe MergeKey
 mergeKey i = case incompCause i of
     Fact (CauseDependency p _ g (q, depSet)) -> Just (MergeDep p q g depSet)
     Fact (CauseDeclaresFlag p _ f)           -> Just (MergeDeclares p f)
@@ -323,7 +377,7 @@ mergeKey i = case incompCause i of
 -- | The union of two clauses carrying the same key, rebuilt through the
 -- constructor of their kind so that the cause stays a leaf cause with the
 -- unioned term ('PubGrub.Store' says why that matters).
-mergeWith :: Incompatibility Cabal -> Incompatibility Cabal -> Incompatibility Cabal
+mergeWith :: Incompatibility Var -> Incompatibility Var -> Incompatibility Var
 mergeWith c new = case (incompCause c, incompCause new) of
     (Fact (CauseDependency p aSet g (q, depSet)), Fact (CauseDependency _ bSet _ _)) ->
         fromDependency p (aSet `union` bSet) g q depSet
@@ -341,3 +395,25 @@ mergeWith c new = case (incompCause c, incompCause new) of
     -- reached, the newer clause would be lost.
     _ -> c
 
+-- --------------------------------------------------------------------------
+-- The answer
+-- --------------------------------------------------------------------------
+
+-- | Fold the solver's answer into one entry per package: each decided flag
+-- goes into the flag assignment of its owner, which must be a source release.
+-- A flag whose owner is not in the answer, or not built from source, is dropped;
+-- neither can happen, since a flag is only ever decided under its owner.
+foldFlags :: Map Var Value -> Map PackageName Resolved
+foldFlags decided = Map.foldrWithKey fold owners decided
+  where
+    owners =
+        Map.fromList
+            [ (p, resolved i)
+            | (PackageVar p, PackageValue i) <- Map.toList decided
+            ]
+    resolved (UsePreInstalled pip) = Installed pip
+    resolved (BuildSource v)       = Built v (mkFlagAssignment [])
+    fold (FlagVar p f) (FlagValue b) = Map.adjust (withFlag f b) p
+    fold _ _                         = id
+    withFlag f b (Built v fa) = Built v (insertFlagAssignment (flagName f) b fa)
+    withFlag _ _ r            = r

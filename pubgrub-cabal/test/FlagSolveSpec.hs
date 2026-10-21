@@ -47,9 +47,10 @@ import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.UnitId      (mkUnitId)
 import           Distribution.Types.Version     (mkVersion)
 import           Distribution.Version           (anyVersion, thisVersion)
-import           PubGrub.Cabal                  (Cabal, CabalFact (..),
+import           PubGrub.Cabal                  (CabalFact (..), Flag (..),
                                                  UnbuildableReason (..),
-                                                 flagConstraint, request)
+                                                 Var (..), flagConstraint,
+                                                 foldFlags, request)
 import           PubGrub.Cabal.Flatten          (FlagModel (..))
 import           PubGrub.Cabal.Installed        (InstalledPkg (..),
                                                  mkInstalledDb)
@@ -62,8 +63,7 @@ import           PubGrub.Cabal.Provider         (ParseError (..))
 import qualified PubGrub.Cabal.Provider         as BP
 import           PubGrub.Cabal.Report           (reportConflict)
 import           PubGrub.Cabal.Value            (Resolved (..), Value (..),
-                                                 foldFlags, instanceSet)
-import           PubGrub.Cabal.Variable         (Flag (..), Var (..))
+                                                 instanceSet)
 import           PubGrub.Cabal.Version          (Version)
 import qualified PubGrub.Cabal.Version          as V
 import qualified PubGrub.Cabal.VersionSet       as VersionSet
@@ -106,11 +106,11 @@ type World = [(PackageName, Pkg)]
 -- guards are resolved at the declared defaults before the provider sees them,
 -- which is what 'PubGrub.Cabal.Flatten.componentDepsStored' does to a real
 -- release.
-worldProviderUnder :: FlagModel -> UnbuildableHere -> World -> Provider Cabal TestM
+worldProviderUnder :: FlagModel -> UnbuildableHere -> World -> Provider Var TestM
 worldProviderUnder = worldProviderUnderWith BP.noPreference
 
 -- | 'worldProviderUnder' with flag search and a 'BP.Preference'.
-worldProviderUnderPreferring :: BP.Preference -> UnbuildableHere -> World -> Provider Cabal TestM
+worldProviderUnderPreferring :: BP.Preference -> UnbuildableHere -> World -> Provider Var TestM
 worldProviderUnderPreferring preference = worldProviderUnderWith preference FlagPackages
 
 -- | Which releases cannot be built here, and under which flag condition:
@@ -118,7 +118,7 @@ worldProviderUnderPreferring preference = worldProviderUnderWith preference Flag
 -- @PubGrub.Cabal.Flatten.unbuildableStored@.
 type UnbuildableHere = [((PackageName, Version), Condition FlagName)]
 
-worldProviderUnderWith :: BP.Preference -> FlagModel -> UnbuildableHere -> World -> Provider Cabal TestM
+worldProviderUnderWith :: BP.Preference -> FlagModel -> UnbuildableHere -> World -> Provider Var TestM
 worldProviderUnderWith preference model unbuildableHere world =
     Provider (BP.mkExpand mempty preference (mkInstalledDb []) source)
   where
@@ -166,7 +166,7 @@ atDefaults defaults = go
     go (COr a b)  = go a || go b
     go (CAnd a b) = go a && go b
 
-worldProvider :: World -> Provider Cabal TestM
+worldProvider :: World -> Provider Var TestM
 worldProvider = worldProviderUnder FlagPackages []
 
 -- --------------------------------------------------------------------------
@@ -192,16 +192,16 @@ rootInstance = BuildSource v1
 
 -- | Run the solver and fold its flag decisions into their owners, so an answer
 -- reads as a plan. A failure is kept as its rendered proof.
-runSolve :: Provider Cabal TestM -> IO (Either Text (Map PackageName Resolved))
+runSolve :: Provider Var TestM -> IO (Either Text (Map PackageName Resolved))
 runSolve = runSolveWith []
 
 -- | The same with further seeds after the request: constraints, in these tests.
-runSolveWith :: [Incompatibility Cabal] -> Provider Cabal TestM -> IO (Either Text (Map PackageName Resolved))
+runSolveWith :: [Incompatibility Var] -> Provider Var TestM -> IO (Either Text (Map PackageName Resolved))
 runSolveWith seeds provider =
     either (Left . renderFailure) (Right . foldFlags)
         <$> runTestM (solve mempty provider (request root (singletonInstance rootInstance) : seeds))
 
-renderFailure :: SolveError Cabal -> Text
+renderFailure :: SolveError Var -> Text
 renderFailure (NoSolution i) = reportConflict i
 renderFailure (NoSatisfier p _) =
     T.pack ("internal error: no satisfier for " <> show p)
@@ -221,7 +221,7 @@ solveWorldWith unbuildableHere = runSolve . worldProviderUnder FlagPackages [(pv
 -- a package asked twice was reconsidered after a conflict. Flags are not
 -- counted; they are decided with their owner and are not what these counts
 -- measure.
-countingProvider :: IORef [PackageName] -> Provider Cabal TestM -> Provider Cabal TestM
+countingProvider :: IORef [PackageName] -> Provider Var TestM -> Provider Var TestM
 countingProvider ref provider = Provider $ \v range -> do
     case v of
         PackageVar p -> liftIO (modifyIORef' ref (p :))

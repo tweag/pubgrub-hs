@@ -34,7 +34,8 @@ import           Distribution.Types.GenericPackageDescription (GenericPackageDes
 import           Distribution.Types.PackageName               (PackageName,
                                                                mkPackageName)
 import qualified Distribution.Types.Version                   as Cabal
-import           PubGrub.Cabal                                (Cabal, request)
+import           PubGrub.Cabal                                (Var, foldFlags,
+                                                               request)
 import           PubGrub.Cabal.Flatten                        (FlagModel (..),
                                                                Stanzas,
                                                                allStanzas,
@@ -44,8 +45,7 @@ import           PubGrub.Cabal.InstanceSet                    (Instance (..),
                                                                singletonInstance)
 import qualified PubGrub.Cabal.Provider                       as BP
 import           PubGrub.Cabal.Report                         (reportConflict)
-import           PubGrub.Cabal.Value                          (Resolved (..),
-                                                               foldFlags)
+import           PubGrub.Cabal.Value                          (Resolved (..))
 import           PubGrub.Cabal.Version                        (Version)
 import qualified PubGrub.Cabal.Version                        as V
 import           PubGrub.Provider                             (Provider (..))
@@ -71,7 +71,7 @@ gpdOf src = case snd (runParseResult (parseGenericPackageDescription (BS.pack sr
 
 -- | A world of one release per package, each reduced from its @.cabal@ under
 -- the 'Stanzas' given for it, with no installed units and no pkg-config.
-worldFrom :: [(PackageName, Stanzas, GenericPackageDescription)] -> Provider Cabal IO
+worldFrom :: [(PackageName, Stanzas, GenericPackageDescription)] -> Provider Var IO
 worldFrom entries =
     Provider (BP.mkExpand mempty BP.noPreference (mkInstalledDb []) source)
   where
@@ -92,7 +92,7 @@ worldFrom entries =
 v1 :: Version
 v1 = V.mkVersion [1, 0]
 
-solveFor :: PackageName -> Provider Cabal IO -> IO (Either Text (Map.Map PackageName Resolved))
+solveFor :: PackageName -> Provider Var IO -> IO (Either Text (Map.Map PackageName Resolved))
 solveFor target provider =
     either (Left . render) (Right . foldFlags)
         <$> solve mempty provider [request target (singletonInstance (BuildSource v1))]

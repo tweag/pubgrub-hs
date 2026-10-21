@@ -49,10 +49,9 @@ module PubGrub.Cabal.Report.Rule
 import           Data.Map.Strict                (Map)
 import qualified Data.Map.Strict                as Map
 import           Distribution.Types.PackageName (PackageName)
-import           PubGrub.Cabal                  (Cabal, CabalFact (..))
+import           PubGrub.Cabal                  (CabalFact (..), Var (..))
 import           PubGrub.Cabal.InstanceSet      (InstanceSet)
 import           PubGrub.Cabal.Value            (ValueSet (..))
-import           PubGrub.Cabal.Variable         (Var (..))
 import           PubGrub.Derivation
 import           PubGrub.Incompatibility        (Incompatibility (..))
 import           PubGrub.SetOps                 (SetOps (union))
@@ -63,13 +62,13 @@ import           PubGrub.Term                   (Term (..))
 -- --------------------------------------------------------------------------
 
 -- | A seed: the package and the range it was requested in.
-asRequest :: Rule (Incompatibility Cabal) (PackageName, InstanceSet)
+asRequest :: Rule (Incompatibility Var) (PackageName, InstanceSet)
 asRequest c = case asSeed c of
     Just (CauseRequest p s) -> Just (p, s)
     _                       -> Nothing
 
 -- | A hole: a range the solver found to hold no releases.
-asHole :: Rule (Incompatibility Cabal) (PackageName, InstanceSet)
+asHole :: Rule (Incompatibility Var) (PackageName, InstanceSet)
 asHole c = case asNoValues c of
     Just (PackageVar p, s) -> Just (p, vsInstances s)
     _                      -> Nothing
@@ -81,7 +80,7 @@ asHole c = case asNoValues c of
 -- cause instead. 'PubGrub.Incompatibility.fromDependency' drops the dependee
 -- term when the dependency is unsatisfiable, and then there is no \"depends on\"
 -- left to render: the clause is a bare ban on the depender and reads as one.
-asDependency :: Rule (Incompatibility Cabal) (PackageName, InstanceSet, PackageName, InstanceSet)
+asDependency :: Rule (Incompatibility Var) (PackageName, InstanceSet, PackageName, InstanceSet)
 asDependency c = case asFact c of
     Just (CauseDependency p s g (q, r))
         | q /= p, Map.null g, Map.member (PackageVar q) (incompTerms c) -> Just (p, s, q, r)
@@ -123,7 +122,7 @@ sameTerms = (==)
 -- merged term, and refusing to merge those is what keeps the union argument of
 -- the widening rule honest — it holds for a run with /one/ depender and nothing
 -- else.
-mergeFacts :: [Incompatibility Cabal] -> Maybe (Map Var (Term ValueSet))
+mergeFacts :: [Incompatibility Var] -> Maybe (Map Var (Term ValueSet))
 mergeFacts = foldr step (Just Map.empty)
   where
     step f acc = acc >>= combineWith sameWay (incompTerms f)

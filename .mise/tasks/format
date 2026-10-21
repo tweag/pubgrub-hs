@@ -11,7 +11,9 @@ case "${1:-}" in
 esac
 
 # git sees the same files as jj in this colocated repo, and CI has only git.
-files=$(git ls-files '*.hs')
+# A file deleted in the working copy stays in git's index until jj's next
+# snapshot reaches it, so only the files that exist are formatted.
+files=$(for f in $(git ls-files '*.hs'); do [ -e "$f" ] && echo "$f"; done)
 
 if ! "$check"; then
   # shellcheck disable=SC2086 # one tracked path per word, none with spaces

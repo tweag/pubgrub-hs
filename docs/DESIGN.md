@@ -34,12 +34,16 @@ values, the sets a term ranges over, and the facts a leaf can state — and the 
 uses variables only through `Ord`, sets only through `SetOps`, and asks the class for
 two things besides: the singleton set of a decision, and which clauses the store may
 merge. This is the shape of pubgrub-rs's `DependencyProvider`, where one type fixes
-the package, version-set and metadata types. The cabal instantiation is
-`PubGrub.Cabal`: a type `Cabal` with no values, so a clause of ours is an
-`Incompatibility Cabal`, and the module holds the fact type, the six constructors a
-`.cabal` fact or a request is stated through, and the merge rule. `Solver`, `Store`,
-`Provider` and `Incompatibility` mention nothing of it; `Report` is the cabal renderer
-and is written over `Cabal` on purpose.
+the package, version-set and metadata types. The instance is on the variable type,
+which names the domain everywhere else: there is no phantom type for it, since the
+variable type determines the domain anyway, and an empty type standing for "this
+choice of four types" was one more thing to explain and one more type family
+annotation to carry. The cabal instantiation is `PubGrub.Cabal`: the instance is on
+`Var`, a package or a flag, so a clause of ours is an `Incompatibility Var`, and the
+module holds `Var` and `Flag`, the fact type, the six constructors a `.cabal` fact or a
+request is stated through, and the merge rule. `Solver`, `Store`, `Provider` and
+`Incompatibility` mention nothing of it; `Report` is the cabal renderer and is written
+over `Var` on purpose.
 
 **The derivation tree is the core's, and only its leaves are the domain's.** The spec
 partitions incompatibilities into the external ones, which state a fact, and the

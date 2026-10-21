@@ -89,39 +89,39 @@ import           PubGrub.Term            (Term (..))
 -- front of it and no full stop after it, because the walker puts its own
 -- \"Because\" before a fragment and ends every line as a sentence. A fragment
 -- must therefore never open with \"because\" or \"and\".
-data Formatter d = Formatter
-    { sayFact     :: FactOf d -> Incompatibility d -> Text
+data Formatter v = Formatter
+    { sayFact     :: FactOf v -> Incompatibility v -> Text
       -- ^ a leaf that states a fact, a seed's or the provider's; the
       -- incompatibility it is the cause of comes with it, for a fact whose
       -- sentence depends on which of its terms survived
-    , sayNoValues :: VarOf d -> SetOf d -> Text
+    , sayNoValues :: v -> SetOf v -> Text
       -- ^ the solver's own leaf: nothing to offer in this set
-    , sayTerms    :: Map (VarOf d) (Term (SetOf d)) -> Text
+    , sayTerms    :: Map (v) (Term (SetOf v)) -> Text
       -- ^ what a set of terms concludes; 'summaryWith' is the standard sentences
-    , prepare     :: Incompatibility d -> Incompatibility d
+    , prepare     :: Incompatibility v -> Incompatibility v
       -- ^ a pass over the tree before the walk; 'id' for none
-    , lineRules   :: [Rule (Incompatibility d) (Line d)]
+    , lineRules   :: [Rule (Incompatibility v) (Line v)]
       -- ^ the domain's own ways of saying a step that is not a branch, tried
       -- before the standard rules for a chain of steps; a rule must keep the
       -- proof sound on its own, and can check that it does by replaying the
       -- steps it covers with 'PubGrub.Incompatibility.priorCauseTerms'
-    , clauseRules :: [Rule (Incompatibility d, Incompatibility d) Text]
+    , clauseRules :: [Rule (Incompatibility v, Incompatibility v) Text]
       -- ^ the domain's ways of saying two external facts as one premise, tried
       -- in order; the fallback names them side by side
     }
 
 -- | What a rule proposes for one line of the proof.
-data Line d
+data Line v
     = Line
         Text
         -- ^ the premise, which goes after the connective
-        (Maybe (Incompatibility d))
+        (Maybe (Incompatibility v))
         -- ^ the sub-derivation the line continues, explained before it; a line
         -- that continues nothing opens a line of derivation
 
 -- | An external fact at a leaf of the proof, in the domain's words; a derived
 -- node, which is not a leaf, reads as what its terms conclude.
-leaf :: Formatter d -> Incompatibility d -> Text
+leaf :: Formatter v -> Incompatibility v -> Text
 leaf fmt c = case incompCause c of
     Seed f       -> sayFact fmt f c
     Fact f       -> sayFact fmt f c
@@ -136,9 +136,9 @@ leaf fmt c = case incompCause c of
 -- \"if foo and bar then baz <3\", \"either foo <2 or bar <3\". The empty
 -- incompatibility is failure by name: \"version solving failed\".
 summaryWith
-    :: (VarOf d -> SetOf d -> Text)
-    -> (VarOf d -> SetOf d -> Text)
-    -> Map (VarOf d) (Term (SetOf d))
+    :: (v -> SetOf v -> Text)
+    -> (v -> SetOf v -> Text)
+    -> Map (v) (Term (SetOf v))
     -> Text
 summaryWith named bare ts = case Map.toList ts of
     [] -> "version solving failed"
@@ -180,7 +180,7 @@ anyOf = T.intercalate " or "
 -- --------------------------------------------------------------------------
 
 -- | Render an incompatibility and its derivation as a human-readable proof.
-reportConflict :: Domain d => Formatter d -> Incompatibility d -> Text
+reportConflict :: Domain v => Formatter v -> Incompatibility v -> Text
 reportConflict fmt root0
     | isDerived root = render (reverse (outLines (derived fmt True root (Out [] 1))))
     -- The terminal incompatibility is itself an external fact: nothing was
@@ -227,7 +227,7 @@ numberLast out = case outLines out of
 -- | Explain one derived incompatibility, ending with the line that concludes it.
 -- @final@ marks the last line of the whole proof, which reads \"So, …\" and
 -- concludes failure by name.
-derived :: Domain d => Formatter d -> Bool -> Incompatibility d -> Out -> Out
+derived :: Domain v => Formatter v -> Bool -> Incompatibility v -> Out -> Out
 derived fmt final inc out = case bothDerived inc of
     -- Case 1 (references/pubgrub.md:595): both causes derived — the derivation
     -- branches, and this is the only place a line number is wanted. Explain the
@@ -275,7 +275,7 @@ derived fmt final inc out = case bothDerived inc of
 
 -- | Both causes are external. One line, and the only case that opens a line
 -- of derivation rather than continuing one.
-twoFacts :: Formatter d -> Rule (Incompatibility d) (Line d)
+twoFacts :: Formatter v -> Rule (Incompatibility v) (Line v)
 twoFacts fmt step = do
     (c1, c2) <- bothExternal step
     pure (Line (clause fmt c1 c2) Nothing)
@@ -284,7 +284,7 @@ twoFacts fmt step = do
 -- own: the every-other-step skip. The derived cause's own conclusion is left
 -- unsaid and the two external facts are named together here, which is where a
 -- long linear chain loses half its lines.
-everyOtherStep :: Formatter d -> Rule (Incompatibility d) (Line d)
+everyOtherStep :: Formatter v -> Rule (Incompatibility v) (Line v)
 everyOtherStep fmt step = do
     (d, e) <- chainStep step
     (dd, de) <- chainStep d
@@ -293,12 +293,12 @@ everyOtherStep fmt step = do
 -- | One cause is derived and one external, and the derived cause branches or
 -- bottoms out, so it gets its own lines and this one closes with the external
 -- fact alone.
-oneFact :: Formatter d -> Rule (Incompatibility d) (Line d)
+oneFact :: Formatter v -> Rule (Incompatibility v) (Line v)
 oneFact fmt step = do
     (d, e) <- chainStep step
     pure (Line (leaf fmt e) (Just d))
 
 -- | Two external facts, as one clause: the first of the domain's clause rules
 -- to fire, or the two facts side by side.
-clause :: Formatter d -> Incompatibility d -> Incompatibility d -> Text
+clause :: Formatter v -> Incompatibility v -> Incompatibility v -> Text
 clause fmt c1 c2 = fromMaybe (leaf fmt c1 <> " and " <> leaf fmt c2) (firstOf (clauseRules fmt) (c1, c2))

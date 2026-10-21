@@ -41,14 +41,13 @@ import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Version           (VersionRange, earlierVersion,
                                                  intersectVersionRanges,
                                                  mkVersion, orLaterVersion)
-import           PubGrub.Cabal                  (Cabal, request)
+import           PubGrub.Cabal                  (Var (..), request)
 import           PubGrub.Cabal.Installed        (mkInstalledDb)
 import           PubGrub.Cabal.InstanceSet      (Instance (BuildSource))
 import           PubGrub.Cabal.Provider         (ParseError (..))
 import qualified PubGrub.Cabal.Provider         as BP
 import           PubGrub.Cabal.Report           (reportConflict)
 import           PubGrub.Cabal.Value            (Value (..))
-import           PubGrub.Cabal.Variable         (Var (..))
 import           PubGrub.Cabal.Version          (Version)
 import qualified PubGrub.Cabal.Version          as V
 import qualified PubGrub.Cabal.VersionSet       as VersionSet
@@ -125,7 +124,7 @@ instanceOf world p v =
 -- guard, not the absence of one, which 'PubGrub.Cabal.Flatten.expandGuard' resolves
 -- to the single empty pin set. That is the shape every guard folds to while flags
 -- are fixed at their declared defaults.
-mkProvider :: World -> Provider Cabal Identity
+mkProvider :: World -> Provider Var Identity
 mkProvider world = Provider (BP.mkExpand mempty BP.noPreference (mkInstalledDb []) source)
   where
     source =
@@ -176,9 +175,9 @@ mkProvider world = Provider (BP.mkExpand mempty BP.noPreference (mkInstalledDb [
 -- asks only for 'Monad', so these tests stay pure and their assertions stay a
 -- plain '@?='.
 runSolve
-    :: Provider Cabal Identity
-    -> [Incompatibility Cabal]
-    -> Either (SolveError Cabal) (Map Var Value)
+    :: Provider Var Identity
+    -> [Incompatibility Var]
+    -> Either (SolveError Var) (Map Var Value)
 runSolve provider seeds =
     runIdentity (solve mempty provider seeds)
 
@@ -191,7 +190,7 @@ solveWorld rootDeps world =
         runSolve (mkProvider world) [request p (BP.widenTo (mkInstalledDb []) p (VersionSet.fromVersionRange vr)) | (p, vr) <- rootDeps]
 
 -- | Render a solver failure as its explanatory proof.
-renderFailure :: SolveError Cabal -> Text
+renderFailure :: SolveError Var -> Text
 renderFailure (NoSolution i) = reportConflict i
 renderFailure (NoSatisfier p _) =
     T.pack ("internal error: no satisfier for " <> show p)

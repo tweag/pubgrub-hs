@@ -58,10 +58,10 @@ data IncompatRelation v
 -- the accumulated term the partial solution holds for @v@, or 'Nothing' if
 -- @v@ is unmentioned (equivalent to ⊤, and always inconclusive).
 incompRelation
-    :: Domain d
-    => (VarOf d -> Maybe (Term (SetOf d)))
-    -> Incompatibility d
-    -> IncompatRelation (VarOf d)
+    :: Domain v
+    => (v -> Maybe (Term (SetOf v)))
+    -> Incompatibility v
+    -> IncompatRelation v
 incompRelation lookupTerm (Incompatibility m _) = Map.foldlWithKey' step ISatisfied m
   where
     -- A strict fold over the map rather than a walk over 'Map.toList': this runs

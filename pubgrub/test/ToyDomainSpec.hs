@@ -100,14 +100,14 @@ tests =
 
 -- | A seed that says "@p@ is 1 or @q@ is 1": two negative terms, which is not
 -- a request.
-eitherOf :: Pkg -> Pkg -> Incompatibility Toy
+eitherOf :: Pkg -> Pkg -> Incompatibility Pkg
 eitherOf p q =
     Incompatibility
         (Map.fromList [(p, Negative (Set.singleton 1)), (q, Negative (Set.singleton 1))])
         (Seed (Wants p (Set.singleton 1)))
 
 -- | A provider that ignores the set it is offered.
-outside :: Provider Toy Identity
+outside :: Provider Pkg Identity
 outside = Provider (\_ _ -> pure (Just 99, []))
 
 -- | The proof, as the spec's three cases render the derivation above: the two

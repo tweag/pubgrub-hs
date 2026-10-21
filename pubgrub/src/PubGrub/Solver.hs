@@ -63,20 +63,20 @@ import           PubGrub.Term            (Term (..), anyTerm, intersectTerm,
 -- --------------------------------------------------------------------------
 
 -- | Result of searching for the satisfier of a conflict incompatibility.
-data SatisfierSearch d
+data SatisfierSearch v
     = DifferentDecisionLevels !Int
       -- ^ backtrack to this level
-    | SameDecisionLevels (Incompatibility d)
+    | SameDecisionLevels (Incompatibility v)
       -- ^ satisfier's cause
 
 -- | Earliest assignment of @p@ whose running accumulated term becomes disjoint
 -- from @startTerm@, or 'Nothing' if none does.
 satisfierOf
-    :: Domain d
-    => PartialSolution d
-    -> VarOf d
-    -> Term (SetOf d)
-    -> Maybe (Assignment d)
+    :: Domain v
+    => PartialSolution v
+    -> v
+    -> Term (SetOf v)
+    -> Maybe (Assignment v)
 satisfierOf ps p startTerm = go anyTerm (varHistory ps p)
   where
     go _ [] = Nothing
@@ -106,10 +106,10 @@ maximumOn f = foldl' pick Nothing
 -- That is reported as a 'NoSatisfier' failure rather than thrown, so a bug
 -- there is something the caller can print, not a crash inside a pure fold.
 satisfierSearch
-    :: Domain d
-    => PartialSolution d
-    -> Incompatibility d
-    -> Either (SolveError d) (VarOf d, SatisfierSearch d)
+    :: Domain v
+    => PartialSolution v
+    -> Incompatibility v
+    -> Either (SolveError v) (v, SatisfierSearch v)
 satisfierSearch ps i = do
     satMap <- traverse satisfierForTerm (Map.toList (incompTerms i))
     (satVar, satAssign) <- latestSatisfier satMap
@@ -140,7 +140,7 @@ satisfierSearch ps i = do
 -- | The assignments the seeds made: the level-0 derivations whose cause is a
 -- seed ('isSeed'). They are the oldest assignments of all, and they are never
 -- backtracked.
-seedAssignments :: Domain d => PartialSolution d -> VarOf d -> [Assignment d]
+seedAssignments :: Domain v => PartialSolution v -> v -> [Assignment v]
 seedAssignments ps p = [a | a <- varHistory ps p, fromSeed a]
   where
     fromSeed a = case aKind a of
@@ -160,7 +160,7 @@ seedAssignments ps p = [a | a <- varHistory ps p, fromSeed a]
 -- Checked before the satisfier search, which is what keeps a seed from ever being
 -- a satisfier's cause: the seeds are the oldest assignments, so a seed derivation
 -- is the latest satisfier only when it is the only one.
-satisfiedBySeeds :: Domain d => PartialSolution d -> Incompatibility d -> Bool
+satisfiedBySeeds :: Domain v => PartialSolution v -> Incompatibility v -> Bool
 satisfiedBySeeds ps inc = incompRelation seedTerm inc == ISatisfied
   where
     seedTerm p = foldr1 intersectTerm . NE.map assignmentTerm <$> nonEmpty (seedAssignments ps p)
@@ -178,8 +178,8 @@ satisfiedBySeeds ps inc = incompRelation seedTerm inc == ISatisfied
 -- as it is: the verdict is decided, and the report prints the closing line as
 -- failure whatever the terms say.
 closeWithSeeds
-    :: (Domain d, Monad m)
-    => LogAction m (SolverMsg d) -> PartialSolution d -> Incompatibility d -> m (Incompatibility d)
+    :: (Domain v, Monad m)
+    => LogAction m (SolverMsg v) -> PartialSolution v -> Incompatibility v -> m (Incompatibility v)
 closeWithSeeds logA ps = go
   where
     -- One pass over the seeds of every variable still named; another pass while
@@ -221,18 +221,18 @@ closeWithSeeds logA ps = go
 -- scan would choose, every time: the search does not depend on the worklist,
 -- and the number of judgements is proportional to what changed.
 unitPropagation
-    :: forall d m. (Domain d, Monad m)
-    => LogAction m (SolverMsg d)
+    :: forall v m. (Domain v, Monad m)
+    => LogAction m (SolverMsg v)
     -> IntSet
     -- ^ the clauses whose relation may have changed since the last fixpoint
-    -> Store d
-    -> PartialSolution d
-    -> m (Either (SolveError d) (Store d, PartialSolution d))
+    -> Store v
+    -> PartialSolution v
+    -> m (Either (SolveError v) (Store v, PartialSolution v))
 unitPropagation logA pending store0 ps0 = settle pending IntSet.empty store0 ps0
   where
     -- Judge the dirty clauses, then act on the newest actionable one.
     settle dirty actionable store ps = do
-        logA <& (Judged (IntSet.size dirty) :: SolverMsg d)
+        logA <& (Judged (IntSet.size dirty) :: SolverMsg v)
         let actionable' = IntSet.foldl' (judge store ps) actionable dirty
         case IntSet.maxView actionable' of
             Nothing        -> pure (Right (store, ps))
@@ -262,7 +262,7 @@ unitPropagation logA pending store0 ps0 = settle pending IntSet.empty store0 ps0
                         logA <& Learned rootCause
                         -- 'Backtracked' carries only a level, which does not
                         -- determine @d@, so the message's type is annotated.
-                        logA <& (Backtracked (psLevel ps') :: SolverMsg d)
+                        logA <& (Backtracked (psLevel ps') :: SolverMsg v)
                         -- Only the clauses of the variables the backtrack
                         -- moved, the learned clause (which is the conflict's
                         -- clause too, where the rule merged them) and the
@@ -305,11 +305,11 @@ unitPropagation logA pending store0 ps0 = settle pending IntSet.empty store0 ps0
 -- It is monadic only to log 'Resolving': the outcome depends on the partial
 -- solution alone.
 conflictResolution
-    :: (Domain d, Monad m)
-    => LogAction m (SolverMsg d)
-    -> Incompatibility d
-    -> PartialSolution d
-    -> m (Either (SolveError d) (VarOf d, Incompatibility d, ([VarOf d], PartialSolution d)))
+    :: (Domain v, Monad m)
+    => LogAction m (SolverMsg v)
+    -> Incompatibility v
+    -> PartialSolution v
+    -> m (Either (SolveError v) (v, Incompatibility v, ([v], PartialSolution v)))
 conflictResolution logA = loop
   where
     loop current ps
@@ -327,53 +327,53 @@ conflictResolution logA = loop
 
 -- | Why 'solve' found no solution. Only 'NoSolution' is a verdict on the
 -- problem; the others say the solve was given something it cannot work with.
-data SolveError d
+data SolveError v
     = -- | There is none. The incompatibility is the end of the proof: normally
       -- one with no terms, which can never be satisfied, derived from the seeds
       -- and from facts the provider stated. Its 'PubGrub.Incompatibility.Cause'
       -- tree is the argument for why; "PubGrub.Report" writes it out and
       -- "PubGrub.Derivation" reads it.
-      NoSolution (Incompatibility d)
+      NoSolution (Incompatibility v)
     | -- | This seed is not a request or a constraint: its cause is not
       -- 'PubGrub.Incompatibility.Seed', or it has more or fewer than one term.
       -- The solve is refused before it starts. A seed with two negative terms,
       -- say, asks for one of two variables to have a value without saying
       -- which, and the search would never decide either: the answer would be a
       -- plan that violates the seed.
-      BadSeed (Incompatibility d)
+      BadSeed (Incompatibility v)
     | -- | The provider chose a value outside the set it was offered: the
       -- variable, the value, and the set. The solver stops at once, because
       -- recording such a decision contradicts what it had already derived and
       -- the search would never end. This is a bug in the provider.
-      BadValue (VarOf d) (ValueOf d) (SetOf d)
+      BadValue (v) (ValueOf v) (SetOf v)
     | -- | The solver broke an invariant of its own: conflict resolution found a
       -- term of a violated incompatibility that nothing it had recorded about
       -- the variable accounts for. This is a bug in the solver, returned as a
       -- value so that a caller can report it.
-      NoSatisfier (VarOf d) (Incompatibility d)
+      NoSatisfier (v) (Incompatibility v)
 
-deriving stock instance (Eq (VarOf d), Eq (ValueOf d), Eq (SetOf d), Eq (FactOf d)) => Eq (SolveError d)
-deriving stock instance (Show (VarOf d), Show (ValueOf d), Show (SetOf d), Show (FactOf d)) => Show (SolveError d)
+deriving stock instance (Eq (v), Eq (ValueOf v), Eq (SetOf v), Eq (FactOf v)) => Eq (SolveError v)
+deriving stock instance (Show (v), Show (ValueOf v), Show (SetOf v), Show (FactOf v)) => Show (SolveError v)
 
 -- | What the solver is doing, one message per step of the search. 'solve'
 -- sends them to the log action it is given.
-data SolverMsg d
+data SolverMsg v
     = -- | About to ask the provider for a value of the variable in the set.
-      Deciding (VarOf d) (SetOf d)
+      Deciding (v) (SetOf v)
     | -- | The provider chose this value, and the solver decided it.
-      Chose (VarOf d) (ValueOf d)
+      Chose (v) (ValueOf v)
     | -- | The provider had no value in the set. A conflict follows.
-      NoVersionFor (VarOf d) (SetOf d)
+      NoVersionFor (v) (SetOf v)
     | -- | This incompatibility is violated by what has been decided: a
       -- conflict, which conflict resolution starts from.
-      Conflict (Incompatibility d)
+      Conflict (Incompatibility v)
     | -- | One step of conflict resolution: the variable it resolved on, and
       -- the incompatibility it derived. The number of these between a
       -- 'Conflict' and its 'Backtracked' is how deep that resolution went.
-      Resolving (VarOf d) (Incompatibility d)
+      Resolving (v) (Incompatibility v)
     | -- | The incompatibility conflict resolution learned, which the solver now
       -- keeps. The 'Conflict' that started it was already known; this is new.
-      Learned (Incompatibility d)
+      Learned (Incompatibility v)
     | -- | The solver undid every decision above this level. A level is the
       -- number of decisions in force.
       Backtracked Int
@@ -382,8 +382,8 @@ data SolverMsg d
       -- 'Backtracked' re-examines what the backtrack undid.
       Judged Int
 
-deriving stock instance (Eq (VarOf d), Eq (ValueOf d), Eq (SetOf d), Eq (FactOf d)) => Eq (SolverMsg d)
-deriving stock instance (Show (VarOf d), Show (ValueOf d), Show (SetOf d), Show (FactOf d)) => Show (SolverMsg d)
+deriving stock instance (Eq (v), Eq (ValueOf v), Eq (SetOf v), Eq (FactOf v)) => Eq (SolverMsg v)
+deriving stock instance (Show (v), Show (ValueOf v), Show (SetOf v), Show (FactOf v)) => Show (SolverMsg v)
 
 -- | Solve: find a value for every variable the request needs, or prove that
 -- there is none.
@@ -408,11 +408,11 @@ deriving stock instance (Show (VarOf d), Show (ValueOf d), Show (SetOf d), Show 
 -- The first argument receives a 'SolverMsg' at each step, a @LogAction@ from
 -- co-log-core; 'mempty' discards them.
 solve
-    :: (Domain d, Monad m)
-    => LogAction m (SolverMsg d)
-    -> Provider d m
-    -> [Incompatibility d]
-    -> m (Either (SolveError d) (Map (VarOf d) (ValueOf d)))
+    :: (Domain v, Monad m)
+    => LogAction m (SolverMsg v)
+    -> Provider v m
+    -> [Incompatibility v]
+    -> m (Either (SolveError v) (Map (v) (ValueOf v)))
 solve logA provider seeds
     | (bad : _) <- filter (not . wellFormedSeed) seeds = pure (Left (BadSeed bad))
     | otherwise = uncurry go (insertClauses seeds emptyStore) emptyPS

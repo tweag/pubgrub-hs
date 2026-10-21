@@ -58,8 +58,9 @@ import           PubGrub
 -- $versions
 --
 -- When a variable's values are versions, use 'Version' for the values and
--- 'VersionSet' for the sets: ranges of versions, built from bounds. Name the
--- four types, and give 'singleton':
+-- 'VersionSet' for the sets: ranges of versions, built from bounds. Make the
+-- variable type an instance of 'Domain', naming the other three, and give
+-- 'singleton':
 --
 -- > newtype Name = Name Text
 -- >     deriving (Eq, Ord, Show)
@@ -70,13 +71,11 @@ import           PubGrub
 -- >     | DependsOn Name VersionSet Name VersionSet
 -- >     | Unusable Name VersionSet Text
 -- >
--- > data Repo
 -- >
--- > instance Domain Repo where
--- >     type VarOf Repo = Name
--- >     type ValueOf Repo = Version
--- >     type SetOf Repo = VersionSet
--- >     type FactOf Repo = Said
+-- > instance Domain Name where
+-- >     type ValueOf Name = Version
+-- >     type SetOf Name = VersionSet
+-- >     type FactOf Name = Said
 -- >     singleton _ = singletonVersionSet
 --
 -- The fact type is what explanations are made from: give it one constructor
@@ -103,7 +102,7 @@ import           PubGrub
 -- package to have a version in a set, state that its having none there is
 -- impossible, with a 'Negative' term:
 --
--- > request :: Name -> VersionSet -> Incompatibility Repo
+-- > request :: Name -> VersionSet -> Incompatibility Name
 -- > request p s = Incompatibility (Map.singleton p (Negative s)) (Seed (Requested p s))
 --
 -- To constrain a package without requiring it, so that /if/ it is in the plan
@@ -111,7 +110,7 @@ import           PubGrub
 -- 'Positive' term. Sets need not have a complement, so a constraint is stated
 -- through what it forbids; a version set has one, 'complementVersionSet':
 --
--- > constrain :: Name -> VersionSet -> Incompatibility Repo
+-- > constrain :: Name -> VersionSet -> Incompatibility Name
 -- > constrain p allowed =
 -- >     Incompatibility
 -- >         (Map.singleton p (Positive (complementVersionSet allowed)))
@@ -151,7 +150,7 @@ import           PubGrub
 -- >   where
 -- >     next = find (> x) versions
 -- >
--- > dependsOn :: Name -> VersionSet -> Name -> VersionSet -> Incompatibility Repo
+-- > dependsOn :: Name -> VersionSet -> Name -> VersionSet -> Incompatibility Name
 -- > dependsOn p ps q qs =
 -- >     Incompatibility
 -- >         (Map.fromList [(p, Positive ps), (q, Negative qs)])
@@ -163,7 +162,7 @@ import           PubGrub
 -- then names the reason rather than saying that no version exists. If no
 -- release is left, answer 'Nothing', still with the reasons:
 --
--- > provider :: Index -> Provider Repo Identity
+-- > provider :: Index -> Provider Name Identity
 -- > provider index = Provider $ \p offered ->
 -- >     let releases = Map.findWithDefault [] p index
 -- >         versions = map fst releases
@@ -199,7 +198,7 @@ import           PubGrub
 -- >         , (extra, [(mkVersion [1], Release [] Nothing), (mkVersion [2], Release [] Nothing)])
 -- >         ]
 -- >
--- > plan :: Index -> [Incompatibility Repo] -> Maybe (Map Name Version)
+-- > plan :: Index -> [Incompatibility Name] -> Maybe (Map Name Version)
 -- > plan index seeds = case runIdentity (solve mempty (provider index) seeds) of
 -- >     Right solution -> Just solution
 -- >     Left _         -> Nothing
@@ -227,7 +226,7 @@ import           PubGrub
 -- as they arrive. Here, two dependencies with the same depender and the same
 -- dependee range merge into one over both depender ranges:
 --
--- > sameDependency :: MergeRule Repo
+-- > sameDependency :: MergeRule Name
 -- > sameDependency =
 -- >     MergeRule
 -- >         { mergeKey = \i -> case incompCause i of
@@ -239,7 +238,7 @@ import           PubGrub
 -- >         }
 --
 -- Name the rule in the domain's instance, as 'mergeRule': add this line to the
--- @instance Domain Repo@ of the first recipe, after 'singleton':
+-- @instance Domain Name@ of the first recipe, after 'singleton':
 --
 -- >     mergeRule = sameDependency
 --
@@ -278,7 +277,7 @@ import           PubGrub
 -- > name :: Name -> VersionSet -> Text
 -- > name (Name p) s = p <> " " <> pretty s
 -- >
--- > formatter :: Formatter Repo
+-- > formatter :: Formatter Name
 -- > formatter =
 -- >     Formatter
 -- >         { sayFact = \fact _ -> case fact of
@@ -304,7 +303,7 @@ import           PubGrub
 -- names, so the sentence stays true. 'Rule', 'symmetric' and 'asFact' come from
 -- "PubGrub.Derivation":
 --
--- > whichDependsOn :: Rule (Incompatibility Repo, Incompatibility Repo) Text
+-- > whichDependsOn :: Rule (Incompatibility Name, Incompatibility Name) Text
 -- > whichDependsOn = symmetric $ \(first, second) -> do
 -- >     DependsOn p ps q qs <- asFact first
 -- >     DependsOn q' qs' r rs <- asFact second
@@ -314,7 +313,7 @@ import           PubGrub
 -- Then render a failure. Any 'Left' other than 'NoSolution' is a bug, in the
 -- provider or in the solver, not a verdict on the index:
 --
--- > why :: Index -> [Incompatibility Repo] -> Text
+-- > why :: Index -> [Incompatibility Name] -> Text
 -- > why index seeds = case runIdentity (solve mempty (provider index) seeds) of
 -- >     Right _                -> "There is a plan."
 -- >     Left (NoSolution root) -> reportConflict formatter root
@@ -340,13 +339,13 @@ import           PubGrub
 -- @LogAction (mapM_ T.putStrLn . describe)@. To collect them, solve in a monad
 -- that can, such as a pair with a list:
 --
--- > searchLog :: Index -> [Incompatibility Repo] -> [Text]
+-- > searchLog :: Index -> [Incompatibility Name] -> [Text]
 -- > searchLog index seeds = fst (solve logger (Provider expandLogged) seeds)
 -- >   where
 -- >     logger = LogAction $ \msg -> (describe msg, ())
 -- >     expandLogged p s = ([], runIdentity (expand (provider index) p s))
 -- >
--- > describe :: SolverMsg Repo -> [Text]
+-- > describe :: SolverMsg Name -> [Text]
 -- > describe msg = case msg of
 -- >     Chose (Name p) x            -> [p <> " " <> pretty x]
 -- >     NoVersionFor (Name p) s     -> ["no " <> p <> " in " <> pretty s]
@@ -373,7 +372,7 @@ import           PubGrub
 -- part in the failure. A held package outside it played no part, and stays held;
 -- release the held packages inside it, and solve again:
 --
--- > solveWithLock :: Index -> Map Name Version -> [Incompatibility Repo] -> Either (SolveError Repo) (Map Name Version)
+-- > solveWithLock :: Index -> Map Name Version -> [Incompatibility Name] -> Either (SolveError Name) (Map Name Version)
 -- > solveWithLock index lock requests = case attempt lock of
 -- >     Left (NoSolution root)
 -- >         | let involved = Map.keysSet lock `Set.intersection` conflictSet root

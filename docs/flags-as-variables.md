@@ -13,7 +13,7 @@
 ## 1. The model
 
 ```haskell
-data Flag = Flag { flagName :: FlagName, flagDefault :: Bool }   -- PubGrub.Cabal.Variable
+data Flag = Flag { flagName :: FlagName, flagDefault :: Bool }   -- PubGrub.Cabal
 data Var  = PackageVar PackageName | FlagVar PackageName Flag
 
 data Instance = UsePreInstalled PreInstalledPackage | BuildSource Version   -- PubGrub.Cabal.InstanceSet

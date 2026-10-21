@@ -12,7 +12,8 @@ import           Data.Ord                       (comparing)
 import           Data.Text                      (Text)
 import qualified Data.Text                      as T
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
-import           PubGrub.Cabal                  (Cabal, fromDependency, request)
+import           PubGrub.Cabal                  (Var (..), fromDependency,
+                                                 request)
 import           PubGrub.Cabal.InstanceSet      (HasVersion (version),
                                                  Instance (..), InstanceSet,
                                                  emptyInstanceSet,
@@ -20,7 +21,6 @@ import           PubGrub.Cabal.InstanceSet      (HasVersion (version),
                                                  singletonInstance)
 import           PubGrub.Cabal.Report           (reportConflict)
 import           PubGrub.Cabal.Value            (Value (..), ValueSet (..))
-import           PubGrub.Cabal.Variable         (Var (..))
 import           PubGrub.Cabal.Version          (mkVersion)
 import           PubGrub.Provider               (Provider (..))
 import           PubGrub.SetOps                 (union)
@@ -50,7 +50,7 @@ allInstances = [rootI, foo1, foo2, bar1]
 -- newest instance in @range@ (the "newest wins" preference) and turns that
 -- instance's table entry into dependency incompatibilities. These worlds have
 -- no flags, so a flag variable is never asked about.
-mkProvider :: Applicative m => (Instance -> [(PackageName, [Instance])]) -> Provider Cabal m
+mkProvider :: Applicative m => (Instance -> [(PackageName, [Instance])]) -> Provider Var m
 mkProvider deps = Provider expand'
   where
     expand' (PackageVar p) set =
@@ -69,14 +69,14 @@ mkProvider deps = Provider expand'
 -- the solver's log trace. A failure is kept as its rendered report rather than
 -- 'show'n: the derived 'Show' would expand the whole derivation DAG as a tree.
 runSolve
-    :: Provider Cabal Identity
+    :: Provider Var Identity
     -> PackageName
     -> Instance
     -> Either Text (Map.Map Var Value)
 runSolve provider p i =
     either (Left . renderFailure) Right (runIdentity (solve mempty provider [request p (singletonInstance i)]))
 
-renderFailure :: SolveError Cabal -> Text
+renderFailure :: SolveError Var -> Text
 renderFailure (NoSolution i) = reportConflict i
 renderFailure (NoSatisfier p _) =
     T.pack ("internal error: no satisfier for " <> show p)
