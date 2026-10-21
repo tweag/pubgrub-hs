@@ -160,8 +160,9 @@ summaryWith named bare ts = case Map.toList ts of
                 ([], _) -> "one of " <> anyOf negatives <> " must be true"
   where
     -- A /derived/ two-term incompatibility. The spec says \"requires\" here and
-    -- keeps \"depends on\" for the external fact (@:1005@, both in one line): a
-    -- dependency is declared, a requirement is what the solver worked out.
+    -- keeps \"depends on\" for the external fact (@references\/pubgrub.md:1005@,
+    -- both in one line): a dependency is declared, a requirement is what the
+    -- solver worked out.
     requires p1 r1 p2 r2 = named p1 r1 <> " requires " <> bare p2 r2
 
 -- | \"a, b and c\"

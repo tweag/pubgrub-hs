@@ -25,7 +25,7 @@ copyright:          (c) 2026 Tweag I/O by Modus Create
 homepage:           https://github.com/tweag/pubgrub-hs
 bug-reports:        https://github.com/tweag/pubgrub-hs/issues
 build-type:         Simple
-tested-with:        GHC ==9.12.2 || ==9.14.1
+tested-with:        GHC ==9.10.3 || ==9.12.2 || ==9.14.1
 extra-doc-files:
     CHANGELOG.md
     README.md
@@ -64,7 +64,7 @@ library
         PubGrub.Relation
         PubGrub.Store
     build-depends:
-        , base        >=4.21  && <4.23
+        , base        >=4.20  && <4.23
         , co-log-core >=0.3.2 && <0.4
         , containers  >=0.7   && <0.9
         , text        >=2.1   && <2.2
@@ -102,7 +102,7 @@ test-suite pubgrub-test
         Toy
         ToyDomainSpec
     build-depends:
-        , base             >=4.21  && <4.23
+        , base             >=4.20  && <4.23
         , co-log-core      >=0.3.2 && <0.4
         , containers       >=0.7   && <0.9
         , tasty            >=1.5   && <1.6

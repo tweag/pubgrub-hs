@@ -50,7 +50,7 @@ import           PubGrub.Term    (Term (..), anyTerm, intersectTerm, isTopTerm,
 -- @d@ is a type that only names the domain, usually one with no values
 -- (@data MyDomain@). The variable type determines it, so that a variable alone
 -- names its domain: two domains cannot share a variable type.
-class (Ord (VarOf d), SetOps (SetOf d)) => Domain d where
+class (Ord (VarOf d), SetOps (SetOf d)) => Domain (d :: Type) where
     -- | The variables the solver assigns values to.
     type VarOf d = (v :: Type) | v -> d
     -- | The values a variable takes.

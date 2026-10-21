@@ -120,8 +120,8 @@ satisfierSearch ps i = do
     latestSatisfier = maybe (Left (NoSolution i)) Right . maximumOn (aIndex . snd)
 
 -- | The assignments the seeds made: the level-0 derivations whose cause is a
--- 'PubGrub.Incompatibility.request'. They are the oldest assignments of all,
--- and they are never backtracked.
+-- seed ('isSeed'). They are the oldest assignments of all, and they are never
+-- backtracked.
 seedAssignments :: Domain d => PartialSolution d -> VarOf d -> [Assignment d]
 seedAssignments ps p = [a | a <- varHistory ps p, fromSeed a]
   where
