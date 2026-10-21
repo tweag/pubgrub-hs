@@ -38,6 +38,12 @@ import           PubGrub.SetOps  (SetOps (..))
 import           PubGrub.Term    (Term (..), anyTerm, intersectTerm, isTopTerm,
                                   unionTerm)
 
+-- Specialised in the client, with the solver ("PubGrub.Solver" says why).
+{-# INLINABLE incompGet #-}
+{-# INLINABLE noValues #-}
+{-# INLINABLE priorCause #-}
+{-# INLINABLE priorCauseTerms #-}
+
 -- --------------------------------------------------------------------------
 -- Domain
 -- --------------------------------------------------------------------------

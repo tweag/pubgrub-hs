@@ -40,6 +40,24 @@ import           PubGrub.Store           (Store, allClauses, clauseAt,
 import           PubGrub.Term            (Term (..), anyTerm, intersectTerm,
                                           negateTerm)
 
+-- The solver is polymorphic in the domain and the monad, and a client calls it
+-- from another package, where GHC specialises an imported function only if it
+-- has an unfolding to specialise. These pragmas, and the ones in the modules
+-- the solver calls, give every function that takes a dictionary one, so that
+-- a client's solve runs over its own variable and set types rather than
+-- through the dictionaries. Measured on synthetic problems over a Set Int
+-- domain, with every count identical: a fifth of the time and a tenth of
+-- the allocation.
+{-# INLINABLE satisfierOf #-}
+{-# INLINABLE maximumOn #-}
+{-# INLINABLE satisfierSearch #-}
+{-# INLINABLE seedAssignments #-}
+{-# INLINABLE satisfiedBySeeds #-}
+{-# INLINABLE closeWithSeeds #-}
+{-# INLINABLE unitPropagation #-}
+{-# INLINABLE conflictResolution #-}
+{-# INLINABLE solve #-}
+
 -- --------------------------------------------------------------------------
 -- The algorithm
 -- --------------------------------------------------------------------------

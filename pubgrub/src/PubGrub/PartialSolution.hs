@@ -33,6 +33,18 @@ import           PubGrub.Relation        (IncompatRelation, incompRelation)
 import           PubGrub.Term            (Term (..), anyTerm, intersectTerm,
                                           negateTerm)
 
+-- Specialised in the client, with the solver ("PubGrub.Solver" says why).
+{-# INLINABLE assignmentTerm #-}
+{-# INLINABLE extendVar #-}
+{-# INLINABLE fromHistory #-}
+{-# INLINABLE recordAssignment #-}
+{-# INLINABLE addDecision #-}
+{-# INLINABLE addDerivation #-}
+{-# INLINABLE backtrack #-}
+{-# INLINABLE termIntersectionFor #-}
+{-# INLINABLE psRelation #-}
+{-# INLINABLE varHistory #-}
+
 -- --------------------------------------------------------------------------
 -- Partial solution
 -- --------------------------------------------------------------------------

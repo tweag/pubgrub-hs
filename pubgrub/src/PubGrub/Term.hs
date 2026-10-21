@@ -25,6 +25,15 @@ import           PubGrub.SetOps
 -- >>> import Data.Set (Set)
 -- >>> import PubGrub.SetOps
 
+-- Specialised in the client, with the solver ("PubGrub.Solver" says why).
+{-# INLINABLE intersectTerm #-}
+{-# INLINABLE unionTerm #-}
+{-# INLINABLE differenceTerm #-}
+{-# INLINABLE isEmptyTerm #-}
+{-# INLINABLE anyTerm #-}
+{-# INLINABLE isTopTerm #-}
+{-# INLINABLE isBottomTerm #-}
+
 -- ---------------------------------------------------------------------------
 -- Term
 -- ---------------------------------------------------------------------------
@@ -112,6 +121,12 @@ isEmptyTerm (Negative _) = False
 -- >>> isEmpty (Negative Set.empty :: Term (Set Int))
 -- False
 instance SetOps a => SetOps (Term a) where
+    {-# INLINABLE intersect #-}
+    {-# INLINABLE union #-}
+    {-# INLINABLE difference #-}
+    {-# INLINABLE isEmpty #-}
+    {-# INLINABLE isSubsetOf #-}
+    {-# INLINABLE isDisjoint #-}
     empty = Positive empty
     intersect = intersectTerm
     union = unionTerm

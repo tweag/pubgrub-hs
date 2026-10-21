@@ -10,6 +10,10 @@ import           PubGrub.Incompatibility (Domain (..), Incompatibility (..))
 import           PubGrub.SetOps          (SetOps (..))
 import           PubGrub.Term            (Term (..))
 
+-- Specialised in the client, with the solver ("PubGrub.Solver" says why).
+{-# INLINABLE relation #-}
+{-# INLINABLE incompRelation #-}
+
 
 -- | How a term stands relative to a reference term (both about the same
 -- package). This is the primitive unit propagation reads off the partial

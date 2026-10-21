@@ -102,6 +102,15 @@ import qualified Data.Map.Strict         as Map
 import           PubGrub.Incompatibility (Domain (..), Incompatibility (..),
                                           MergeRule (..))
 
+-- Specialised in the client, with the solver ("PubGrub.Solver" says why).
+{-# INLINABLE emptyStore #-}
+{-# INLINABLE insertClause #-}
+{-# INLINABLE insertClauses #-}
+{-# INLINABLE clausesOf #-}
+{-# INLINABLE index #-}
+{-# INLINABLE unindex #-}
+{-# INLINABLE reindex #-}
+
 -- | A clause's place in the scan order: higher is newer. A merge keeps the id of
 -- the clause it merged into.
 type ClauseId = Int
