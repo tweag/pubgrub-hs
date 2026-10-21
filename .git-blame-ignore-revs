@@ -1,0 +1,4 @@
+# Layout-only commits, for git blame --ignore-revs-file (GitHub reads this file).
+
+# style: format the tree with stylish-haskell
+73e5f4d856400947c8f72fb92d407985a6f6b460

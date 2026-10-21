@@ -1,7 +1,15 @@
 # Contributing
 
 How to read the project is [`CLAUDE.md`](CLAUDE.md); what works and what is planned is
-[`docs/STATUS.md`](docs/STATUS.md). This file is the commit and release process.
+[`docs/STATUS.md`](docs/STATUS.md). This file is the formatting, commit and release
+process.
+
+## Formatting
+
+Every Haskell file is formatted by [stylish-haskell](https://github.com/haskell/stylish-haskell)
+with [`.stylish-haskell.yaml`](.stylish-haskell.yaml), at the version pinned in
+`mise.toml`. `mise run format` formats the tree, and `mise run format --check` reports
+the files it would change. CI runs the check, and `ci-ok` fails on it.
 
 ## Commit messages
 

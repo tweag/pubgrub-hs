@@ -1,0 +1,34 @@
+#!/bin/sh
+#MISE description="Format every tracked Haskell file with stylish-haskell; --check only reports"
+# POSIX sh, because CI runs it on a runner without zsh.
+set -eu
+
+check=false
+case "${1:-}" in
+  --check) check=true ;;
+  "") ;;
+  *) echo "usage: format [--check]" >&2; exit 2 ;;
+esac
+
+# git sees the same files as jj in this colocated repo, and CI has only git.
+files=$(git ls-files '*.hs')
+
+if ! "$check"; then
+  # shellcheck disable=SC2086 # one tracked path per word, none with spaces
+  stylish-haskell --inplace $files
+  exit 0
+fi
+
+# Compare each file with what the formatter would write, so uncommitted work
+# elsewhere in the tree does not make the check fail.
+status=0
+for f in $files; do
+  if ! stylish-haskell "$f" | cmp -s - "$f"; then
+    echo "not formatted: $f" >&2
+    status=1
+  fi
+done
+if [ "$status" -ne 0 ]; then
+  echo "run: mise run format" >&2
+fi
+exit "$status"

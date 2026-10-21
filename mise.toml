@@ -1,4 +1,4 @@
 [tools]
-"github:haskell/stylish-haskell" = "latest"
+"github:haskell/stylish-haskell" = "0.15.1.0"
 git-cliff = "2.14.2"
 jq = "1.8.2"

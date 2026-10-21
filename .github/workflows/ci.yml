@@ -295,6 +295,31 @@ jobs:
         with:
           path: site
 
+  # Every tracked Haskell file must be as stylish-haskell writes it, with
+  # .stylish-haskell.yaml. The binary is the release's static one, checked
+  # against its hash, and the task is the one `mise run format` runs locally.
+  format:
+    name: format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install stylish-haskell
+        env:
+          # The same version as in mise.toml.
+          VERSION: 0.15.1.0
+          SHA256: 40b51887f0ed35dc4b98288ab517888b5aa0cf1d2fa8b4782f11ea140e74e9aa
+        run: |
+          name="stylish-haskell-v${VERSION}-linux-x86_64"
+          curl -fsSL -o "$RUNNER_TEMP/$name.tar.gz" \
+            "https://github.com/haskell/stylish-haskell/releases/download/v${VERSION}/$name.tar.gz"
+          echo "$SHA256  $RUNNER_TEMP/$name.tar.gz" | sha256sum --check --strict
+          tar xzf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
+
+      - name: Check formatting
+        run: .mise/tasks/format --check
+
   # Every commit of a PR must follow Conventional Commits, with a type that a
   # commit parser in cliff.toml knows: the release task reads them to choose
   # the next version and to write CHANGELOG.md. git-cliff checks the PR's
@@ -403,7 +428,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [build, test, sdist, docs, dist, commits]
+    needs: [build, test, sdist, docs, dist, commits, format]
     runs-on: ubuntu-latest
     steps:
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')

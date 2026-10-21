@@ -299,6 +299,9 @@ examples, so a wording change earns its way past them.
 - `-Wall` everywhere. Once the API stabilises, treat warnings as errors.
 - No partial functions (`head`, `fromJust`). Use pattern matching or `Maybe`/`Either`.
 - Prefer `newtype` wrappers over type aliases for domain types.
+- stylish-haskell formats every Haskell file (`.stylish-haskell.yaml`, version pinned
+  in `mise.toml`). Run `mise run format` before committing; CI's `format` job fails
+  on an unformatted file.
 - Commit messages are Conventional Commits, and releases come from them:
   [`CONTRIBUTING.md`](CONTRIBUTING.md) has the types, the version rule and
   `mise run release-pr`.
