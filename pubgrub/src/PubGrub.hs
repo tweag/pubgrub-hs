@@ -1,5 +1,8 @@
 -- | PubGrub, the version-solving algorithm, over any domain.
 --
+-- New to the library? "PubGrub.Tutorial" takes you from an empty file to a
+-- plan, and to an explanation of a failure.
+--
 -- The solver is 'solve': hand it a 'Provider' for your domain and the seeds —
 -- the incompatibilities the solve is asked for — and it answers with a value
 -- per variable, or with the terminal 'Incompatibility' whose derivation

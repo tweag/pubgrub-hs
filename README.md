@@ -162,7 +162,7 @@ sentences against cabal's 193.
 ## Test
 
 ```sh
-cabal test all              # 274 tests over the three packages that have them
+cabal test all              # 280 tests over the three packages that have them
 scripts/gate.sh             # every check that must not regress, over 26 real problems
 cabal run pubgrub-harness   # both solvers over both problem sets; writes bench/output/
 ```

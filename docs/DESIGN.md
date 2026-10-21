@@ -65,10 +65,11 @@ a variable and a value, takes nothing else. The empty set needs no variable: it 
 Nothing observable changed when this was done: the gate came out identical, the
 goldens unchanged, and the suite at the same count. What it buys is that the solver
 module states its own assumptions, and can be read or tested against a toy domain
-without `Cabal-syntax` in sight. `test/ToyDomainSpec.hs` is that domain — a package is
+without `Cabal-syntax` in sight. `pubgrub/test/Toy.hs` is that domain — a package is
 a name, a value an `Int`, a set a `Set Int`, a fact one of two sentences — and it
 imports nothing from `PubGrub.Cabal`, so the core leaning on cabal again is a compile
-error there before it is anything else.
+error there before it is anything else. It is also the code of `PubGrub.Tutorial`, line
+for line, and `ToyDomainSpec` holds the tutorial to it.
 
 ## 2. Version sets are intensional
 

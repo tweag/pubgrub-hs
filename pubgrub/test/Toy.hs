@@ -1,0 +1,103 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies      #-}
+
+module Toy where
+
+import           Data.Functor.Identity (Identity, runIdentity)
+import           Data.List             (maximumBy)
+import           Data.Map.Strict       (Map)
+import qualified Data.Map.Strict       as Map
+import           Data.Ord              (comparing)
+import           Data.Set              (Set)
+import qualified Data.Set              as Set
+import           Data.Text             (Text)
+import qualified Data.Text             as T
+import qualified Data.Text.IO          as T
+import           PubGrub
+
+newtype Pkg = Pkg String
+    deriving (Eq, Ord, Show)
+
+data ToyFact
+    = Wants Pkg (Set Int)
+    | Needs Pkg Int Pkg (Set Int)
+
+data Toy
+
+instance Domain Toy where
+    type VarOf Toy = Pkg
+    type ValueOf Toy = Int
+    type SetOf Toy = Set Int
+    type FactOf Toy = ToyFact
+    singleton _ v = Set.singleton v
+
+wants :: Pkg -> [Int] -> Incompatibility Toy
+wants p vs =
+    Incompatibility
+        (Map.singleton p (Negative (Set.fromList vs)))
+        (Seed (Wants p (Set.fromList vs)))
+
+needs :: Pkg -> Int -> Pkg -> [Int] -> Incompatibility Toy
+needs p v q ws =
+    Incompatibility
+        (Map.fromList [(p, Positive (Set.singleton v)), (q, Negative (Set.fromList ws))])
+        (Fact (Needs p v q (Set.fromList ws)))
+
+type World = Map Pkg [(Int, [(Pkg, [Int])])]
+
+app, lib, util :: Pkg
+app = Pkg "app"
+lib = Pkg "lib"
+util = Pkg "util"
+
+world :: World
+world =
+    Map.fromList
+        [ (app, [(1, [(lib, [1, 2])])])
+        , (lib, [(1, [(util, [1])]), (2, [(util, [2])])])
+        , (util, [(1, [])])
+        ]
+
+provider :: World -> Provider Toy Identity
+provider w = Provider $ \p offered ->
+    pure $ case [(v, deps) | (v, deps) <- Map.findWithDefault [] p w, v `Set.member` offered] of
+        [] -> (Nothing, [])
+        candidates ->
+            let (v, deps) = maximumBy (comparing fst) candidates
+             in (Just v, [needs p v q ws | (q, ws) <- deps])
+
+plan :: World -> [Incompatibility Toy] -> Maybe (Map Pkg Int)
+plan w seeds = case runIdentity (solve mempty (provider w) seeds) of
+    Right solution -> Just solution
+    Left _         -> Nothing
+
+broken :: World
+broken = Map.insert util [(3, [])] world
+
+versions :: Set Int -> Text
+versions vs = T.intercalate " or " (map (T.pack . show) (Set.toList vs))
+
+name :: Pkg -> Set Int -> Text
+name (Pkg p) vs = T.pack p <> " " <> versions vs
+
+formatter :: Formatter Toy
+formatter =
+    Formatter
+        { sayFact = \fact _ -> case fact of
+            Wants p vs     -> name p vs <> " is requested"
+            Needs p v q ws -> name p (Set.singleton v) <> " depends on " <> name q ws
+        , sayNoValues = \(Pkg p) vs -> T.pack p <> " has no version " <> versions vs
+        , sayTerms = summaryWith name name
+        , prepare = id
+        , lineRules = []
+        , clauseRules = []
+        }
+
+why :: World -> [Incompatibility Toy] -> Text
+why w seeds = case runIdentity (solve mempty (provider w) seeds) of
+    Right _                -> "There is a plan."
+    Left (NoSolution root) -> reportConflict formatter root
+    Left (NoSatisfier _ _) -> "The solver failed unexpectedly."
+
+explain :: World -> [Incompatibility Toy] -> IO ()
+explain w seeds = T.putStrLn (why w seeds)

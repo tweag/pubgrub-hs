@@ -1,0 +1,311 @@
+{-# OPTIONS_GHC -Wno-unused-imports #-}
+
+-- | A first solve: from an empty file to a plan, and from a broken world to an
+-- explanation of why it has no plan.
+--
+-- In this tutorial we will describe a small world of three packages to the
+-- solver, ask it for a plan, and then break the world so that no plan exists
+-- and have the solver say why. Along the way we will meet the four things every
+-- use of the library involves: a /domain/, the /incompatibilities/ stated in it,
+-- a /provider/ that answers the solver's questions, and a /formatter/ that puts
+-- a failure into words.
+--
+-- Everything we write goes into one file, @Toy.hs@, built up a piece at a time.
+-- Each piece goes at the end of the file. The packages here are not Haskell
+-- packages: they are names with numbered versions, and that is all the solver
+-- needs.
+module PubGrub.Tutorial
+    ( -- * Setting up
+      -- $settingUp
+
+      -- * Describing the domain
+      -- $domain
+
+      -- * Stating what is known
+      -- $facts
+
+      -- * Describing a world
+      -- $world
+
+      -- * Answering the solver's questions
+      -- $provider
+
+      -- * Solving
+      -- $solving
+
+      -- * Breaking the world
+      -- $breaking
+
+      -- * Explaining the failure
+      -- $explaining
+
+      -- * Where to go from here
+      -- $next
+    ) where
+
+import           PubGrub
+
+-- $settingUp
+--
+-- Make a new directory with two files in it. The first is @toy.cabal@:
+--
+-- @
+-- cabal-version: 3.0
+-- name:          toy
+-- version:       0
+--
+-- library
+--     exposed-modules:  Toy
+--     build-depends:    base, containers, pubgrub, text
+--     default-language: GHC2021
+-- @
+--
+-- The second is @Toy.hs@, which starts with the extensions, the module name and
+-- the imports we will need:
+--
+-- > {-# LANGUAGE OverloadedStrings #-}
+-- > {-# LANGUAGE TypeFamilies      #-}
+-- >
+-- > module Toy where
+-- >
+-- > import           Data.Functor.Identity (Identity, runIdentity)
+-- > import           Data.List             (maximumBy)
+-- > import           Data.Map.Strict       (Map)
+-- > import qualified Data.Map.Strict       as Map
+-- > import           Data.Ord              (comparing)
+-- > import           Data.Set              (Set)
+-- > import qualified Data.Set              as Set
+-- > import           Data.Text             (Text)
+-- > import qualified Data.Text             as T
+-- > import qualified Data.Text.IO          as T
+-- > import           PubGrub
+--
+-- Start a session in that directory with @cabal repl@. After cabal has built
+-- the dependencies you get a @ghci>@ prompt, and GHCi says
+-- @Ok, one module loaded.@ Keep this session open. Each time you add to
+-- @Toy.hs@, type @:reload@ and check that it says the same again.
+
+-- $domain
+--
+-- The solver does not know what it is solving for. We tell it, by naming four
+-- types: what a /variable/ is (here, a package), what a /value/ is (a version),
+-- what a /set of values/ is, and what a /fact/ about the world is. The fact type
+-- is for explanations only; we will use it at the end.
+--
+-- Add to @Toy.hs@:
+--
+-- > newtype Pkg = Pkg String
+-- >     deriving (Eq, Ord, Show)
+-- >
+-- > data ToyFact
+-- >     = Wants Pkg (Set Int)
+-- >     | Needs Pkg Int Pkg (Set Int)
+-- >
+-- > data Toy
+-- >
+-- > instance Domain Toy where
+-- >     type VarOf Toy = Pkg
+-- >     type ValueOf Toy = Int
+-- >     type SetOf Toy = Set Int
+-- >     type FactOf Toy = ToyFact
+-- >     singleton _ v = Set.singleton v
+--
+-- @Toy@ has no values. It is only a name for this choice of four types, and
+-- every other type in the library takes it as a parameter. 'singleton' is the
+-- one function the domain has to supply: the set that holds exactly one value.
+--
+-- A @ToyFact@ is either a request (/we want @app@ at one of these versions/) or a
+-- dependency (/@lib@ version 1 needs @util@ at one of these versions/).
+
+-- $facts
+--
+-- Everything the solver knows is an 'Incompatibility': a set of terms, one per
+-- variable, that cannot /all/ be true at once. A term is either
+-- 'Positive', \"the package is picked, at a version in this set\", or
+-- 'Negative', \"the package is not picked at a version in this set\". Each
+-- incompatibility also records its 'Cause', the fact it comes from.
+--
+-- Add two functions that state our two kinds of fact:
+--
+-- > wants :: Pkg -> [Int] -> Incompatibility Toy
+-- > wants p vs =
+-- >     Incompatibility
+-- >         (Map.singleton p (Negative (Set.fromList vs)))
+-- >         (Seed (Wants p (Set.fromList vs)))
+-- >
+-- > needs :: Pkg -> Int -> Pkg -> [Int] -> Incompatibility Toy
+-- > needs p v q ws =
+-- >     Incompatibility
+-- >         (Map.fromList [(p, Positive (Set.singleton v)), (q, Negative (Set.fromList ws))])
+-- >         (Fact (Needs p v q (Set.fromList ws)))
+--
+-- Reload, and look at what a dependency says:
+--
+-- @
+-- ghci> incompTerms (needs (Pkg \"lib\") 1 (Pkg \"util\") [1])
+-- fromList [(Pkg \"lib\",Positive (fromList [1])),(Pkg \"util\",Negative (fromList [1]))]
+-- @
+--
+-- It says that \"@lib@ is picked at 1\" and \"@util@ is not picked at 1\"
+-- cannot both be true: if @lib@ is 1, then @util@ is 1. A request has a single
+-- negative term, so \"@app@ is not picked at 1\" cannot be true, and @app@ must
+-- be picked at 1. Notice that a request is marked
+-- 'Seed' and a dependency 'Fact'. A seed is something we ask for; the solver
+-- treats the two differently when it decides that it has failed.
+
+-- $world
+--
+-- Now some packages. A world lists each package's versions and, for each
+-- version, what it needs. Add:
+--
+-- > type World = Map Pkg [(Int, [(Pkg, [Int])])]
+-- >
+-- > app, lib, util :: Pkg
+-- > app = Pkg "app"
+-- > lib = Pkg "lib"
+-- > util = Pkg "util"
+-- >
+-- > world :: World
+-- > world =
+-- >     Map.fromList
+-- >         [ (app, [(1, [(lib, [1, 2])])])
+-- >         , (lib, [(1, [(util, [1])]), (2, [(util, [2])])])
+-- >         , (util, [(1, [])])
+-- >         ]
+--
+-- So @app@ 1 needs @lib@ 1 or 2, @lib@ 1 needs @util@ 1, @lib@ 2 needs @util@
+-- 2, and the only version of @util@ is 1.
+
+-- $provider
+--
+-- The solver never sees the world. When it needs a package, it asks a
+-- 'Provider': here is the package, and here is the set of versions still
+-- allowed; pick one, and tell me what that choice entails. Add:
+--
+-- > provider :: World -> Provider Toy Identity
+-- > provider w = Provider $ \p offered ->
+-- >     pure $ case [(v, deps) | (v, deps) <- Map.findWithDefault [] p w, v `Set.member` offered] of
+-- >         [] -> (Nothing, [])
+-- >         candidates ->
+-- >             let (v, deps) = maximumBy (comparing fst) candidates
+-- >              in (Just v, [needs p v q ws | (q, ws) <- deps])
+--
+-- Our provider picks the newest version the set allows, and states that
+-- version's dependencies with @needs@. If no version is allowed, it answers
+-- 'Nothing'. It runs in 'Identity' because it needs no effects; a provider that
+-- reads files would run in 'IO'.
+--
+-- Reload, and ask it the question the solver will ask about @lib@:
+--
+-- @
+-- ghci> fst (runIdentity (expand (provider world) lib (Set.fromList [1, 2])))
+-- Just 2
+-- @
+
+-- $solving
+--
+-- To solve, hand 'solve' the provider and the requests. Its first argument
+-- receives a message at each step of the search; 'mempty' discards them. Add:
+--
+-- > plan :: World -> [Incompatibility Toy] -> Maybe (Map Pkg Int)
+-- > plan w seeds = case runIdentity (solve mempty (provider w) seeds) of
+-- >     Right solution -> Just solution
+-- >     Left _         -> Nothing
+--
+-- Reload, and ask for @app@ 1:
+--
+-- @
+-- ghci> plan world [wants app [1]]
+-- Just (fromList [(Pkg \"app\",1),(Pkg \"lib\",1),(Pkg \"util\",1)])
+-- @
+--
+-- Notice that @lib@ is 1, though the provider prefers 2. The provider did pick
+-- @lib@ 2 first. That made the solver ask for @util@ 2, the provider found no
+-- such version, and the solver went back and asked for @lib@ again, this time
+-- without 2.
+
+-- $breaking
+--
+-- Replace @util@ 1 with a @util@ 3 that no @lib@ accepts. Add:
+--
+-- > broken :: World
+-- > broken = Map.insert util [(3, [])] world
+--
+-- @
+-- ghci> plan broken [wants app [1]]
+-- Nothing
+-- @
+--
+-- There is no plan, and 'Nothing' does not say why.
+
+-- $explaining
+--
+-- When there is no plan, 'solve' answers @'Left' ('NoSolution' root)@. The
+-- incompatibility @root@ carries the whole chain of reasoning that led to the
+-- failure, and 'reportConflict' writes it out as a numbered proof. It needs a
+-- 'Formatter': the words for each fact, and for the solver's own finding that a
+-- package has none of a set of versions. Add:
+--
+-- > versions :: Set Int -> Text
+-- > versions vs = T.intercalate " or " (map (T.pack . show) (Set.toList vs))
+-- >
+-- > name :: Pkg -> Set Int -> Text
+-- > name (Pkg p) vs = T.pack p <> " " <> versions vs
+-- >
+-- > formatter :: Formatter Toy
+-- > formatter =
+-- >     Formatter
+-- >         { sayFact = \fact _ -> case fact of
+-- >             Wants p vs     -> name p vs <> " is requested"
+-- >             Needs p v q ws -> name p (Set.singleton v) <> " depends on " <> name q ws
+-- >         , sayNoValues = \(Pkg p) vs -> T.pack p <> " has no version " <> versions vs
+-- >         , sayTerms = summaryWith name name
+-- >         , prepare = id
+-- >         , lineRules = []
+-- >         , clauseRules = []
+-- >         }
+-- >
+-- > why :: World -> [Incompatibility Toy] -> Text
+-- > why w seeds = case runIdentity (solve mempty (provider w) seeds) of
+-- >     Right _                -> "There is a plan."
+-- >     Left (NoSolution root) -> reportConflict formatter root
+-- >     Left (NoSatisfier _ _) -> "The solver failed unexpectedly."
+-- >
+-- > explain :: World -> [Incompatibility Toy] -> IO ()
+-- > explain w seeds = T.putStrLn (why w seeds)
+--
+-- Reload, and ask why the broken world has no plan:
+--
+-- @
+-- ghci> explain broken [wants app [1]]
+-- 1. Because lib 1 depends on util 1 and util has no version 1, lib 1 is forbidden.
+--
+-- Because util has no version 2 and lib 2 depends on util 2, lib 2 is forbidden.
+-- And because lib 1 is forbidden (1), lib 1 or 2 is forbidden.
+-- So, because app 1 depends on lib 1 or 2 and app 1 is requested, version solving failed.
+-- @
+--
+-- Each line takes facts we stated, or an earlier conclusion, and draws a new
+-- conclusion. The first line is numbered because a later line uses it. The last
+-- line ends with the request, @app 1@: everything above it shows that the
+-- request cannot be met. Every sentence in it came from our @formatter@.
+--
+-- The original world still has a plan, and @explain@ says so:
+--
+-- @
+-- ghci> explain world [wants app [1]]
+-- There is a plan.
+-- @
+--
+-- We have described a domain to the solver, answered its questions with a
+-- provider, found a plan, and turned a failure into an explanation in our own
+-- words.
+
+-- $next
+--
+-- * "PubGrub" is the library's front page, with everything this tutorial used.
+-- * "PubGrub.Provider" states what a provider must and may do.
+-- * "PubGrub.Report" describes the rest of 'Formatter', for wording proofs in a
+--   domain's own terms.
+-- * "PubGrub.Version" and "PubGrub.VersionSet" are ready-made values and sets
+--   for a domain whose values are versions with ranges.

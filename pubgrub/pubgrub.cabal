@@ -57,6 +57,7 @@ library
         PubGrub.Solver
         PubGrub.Store
         PubGrub.Term
+        PubGrub.Tutorial
         PubGrub.Version
         PubGrub.VersionSet
     build-depends:
@@ -72,6 +73,7 @@ test-suite pubgrub-test
     main-is:        Main.hs
     other-modules:
         StoreInvariantsSpec
+        Toy
         ToyDomainSpec
     build-depends:
         , base

@@ -13,6 +13,9 @@ behind pub, Cargo's resolver and uv, written once over any domain.
 - `PubGrub.Report` renders that derivation as the numbered proof the
   specification describes, in words a `Formatter` supplies.
 
+To get started, follow the tutorial in the `PubGrub.Tutorial` module: it builds
+a small domain, solves in it, and explains a failure.
+
 The instantiation for cabal packages is the [`pubgrub-cabal`][cabal] package.
 The algorithm follows pub's specification, which the repository vendors as the
 authority.

@@ -63,7 +63,7 @@ design decision per section, with the evidence that earned it.
 
 ```sh
 cabal build all
-cabal test all                       # 274 tests over the three packages that have them, ~0.5 s
+cabal test all                       # 280 tests over the three packages that have them, ~0.5 s
 cabal run exe:pubgrub -- aeson              # the driver; add -v for the search trace
 cabal run exe:pubgrub -- 'aeson <2'         # a target is ONE argument: package and range
 cabal run exe:pubgrub -- hlint 'aeson <2'   # several targets, solved together
@@ -155,8 +155,8 @@ pubgrub-harness (package, unpublished)
 
 | component | what it is |
 | --- | --- |
-| `pubgrub` library | `pubgrub/src/` — the solver. `PubGrub.hs` (the public surface) plus `PubGrub/{SetOps,Term,Relation,Incompatibility,Store,Provider,Solver,Derivation,Report,Pretty,Version,VersionSet}.hs`. `cabal check` clean |
-| `pubgrub` test-suite | `pubgrub/test/ToyDomainSpec.hs` — the solver and the walker over a domain that is not cabal's; it imports nothing from `PubGrub.Cabal`, so the core leaning on cabal is a compile error here first |
+| `pubgrub` library | `pubgrub/src/` — the solver. `PubGrub.hs` (the public surface) plus `PubGrub/{SetOps,Term,Relation,Incompatibility,Store,Provider,Solver,Derivation,Report,Pretty,Version,VersionSet}.hs`, and `PubGrub/Tutorial.hs`, a module of documentation only. `cabal check` clean |
+| `pubgrub` test-suite | `pubgrub/test/ToyDomainSpec.hs` — the solver and the walker over `Toy`, a domain that is not cabal's; it imports nothing from `PubGrub.Cabal`, so the core leaning on cabal is a compile error here first. `Toy.hs` is the tutorial's code, and the spec fails if `PubGrub.Tutorial`'s code blocks or printed results drift from it. `StoreInvariantsSpec.hs` holds the store to its invariants |
 | `pubgrub-cabal` library | `pubgrub-cabal/src/` — `PubGrub/Cabal.hs` and `PubGrub/Cabal/{Variable,Value,InstanceSet,PreInstalled,Version,VersionSet,Pretty,Flatten,Installed,Provider,Report}.hs`, `PubGrub/Cabal/Report/{Rule,Wording,Headline,Layout}.hs`. Cabal-syntax only. `cabal check` clean |
 | `pubgrub-cabal` test-suite | `pubgrub-cabal/test/` — 10 spec modules plus `test/golden/` |
 | `pubgrub-hs` library | `pubgrub-hs/src/` — the bridge: `Bridge/{Hackage,Provider}.hs`, `Bridge/Hackage/{HttpClient,Store,Unlifted}.hs`, `Bridge/Cabal/{Baseline,InstalledPkg}.hs` |
