@@ -12,29 +12,23 @@ module PubGrub.Incompatibility
       Domain (..)
     , MergeRule (..)
     , noMerging
-      -- * Terms about variables
-    , VarTerm (..)
       -- * Incompatibilities
     , Incompatibility (..)
     , Cause (..)
     , incompGet
     , noValues
     , isSeed
-      -- * Judging against the partial solution
-    , IncompatRelation (..)
-    , incompRelation
       -- * Resolution
     , priorCause
     , priorCauseTerms
     ) where
 
-import           Data.Kind        (Type)
-import           Data.Map.Strict  (Map)
-import qualified Data.Map.Strict  as Map
-import           PubGrub.Relation (Relation (..), relation)
-import           PubGrub.SetOps   (SetOps (..))
-import           PubGrub.Term     (Term (..), anyTerm, intersectTerm, isTopTerm,
-                                   unionTerm)
+import           Data.Kind       (Type)
+import           Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import           PubGrub.SetOps  (SetOps (..))
+import           PubGrub.Term    (Term (..), anyTerm, intersectTerm, isTopTerm,
+                                  unionTerm)
 
 -- --------------------------------------------------------------------------
 -- Domain
@@ -97,22 +91,6 @@ data MergeRule d = forall k. Ord k => MergeRule
 -- | No two clauses merge.
 noMerging :: MergeRule d
 noMerging = MergeRule{mergeKey = const (Nothing :: Maybe ()), mergeWith = const}
-
--- --------------------------------------------------------------------------
--- VarTerm
--- --------------------------------------------------------------------------
-
--- | One term about one variable — an /assignment/, the unit the partial
--- solution records. A decision is the special case where the term is
--- @Positive@ of a singleton.
---
--- Contrast 'Incompatibility', which also pairs variables with terms but makes
--- the opposite judgement: an assignment /asserts/ its term, an
--- incompatibility forbids its terms from all holding at once.
-data VarTerm d = VarTerm
-    { termVar :: VarOf d
-    , termSet :: Term (SetOf d)
-    }
 
 -- --------------------------------------------------------------------------
 -- Incompatibility
@@ -185,47 +163,6 @@ isSeed :: Incompatibility d -> Bool
 isSeed i = case incompCause i of
     Seed _ -> True
     _      -> False
-
--- Judging against the partial solution -----------------------------------------
-
--- | How an incompatibility relates to the partial solution.
-data IncompatRelation v
-    = ISatisfied
-    | IContradicted v
-    | -- | all terms satisfied but one (the named variable): the unit case
-      IAlmostSatisfied v
-    | IInconclusive
-    deriving (Eq, Show)
-
--- | Judge an incompatibility against the partial solution. @lookupTerm v@ is
--- the accumulated term the partial solution holds for @v@, or 'Nothing' if
--- @v@ is unmentioned (equivalent to ⊤, and always inconclusive).
-incompRelation
-    :: Domain d
-    => (VarOf d -> Maybe (Term (SetOf d)))
-    -> Incompatibility d
-    -> IncompatRelation (VarOf d)
-incompRelation lookupTerm (Incompatibility m _) = Map.foldlWithKey' step ISatisfied m
-  where
-    -- A strict fold over the map rather than a walk over 'Map.toList': this runs
-    -- for every clause on every visit, and building the list costs allocation. A
-    -- clause has a handful of terms, so once the answer is final the remaining
-    -- terms are skipped by the first two equations rather than by stopping. Terms
-    -- are judged in key order, which decides the variable a contradiction or an
-    -- open term is reported on.
-    step acc@(IContradicted _) _ _ = acc
-    step IInconclusive _ _ = IInconclusive
-    step acc v it =
-        case lookupTerm v of
-            Just term ->
-                case relation term it of
-                    Satisfied    -> acc
-                    Contradicted -> IContradicted v
-                    Inconclusive -> almost v acc
-            Nothing -> almost v acc
-    -- absent or inconclusive term: at most one allowed for AlmostSatisfied
-    almost v ISatisfied = IAlmostSatisfied v
-    almost _ _          = IInconclusive
 
 -- | Rule of Resolution. From the current incompatibility and the cause of the
 -- satisfier (sharing @pivot@), derive their resolvent: union the shared

@@ -36,7 +36,6 @@ import           PubGrub.Cabal.Version      (Version, mkVersion, toCabalVersion)
 import           PubGrub.Cabal.VersionSet   (VersionSet, emptyVersionSet,
                                              fromVersionRange, fullVersionSet,
                                              singletonVersionSet)
-import           PubGrub.Relation           (Relation (..), relation)
 import           PubGrub.SetOps             (SetOps (..), equivalent,
                                              isDisjoint, isSubsetOf)
 import           PubGrub.Term               (Term (..), intersectTerm,
@@ -178,11 +177,9 @@ tests =
                 not (isTopTerm x) || termModel x == everything
             , testProperty "isBottomTerm only claims a real bottom" $ \(SymTerm x) ->
                 not (isBottomTerm x) || Set.null (termModel x)
-            , testProperty "relation never claims a relation the model denies" $ \(SymTerm x) (SymTerm y) ->
-                case relation x y of
-                    Satisfied    -> termModel x `Set.isSubsetOf` termModel y
-                    Contradicted -> Set.null (termModel x `Set.intersection` termModel y)
-                    Inconclusive -> True
+            , testProperty "subset and disjointness never claim what the model denies" $ \(SymTerm x) (SymTerm y) ->
+                (not (x `isSubsetOf` y) || termModel x `Set.isSubsetOf` termModel y)
+                    && (not (x `isDisjoint` y) || Set.null (termModel x `Set.intersection` termModel y))
             ]
         , testGroup
             "flag value sets"

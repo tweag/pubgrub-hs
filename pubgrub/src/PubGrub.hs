@@ -25,7 +25,6 @@ module PubGrub
     , module PubGrub.Term
     , Incompatibility (..)
     , Cause (..)
-    , VarTerm (..)
     , incompGet
     , noValues
     , isSeed

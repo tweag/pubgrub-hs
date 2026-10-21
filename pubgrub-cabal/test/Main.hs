@@ -5,12 +5,11 @@ import qualified FlagSolveSpec
 import qualified InstalledSpec
 import qualified InstanceSetSpec
 import qualified PaperSpec
-import qualified PartialSolutionSpec
 import qualified ReleaseSpec
 import qualified ReportSpec
 import qualified SolverSpec
 import qualified StoreSpec
-import           Test.Tasty          (defaultMain, testGroup)
+import           Test.Tasty      (defaultMain, testGroup)
 import qualified VersionSetSpec
 
 main :: IO ()
@@ -20,7 +19,6 @@ main =
             "pubgrub-cabal"
             [ VersionSetSpec.tests
             , InstanceSetSpec.tests
-            , PartialSolutionSpec.tests
             , SolverSpec.tests
             , ConstraintSpec.tests
             , StoreSpec.tests

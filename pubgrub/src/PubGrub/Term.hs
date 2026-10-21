@@ -77,16 +77,6 @@ isEmptyTerm :: SetOps s => Term s -> Bool
 isEmptyTerm (Positive s) = isEmpty s
 isEmptyTerm (Negative _) = False
 
--- The term can never be true.
-termIsImpossible :: SetOps s => Term s -> Bool
-termIsImpossible (Positive s) = isEmpty s
-termIsImpossible (Negative _) = False
-
--- The term is always true.
-termIsUniversal :: SetOps s => Term s -> Bool
-termIsUniversal (Positive _) = False
-termIsUniversal (Negative s) = isEmpty s
-
 
 -- | The Boolean algebra on terms, through the state-set denotations above.
 -- The payload only ever needs 'intersect', 'union' and 'difference' — never a

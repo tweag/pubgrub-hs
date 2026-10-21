@@ -1,4 +1,5 @@
--- | Tests for 'PubGrub.Store': merging dependency facts as they are inserted.
+-- | Tests for cabal's merge rule: merging dependency facts as they are inserted
+-- into the solver's store.
 --
 -- The property under test is the one @references\/pubgrub.md:456@ asks for: two
 -- facts stating the same dependency of two /adjacent/ releases become one fact
@@ -9,6 +10,11 @@
 -- The cases here are the boundaries of that: what must merge, what must not, and
 -- what the merge must preserve (the clause's place in the scan order, and a
 -- 'CauseDependency' leaf rather than a derived node).
+--
+-- The store itself is the core's and is not exported; the core's own tests hold
+-- it to its invariants under any rule that keeps 'MergeRule''s law. What is
+-- tested here is cabal's rule, through 'Store' below: a model of the core's
+-- store that applies the domain's rule on insert the way the store does.
 module StoreSpec (tests) where
 
 import           Data.List.NonEmpty                       (NonEmpty)
@@ -37,13 +43,12 @@ import           PubGrub.Cabal.Version                    (Version)
 import qualified PubGrub.Cabal.Version                    as V
 import qualified PubGrub.Cabal.VersionSet                 as VersionSet
 import           PubGrub.Incompatibility                  (Cause (..),
+                                                           Domain (..),
                                                            Incompatibility (..),
+                                                           MergeRule (..),
                                                            noValues)
 import           PubGrub.SetOps                           (SetOps (isEmpty),
                                                            equivalent)
-import           PubGrub.Store                            (Store, emptyStore,
-                                                           storeClauses)
-import qualified PubGrub.Store                            as Store
 import           PubGrub.Term                             (Term (..))
 import           Test.Tasty                               (TestTree, testGroup)
 import           Test.Tasty.HUnit                         (assertBool,
@@ -54,13 +59,25 @@ import           Test.Tasty.HUnit                         (assertBool,
 -- Fixtures
 -- --------------------------------------------------------------------------
 
--- | The store after the inserts. These tests are about what the store holds,
--- not about where each clause landed.
-insertClause :: Incompatibility Cabal -> Store Cabal -> Store Cabal
-insertClause i = snd . Store.insertClause i
+-- | The store as these tests see it: its clauses, newest first.
+newtype Store d = Store {storeClauses :: [Incompatibility d]}
 
-insertClauses :: [Incompatibility Cabal] -> Store Cabal -> Store Cabal
-insertClauses is = snd . Store.insertClauses is
+emptyStore :: Store d
+emptyStore = Store []
+
+-- | Merge an arriving clause into the clause that has its key, where that
+-- clause sits, or put it at the front: what the core's store does.
+insertClause :: Domain d => Incompatibility d -> Store d -> Store d
+insertClause i (Store cs) = case mergeRule of
+    MergeRule{mergeKey, mergeWith} -> case mergeKey i of
+        Nothing -> Store (i : cs)
+        Just k -> case break ((== Just k) . mergeKey) cs of
+            (newer, existing : older) -> Store (newer ++ mergeWith existing i : older)
+            (_, [])                   -> Store (i : cs)
+
+-- | Insert several, leaving them at the front in the order given.
+insertClauses :: Domain d => [Incompatibility d] -> Store d -> Store d
+insertClauses is store = foldr insertClause store is
 
 pkgA, pkgB, pkgQ :: PackageName
 pkgA = mkPackageName "a"

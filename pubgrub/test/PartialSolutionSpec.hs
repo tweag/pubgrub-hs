@@ -1,54 +1,38 @@
 -- | Differential tests for the partial solution's storage layer.
 --
--- 'PubGrub.Solver.PartialSolution' indexes assignments by package and caches,
--- per package, the intersection of its assignments' terms and the instance it
--- was decided to be. The caches are what let unit propagation ask about a
--- package without scanning; they are also the only thing that can be wrong.
--- Backtracking is where they can be wrong most quietly: @intersectTerm@ cannot
--- be undone, so a package that loses assignments must have its term rebuilt
--- from the survivors, and a dropped decision must stop being remembered.
+-- 'PubGrub.PartialSolution.PartialSolution' indexes assignments by variable and
+-- caches, per variable, the intersection of its assignments' terms and the
+-- value it was decided to be. The caches are what let unit propagation ask
+-- about a variable without scanning; they are also the only thing that can be
+-- wrong. Backtracking is where they can be wrong most quietly: @intersectTerm@
+-- cannot be undone, so a variable that loses assignments must have its term
+-- rebuilt from the survivors, and a dropped decision must stop being
+-- remembered.
 --
 -- The model below is the naive implementation: one flat chronological list,
 -- every query a scan. It has no caches to invalidate, so agreement with it is
 -- exactly the property at issue.
 module PartialSolutionSpec (tests) where
 
-import qualified Data.Map.Strict                 as Map
-import           Data.Maybe                      (mapMaybe)
-import qualified Data.Set                        as Set
-import           Distribution.Types.PackageName  (mkPackageName)
-import           Distribution.Types.Version      (mkVersion)
-import           Distribution.Types.VersionRange (earlierVersion,
-                                                  orLaterVersion, thisVersion)
-import           PubGrub.Cabal                   (Cabal, fromDependency,
-                                                  request)
-import           PubGrub.Cabal.InstanceSet       (Instance (..),
-                                                  InstanceSet (..),
-                                                  singletonInstance)
-import           PubGrub.Cabal.Value             (Value (..), ValueSet,
-                                                  instanceSet)
-import           PubGrub.Cabal.Variable          (Var (..))
-import qualified PubGrub.Cabal.Version           as V
-import qualified PubGrub.Cabal.VersionSet        as VersionSet
-import           PubGrub.Incompatibility         (Incompatibility, incompGet,
-                                                  noValues)
-import           PubGrub.SetOps                  (equivalent)
-import           PubGrub.Solver                  (Assignment (..),
-                                                  AssignmentKind (..),
-                                                  PartialSolution (..),
-                                                  addDecision, addDerivation,
-                                                  assignmentTerm, backtrack,
-                                                  decidedValue, emptyPS,
-                                                  extractSolution,
-                                                  termIntersectionFor,
-                                                  undecidedPositive, varHistory)
-import           PubGrub.Term                    (Term (..), anyTerm,
-                                                  intersectTerm, negateTerm)
-import           Test.Tasty                      (TestTree, testGroup)
-import           Test.Tasty.QuickCheck           (Arbitrary (..), Gen, Property,
-                                                  conjoin, counterexample,
-                                                  elements, frequency,
-                                                  testProperty)
+import qualified Data.Map.Strict         as Map
+import           Data.Maybe              (mapMaybe)
+import           Data.Set                (Set)
+import qualified Data.Set                as Set
+import           PubGrub.Incompatibility (Incompatibility, incompGet, noValues)
+import           PubGrub.PartialSolution (Assignment (..), AssignmentKind (..),
+                                          PartialSolution (..), addDecision,
+                                          addDerivation, assignmentTerm,
+                                          backtrack, decidedValue, emptyPS,
+                                          extractSolution, termIntersectionFor,
+                                          undecidedPositive, varHistory)
+import           PubGrub.SetOps          (equivalent)
+import           PubGrub.Term            (Term (..), anyTerm, intersectTerm,
+                                          negateTerm)
+import           Test.Tasty              (TestTree, testGroup)
+import           Test.Tasty.QuickCheck   (Arbitrary (..), Gen, Property,
+                                          conjoin, counterexample, elements,
+                                          frequency, testProperty)
+import           Toy                     (Pkg (..), Toy, needs, wants)
 
 -- --------------------------------------------------------------------------
 -- The universe the scripts draw from
@@ -57,36 +41,26 @@ import           Test.Tasty.QuickCheck           (Arbitrary (..), Gen, Property,
 -- | Probe packages. Every query is checked for all of them, so keep the list
 -- short — and keep it a superset of what the generators use, so that packages
 -- which were never mentioned (the @Nothing@ / @⊤@ case) are checked too.
-packages :: [Var]
-packages = map (PackageVar . mkPackageName) ["a", "b", "c", "d"]
+packages :: [Pkg]
+packages = map Pkg ["a", "b", "c", "d"]
 
-instances :: [Value]
-instances = [PackageValue (BuildSource (V.mkVersion [k])) | k <- [1 .. 3]]
+instances :: [Int]
+instances = [1 .. 3]
 
--- | Range-shaped instance sets, as the provider mints them.
-sets :: [InstanceSet]
-sets =
-    [ InstanceSet{isInstalled = Set.empty, isSource = vs}
-    | vs <-
-        map
-            VersionSet.fromVersionRange
-            [ orLaterVersion (mkVersion [2])
-            , earlierVersion (mkVersion [3])
-            , thisVersion (mkVersion [2])
-            ]
-    ]
+-- | Range-shaped sets over the versions 1 to 3: at least 2, below 3, exactly 2.
+sets :: [Set Int]
+sets = map Set.fromList [[2, 3], [1, 2], [2]]
 
 -- | The incompatibilities a derivation can be caused by: unit bans (which
--- derive a negative term), \"no instances\" (positive), and real two-package
+-- derive a negative term), \"no versions\" (positive), and real two-package
 -- dependencies — so that deriving for a package the incompatibility does /not/
 -- mention (⊤, the term-absent case) is reachable too.
-incompatibilities :: [Incompatibility Cabal]
+incompatibilities :: [Incompatibility Toy]
 incompatibilities =
-    [request p (singletonInstance i) | PackageVar p <- packages, PackageValue i <- instances]
-        ++ [noValues p (instanceSet s) | p <- packages, s <- sets]
-        ++ [ fromDependency p s Map.empty q t
-           | (PackageVar p, PackageVar q) <- zip packages (drop 1 packages)
-           , s <- take 1 sets
+    [wants p [i] | p <- packages, i <- instances]
+        ++ [noValues p s | p <- packages, s <- sets]
+        ++ [ needs p 2 q (Set.toList t)
+           | (p, q) <- zip packages (drop 1 packages)
            , t <- sets
            ]
 
@@ -127,7 +101,7 @@ instance Arbitrary Op where
 
 -- | The model: one flat chronological list of assignments.
 data Model = Model
-    { mAssignments :: [Assignment Cabal]
+    { mAssignments :: [Assignment Toy]
     , mLevel       :: Int
     , mNextIndex   :: Int
     }
@@ -135,11 +109,11 @@ data Model = Model
 emptyModel :: Model
 emptyModel = Model{mAssignments = [], mLevel = 0, mNextIndex = 0}
 
-mDecide :: Var -> Value -> Model -> Model
+mDecide :: Pkg -> Int -> Model -> Model
 mDecide p i (Model as l n) =
     Model (as ++ [Assignment n (l + 1) p (Decision i)]) (l + 1) (n + 1)
 
-mDerive :: Var -> Incompatibility Cabal -> Model -> Model
+mDerive :: Pkg -> Incompatibility Toy -> Model -> Model
 mDerive p cause (Model as l n) =
     Model (as ++ [Assignment n l p (Derivation term cause)]) l (n + 1)
   where
@@ -148,20 +122,20 @@ mDerive p cause (Model as l n) =
 mBacktrack :: Int -> Model -> Model
 mBacktrack level (Model as _ n) = Model (filter ((<= level) . aLevel) as) level n
 
-mHistory :: Model -> Var -> [Assignment Cabal]
+mHistory :: Model -> Pkg -> [Assignment Toy]
 mHistory m p = filter ((== p) . aVar) (mAssignments m)
 
-mTerm :: Model -> Var -> Maybe (Term ValueSet)
+mTerm :: Model -> Pkg -> Maybe (Term (Set Int))
 mTerm m p = case map assignmentTerm (mHistory m p) of
     []     -> Nothing
     t : ts -> Just (foldl intersectTerm t ts)
 
-mSolution :: Model -> Map.Map Var Value
+mSolution :: Model -> Map.Map Pkg Int
 mSolution m =
     Map.fromList
         [(aVar a, i) | a <- mAssignments m, Just i <- [decidedValue a]]
 
-mUndecidedPositive :: Model -> [(Var, ValueSet)]
+mUndecidedPositive :: Model -> [(Pkg, Set Int)]
 mUndecidedPositive m =
     mapMaybe positive (filter (`notElem` decided) pkgs)
   where
@@ -178,7 +152,7 @@ mUndecidedPositive m =
             | otherwise = go (x : seen) xs
 
 -- | Apply one op to both, so a script drives them in lockstep.
-step :: Op -> (PartialSolution Cabal, Model) -> (PartialSolution Cabal, Model)
+step :: Op -> (PartialSolution Toy, Model) -> (PartialSolution Toy, Model)
 step op (ps, m) = case op of
     OpDecide pi_ ii -> case (atIndex packages pi_, atIndex instances ii) of
         (Just p, Just i) -> (addDecision p i ps, mDecide p i m)
@@ -196,26 +170,26 @@ step op (ps, m) = case op of
 
 -- | Terms are compared up to set equivalence, which with canonical sets is
 -- equality; the semantic form says what is being compared.
-termEquiv :: Term ValueSet -> Term ValueSet -> Bool
+termEquiv :: Term (Set Int) -> Term (Set Int) -> Bool
 termEquiv (Positive x) (Positive y) = equivalent x y
 termEquiv (Negative x) (Negative y) = equivalent x y
 termEquiv _ _                       = False
 
-maybeTermEquiv :: Maybe (Term ValueSet) -> Maybe (Term ValueSet) -> Bool
+maybeTermEquiv :: Maybe (Term (Set Int)) -> Maybe (Term (Set Int)) -> Bool
 maybeTermEquiv Nothing Nothing   = True
 maybeTermEquiv (Just x) (Just y) = termEquiv x y
 maybeTermEquiv _ _               = False
 
 -- | An assignment's identity, ignoring the term (compared separately, by
 -- equivalence).
-key :: Assignment Cabal -> (Int, Int, Var, Maybe Value)
+key :: Assignment Toy -> (Int, Int, Pkg, Maybe Int)
 key a = (aIndex a, aLevel a, aVar a, decidedValue a)
 
 check :: String -> Bool -> Property
 check what = counterexample ("mismatch: " ++ what)
 
 -- | Every query, on both, for every probe package.
-agree :: PartialSolution Cabal -> Model -> Property
+agree :: PartialSolution Toy -> Model -> Property
 agree ps m =
     conjoin $
         [ check "psLevel" (psLevel ps == mLevel m)
