@@ -55,12 +55,11 @@ import           PubGrub.Cabal.Version                  (Version)
 import           PubGrub.Incompatibility                (Cause (..),
                                                          Domain (..),
                                                          Incompatibility (..),
-                                                         MergeRule (MergeRule))
+                                                         MergeRule (MergeRule),
+                                                         fact, seed)
 import           PubGrub.Pretty                         (Pretty (..))
 import           PubGrub.SetOps                         (SetOps (..))
-import           PubGrub.Term                           (Term (..),
-                                                         intersectTerm,
-                                                         isTopTerm)
+import           PubGrub.Term                           (Term (..))
 
 -- --------------------------------------------------------------------------
 -- Variables
@@ -170,7 +169,7 @@ data UnbuildableReason
 -- level 0 before anything is decided; 'PubGrub.Solver' recognises a conflict that
 -- rests on those derivations alone as the end of the search.
 request :: PackageName -> InstanceSet -> Incompatibility Var
-request p s = Incompatibility (Map.singleton (PackageVar p) (Negative (instanceSet s))) (Seed (CauseRequest p s))
+request p s = seed (CauseRequest p s) (PackageVar p) (Negative (instanceSet s))
 
 -- | A constraint: if @v@ is in the plan at all, it is in @allowed@. It is
 -- impossible for @v@ to be in @forbidden@, the complement of @allowed@ in the
@@ -193,8 +192,7 @@ request p s = Incompatibility (Map.singleton (PackageVar p) (Negative (instanceS
 -- complement from a 'PubGrub.Cabal.Installed.InstalledDb'; 'flagConstraint' is
 -- the two-valued case, which needs nothing.
 constraint :: Var -> ValueSet -> ValueSet -> Incompatibility Var
-constraint v allowed forbidden =
-    Incompatibility (Map.singleton v (Positive forbidden)) (Seed (CauseConstraint v allowed))
+constraint v allowed forbidden = seed (CauseConstraint v allowed) v (Positive forbidden)
 
 -- | A flag held at a value: @p:f@ is @b@ if it is in play at all. A 'constraint'
 -- over the flag's own variable, as a user's @--constraint 'p +f'@ is.
@@ -223,7 +221,7 @@ flagConstraint p f b =
 -- shape.
 onlyInstalled :: PackageName -> [Version] -> InstanceSet -> Incompatibility Var
 onlyInstalled p installed anySource =
-    Incompatibility (Map.singleton (PackageVar p) (Positive (instanceSet anySource))) (Fact (CauseOnlyInstalled p installed))
+    fact (CauseOnlyInstalled p installed) [(PackageVar p, Positive (instanceSet anySource))]
 
 -- | Instances that cannot be built in this environment, and so must never be
 -- selected. This is the PubGrub algorithm's rule for a version that cannot be
@@ -258,13 +256,11 @@ onlyInstalled p installed anySource =
 -- sentence says instead of a bare \"cannot be built\".
 unbuildable :: PackageName -> InstanceSet -> Guard -> NonEmpty UnbuildableReason -> Incompatibility Var
 unbuildable p s guard why =
-    Incompatibility
-        ( Map.fromList
-            ( (PackageVar p, Positive (instanceSet s))
-                : [(FlagVar p f, Positive (flagSet (boolSet b))) | (f, b) <- Map.toList guard]
-            )
+    fact
+        (CauseUnbuildable p s guard why)
+        ( (PackageVar p, Positive (instanceSet s))
+            : [(FlagVar p f, Positive (flagSet (boolSet b))) | (f, b) <- Map.toList guard]
         )
-        (Fact (CauseUnbuildable p s guard why))
 
 -- | Dependency incompatibility: @package@ in @instances@, with each flag of
 -- @guard@ at the value it names, requires @dep@ in @depSet@:
@@ -297,15 +293,12 @@ unbuildable p s guard why =
 -- net rather than the rule.
 fromDependency :: PackageName -> InstanceSet -> Guard -> PackageName -> InstanceSet -> Incompatibility Var
 fromDependency pkgName pkgSet guard depName depSet =
-    Incompatibility
-        ( Map.fromListWith
-            intersectTerm
-            ( (PackageVar pkgName, Positive (instanceSet pkgSet))
-                : [(FlagVar pkgName f, Positive (flagSet (boolSet b))) | (f, b) <- Map.toList guard]
-                ++ [(PackageVar depName, Negative (instanceSet depSet)) | not (isTopTerm (Negative (instanceSet depSet)))]
-            )
+    fact
+        (CauseDependency pkgName pkgSet guard (depName, depSet))
+        ( (PackageVar pkgName, Positive (instanceSet pkgSet))
+            : (PackageVar depName, Negative (instanceSet depSet))
+            : [(FlagVar pkgName f, Positive (flagSet (boolSet b))) | (f, b) <- Map.toList guard]
         )
-        (Fact (CauseDependency pkgName pkgSet guard (depName, depSet)))
 
 -- | A release declares an automatic flag: @package@ in @instances@ requires the
 -- flag to be in play, at either value:
@@ -320,13 +313,11 @@ fromDependency pkgName pkgSet guard depName depSet =
 -- the owner is inert for the owner's other releases.
 declaresFlag :: PackageName -> InstanceSet -> Flag -> Incompatibility Var
 declaresFlag p s f =
-    Incompatibility
-        ( Map.fromList
-            [ (PackageVar p, Positive (instanceSet s))
-            , (FlagVar p f, Negative (flagSet bothValues))
-            ]
-        )
-        (Fact (CauseDeclaresFlag p s f))
+    fact
+        (CauseDeclaresFlag p s f)
+        [ (PackageVar p, Positive (instanceSet s))
+        , (FlagVar p f, Negative (flagSet bothValues))
+        ]
 
 -- --------------------------------------------------------------------------
 -- Merging

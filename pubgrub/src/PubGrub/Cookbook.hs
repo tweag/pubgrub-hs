@@ -97,24 +97,21 @@ import           PubGrub
 
 -- $requests
 --
--- The request is a list of incompatibilities whose cause is 'Seed', each of
--- exactly one term; 'solve' refuses any other seed with 'BadSeed'. To require a
--- package to have a version in a set, state that its having none there is
--- impossible, with a 'Negative' term:
+-- The request is a list of seeds: incompatibilities of one term, built with
+-- 'seed' from what the request said. To require a package to have a version
+-- in a set, state that its having none there is impossible, with a 'Negative'
+-- term:
 --
 -- > request :: Name -> VersionSet -> Incompatibility Name
--- > request p s = Incompatibility (Map.singleton p (Negative s)) (Seed (Requested p s))
+-- > request p s = seed (Requested p s) p (Negative s)
 --
 -- To constrain a package without requiring it, so that /if/ it is in the plan
--- its version is in a range, forbid the versions outside the range with a single
+-- its version is in a range, forbid the versions outside the range with a
 -- 'Positive' term. Sets need not have a complement, so a constraint is stated
 -- through what it forbids; a version set has one, 'complementVersionSet':
 --
 -- > constrain :: Name -> VersionSet -> Incompatibility Name
--- > constrain p allowed =
--- >     Incompatibility
--- >         (Map.singleton p (Positive (complementVersionSet allowed)))
--- >         (Seed (Constrained p allowed))
+-- > constrain p allowed = seed (Constrained p allowed) p (Positive (complementVersionSet allowed))
 --
 -- Give both to 'solve' in one list. A constraint narrows the choice for a
 -- package the plan needs, and does not bring into the plan a package nothing
@@ -151,10 +148,7 @@ import           PubGrub
 -- >     next = find (> x) versions
 -- >
 -- > dependsOn :: Name -> VersionSet -> Name -> VersionSet -> Incompatibility Name
--- > dependsOn p ps q qs =
--- >     Incompatibility
--- >         (Map.fromList [(p, Positive ps), (q, Negative qs)])
--- >         (Fact (DependsOn p ps q qs))
+-- > dependsOn p ps q qs = fact (DependsOn p ps q qs) [(p, Positive ps), (q, Negative qs)]
 --
 -- Pick the newest release the offered set admits; the answer must be in the
 -- set. When releases are passed over because they cannot be used, say why, with
@@ -169,7 +163,7 @@ import           PubGrub
 -- >         newestFirst = sortOn (Down . fst) [r | r@(x, _) <- releases, offered `contains` x]
 -- >         (unusable, usable) = span (isJust . broken . snd) newestFirst
 -- >         reasons =
--- >             [ Incompatibility (Map.singleton p (Positive (slot versions x))) (Fact (Unusable p (slot versions x) reason))
+-- >             [ fact (Unusable p (slot versions x) reason) [(p, Positive (slot versions x))]
 -- >             | (x, Release{broken = Just reason}) <- unusable
 -- >             ]
 -- >      in Identity $ case usable of

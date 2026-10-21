@@ -21,6 +21,10 @@ module PubGrub.Incompatibility
     , incompGet
     , noValues
     , isSeed
+      -- * Building one
+    , incompatibility
+    , seed
+    , fact
       -- * Resolution
       -- | The step conflict resolution derives a new incompatibility with. A
       -- formatter's tests can build a derivation by hand with 'priorCause', and
@@ -150,6 +154,9 @@ noMerging = MergeRule{mergeKey = const (Nothing :: Maybe ()), mergeWith = const}
 -- Every incompatibility records why it holds, its 'Cause', which is what a
 -- failure is explained from. The cause never changes what an incompatibility
 -- means.
+--
+-- Build one with 'seed', 'fact' or 'incompatibility', which keep that shape;
+-- the constructor is for taking one apart.
 data Incompatibility v = Incompatibility
     { incompTerms :: Map (v) (Term (SetOf v))
     , incompCause :: Cause v
@@ -201,6 +208,25 @@ isSeed :: Incompatibility v -> Bool
 isSeed i = case incompCause i of
     Seed _ -> True
     _      -> False
+
+-- | An incompatibility from its cause and terms, in the shape the solver
+-- expects: a variable named twice gets the intersection of its terms, and a
+-- term that is always true is left out.
+incompatibility :: Domain v => Cause v -> [(v, Term (SetOf v))] -> Incompatibility v
+incompatibility cause terms =
+    Incompatibility (Map.filter (not . isTopTerm) (Map.fromListWith intersectTerm terms)) cause
+
+-- | A seed: one term about one variable, with what the request said as its
+-- fact. @'Negative' s@ asks for the variable to have a value in @s@, and
+-- @'Positive' f@ forbids it the values in @f@. 'PubGrub.Solver.solve' takes a
+-- list of these, and a seed built here is always one it accepts.
+seed :: FactOf v -> v -> Term (SetOf v) -> Incompatibility v
+seed f v t = Incompatibility (Map.singleton v t) (Seed f)
+
+-- | A fact the provider states, from what it says and its terms, in the shape
+-- 'incompatibility' keeps.
+fact :: Domain v => FactOf v -> [(v, Term (SetOf v))] -> Incompatibility v
+fact f = incompatibility (Fact f)
 
 -- | The rule of resolution: from two incompatibilities that both mention the
 -- pivot variable, the one that follows from both. Its terms are

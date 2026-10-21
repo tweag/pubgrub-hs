@@ -38,13 +38,10 @@ range :: [Int] -> [Int] -> VersionSet
 range lo hi = halfOpenVersionSet (mkVersion lo) (Just (mkVersion hi))
 
 request :: Name -> VersionSet -> Incompatibility Name
-request p s = Incompatibility (Map.singleton p (Negative s)) (Seed (Requested p s))
+request p s = seed (Requested p s) p (Negative s)
 
 constrain :: Name -> VersionSet -> Incompatibility Name
-constrain p allowed =
-    Incompatibility
-        (Map.singleton p (Positive (complementVersionSet allowed)))
-        (Seed (Constrained p allowed))
+constrain p allowed = seed (Constrained p allowed) p (Positive (complementVersionSet allowed))
 
 data Release = Release
     { needs  :: [(Name, VersionSet)]
@@ -61,10 +58,7 @@ slot versions x
     next = find (> x) versions
 
 dependsOn :: Name -> VersionSet -> Name -> VersionSet -> Incompatibility Name
-dependsOn p ps q qs =
-    Incompatibility
-        (Map.fromList [(p, Positive ps), (q, Negative qs)])
-        (Fact (DependsOn p ps q qs))
+dependsOn p ps q qs = fact (DependsOn p ps q qs) [(p, Positive ps), (q, Negative qs)]
 
 provider :: Index -> Provider Name Identity
 provider index = Provider $ \p offered ->
@@ -73,7 +67,7 @@ provider index = Provider $ \p offered ->
         newestFirst = sortOn (Down . fst) [r | r@(x, _) <- releases, offered `contains` x]
         (unusable, usable) = span (isJust . broken . snd) newestFirst
         reasons =
-            [ Incompatibility (Map.singleton p (Positive (slot versions x))) (Fact (Unusable p (slot versions x) reason))
+            [ fact (Unusable p (slot versions x) reason) [(p, Positive (slot versions x))]
             | (x, Release{broken = Just reason}) <- unusable
             ]
      in Identity $ case usable of

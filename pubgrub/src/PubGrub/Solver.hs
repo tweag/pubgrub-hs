@@ -335,7 +335,8 @@ data SolveError v
       -- "PubGrub.Derivation" reads it.
       NoSolution (Incompatibility v)
     | -- | This seed is not a request or a constraint: its cause is not
-      -- 'PubGrub.Incompatibility.Seed', or it has more or fewer than one term.
+      -- 'PubGrub.Incompatibility.Seed', or it has more or fewer than one term;
+      -- one built with 'PubGrub.Incompatibility.seed' never is.
       -- The solve is refused before it starts. A seed with two negative terms,
       -- say, asks for one of two variables to have a value without saying
       -- which, and the search would never decide either: the answer would be a

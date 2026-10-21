@@ -30,16 +30,11 @@ instance Domain Pkg where
     singleton _ v = Set.singleton v
 
 wants :: Pkg -> [Int] -> Incompatibility Pkg
-wants p vs =
-    Incompatibility
-        (Map.singleton p (Negative (Set.fromList vs)))
-        (Seed (Wants p (Set.fromList vs)))
+wants p vs = seed (Wants p (Set.fromList vs)) p (Negative (Set.fromList vs))
 
 needs :: Pkg -> Int -> Pkg -> [Int] -> Incompatibility Pkg
 needs p v q ws =
-    Incompatibility
-        (Map.fromList [(p, Positive (Set.singleton v)), (q, Negative (Set.fromList ws))])
-        (Fact (Needs p v q (Set.fromList ws)))
+    fact (Needs p v q (Set.fromList ws)) [(p, Positive (Set.singleton v)), (q, Negative (Set.fromList ws))]
 
 type World = Map Pkg [(Int, [(Pkg, [Int])])]
 

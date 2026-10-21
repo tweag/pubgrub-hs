@@ -78,6 +78,9 @@ module PubGrub
     , incompGet
     , noValues
     , isSeed
+    , incompatibility
+    , seed
+    , fact
       -- * The provider
     , Provider (..)
       -- * Solving

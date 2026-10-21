@@ -123,21 +123,18 @@ import           PubGrub
 -- variable, that cannot /all/ be true at once. A term is either
 -- 'Positive', \"the package is picked, at a version in this set\", or
 -- 'Negative', \"the package is not picked at a version in this set\". Each
--- incompatibility also records its 'Cause', the fact it comes from.
+-- incompatibility also records why it holds: the fact it comes from, which
+-- is either something we ask for, built with 'seed', or something the world
+-- says, built with 'fact'.
 --
 -- Add two functions that state our two kinds of fact:
 --
 -- > wants :: Pkg -> [Int] -> Incompatibility Pkg
--- > wants p vs =
--- >     Incompatibility
--- >         (Map.singleton p (Negative (Set.fromList vs)))
--- >         (Seed (Wants p (Set.fromList vs)))
+-- > wants p vs = seed (Wants p (Set.fromList vs)) p (Negative (Set.fromList vs))
 -- >
 -- > needs :: Pkg -> Int -> Pkg -> [Int] -> Incompatibility Pkg
 -- > needs p v q ws =
--- >     Incompatibility
--- >         (Map.fromList [(p, Positive (Set.singleton v)), (q, Negative (Set.fromList ws))])
--- >         (Fact (Needs p v q (Set.fromList ws)))
+-- >     fact (Needs p v q (Set.fromList ws)) [(p, Positive (Set.singleton v)), (q, Negative (Set.fromList ws))]
 --
 -- Reload, and look at what a dependency says:
 --
@@ -149,9 +146,8 @@ import           PubGrub
 -- It says that \"@lib@ is picked at 1\" and \"@util@ is not picked at 1\"
 -- cannot both be true: if @lib@ is 1, then @util@ is 1. A request has a single
 -- negative term, so \"@app@ is not picked at 1\" cannot be true, and @app@ must
--- be picked at 1. Notice that a request is marked
--- 'Seed' and a dependency 'Fact'. A seed is something we ask for; the solver
--- treats the two differently when it decides that it has failed.
+-- be picked at 1. A request is a seed and a dependency is a fact, and the
+-- solver treats the two differently when it decides that it has failed.
 
 -- $world
 --

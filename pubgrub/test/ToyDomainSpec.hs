@@ -23,7 +23,8 @@ import qualified Data.Text               as T
 import           DocCode                 (codeMatches)
 import           PubGrub.Derivation      (asFact, asNoValues, conflictSet,
                                           externals)
-import           PubGrub.Incompatibility (Cause (..), Incompatibility (..))
+import           PubGrub.Incompatibility (Cause (..), Incompatibility (..),
+                                          incompatibility)
 import           PubGrub.Provider        (Provider (..))
 import           PubGrub.Solver          (SolveError (..), solve)
 import           PubGrub.Term            (Term (..))
@@ -55,6 +56,9 @@ tests =
                     let leaves = externals root
                     [p | Just (Wants p vs) <- map asFact leaves, vs == Set.fromList [1]] @?= [app]
                     sort [h | Just h <- map asNoValues leaves] @?= [(util, Set.fromList [1]), (util, Set.fromList [2])]
+        , testCase "incompatibility intersects a variable named twice and drops a term that is always true" $
+            incompTerms (incompatibility (Fact (Wants app Set.empty)) [(app, Positive (Set.fromList [1, 2])), (app, Positive (Set.fromList [2, 3])), (lib, Negative Set.empty)])
+                @?= Map.fromList [(app, Positive (Set.fromList [2]))]
         , testGroup
             "the boundary"
             [ testCase "a seed of two negative terms is refused, not solved to an empty plan" $
