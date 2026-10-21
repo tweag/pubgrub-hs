@@ -115,9 +115,9 @@ desktop), total allocation from `+RTS -s` is the stable stand-in for time, and
 
 ## Architecture
 
-Five packages in one `cabal.project`, with a hard dependency boundary. The first two
-are meant for Hackage; the other three are this repository's research harness and stay
-here. The cabal-install entanglement is quarantined in the third, `pubgrub-hs`, so the solver and its cabal
+Six packages in one `cabal.project`, with a hard dependency boundary. `pubgrub` and
+`pubgrub-cabal` are meant for Hackage; `pubgrub-doctest` holds `pubgrub`'s doctests, and
+the other three are this repository's research harness. Those four stay here. The cabal-install entanglement is quarantined in the third, `pubgrub-hs`, so the solver and its cabal
 instantiation stay lightweight, and another tool can drive the solver over its own
 index with the two published packages alone.
 
@@ -152,13 +152,13 @@ pubgrub-harness (package, unpublished)
                    problem and repetition; writes bench/output/benchmark.md and showcase.md
 ```
 
-**Five packages, ten components:**
+**Six packages, ten components:**
 
 | component | what it is |
 | --- | --- |
 | `pubgrub` library | `pubgrub/src/` — the solver. `PubGrub.hs` (the public surface) plus `PubGrub/{SetOps,Term,Incompatibility,Provider,Solver,Derivation,Report,Pretty,Version,VersionSet}.hs`, and `PubGrub/Tutorial.hs` and `PubGrub/Cookbook.hs`, modules of documentation only (the tutorial and the how-to guides). The solver's machinery, `PubGrub/{PartialSolution,Relation,Store}.hs`, is not exposed (decision 0068), and `PubGrub.Solver` exports `solve`, `SolveError` and `SolverMsg` only. `cabal check` clean |
 | `pubgrub` test-suite | compiles the library's sources itself, so it can test the hidden modules (`PartialSolutionSpec`, `StoreInvariantsSpec`). `pubgrub/test/ToyDomainSpec.hs` — the solver and the walker over `Toy`, a domain that is not cabal's; it imports nothing from `PubGrub.Cabal`, so the core leaning on cabal is a compile error here first. `Toy.hs` is the tutorial's code and `Cookbook.hs` the guides', and `ToyDomainSpec` and `CookbookSpec` fail if a documentation module's code blocks or printed results drift from them (`DocCode.codeMatches`). |
-| `pubgrub` test-suite `pubgrub-doctests` | `pubgrub/doctest/Main.hs` — runs the library's `>>>` Haddock examples through `doctest-parallel` (decision 0069). It finds the library through the GHC environment file that `write-ghc-environment-files: always` in `cabal.project` writes, so on a clean tree build before testing |
+| `pubgrub-doctest` test-suite `pubgrub-doctests` | `pubgrub-doctest/Main.hs` — runs the `pubgrub` library's `>>>` Haddock examples through `doctest-parallel` (decision 0069). A package of its own, unpublished, so that a project building `pubgrub` from source (latti does) need not solve for the `Cabal < 3.17` that `doctest-parallel` 0.4 requires. It finds the library through the GHC environment file that `write-ghc-environment-files: always` in `cabal.project` writes, so on a clean tree build before testing |
 | `pubgrub-cabal` library | `pubgrub-cabal/src/` — `PubGrub/Cabal.hs` and `PubGrub/Cabal/{Variable,Value,InstanceSet,PreInstalled,Version,VersionSet,Pretty,Flatten,Installed,Provider,Report}.hs`, `PubGrub/Cabal/Report/{Rule,Wording,Headline,Layout}.hs`. Cabal-syntax only. `cabal check` clean |
 | `pubgrub-cabal` test-suite | `pubgrub-cabal/test/` — 10 spec modules plus `test/golden/` |
 | `pubgrub-hs` library | `pubgrub-hs/src/` — the bridge: `Bridge/{Hackage,Provider}.hs`, `Bridge/Hackage/{HttpClient,Store,Unlifted}.hs`, `Bridge/Cabal/{Baseline,InstalledPkg}.hs` |

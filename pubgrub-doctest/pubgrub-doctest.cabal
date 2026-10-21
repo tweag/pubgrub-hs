@@ -1,0 +1,30 @@
+cabal-version:   3.0
+name:            pubgrub-doctest
+version:         0.1.0.0
+license:         BSD-3-Clause
+license-file:    LICENSE
+copyright:       (c) 2026 Tweag I/O by Modus Create
+author:          Andrea Bedini
+maintainer:      andrea.bedini@moduscreate.com
+build-type:      Simple
+extra-doc-files: CHANGELOG.md
+synopsis:        The doctests of the pubgrub package
+description:
+    Runs the @>>>@ examples in the Haddocks of the @pubgrub@ library. A package
+    of its own rather than a test-suite of @pubgrub@: doctest-parallel depends
+    on Cabal, and a project that builds @pubgrub@ from source would otherwise
+    have to solve for a Cabal that doctest-parallel admits.
+
+common warnings
+    ghc-options: -Wall
+
+test-suite pubgrub-doctests
+    import:           warnings
+    default-language: GHC2021
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
+    ghc-options:      -threaded
+    build-depends:
+        , base             >=4.21  && <4.23
+        , doctest-parallel >=0.4   && <0.5
+        , pubgrub

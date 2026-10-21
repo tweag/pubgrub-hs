@@ -187,12 +187,14 @@ documentation of every package with a library, as
 
 ## Layout
 
-Five packages in one `cabal.project`. The first two are meant for Hackage.
+Six packages in one `cabal.project`. `pubgrub` and `pubgrub-cabal` are meant for Hackage.
 
 ```
 pubgrub/            the solver, written once over any domain: the algorithm, the
                     derivation views, the spec's reporting walker over a Formatter,
                     and version sets. Depends on base, containers, text, co-log-core.
+pubgrub-doctest/    pubgrub's doctests, unpublished: a package of their own so that
+                    doctest-parallel's Cabal bound stays out of pubgrub.
 pubgrub-cabal/      the cabal domain: packages and flags as variables, the facts a
                     .cabal file states, the proof renderer, the .cabal flatten and
                     the rule that picks an instance of a package, over any index and

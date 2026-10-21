@@ -1,9 +1,10 @@
--- The five packages of this repository, in dependency order: the solver, its
--- cabal instantiation, the bridge to Hackage and to cabal's own solver, the
--- driver, and the research harness that compares the two solvers. The first two
--- are meant for Hackage; the other three stay here.
+-- The six packages of this repository, in dependency order: the solver, its
+-- doctests, its cabal instantiation, the bridge to Hackage and to cabal's own
+-- solver, the driver, and the research harness that compares the two solvers.
+-- pubgrub and pubgrub-cabal are meant for Hackage; the others stay here.
 packages:
     pubgrub
+    pubgrub-doctest
     pubgrub-cabal
     pubgrub-hs
     pubgrub-cli
