@@ -1,0 +1,365 @@
+{-# OPTIONS_GHC -Wno-unused-imports #-}
+
+-- | How-to guides: recipes for the tasks a user of the library meets. They
+-- assume the terms of "PubGrub.Tutorial"; "PubGrub" explains the model, and
+-- each module documents its names.
+--
+-- The recipes share one example: a domain of packages with versions and
+-- ranges, an index of releases, and a provider over it. Their code is one
+-- module, @Cookbook.hs@, which each recipe adds to; the GHCi sessions use all of
+-- it. It needs @pubgrub@, @containers@, @text@ and @co-log-core@, and starts:
+--
+-- > {-# LANGUAGE OverloadedStrings #-}
+-- > {-# LANGUAGE TypeFamilies      #-}
+-- >
+-- > module Cookbook where
+-- >
+-- > import           Colog.Core            (LogAction (..))
+-- > import           Control.Monad         (guard)
+-- > import           Data.Functor.Identity (Identity (..))
+-- > import           Data.List             (find, sortOn)
+-- > import           Data.Map.Strict       (Map)
+-- > import qualified Data.Map.Strict       as Map
+-- > import           Data.Maybe            (isJust)
+-- > import           Data.Ord              (Down (..))
+-- > import qualified Data.Set              as Set
+-- > import           Data.Text             (Text)
+-- > import qualified Data.Text             as T
+-- > import           PubGrub
+module PubGrub.Cookbook
+    ( -- * How to give a domain versions and ranges
+      -- $versions
+
+      -- * How to request a package, or constrain one without requesting it
+      -- $requests
+
+      -- * How to write a provider over an index of releases
+      -- $provider
+
+      -- * How to explain a failure in your domain's words
+      -- $explaining
+
+      -- * How to merge facts that say the same thing
+      -- $merging
+
+      -- * How to watch the search
+      -- $watching
+
+      -- * How to find what to release from a lock after a failure
+      -- $unlocking
+    ) where
+
+import           PubGrub
+
+-- $versions
+--
+-- When a variable's values are versions, use 'Version' for the values and
+-- 'VersionSet' for the sets: ranges of versions, built from bounds. Name the
+-- four types, and give 'singleton':
+--
+-- > newtype Name = Name Text
+-- >     deriving (Eq, Ord, Show)
+-- >
+-- > data Said
+-- >     = Requested Name VersionSet
+-- >     | Constrained Name VersionSet
+-- >     | DependsOn Name VersionSet Name VersionSet
+-- >     | Unusable Name VersionSet Text
+-- >
+-- > data Repo
+-- >
+-- > instance Domain Repo where
+-- >     type VarOf Repo = Name
+-- >     type ValueOf Repo = Version
+-- >     type SetOf Repo = VersionSet
+-- >     type FactOf Repo = Said
+-- >     singleton _ = singletonVersionSet
+-- >     mergeRule = sameDependency
+--
+-- The fact type is what explanations are made from: give it one constructor
+-- per kind of fact the provider states, carrying what a sentence about it
+-- needs. 'mergeRule' is optional; this domain's is in
+-- [How to merge facts that say the same thing](#g:5).
+--
+-- Build ranges from their bounds. @'halfOpenVersionSet' lo ('Just' hi)@ is
+-- @>=lo && \<hi@, and 'aboveVersionSet', 'belowVersionSet',
+-- 'singletonVersionSet' and the 'SetOps' operations make the rest:
+--
+-- > range :: [Int] -> [Int] -> VersionSet
+-- > range lo hi = halfOpenVersionSet (mkVersion lo) (Just (mkVersion hi))
+--
+-- A set built from a range someone wrote can keep their spelling for
+-- explanations: 'declare' tags it, and 'pretty' prints the tag rather than
+-- the canonical form.
+
+-- $requests
+--
+-- The request is a list of incompatibilities whose cause is 'Seed'. To require
+-- a package to have a version in a set, state that its having none there is
+-- impossible, with a single 'Negative' term:
+--
+-- > request :: Name -> VersionSet -> Incompatibility Repo
+-- > request p s = Incompatibility (Map.singleton p (Negative s)) (Seed (Requested p s))
+--
+-- To constrain a package without requiring it, so that /if/ it is in the plan
+-- its version is in a range, forbid the versions outside the range with a single
+-- 'Positive' term. Sets need not have a complement, so a constraint is stated
+-- through what it forbids; a version set has one, 'complementVersionSet':
+--
+-- > constrain :: Name -> VersionSet -> Incompatibility Repo
+-- > constrain p allowed =
+-- >     Incompatibility
+-- >         (Map.singleton p (Positive (complementVersionSet allowed)))
+-- >         (Seed (Constrained p allowed))
+--
+-- Give both to 'solve' in one list. A constraint narrows the choice for a
+-- package the plan needs, and does not bring into the plan a package nothing
+-- requires.
+-- With @plan@ and @example@ from the next recipe:
+--
+-- @
+-- ghci> plan example [request app fullVersionSet, constrain util (range [1] [2])]
+-- Just (fromList [(Name \"app\",mkVersion [1]),(Name \"lib\",mkVersion [2]),(Name \"util\",mkVersion [1])])
+-- ghci> plan example [request app fullVersionSet, constrain extra (range [2] [3])]
+-- Just (fromList [(Name \"app\",mkVersion [1]),(Name \"lib\",mkVersion [2]),(Name \"util\",mkVersion [2])])
+-- @
+--
+-- A conflict among the seeds alone ends the solve, and the explanation's last
+-- line names the requests and constraints it rests on.
+
+-- $provider
+--
+-- A provider is asked about one package at a time: here are the versions it may
+-- still have, pick one and say what it needs. Over an index of releases,
+-- describe each release by what it needs and whether it can be used:
+--
+-- > data Release = Release
+-- >     { needs  :: [(Name, VersionSet)]
+-- >     , broken :: Maybe Text
+-- >     }
+-- >
+-- > type Index = Map Name [(Version, Release)]
+--
+-- State each dependency over the release's /slot/, the range from its version up
+-- to the next release in the index, rather than over the version alone. The
+-- slot holds the same releases, but the slots of neighbouring releases touch,
+-- so their facts can merge into one
+-- ([How to merge facts that say the same thing](#g:5)):
+--
+-- > slot :: [Version] -> Version -> VersionSet
+-- > slot versions x = halfOpenVersionSet x (find (> x) versions)
+-- >
+-- > dependsOn :: Name -> VersionSet -> Name -> VersionSet -> Incompatibility Repo
+-- > dependsOn p ps q qs =
+-- >     Incompatibility
+-- >         (Map.fromList [(p, Positive ps), (q, Negative qs)])
+-- >         (Fact (DependsOn p ps q qs))
+--
+-- Pick the newest release the offered set admits; the answer must be in the
+-- set. When releases are passed over because they cannot be used, say why, with
+-- a fact over each one's slot: the solver keeps the facts, and an explanation
+-- then names the reason rather than saying that no version exists. If no
+-- release is left, answer 'Nothing', still with the reasons:
+--
+-- > provider :: Index -> Provider Repo Identity
+-- > provider index = Provider $ \p offered ->
+-- >     let releases = Map.findWithDefault [] p index
+-- >         versions = map fst releases
+-- >         newestFirst = sortOn (Down . fst) [r | r@(x, _) <- releases, offered `contains` x]
+-- >         (unusable, usable) = span (isJust . broken . snd) newestFirst
+-- >         reasons =
+-- >             [ Incompatibility (Map.singleton p (Positive (slot versions x))) (Fact (Unusable p (slot versions x) reason))
+-- >             | (x, Release{broken = Just reason}) <- unusable
+-- >             ]
+-- >      in Identity $ case usable of
+-- >             (x, release) : _ -> (Just x, reasons ++ [dependsOn p (slot versions x) q qs | (q, qs) <- needs release])
+-- >             []               -> (Nothing, reasons)
+--
+-- An example index, and a function that solves over one:
+--
+-- > app, lib, util, extra :: Name
+-- > app = Name "app"
+-- > lib = Name "lib"
+-- > util = Name "util"
+-- > extra = Name "extra"
+-- >
+-- > example :: Index
+-- > example =
+-- >     Map.fromList
+-- >         [ (app, [(mkVersion [1], Release [(lib, range [1] [2, 1])] Nothing)])
+-- >         , ( lib
+-- >           , [ (mkVersion [1], Release [(util, range [1] [3])] Nothing)
+-- >             , (mkVersion [2], Release [(util, range [1] [3])] Nothing)
+-- >             , (mkVersion [2, 1], Release [] (Just "it does not build here"))
+-- >             ]
+-- >           )
+-- >         , (util, [(mkVersion [1], Release [] Nothing), (mkVersion [2], Release [] Nothing)])
+-- >         , (extra, [(mkVersion [1], Release [] Nothing), (mkVersion [2], Release [] Nothing)])
+-- >         ]
+-- >
+-- > plan :: Index -> [Incompatibility Repo] -> Maybe (Map Name Version)
+-- > plan index seeds = case runIdentity (solve mempty (provider index) seeds) of
+-- >     Right solution -> Just solution
+-- >     Left _         -> Nothing
+--
+-- @
+-- ghci> plan example [request app fullVersionSet]
+-- Just (fromList [(Name \"app\",mkVersion [1]),(Name \"lib\",mkVersion [2]),(Name \"util\",mkVersion [2])])
+-- @
+--
+-- This provider runs in 'Data.Functor.Identity.Identity'. One that reads its
+-- index from disk runs in 'IO', and so does 'solve' then.
+
+-- $explaining
+--
+-- When there is no plan, 'solve' answers with the incompatibility the proof
+-- ends with, and 'reportConflict' writes the proof out in the sentences a
+-- t'Formatter' gives it. Give a sentence for each kind of fact, one for the
+-- solver's finding that a package has no version in a set, and take the
+-- conclusions from 'summaryWith', which needs only how to name a package with a
+-- set of versions:
+--
+-- > name :: Name -> VersionSet -> Text
+-- > name (Name p) s = p <> " " <> pretty s
+-- >
+-- > formatter :: Formatter Repo
+-- > formatter =
+-- >     Formatter
+-- >         { sayFact = \fact _ -> case fact of
+-- >             Requested p s       -> name p s <> " is requested"
+-- >             Constrained p s     -> name p s <> " is required by a constraint"
+-- >             DependsOn p ps q qs -> name p ps <> " depends on " <> name q qs
+-- >             Unusable p s reason -> name p s <> " cannot be used: " <> reason
+-- >         , sayNoValues = \p s -> "no version of " <> name p s <> " exists"
+-- >         , sayTerms = summaryWith name name
+-- >         , prepare = id
+-- >         , lineRules = []
+-- >         , clauseRules = [whichDependsOn]
+-- >         }
+--
+-- A sentence is a fragment: no capital letter, no full stop, and no leading
+-- \"because\" or \"and\", since the proof adds its own connectives.
+--
+-- A clause rule says two facts as one premise where that reads better. This one
+-- writes \"a depends on b which depends on c\" rather than naming @b@ twice. It
+-- fires only when the second fact covers every version of @b@ the first one
+-- names, so the sentence stays true. 'Rule', 'symmetric' and 'asFact' come from
+-- "PubGrub.Derivation":
+--
+-- > whichDependsOn :: Rule (Incompatibility Repo, Incompatibility Repo) Text
+-- > whichDependsOn = symmetric $ \(first, second) -> do
+-- >     DependsOn p ps q qs <- asFact first
+-- >     DependsOn q' qs' r rs <- asFact second
+-- >     guard (q == q' && qs `isSubsetOf` qs')
+-- >     pure (name p ps <> " depends on " <> name q qs <> " which depends on " <> name r rs)
+--
+-- Then render a failure:
+--
+-- > why :: Index -> [Incompatibility Repo] -> Text
+-- > why index seeds = case runIdentity (solve mempty (provider index) seeds) of
+-- >     Right _                -> "There is a plan."
+-- >     Left (NoSolution root) -> reportConflict formatter root
+-- >     Left (NoSatisfier _ _) -> "The solver failed unexpectedly."
+--
+-- @
+-- ghci> import qualified Data.Text.IO as T
+-- ghci> T.putStrLn (why example [request app fullVersionSet, constrain util (range [3] [4])])
+-- Because app >=1 depends on lib >=1 && \<2.1 which depends on util >=1 && \<3, app >=1 requires util >=1 && \<3.
+-- And because no version of app \<1 exists, app >=0 requires util >=1 && \<3.
+-- So, because app >=0 is requested and util >=3 && \<4 is required by a constraint, version solving failed.
+-- ghci> T.putStrLn (why example [request lib (singletonVersionSet (mkVersion [2, 1]))])
+-- So, because lib >=2.1 cannot be used: it does not build here and lib ==2.1 is requested, version solving failed.
+-- @
+
+-- $merging
+--
+-- A provider that states the same dependency for each of several releases gives
+-- the solver several facts where one would do. A t'MergeRule' tells the solver
+-- which incompatibilities say the same thing: those with the same key are merged
+-- as they arrive. Here, two dependencies with the same depender and the same
+-- dependee range merge into one over both depender ranges:
+--
+-- > sameDependency :: MergeRule Repo
+-- > sameDependency =
+-- >     MergeRule
+-- >         { mergeKey = \i -> case incompCause i of
+-- >             Fact (DependsOn p _ q qs) -> Just (p, q, qs)
+-- >             _                         -> Nothing
+-- >         , mergeWith = \old new -> case (incompCause old, incompCause new) of
+-- >             (Fact (DependsOn p ps q qs), Fact (DependsOn _ ps' _ _)) -> dependsOn p (ps `union` ps') q qs
+-- >             _ -> old
+-- >         }
+--
+-- Name the rule in the domain's instance, as 'mergeRule'. Check two things.
+-- The merged fact replaces both, so it must say exactly what the two said
+-- together; a union of depender ranges does, since \"@lib@ in @a@ or @b@ needs
+-- @util@ in @r@\" is both \"@lib@ in @a@ needs @util@ in @r@\" and \"@lib@ in @b@
+-- needs @util@ in @r@\". And the merged fact must have the key its parts had.
+--
+-- The first explanation in
+-- [How to explain a failure in your domain's words](#g:4) shows what it buys:
+-- @lib >=1 && \<2.1 depends on util >=1 && \<3@ is the dependency of @lib@ 1 and
+-- of @lib@ 2, over their touching slots, stated once.
+
+-- $watching
+--
+-- 'solve' sends a 'SolverMsg' for each step of the search to the @LogAction@ it
+-- is given, from co-log-core. To print the steps, solve in 'IO' with
+-- @LogAction (mapM_ T.putStrLn . describe)@. To collect them, solve in a monad
+-- that can, such as a pair with a list:
+--
+-- > searchLog :: Index -> [Incompatibility Repo] -> [Text]
+-- > searchLog index seeds = fst (solve logger (Provider expandLogged) seeds)
+-- >   where
+-- >     logger = LogAction $ \msg -> (describe msg, ())
+-- >     expandLogged p s = ([], runIdentity (expand (provider index) p s))
+-- >
+-- > describe :: SolverMsg Repo -> [Text]
+-- > describe msg = case msg of
+-- >     Chose (Name p) x            -> [p <> " " <> pretty x]
+-- >     NoVersionFor (Name p) s     -> ["no " <> p <> " in " <> pretty s]
+-- >     Learned i                   -> ["learned: " <> sayTerms formatter (incompTerms i)]
+-- >     Backtracked level           -> ["back to level " <> T.pack (show level)]
+-- >     _                           -> []
+--
+-- @
+-- ghci> mapM_ T.putStrLn (searchLog example [request app fullVersionSet, constrain util (range [3] [4])])
+-- app 1
+-- lib 2
+-- learned: lib >=2 && \<2.1 requires util >=1 && \<3
+-- back to level 1
+-- lib 1
+-- learned: app >=1 requires util >=1 && \<3
+-- back to level 0
+-- no app in \<1
+-- @
+--
+-- Each @learned@ line is an incompatibility the solver derived from a conflict
+-- and keeps; each @back to@ line is the backtrack that followed it.
+
+-- $unlocking
+--
+-- A planner that holds packages at the versions a lock file names states each as
+-- a constraint. When the solve fails, 'conflictSet' gives every package that took
+-- part in the failure. A held package outside it played no part, and stays held;
+-- release the held packages inside it, and solve again:
+--
+-- > solveWithLock :: Index -> Map Name Version -> [Incompatibility Repo] -> Either (SolveError Repo) (Map Name Version)
+-- > solveWithLock index lock requests = case attempt lock of
+-- >     Left (NoSolution root)
+-- >         | let involved = Map.keysSet lock `Set.intersection` conflictSet root
+-- >         , not (Set.null involved) ->
+-- >             attempt (Map.withoutKeys lock involved)
+-- >     result -> result
+-- >   where
+-- >     attempt held =
+-- >         runIdentity . solve mempty (provider index) $
+-- >             requests ++ [constrain p (singletonVersionSet x) | (p, x) <- Map.toList held]
+--
+-- Here the lock holds @util@ and @extra@ at 1, and the request now asks for
+-- @util >=2@. @util@ is released and @extra@ stays at 1:
+--
+-- @
+-- ghci> either (const Nothing) Just (solveWithLock example (Map.fromList [(util, mkVersion [1]), (extra, mkVersion [1])]) [request app fullVersionSet, request util (range [2] [3]), request extra fullVersionSet])
+-- Just (fromList [(Name \"app\",mkVersion [1]),(Name \"extra\",mkVersion [1]),(Name \"lib\",mkVersion [2]),(Name \"util\",mkVersion [2])])
+-- @

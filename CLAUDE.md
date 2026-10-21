@@ -63,7 +63,7 @@ design decision per section, with the evidence that earned it.
 
 ```sh
 cabal build all
-cabal test all                       # 286 tests over the three packages that have them, and pubgrub's doctests
+cabal test all                       # 294 tests over the three packages that have them, and pubgrub's doctests
 cabal run exe:pubgrub -- aeson              # the driver; add -v for the search trace
 cabal run exe:pubgrub -- 'aeson <2'         # a target is ONE argument: package and range
 cabal run exe:pubgrub -- hlint 'aeson <2'   # several targets, solved together
@@ -155,8 +155,8 @@ pubgrub-harness (package, unpublished)
 
 | component | what it is |
 | --- | --- |
-| `pubgrub` library | `pubgrub/src/` — the solver. `PubGrub.hs` (the public surface) plus `PubGrub/{SetOps,Term,Incompatibility,Provider,Solver,Derivation,Report,Pretty,Version,VersionSet}.hs`, and `PubGrub/Tutorial.hs`, a module of documentation only. The solver's machinery, `PubGrub/{PartialSolution,Relation,Store}.hs`, is not exposed (decision 0068), and `PubGrub.Solver` exports `solve`, `SolveError` and `SolverMsg` only. `cabal check` clean |
-| `pubgrub` test-suite | compiles the library's sources itself, so it can test the hidden modules (`PartialSolutionSpec`, `StoreInvariantsSpec`). `pubgrub/test/ToyDomainSpec.hs` — the solver and the walker over `Toy`, a domain that is not cabal's; it imports nothing from `PubGrub.Cabal`, so the core leaning on cabal is a compile error here first. `Toy.hs` is the tutorial's code, and the spec fails if `PubGrub.Tutorial`'s code blocks or printed results drift from it. |
+| `pubgrub` library | `pubgrub/src/` — the solver. `PubGrub.hs` (the public surface) plus `PubGrub/{SetOps,Term,Incompatibility,Provider,Solver,Derivation,Report,Pretty,Version,VersionSet}.hs`, and `PubGrub/Tutorial.hs` and `PubGrub/Cookbook.hs`, modules of documentation only (the tutorial and the how-to guides). The solver's machinery, `PubGrub/{PartialSolution,Relation,Store}.hs`, is not exposed (decision 0068), and `PubGrub.Solver` exports `solve`, `SolveError` and `SolverMsg` only. `cabal check` clean |
+| `pubgrub` test-suite | compiles the library's sources itself, so it can test the hidden modules (`PartialSolutionSpec`, `StoreInvariantsSpec`). `pubgrub/test/ToyDomainSpec.hs` — the solver and the walker over `Toy`, a domain that is not cabal's; it imports nothing from `PubGrub.Cabal`, so the core leaning on cabal is a compile error here first. `Toy.hs` is the tutorial's code and `Cookbook.hs` the guides', and `ToyDomainSpec` and `CookbookSpec` fail if a documentation module's code blocks or printed results drift from them (`DocCode.codeMatches`). |
 | `pubgrub` test-suite `pubgrub-doctests` | `pubgrub/doctest/Main.hs` — runs the library's `>>>` Haddock examples through `doctest-parallel` (decision 0069). It finds the library through the GHC environment file that `write-ghc-environment-files: always` in `cabal.project` writes, so on a clean tree build before testing |
 | `pubgrub-cabal` library | `pubgrub-cabal/src/` — `PubGrub/Cabal.hs` and `PubGrub/Cabal/{Variable,Value,InstanceSet,PreInstalled,Version,VersionSet,Pretty,Flatten,Installed,Provider,Report}.hs`, `PubGrub/Cabal/Report/{Rule,Wording,Headline,Layout}.hs`. Cabal-syntax only. `cabal check` clean |
 | `pubgrub-cabal` test-suite | `pubgrub-cabal/test/` — 10 spec modules plus `test/golden/` |

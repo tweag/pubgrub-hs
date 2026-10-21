@@ -6,6 +6,9 @@
 --
 -- * To learn the library by building something with it, follow
 --   "PubGrub.Tutorial".
+-- * For a task in hand (versions and ranges, requests and constraints, a
+--   provider over an index, explanations in a domain's words, watching the
+--   search, releasing a lock), see the recipes in "PubGrub.Cookbook".
 -- * For what each name means, read on: the sections below are the reference,
 --   and the modules they come from say more.
 --

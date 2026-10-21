@@ -304,6 +304,8 @@ import           PubGrub
 -- $next
 --
 -- * "PubGrub" is the library's front page, with everything this tutorial used.
+-- * "PubGrub.Cookbook" has recipes for what comes next: versions and ranges, a
+--   provider over an index of releases, explanations in a domain's own words.
 -- * "PubGrub.Provider" states what a provider must and may do.
 -- * "PubGrub.Report" describes the rest of t'Formatter', for wording proofs in a
 --   domain's own terms.

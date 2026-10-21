@@ -15,12 +15,12 @@
 module ToyDomainSpec (tests) where
 
 import           Data.Functor.Identity   (runIdentity)
-import           Data.List               (sort, stripPrefix)
+import           Data.List               (sort)
 import qualified Data.Map.Strict         as Map
-import           Data.Maybe              (mapMaybe)
 import qualified Data.Set                as Set
 import           Data.Text               (Text)
 import qualified Data.Text               as T
+import           DocCode                 (codeMatches)
 import           PubGrub.Derivation      (asFact, asNoValues, conflictSet,
                                           externals)
 import           PubGrub.Incompatibility (Incompatibility (..))
@@ -54,10 +54,8 @@ tests =
                     sort [h | Just h <- map asNoValues leaves] @?= [(util, Set.fromList [1]), (util, Set.fromList [2])]
         , testGroup
             "the tutorial"
-            [ testCase "its code is Toy.hs" $ do
-                tutorial <- birdTracks <$> readFile "src/PubGrub/Tutorial.hs"
-                toy <- nonBlank . lines <$> readFile "test/Toy.hs"
-                firstDifference tutorial toy @?= Nothing
+            [ testCase "its code is Toy.hs" $
+                codeMatches "src/PubGrub/Tutorial.hs" "test/Toy.hs"
             , testCase "a dependency's terms" $
                 incompTerms (needs (Pkg "lib") 1 (Pkg "util") [1])
                     @?= Map.fromList [(Pkg "lib", Positive (Set.fromList [1])), (Pkg "util", Negative (Set.fromList [1]))]
@@ -71,23 +69,6 @@ tests =
                 why world [wants app [1]] @?= "There is a plan."
             ]
         ]
-
--- | The code blocks of a Haddock comment, as the lines of the file they
--- assemble into, blank lines dropped.
-birdTracks :: String -> [String]
-birdTracks = nonBlank . mapMaybe (fmap (drop 1) . stripPrefix "-- >") . lines
-
-nonBlank :: [String] -> [String]
-nonBlank = filter (not . all (== ' '))
-
--- | The first line where two files part, the tutorial's first; an empty line
--- stands for the end of a file that stopped early.
-firstDifference :: [String] -> [String] -> Maybe (String, String)
-firstDifference (x : xs) (y : ys)
-    | x == y = firstDifference xs ys
-    | otherwise = Just (x, y)
-firstDifference [] [] = Nothing
-firstDifference xs ys = Just (concat (take 1 xs), concat (take 1 ys))
 
 -- | The proof, as the spec's three cases render the derivation above: the two
 -- refutations of @lib@ are two branches (@references\/pubgrub.md:595@), so the
