@@ -15,6 +15,7 @@ import qualified Data.Set              as Set
 import           Data.Text             (Text)
 import qualified Data.Text             as T
 import           PubGrub
+import           PubGrub.SetOps        (isSubsetOf, union)
 
 newtype Name = Name Text
     deriving (Eq, Ord, Show)

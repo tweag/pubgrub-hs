@@ -26,6 +26,7 @@
 -- > import           Data.Text             (Text)
 -- > import qualified Data.Text             as T
 -- > import           PubGrub
+-- > import           PubGrub.SetOps        (isSubsetOf, union)
 module PubGrub.Cookbook
     ( -- * How to give a domain versions and ranges
       -- $versions

@@ -53,7 +53,10 @@
 --
 -- * "PubGrub.Incompatibility": the domain, incompatibilities and their causes.
 -- * "PubGrub.Term" and "PubGrub.SetOps": terms, and the set operations a
---   domain's sets provide.
+--   domain's sets provide. The class is re-exported here and its methods are
+--   not, since @empty@, @union@ and @intersect@ are names every other set
+--   library uses too: a domain that writes an instance imports
+--   "PubGrub.SetOps" for them.
 -- * "PubGrub.Provider": the provider and its contract.
 -- * "PubGrub.Solver": 'solve'.
 -- * "PubGrub.Derivation" and "PubGrub.Report": reading a failure, and writing
@@ -68,7 +71,7 @@ module PubGrub
     , MergeRule (..)
     , noMerging
       -- * Terms and incompatibilities
-    , module PubGrub.SetOps
+    , SetOps
     , module PubGrub.Term
     , Incompatibility (..)
     , Cause (..)
@@ -96,7 +99,7 @@ import           PubGrub.Incompatibility
 import           PubGrub.Pretty
 import           PubGrub.Provider
 import           PubGrub.Report
-import           PubGrub.SetOps
+import           PubGrub.SetOps          (SetOps)
 import           PubGrub.Solver          (SolveError (..), SolverMsg (..),
                                           solve)
 import           PubGrub.Term
