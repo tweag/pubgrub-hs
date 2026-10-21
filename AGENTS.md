@@ -43,8 +43,14 @@ design decision per section, with the evidence that earned it.
   [`docs/cabal-build-model.md`](docs/cabal-build-model.md), the reference for rungs 4
   and 5.
 
-**Two citation rules, and both have been broken.**
+**Three citation rules, and all three have been broken.**
 
+- **Cite nothing external in a Haddock.** The Haddocks of `pubgrub` and
+  `pubgrub-cabal` are read on Hackage, where none of this repository can be opened.
+  They name no other project (pubgrub-rs, latti, pub, cabal-install's internals), cite
+  no spec line, and point at nothing in the harness (`Bridge.*`, `docs/`, the gate,
+  test files, decision records). State the rule or the reason itself. The two rules
+  below are for plain comments and for answers.
 - **Cite `references/pubgrub.md` by line.** Check the line first. `:596`, `:601`,
   `:640`, `:643` and `:670` are blank, and each has been cited before. As of
   2026-09-03 no citation in the tree lands on a blank line.
