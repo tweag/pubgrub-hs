@@ -176,11 +176,17 @@ release, so the up-walk terminates immediately. On later expansions the up-walk
 re-treads releases that are already memoised. It saves time, not reads, and it gives up
 the spec's exact upper bound (`references/pubgrub.md:466`) to do so. The weakest of the five.
 
-### Option B — cache the span per `(package, guard, dependency)`
+### Option B — cache the span per `(package, guard, dependency, starting version)`
 
 The same occurrence is re-walked on every expansion of that package, and neither the
-index nor the guard changes during a solve. Pure repetition. Cheap and obviously
-correct, and it buys back the traversal and the comparisons rather than the reads.
+index nor the guard changes during a solve. Pure repetition. Cheap, and it buys back
+the traversal and the comparisons rather than the reads.
+
+**The key must include the version the walk starts from**, or the cache must store
+the run it found and check that the new starting version lies in it. Keyed on
+`(package, guard, dependency)` alone it is unsound: the same occurrence can appear in
+two runs of a package's releases separated by a release that lacks it, and a cache
+that remembers the first run would answer with it for a version in the second.
 
 ### Option C — bound the walk to k steps
 

@@ -410,7 +410,10 @@ the reason for reverting does not apply to it. See
 the whole store. Re-judging only the clauses of the variables the backtrack undid
 gives the same search and cuts the post-backtrack judgements by 23% (46% on
 `haskell-language-server`), and allocation moves by under 0.1%: a judgement is too
-cheap for the count to matter. Built and reverted on 2026-10-20; the numbers are in
+cheap for the count to matter. Built and reverted on 2026-10-20 on that evidence, then
+built again on 2026-10-21 (decision 0070) when a synthetic chain of shallow backjumps
+showed the regime the corpus lacks: there the whole-store re-judge is quadratic in the
+number of conflicts. It is in; the numbers for both regimes are in
 [DESIGN.md §5](DESIGN.md#5-dependency-facts-collapse-in-two-places).
 
 ---
