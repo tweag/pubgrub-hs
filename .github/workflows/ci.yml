@@ -123,8 +123,13 @@ jobs:
           version=$(sed -nE 's/^version:[[:space:]]+//p' "$VERSION_FROM")
           echo "ARCHIVE=$ARCHIVE_NAME-$version-${{ matrix.target }}" >> "$GITHUB_ENV"
 
+      # --enable-tests keeps the configuration of the build above: without it,
+      # cabal test requests the test stanzas differently, reconfigures and
+      # rebuilds every package with a test suite, and the doctests, which load
+      # every library the GHC environment file names, read one as it is being
+      # relinked.
       - name: Test
-        run: cabal test all --test-show-details=direct
+        run: cabal test all --enable-tests --test-show-details=direct
 
       - name: Strip
         if: runner.os != 'Windows'
@@ -365,7 +370,13 @@ jobs:
           mkdir -p docs
           mv dist-newstyle/*-docs.tar.gz docs/
 
+      # cabal.project writes a GHC environment file for the doctests, and it
+      # names every local package as an inplace unit, built or not. The index
+      # that haddock-project builds last would load it and stop at the first
+      # package this job never registered, so GHC is told to ignore the file.
       - name: Documentation of the project
+        env:
+          GHC_ENVIRONMENT: '-'
         run: cabal haddock-project --hackage --output=site
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
