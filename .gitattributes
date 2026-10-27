@@ -1,0 +1,4 @@
+# Every text file is checked out with LF endings on every platform. The golden
+# proofs under pubgrub-cabal/test/golden are compared byte for byte with what
+# the renderer writes, and a Windows checkout with autocrlf would give them CRLF.
+* text=auto eol=lf
