@@ -421,6 +421,22 @@ needs pkg-config package libsecp256k1` once to the same reason three times, one 
 slot the solver then had to ask about, and the search went 123 to 219 decisions. The
 eager read is explanation work, not waste.
 
+**Indexing a release's occurrences for the neighbour walk.** `carries`, the test
+the walk puts to each neighbour, searches every guarded group's list for the
+dependency, and `Eq Dependency` compares the whole range. The 2026-10-20 profile put
+those comparisons at 19% of `haskell-language-server`'s time, and the 2026-10-27
+external review proposed a per-release index. Built as a lazy map from package name
+to occurrences on `Release`, measured the same day at the pin over ten interleaved
+runs: search identical; mutator time median 0.723 → 0.735 s on HLS under flag search
+(0%), 0.615 → 0.596 s on `yesod` (−3%), 0.421 → 0.371 s on `pandoc` (−12%); and
+allocation +2.8%, +3.9% and +4.9%, for the map each neighbour builds. Not kept: the
+one problem that gains is the one that is nearly all walk, HLS gains nothing, and
+allocation is the metric that holds still. **The 19% was the profiler's.** The same
+cost-centre profile taken on 2026-10-27 shows `Eq Dependency` with `elem` at 13% of
+HLS's profiled time and 16% of `yesod`'s, in a run whose profiled time is 2.8× its
+real mutator time; the clock puts the comparisons under 5% on HLS. A share of a tiny
+function read off a cost-centre profile is an upper bound, and not a close one.
+
 **Re-judging only what a backtrack moved.** After a conflict, propagation re-judges
 the whole store. Re-judging only the clauses of the variables the backtrack undid
 gives the same search and cuts the post-backtrack judgements by 23% (46% on

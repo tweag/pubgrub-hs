@@ -610,6 +610,11 @@ mkExpand logA preference installedDb source = expand'
                     Right neighbour | carries neighbour, admit neighbour -> walk step w
                     _ -> pure from
 
+        -- A linear search of every group's list. A map from package name to
+        -- occurrences was measured against it: search identical, mutator time
+        -- 0% to −12%, allocation +3–5% on every problem, so it was not kept
+        -- (docs/STATUS.md §5.2). The cost-centre profile's 13–16% for
+        -- @Eq Dependency@ here is mostly the profiler's own overhead.
         carries neighbour =
             any (\(g, ds) -> g == guard && dep `elem` ds) (relGuarded neighbour)
 
