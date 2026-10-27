@@ -406,6 +406,21 @@ deciding the package with the fewest versions first. It cuts `futhark` decisions
 the reason for reverting does not apply to it. See
 [DESIGN.md §12](DESIGN.md#12-decision-order-is-discovery-order-and-yesod-is-the-bill).
 
+**Testing the range before reading the release in the provider's scan.** `scan`
+reads each release of a package, newest first, and tests whether the offered range
+admits it only after the read, so a target pinned to an old release reads every
+newer one on its first scan. Reading only the admitted releases was proposed by the
+2026-10-27 external review and measured the same day at the pin: decodes over the 26
+problems and `haskell-language-server` under flag search went 21,663 to 21,481,
+−0.8%, and none at all on the three large problems, because a later scan's
+out-of-range reads are memo hits already. The gate passed, and it was still
+rejected: the first scan of a package states the unbuildable fact of *every* release
+it reads, and the store merges those into one clause over the whole run.
+`haskoin-store-data` lost that — its headline went from `secp256k1-haskell >=0.1.6
+needs pkg-config package libsecp256k1` once to the same reason three times, one per
+slot the solver then had to ask about, and the search went 123 to 219 decisions. The
+eager read is explanation work, not waste.
+
 **Re-judging only what a backtrack moved.** After a conflict, propagation re-judges
 the whole store. Re-judging only the clauses of the variables the backtrack undid
 gives the same search and cuts the post-backtrack judgements by 23% (46% on

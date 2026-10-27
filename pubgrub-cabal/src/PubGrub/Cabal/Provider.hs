@@ -326,7 +326,14 @@ mkExpand logA preference installedDb source = expand'
                 | isNonReinstallable pn -> pure (Nothing, onlyInstalledFact pn)
                 | otherwise -> scan pn range [] (withSlots (rsVersionsOf source pn))
 
-    -- Releases newest first. One @.cabal@ read per release.
+    -- Releases newest first. Each release is read __before the range is
+    -- tested__, including releases the range does not admit, so the first
+    -- scan of a package states the unbuildable fact of every release it has
+    -- and the store merges those into one clause over the whole run. Testing
+    -- the range first saves almost no reads, since a later scan's
+    -- out-of-range reads are memo hits, and the solver then learns an
+    -- unbuildable fact one slot at a time and the proof names it once per
+    -- slot (measured, docs/STATUS.md §5.2).
     --
     -- @stated@ accumulates the facts about releases the scan rejects on the
     -- way past. They ride out with whichever release it settles on, and with
