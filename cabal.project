@@ -10,13 +10,11 @@ packages:
     pubgrub-cli
     pubgrub-harness
 
--- GHC 9.14 ships base 4.22 and containers 0.8, which the unpublished packages'
--- serialise 0.2.6.1 (with its cborg) and co-log 0.7.0.0 do not admit yet. Both
--- build against them; the constraint keeps the solver from escaping to a co-log
--- old enough to have no such bound. The two published packages need nothing here.
+-- GHC 9.14 ships base 4.22 and containers 0.8, which serialise 0.2.6.1 and its
+-- cborg, used by the unpublished packages, do not admit yet. Both build against
+-- them. The two published packages need nothing here.
 if impl(ghc >= 9.14)
-    allow-newer: serialise:*, cborg:*, co-log:*
-    constraints: co-log ^>=0.7
+    allow-newer: serialise:*, cborg:*
 
 -- pubgrub's doctests run the Haddock examples through the GHC API, which finds
 -- the library and its dependencies through a GHC environment file in the

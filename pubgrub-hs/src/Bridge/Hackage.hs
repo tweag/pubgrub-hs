@@ -2,7 +2,7 @@
 {-# LANGUAGE GADTs #-}
 module Bridge.Hackage where
 
-import           Colog                                        (WithLog, logMsg)
+import           Bridge.Log                                   (WithLog, logMsg)
 import           Control.Exception                            (Exception (..))
 import           Control.Monad                                (forM_, when)
 import           Data.Array.IO                                (IOUArray,

@@ -29,12 +29,13 @@ import           Bridge.Hackage                              (IndexState (..),
                                                               IndexStateTooNew (..),
                                                               mkCache,
                                                               parseIndexState)
+import           Bridge.Log                                  (HasLog (..),
+                                                              logMsg)
 import           Bridge.Provider                             (World (..),
                                                               withProvider,
                                                               withWorld)
-import           Colog                                       (HasLog (..),
-                                                              LogAction (..),
-                                                              cmapMaybe, logMsg)
+import           Colog.Core                                  (LogAction (..),
+                                                              cmapMaybe)
 import           Control.Applicative                         (many, some)
 import           Control.Monad                               (when)
 import           Control.Monad.Reader                        (MonadReader,
@@ -144,11 +145,9 @@ newtype App a = App {unApp :: ReaderT Env IO a}
 
 instance HasLog Env Text App where
     getLogAction = envText
-    setLogAction a e = e {envText = a}
 
 instance HasLog Env (SolverMsg Var) App where
     getLogAction = envSolver
-    setLogAction a e = e {envSolver = a}
 
 toStdout :: LogAction App Text
 toStdout = LogAction (liftIO . TIO.putStrLn)

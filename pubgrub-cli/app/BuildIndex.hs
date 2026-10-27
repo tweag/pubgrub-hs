@@ -30,8 +30,8 @@ import           Bridge.Hackage             (IndexHandle (..), IndexState (..),
                                              showIndexState, withHackageIndex)
 import           Bridge.Hackage.Store       (StorePaths (..), buildStore,
                                              storePaths)
-import           Colog                      (HasLog (..), LogAction (..),
-                                             logMsg)
+import           Bridge.Log                 (HasLog (..), logMsg)
+import           Colog.Core                 (LogAction (..))
 import           Control.Monad.Reader       (MonadReader, ReaderT, runReaderT)
 import qualified Data.Map.Strict            as Map
 import qualified Data.Set                   as Set
@@ -60,7 +60,6 @@ newtype App a = App {unApp :: ReaderT Env IO a}
 
 instance HasLog Env Text App where
     getLogAction = envText
-    setLogAction a e = e {envText = a}
 
 newtype Options = Options {optIndexState :: IndexState}
 

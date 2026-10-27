@@ -26,8 +26,8 @@ import           Bridge.Hackage                           (IndexHandle (..),
                                                            withHackageIndex)
 import           Bridge.Hackage.Store                     (StoreReader (..),
                                                            withStore)
-import           Colog                                    (LogAction (..),
-                                                           WithLog, logMsg)
+import           Bridge.Log                               (WithLog, logMsg)
+import           Colog.Core                               (LogAction (..))
 import           Data.IORef                               (atomicModifyIORef',
                                                            newIORef, readIORef)
 import qualified Data.Map.Strict                          as Map
