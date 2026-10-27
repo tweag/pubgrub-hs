@@ -15,6 +15,7 @@
 module ToyDomainSpec (tests) where
 
 import           Data.Functor.Identity   (Identity, runIdentity)
+import           Data.IORef              (modifyIORef', newIORef, readIORef)
 import           Data.List               (sort, tails)
 import qualified Data.Map.Strict         as Map
 import qualified Data.Set                as Set
@@ -79,6 +80,26 @@ tests =
                     Left (BadValue p v s) -> (p, v, s) @?= (app, 99, Set.fromList [1])
                     Left _                -> assertFailure "failed for another reason"
                     Right plan'           -> assertFailure ("solved to " ++ show plan')
+            , testCase "a reason that names another variable still bans the set" $ do
+                -- lib 1 is passed over because it needs util 1. That reason
+                -- rules lib 1 out only while util is outside {1}, so the
+                -- solver must also state that lib has no value in {1}, or it
+                -- offers lib {1} again, forever. After ten questions the
+                -- provider answers outside the set, which stops the solve.
+                asked <- newIORef (0 :: Int)
+                let reasoned = Provider $ \p _ -> do
+                        modifyIORef' asked (+ 1)
+                        n <- readIORef asked
+                        pure $ if n > 10
+                            then (Just 99, [])
+                            else (Nothing, [needs lib 1 util [1] | p == lib])
+                result <- solve mempty reasoned [wants lib [1]]
+                case result of
+                    Left (NoSolution _) -> pure ()
+                    Left (BadValue p _ s) ->
+                        assertFailure ("offered " ++ show (p, s) ++ " again and again")
+                    Left _ -> assertFailure "failed for another reason"
+                    Right plan' -> assertFailure ("solved to " ++ show plan')
             ]
         , testGroup
             "the tutorial"

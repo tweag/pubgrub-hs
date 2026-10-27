@@ -457,7 +457,10 @@ solve logA provider seeds
         -- __Progress does not depend on the provider being thorough.__ Whatever it
         -- says, this bans all of @range@ between them: the facts cover part, the
         -- @noValues@ clause covers the remainder. So @p@ cannot be offered the
-        -- same set twice, which is the property termination rests on. 'isEmpty' is
+        -- same set twice, which is the property termination rests on. Only a fact
+        -- about @p@ alone covers anything: one with a term about another variable
+        -- rules its values out only while that term holds, and @p@ would be
+        -- offered the same set again whenever it does not. 'isEmpty' is
         -- one-sided on a set — it may miss that a set is empty — and it
         -- errs in the safe direction here: a redundant clause, never a missing one.
         banRest p range facts
@@ -471,5 +474,10 @@ solve logA provider seeds
             leftover = case stated of
                 []       -> range
                 (s : ss) -> range `difference` foldr union s ss
-            stated = [s | inc <- facts, Just (Positive s) <- [incompGet p inc]]
+            stated =
+                [ s
+                | inc <- facts
+                , Map.size (incompTerms inc) == 1
+                , Just (Positive s) <- [incompGet p inc]
+                ]
             landed inc = first IntSet.singleton . insertClause inc

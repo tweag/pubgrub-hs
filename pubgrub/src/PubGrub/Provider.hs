@@ -52,4 +52,7 @@ newtype Provider v m = Provider
       -- something missing), state the reasons: the solver uses them, and
       -- states \"no value\" only for what they do not cover. A failure is then
       -- explained by what was wrong with the values, not by their absence.
+      -- Only a fact about the variable alone covers its values. A reason that
+      -- names another variable rules the values out only while its other terms
+      -- hold, so the solver states \"no value\" for them as well.
     }
