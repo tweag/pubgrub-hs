@@ -136,7 +136,7 @@ corpus_ok=0
 corpus_bad=()
 
 for problem in "${ALL[@]}"; do
-    base=$(echo "$problem" | tr -c 'A-Za-z0-9' '-')
+    base=$(printf '%s' "$problem" | tr -c 'A-Za-z0-9' '-')
     mapfile -t targets < <(targets_of "$problem")
     ours=$(solve_one ours "$base" "${targets[@]}")
     theirs=$(solve_one cabal "$base" "${targets[@]}")
@@ -161,7 +161,7 @@ nover_total=0
 longer=()
 
 for problem in "${CORPUS[@]}"; do
-    base=$(echo "$problem" | tr -c 'A-Za-z0-9' '-')
+    base=$(printf '%s' "$problem" | tr -c 'A-Za-z0-9' '-')
     if grep -aqE 'version solving failed|^Because' "$OUT/$base.ours.log"; then
         corpus_ok=$((corpus_ok + 1))
     else

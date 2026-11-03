@@ -88,7 +88,7 @@ from_stats() {
 
 failed=0
 for problem in "${ALL[@]}"; do
-    base=$(echo "$problem" | tr -c 'A-Za-z0-9' '-')
+    base=$(printf '%s' "$problem" | tr -c 'A-Za-z0-9' '-')
     mapfile -t targets < <(targets_of "$problem")
     timeout "$TIMEOUT" "$EXE" "${INDEX_STATE[@]}" --stats "${targets[@]}" >"$OUT/$base.stats.log" 2>&1
     timeout "$TIMEOUT" "$EXE" "${INDEX_STATE[@]}" -v "${targets[@]}" 2>&1 | awk -f bench/summarise.awk >"$OUT/$base.awk.log"
