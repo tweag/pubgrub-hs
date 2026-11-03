@@ -182,12 +182,11 @@ closeWithSeeds
     => LogAction m (SolverMsg v) -> PartialSolution v -> Incompatibility v -> m (Incompatibility v)
 closeWithSeeds logA ps = go
   where
-    -- One pass over the seeds of every variable still named; another pass while
-    -- a pass removed something. Two seeds on one variable need the second pass:
-    -- the first alone leaves the part of its range the other seed excludes.
-    go inc = do
-        inc' <- foldM step inc [(p, cause) | p <- Map.keys (incompTerms inc), a <- seedAssignments ps p, Derivation _ cause <- [aKind a]]
-        if Map.size (incompTerms inc') < Map.size (incompTerms inc) then go inc' else pure inc'
+    -- One pass over the seeds of every variable named, which is enough: a seed
+    -- has a single term, so resolving with one never adds a variable, and two
+    -- seeds on one variable are both applied in the pass, one after the other.
+    go inc =
+        foldM step inc [(p, cause) | p <- Map.keys (incompTerms inc), a <- seedAssignments ps p, Derivation _ cause <- [aKind a]]
     step inc (p, cause)
         | Map.member p (incompTerms inc) = do
             let next = priorCause inc cause p
