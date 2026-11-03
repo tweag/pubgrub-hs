@@ -649,11 +649,6 @@ table hdr rows = row hdr : row (map (const "---") hdr) : map row rows
 fenced :: [Text] -> [Text]
 fenced body = ["```text"] ++ body ++ ["```"]
 
--- | A proof line as the reports print it, which is as the driver printed it.
--- Counts are made on the raw lines.
-readable :: Text -> Text
-readable = id
-
 statInt :: Text -> Measured -> Maybe Integer
 statInt k m = mStats m >>= lookup k >>= readT
 
@@ -819,7 +814,7 @@ showcaseReport cfg env results =
           ++ [ ""
           , "**pubgrub-hs** (" <> sentences ours <> " sentences, " <> verdictText (mVerdict ours) <> ")"
           , "" ]
-          ++ fenced (if null (mProof ours) then ["(no proof)"] else withHeadline ours (map readable (mProof ours)))
+          ++ fenced (if null (mProof ours) then ["(no proof)"] else withHeadline ours (mProof ours))
           ++ [ ""
              , "**cabal** (" <> lines' cabal <> " lines, " <> verdictText (mVerdict cabal) <> ")"
              , "" ]
@@ -831,7 +826,7 @@ showcaseReport cfg env results =
   where
     withHeadline m body = case mHeadline m of
         [] -> body
-        hs -> map readable hs ++ "" : body
+        hs -> hs ++ "" : body
     excluded = [ r | r@(p, _, _) <- results, probExcluded p ]
     comparable = [ r | r@(p, _, _) <- results, not (probExcluded p) ]
     ourCount (_, ours, _) = length (filter isProofLine (mProof ours))
