@@ -251,9 +251,8 @@ jobs:
 
   # The two packages meant for Hackage, built and tested from their source
   # distributions alone: no cabal.project of the repository, so their own
-  # bounds have to solve. They run on the older GHCs their tested-with claims;
-  # 9.14.1 is left to the build matrix. cabal check is what Hackage runs on
-  # upload.
+  # bounds have to solve. Each runs on every GHC its tested-with claims.
+  # cabal check is what Hackage runs on upload.
   hackage:
     name: Hackage packages, GHC ${{ matrix.ghc }}
     runs-on: ubuntu-latest
@@ -264,6 +263,8 @@ jobs:
           - ghc: 9.10.3
             packages: pubgrub
           - ghc: 9.12.2
+            packages: pubgrub pubgrub-cabal
+          - ghc: 9.14.1
             packages: pubgrub pubgrub-cabal
     env:
       PACKAGES: ${{ matrix.packages }}
