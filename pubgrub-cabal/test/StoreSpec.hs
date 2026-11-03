@@ -147,7 +147,7 @@ needsLibpq s = unbuildable pkgA s Map.empty libpq
 tests :: TestTree
 tests =
     testGroup
-        "PubGrub.Store"
+        "PubGrub.Cabal: mergeRule"
         [ testGroup "merging dependency facts" mergeTests
         , testGroup "merging unbuildable facts" unbuildableTests
         , testGroup "what must not merge" separateTests

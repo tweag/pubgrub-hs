@@ -15,8 +15,10 @@ import           Distribution.Version       (VersionRange, anyVersion,
                                              laterVersion, majorBoundVersion,
                                              majorUpperBound, noVersion,
                                              orEarlierVersion, orLaterVersion,
-                                             thisVersion, unionVersionRanges)
-import           PubGrub.Cabal.Version      (Version, mkVersion, toCabalVersion,
+                                             thisVersion, unionVersionRanges,
+                                             withinRange)
+import           PubGrub.Cabal.Version      (Version, fromCabalVersion,
+                                             mkVersion, toCabalVersion,
                                              versionNumbers)
 import           PubGrub.Cabal.VersionSet
 import           PubGrub.Pretty             (Pretty (pretty))
@@ -250,9 +252,21 @@ tests =
             -- /representation/, since 'Eq' is semantic equality only while the
             -- form stays canonical. Cabal's own canonicaliser is not the
             -- reference: it orders @1.0@ below @1@, and this module does not.
-            -- The membership properties above are the semantic oracle.
+            --
+            -- The round trip folds every range through this module's own
+            -- union and intersection, so it cannot catch an operation that is
+            -- wrong in the same way on both sides. The first property is the
+            -- independent check: a set built from raw range syntax holds
+            -- exactly the versions Cabal's 'withinRange' accepts. Its versions
+            -- have no trailing zero, where Cabal's order and this one agree.
             "agree with the VersionRange reference"
-            [ testProperty "union" $
+            [ testProperty "a set built from a range holds the versions Cabal's withinRange accepts" $
+                forAll genPlainRange $ \r ->
+                    foldr
+                        (\v acc -> (contains (fromVersionRange r) (fromCabalVersion v) === withinRange v r) .&&. acc)
+                        (property True)
+                        plainVersions
+            , testProperty "union" $
                 forAll genViaRange $ \a -> forAll genViaRange $ \b ->
                     unionVersionSet a b === viaRange2 unionVersionRanges a b
             , testProperty "intersection" $
@@ -372,6 +386,36 @@ genViaRange = fromVersionRange <$> sized (\n -> genRange (min n 4))
             , laterVersion . asCabal <$> genVersion
             , earlierVersion . asCabal <$> genVersion
             , orEarlierVersion . asCabal <$> genVersion
+            ]
+
+-- | Versions with no trailing zero, as Cabal versions: on these Cabal's order
+-- is the solver's, so Cabal's own 'withinRange' is an independent reference.
+plainVersions :: [Cabal.Version]
+plainVersions = map Cabal.mkVersion ([[a] | a <- [1 .. 4]] ++ [[a, b] | a <- [0 .. 3], b <- [1 .. 3]])
+
+-- | Random range syntax over 'plainVersions', never folded through this
+-- module's operations.
+genPlainRange :: Gen VersionRange
+genPlainRange = sized (\n -> go (min n 4))
+  where
+    go 0 = leaf
+    go n =
+        oneof
+            [ leaf
+            , unionVersionRanges <$> go (n `div` 2) <*> go (n `div` 2)
+            , intersectVersionRanges <$> go (n `div` 2) <*> go (n `div` 2)
+            ]
+    leaf = do
+        v <- elements plainVersions
+        elements
+            [ anyVersion
+            , noVersion
+            , thisVersion v
+            , orLaterVersion v
+            , laterVersion v
+            , earlierVersion v
+            , orEarlierVersion v
+            , majorBoundVersion v
             ]
 
 newtype NonEmptyVer = NonEmptyVer Version deriving Show
