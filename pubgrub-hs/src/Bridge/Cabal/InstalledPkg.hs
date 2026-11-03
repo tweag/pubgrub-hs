@@ -5,7 +5,6 @@
 -- solver uses: each unit's id, name, version and dependencies.
 module Bridge.Cabal.InstalledPkg
     ( InstalledPkg (..)
-    , getInstalledPackages
     , getInstalledPackageIndex
     , reduceIndex
     ) where
@@ -21,10 +20,6 @@ import           Distribution.Types.PackageId            (PackageIdentifier (..)
 import           Distribution.Verbosity                  (Verbosity)
 import           PubGrub.Cabal.Installed                 (InstalledPkg (..))
 
-
-getInstalledPackages :: Verbosity -> Compiler -> ProgramDb -> IO [InstalledPkg]
-getInstalledPackages verbosity compiler programDb =
-    reduceIndex <$> getInstalledPackageIndex verbosity compiler programDb
 
 -- | Keep only what our solver models: a unit's id, name, version and direct
 -- dependencies. The cabal baseline takes the whole index instead, so the db is
