@@ -74,8 +74,8 @@ class (Ord v, SetOps (SetOf v)) => Domain v where
     -- a decision with it.
     singleton :: v -> ValueOf v -> SetOf v
 
-    -- | Which incompatibilities say the same thing, and the one that says it
-    -- once. The solver applies it as incompatibilities arrive. The default
+    -- | Which incompatibilities can be stated as one, and the one that states
+    -- them. The solver applies it as incompatibilities arrive. The default
     -- merges nothing.
     mergeRule :: MergeRule v
     mergeRule = noMerging
@@ -87,10 +87,11 @@ class (Ord v, SetOps (SetOf v)) => Domain v where
 -- keeps its place in the order the solver judges them in. The key type is the
 -- rule's own.
 --
--- Merging is worth having where a provider states the same fact many times
--- over: two dependencies of neighbouring versions of @p@ on the same range of
--- @q@ are one dependency of both versions. The merged incompatibility
--- propagates further than either part, and a proof names it once.
+-- Merging pays where a provider states a dependency once per release. If two
+-- releases of @p@ both need @q@ in @r@, the solver is given one incompatibility
+-- for each. Merged, they can propagate where neither part can: knowing only that
+-- @p@ is one of the two releases, without knowing which, is enough to conclude
+-- that @q@ is in @r@. A proof then states the dependency once.
 --
 -- __Soundness.__ The merged incompatibility replaces both parts, so it must say
 -- exactly what the two say together. Merging @{p: Positive a, q: Negative r}@

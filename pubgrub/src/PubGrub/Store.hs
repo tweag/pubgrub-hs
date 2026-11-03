@@ -1,5 +1,5 @@
 -- | The incompatibility store: what the solver has learned, in the order
--- propagation scans it, with facts that say the same thing __merged as they
+-- propagation scans it, with facts that can be stated as one __merged as they
 -- arrive__. Which facts those are is the domain's 'mergeRule'; for cabal,
 -- dependency facts about the same pair of packages under the same guard, flag
 -- declarations of the same flag, and unbuildable facts about the same package

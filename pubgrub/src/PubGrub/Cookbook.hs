@@ -216,9 +216,9 @@ import           PubGrub
 --
 -- A provider that states the same dependency for each of several releases gives
 -- the solver several facts where one would do. A t'MergeRule' tells the solver
--- which incompatibilities say the same thing: those with the same key are merged
--- as they arrive. Here, two dependencies with the same depender and the same
--- dependee range merge into one over both depender ranges:
+-- which incompatibilities can be stated as one: those with the same key are
+-- merged as they arrive. Here, two dependencies with the same depender and the
+-- same dependee range merge into one over both depender ranges:
 --
 -- > sameDependency :: MergeRule Name
 -- > sameDependency =
