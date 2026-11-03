@@ -12,9 +12,7 @@
 -- than one fact per version of @foo@. There are two places to do that. When a
 -- fact is generated, a provider can walk out from the release it was asked
 -- about and read its neighbours to learn whether they carry the same
--- dependency, as the cabal provider does
--- (@PubGrub.Cabal.Provider.spanningOccurrence@); that costs a read per
--- neighbour.
+-- dependency; that costs a read per neighbour.
 --
 -- This module is the other place. The provider emits one fact per
 -- release __slot__ — the half-open range up to the next release in the index —

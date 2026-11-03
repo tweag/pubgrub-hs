@@ -244,7 +244,7 @@ the depender to be one incompatibility. It asks for
 `{foo >=1.0 && <1.3, not bar >=1.0 && <2}`, not one fact per release of `foo`. Two
 mechanisms deliver that, and both run.
 
-**At generation time.** `PubGrub.Cabal.Provider.spanningOccurrence` walks out from the
+**At generation time.** `spanningOccurrenceWith` in `PubGrub.Cabal.Provider.mkExpand` walks out from the
 decided release and reads its neighbours. It extends the depender's range while the
 *guarded occurrence* is identical — same guard and same dependency, not the whole
 dependency set.

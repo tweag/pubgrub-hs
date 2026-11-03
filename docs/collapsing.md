@@ -13,7 +13,7 @@ This file is about the mechanism and its cost. It is self-contained on purpose.
 
 > **Two mechanisms run, and neither replaces the other.**
 >
-> 1. **A walk, at generation time.** `PubGrub.Cabal.Provider.spanningOccurrence` reads the
+> 1. **A walk, at generation time.** `spanningOccurrenceWith` in `PubGrub.Cabal.Provider.mkExpand` reads the
 >    decided release's neighbours and widens the depender's range while the occurrence
 >    is identical.
 > 2. **A merge, at insert time.** [`PubGrub.Store`](../pubgrub/src/PubGrub/Store.hs) unions the
@@ -27,7 +27,7 @@ This file is about the mechanism and its cost. It is self-contained on purpose.
 
 ## 1. The walk
 
-`PubGrub.Cabal.Provider.spanningOccurrence` walks out from the decided release in both
+`spanningOccurrenceWith` in `PubGrub.Cabal.Provider.mkExpand` walks out from the decided release in both
 directions while each neighbour carries the *same* occurrence: the same guard, and the
 same `Dependency`. It then emits the contiguous half-open range from the lowest such
 release to the first release above the highest.
