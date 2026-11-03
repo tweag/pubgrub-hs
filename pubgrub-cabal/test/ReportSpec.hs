@@ -115,7 +115,7 @@ holesIn inc = length [() | NoValues _ _ <- causes inc]
 tests :: TestTree
 tests =
     testGroup
-        "PubGrub.Report.collapseNoInstances"
+        "PubGrub.Cabal.Report.collapseNoInstances"
         [ testGroup "what is absorbed" absorbed
         , testGroup "what is left alone" untouched
         , testGroup "the property that makes it sound" soundness
@@ -181,7 +181,7 @@ aDependsOn dependers dependees = dependency pkgA dependers pkgQ dependees
 -- wider requirement on @q@ — the shape a proof takes when it walks a
 -- dependency's bound history one adjacent pair at a time.
 chainOf :: [(InstanceSet, InstanceSet)] -> Incompatibility Var
-chainOf [] = error "chainOf: needs at least two facts"
+chainOf [] = error "chainOf: needs at least one fact"
 chainOf ((s0, r0) : rest) =
     foldl step (aDependsOn s0 r0) rest
   where
@@ -190,24 +190,29 @@ chainOf ((s0, r0) : rest) =
 proofLines :: Incompatibility Var -> [String]
 proofLines = map T.unpack . T.lines . reportConflict
 
+-- | Six adjacent releases of @a@, each depending on @q@ with a bound one wider.
+-- Six, because the ordinary every-other-step skip already fits four facts in
+-- two lines: from five on, only a run rule keeps the proof at two.
+sixSame :: Incompatibility Var
+sixSame = chainOf [(range i (i + 1), range 1 (i + 4)) | i <- [1 .. 6]]
+
 sameePairRun :: [TestTree]
 sameePairRun =
-    [ testCase "four same-pair steps collapse below one line each" $ do
-        let inc = chainOf [(range 1 2, range 1 5), (range 2 3, range 1 6), (range 3 4, range 1 7), (range 4 5, range 1 8)]
-            ls = proofLines inc
-        assertBool
-            ("expected fewer lines than facts, got:\n" ++ unlines ls)
-            (length ls < 4)
+    [ -- Without a run rule the four facts after the first line take two more.
+      testCase "six same-pair steps take two lines" $
+        proofLines sixSame
+            @?= [ "Because a >=1 && <2 depends on q >=1 && <5 and a >=2 && <3 depends on q >=1 && <6, a >=1 && <3 requires q >=1 && <6."
+                , "So, because a >=3 && <7 depends on q >=1 && <10, version solving failed."
+                ]
     , -- The collapsed sentence may only state the union of the facts it stands in
       -- for. Each says @a in Si@ requires @q in Ri@, so together they imply that
       -- @a in union S@ requires @q in union R@, since every @Ri@ lies within it.
       testCase "the collapsed sentence states the union, not one member" $ do
-        let inc = chainOf [(range 1 2, range 1 5), (range 2 3, range 1 6), (range 3 4, range 1 7), (range 4 5, range 1 8)]
-            proof = unlines (proofLines inc)
+        let proof = unlines (proofLines sixSame)
         assertBool
             ("the widest dependee bound should appear:\n" ++ proof)
-            ("<8" `isInfixOf` proof)
-    , -- Rule 3 keys on the (depender, dependee) pair, and rule 5 takes over where
+            ("<10" `isInfixOf` proof)
+    , -- Rule 3 keys on the (depender, dependee) pair, and rule 4 takes over where
       -- the dependee changes. Either way no dependee may be dropped: a sentence
       -- that stood for a fact about @r@ and did not mention @r@ would be claiming
       -- something the facts do not say.
@@ -220,12 +225,12 @@ sameePairRun =
     ]
 
 -- --------------------------------------------------------------------------
--- Rule 5: a run collected by depender alone is one sentence
+-- Rule 4: a run collected by depender alone is one sentence
 -- --------------------------------------------------------------------------
 
 -- | @a@ over @dependers@ depends on @dependee@ over @dependees@ — like
 -- 'aDependsOn', but the dependee is the caller's, which is the whole point of
--- rule 5.
+-- rule 4.
 aRequires :: InstanceSet -> String -> InstanceSet -> Incompatibility Var
 aRequires dependers dependee dependees =
     dependency pkgA dependers (mkPackageName dependee) dependees
@@ -234,43 +239,33 @@ aRequires dependers dependee dependees =
 -- common: the shape a proof takes when it walks a target's whole version
 -- history, one release and one unrelated dependency at a time.
 mixedChainOf :: [(InstanceSet, String, InstanceSet)] -> Incompatibility Var
-mixedChainOf [] = error "mixedChainOf: needs at least two facts"
+mixedChainOf [] = error "mixedChainOf: needs at least one fact"
 mixedChainOf ((s0, q0, r0) : rest) = foldl step (aRequires s0 q0 r0) rest
   where
     step acc (s, q, r) = resolveOn acc (aRequires s q r) pkgA
 
+-- | Six adjacent releases of @a@, each depending on a different package.
+sixMixed :: Incompatibility Var
+sixMixed = mixedChainOf [(range i (i + 1), [d], range 1 (i + 4)) | (i, d) <- zip [1 .. 6] "qrstuv"]
+
 widenedRun :: [TestTree]
 widenedRun =
-    [ -- Four facts about @a@ and four different dependees. Rule 3 cannot touch
-      -- this — no two facts share a dependee — so without rule 5 it costs a line
-      -- for every two facts.
-      testCase "four steps with four dependees collapse below one line each" $ do
-        let inc =
-                mixedChainOf
-                    [ (range 1 2, "q", range 1 5)
-                    , (range 2 3, "r", range 1 6)
-                    , (range 3 4, "s", range 1 7)
-                    , (range 4 5, "t", range 1 8)
-                    ]
-            ls = proofLines inc
-        assertBool
-            ("expected fewer lines than facts, got:\n" ++ unlines ls)
-            (length ls < 4)
+    [ -- Six facts about @a@ and six different dependees. Rule 3 cannot touch
+      -- this, since no two facts share a dependee, so without rule 4 the
+      -- proof takes a line for every two facts.
+      testCase "six steps with six dependees take two lines" $
+        proofLines sixMixed
+            @?= [ "Because a >=1 && <2 depends on q >=1 && <5 and a >=2 && <3 depends on r >=1 && <6, a >=1 && <3 requires q >=1 && <5 or r >=1 && <6."
+                , "So, because a >=3 && <7 requires s >=1 && <7 or t >=1 && <8 or u >=1 && <9 or v >=1 && <10, version solving failed."
+                ]
     , -- The collapsed sentence stands in for every fact in the run, so every
       -- dependee it collected has to appear in it. Dropping one would be claiming
       -- that a range of @a@ requires less than it does.
       testCase "every dependee of the run is named" $ do
-        let inc =
-                mixedChainOf
-                    [ (range 1 2, "q", range 1 5)
-                    , (range 2 3, "r", range 1 6)
-                    , (range 3 4, "s", range 1 7)
-                    , (range 4 5, "t", range 1 8)
-                    ]
-            proof = unlines (proofLines inc)
+        let proof = unlines (proofLines sixMixed)
         mapM_
             (\d -> assertBool (d ++ " should be named:\n" ++ proof) (d `isInfixOf` proof))
-            ["q ", "r ", "s ", "t "]
+            ["q ", "r ", "s ", "t ", "u ", "v "]
     , -- The depender's range is the union of the run's, and it may be neither
       -- wider nor narrower: wider claims facts the run does not have, narrower
       -- drops one it does. The chain is closed with a request for that union,
@@ -427,6 +422,12 @@ headline =
                     (request pkgQ (range 1 5))
                     pkgQ
         T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2 and q >=1 && <5."
+    , -- Two branches of the derivation rest on the same request, and the
+      -- request is still one target.
+      testCase "a seed the proof reaches twice is named once" $ do
+        let via deps = resolveOn (aDependsOn (range 1 2) deps) (request pkgA (range 1 2)) pkgA
+            inc = resolveOn (via (range 5 9)) (via (range 1 3)) pkgQ
+        T.unpack (reportHeadline inc) @?= "No solution for a >=1 && <2."
     , -- The closing line of such a proof: the seeds, and failure by name.
       testCase "the last line names the seeds and concludes failure" $ do
         let inc =
