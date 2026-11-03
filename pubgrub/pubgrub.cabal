@@ -1,13 +1,13 @@
 cabal-version:      3.0
 name:               pubgrub
 version:            0.1.0.0
-synopsis:           The PubGrub version solver, over any domain
+synopsis:           The PubGrub version solver
 description:
-    PubGrub is a version-solving algorithm, the one Dart's pub and Python's uv
-    use: unit propagation with conflict-driven learning, and, when there is no
-    solution, a proof of why that can be written out for a person to read.
+    PubGrub is a version-solving algorithm: unit propagation with
+    conflict-driven learning, and, when there is no solution, a proof of why
+    that can be written out for a person to read.
 
-    This is a Haskell implementation, written once for any domain. A type class
+    This is a Haskell implementation that is generic over the domain. A type class
     says what the variables, values, sets of values and facts are; a callback
     answers the solver's questions one variable at a time; and the explanation
     of a failure is worded by the domain.

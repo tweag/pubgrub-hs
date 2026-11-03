@@ -1,5 +1,5 @@
--- | PubGrub, the version-solving algorithm, written once for any domain: find
--- a value for every variable a request needs, or explain why there is none.
+-- | PubGrub is a version-solving algorithm. Given a set of requests,
+-- it finds a value for every variable or explains why there is none.
 -- This module re-exports everything a user of the library needs.
 --
 -- = Where to start
