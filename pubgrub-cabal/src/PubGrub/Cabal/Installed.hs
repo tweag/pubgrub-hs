@@ -46,12 +46,22 @@ data InstalledDb = InstalledDb
     , idbByName :: Map PackageName [InstalledPkg]
     }
 
+-- | Index a list of units. A unit id listed more than once keeps its last
+-- entry, in both indexes, so that the two always describe the same units.
 mkInstalledDb :: [InstalledPkg] -> InstalledDb
 mkInstalledDb pkgs =
     InstalledDb
-        { idbById = Map.fromList [(ipUnitId p, p) | p <- pkgs]
-        , idbByName = Map.fromListWith (++) [(ipName p, [p]) | p <- pkgs]
+        { idbById = byId
+        , idbByName = Map.fromListWith (++) [(ipName p, [p]) | p <- lastOfEach]
         }
+  where
+    byId = Map.fromList [(ipUnitId p, p) | p <- pkgs]
+    -- In input order, so that the by-name lists keep the order they had.
+    lastOfEach = reverse (go Set.empty (reverse pkgs))
+    go _ [] = []
+    go seen (p : ps)
+        | Set.member (ipUnitId p) seen = go seen ps
+        | otherwise = p : go (Set.insert (ipUnitId p) seen) ps
 
 toPreInstalled :: InstalledPkg -> PreInstalledPackage
 toPreInstalled p =

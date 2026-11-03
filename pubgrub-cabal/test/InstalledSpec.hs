@@ -13,10 +13,12 @@
 -- The dbs here are hand-built, so nothing needs a compiler or an index.
 module InstalledSpec (tests) where
 
+import qualified Data.Map.Strict                as Map
 import           Distribution.Types.PackageName (PackageName, mkPackageName)
 import           Distribution.Types.UnitId      (UnitId, mkUnitId)
 import           Distribution.Version           (mkVersion)
-import           PubGrub.Cabal.Installed        (InstalledEdge (..),
+import           PubGrub.Cabal.Installed        (InstalledDb (..),
+                                                 InstalledEdge (..),
                                                  InstalledPkg (..),
                                                  closureEdges, mkInstalledDb)
 import           PubGrub.Cabal.PreInstalled     (PreInstalledPackage (..))
@@ -99,6 +101,14 @@ tests =
             let sub = (unit "a:sub" []) {ipName = mkPackageName "a"}
              in namesOf [unit "a" ["a:sub", "b"], sub, unit "b" []] "a"
                     @?= [(mkPackageName "a", mkPackageName "b")]
+        , testCase "a unit id listed twice keeps its last entry, by id and by name" $
+            -- The two indexes must describe the same units: the provider
+            -- offers instances by name and walks closures by id.
+            let older = (unit "a" []) {ipVersion = mkVersion [0, 9]}
+                db = mkInstalledDb [older, unit "a" []]
+             in do
+                    fmap ipVersion (Map.lookup (mkUnitId "a") (idbById db)) @?= Just (mkVersion [1, 0])
+                    map ipVersion (Map.findWithDefault [] (mkPackageName "a") (idbByName db)) @?= [mkVersion [1, 0]]
         , testCase "a repeated dependency yields one edge" $
             edgesOf [unit "a" ["b", "b"], unit "b" ["c"], unit "c" []] "a"
                 @?= [edge "a" "b", edge "b" "c"]
