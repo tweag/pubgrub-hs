@@ -485,7 +485,7 @@ mkExpand logA preference installedDb source = expand'
     --
     -- A dependency of @p@ on @p@ itself is dropped rather than stated: on the
     -- source side by the @depPkgName dep /= pn@ filter above, and here by
-    -- 'closureEdges', which emits no edge from a unit to itself. It is not a
+    -- 'closureEdges', which emits no edge between two units of one package. It is not a
     -- version constraint. @lens 1.7@ declares a dependency on @lens ==1.7@
     -- because one of its executables is built against its own library: an
     -- /intra-package/ edge, resolved inside the package. Stated as a fact it

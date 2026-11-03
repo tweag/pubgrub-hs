@@ -91,9 +91,11 @@ data InstalledEdge = InstalledEdge
 --
 -- Deterministic: depth-first in the order @ipDepends@ lists them, each unit
 -- expanded once. The visited set keeps the walk finite on a cycle (GHC's db is
--- a DAG; this is defensive). A unit depending on itself is dropped separately:
--- an incompatibility whose two terms name the same package collapses to a
--- single bogus term.
+-- a DAG; this is defensive). An edge between two units of one package is
+-- dropped, a unit depending on itself included: an incompatibility whose two
+-- terms name the same package collapses to a single bogus term, which bans the
+-- unit just chosen. The solver has one variable per package name, so a unit
+-- of a package's sublibrary is not modelled as an instance of its own.
 --
 -- A 'UnitId' absent from the db contributes no edge. That is vacuous for a db
 -- read whole from the global package db, whose units depend only on each other,
@@ -109,7 +111,7 @@ closureEdges db root = go (Set.singleton root) (lookupUnit root)
             (seen', fresh) = foldl' enqueue (seen, []) deps
          in [ InstalledEdge (named u) (named d)
             | d <- deps
-            , ipUnitId d /= ipUnitId u
+            , ipName d /= ipName u
             ]
                 ++ go seen' (reverse fresh ++ queued)
 

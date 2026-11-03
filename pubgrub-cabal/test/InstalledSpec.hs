@@ -92,6 +92,13 @@ tests =
              in do
                     assertBool "no self-edge" (all (uncurry (/=)) es)
                     es @?= [edge "a" "b"]
+        , testCase "a dependency on another unit of the same package emits no edge" $
+            -- A library linked against its own installed sublibrary: both
+            -- units are named a, so the edge would say "if a is a, then a is
+            -- a:sub", which bans the unit just chosen.
+            let sub = (unit "a:sub" []) {ipName = mkPackageName "a"}
+             in namesOf [unit "a" ["a:sub", "b"], sub, unit "b" []] "a"
+                    @?= [(mkPackageName "a", mkPackageName "b")]
         , testCase "a repeated dependency yields one edge" $
             edgesOf [unit "a" ["b", "b"], unit "b" ["c"], unit "c" []] "a"
                 @?= [edge "a" "b", edge "b" "c"]
