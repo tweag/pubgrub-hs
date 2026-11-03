@@ -493,6 +493,7 @@ styling =
     , testCase "the connective is bold and a continuation line has none" $ do
         assertBool "opener" ("\ESC[1mAnd\ESC[0m \ESC[1mbecause\ESC[0m" `isInfixOf` T.unpack (styleProof (T.pack sentence)))
         assertBool "numbered" ("\ESC[1m1.\ESC[0m" `isInfixOf` T.unpack (styleProof (T.pack ("1. " ++ sentence))))
+        assertBool "numbered Because" ("\ESC[1m1.\ESC[0m \ESC[1mBecause\ESC[0m" `isInfixOf` T.unpack (styleProof (T.pack ("1. Because" ++ drop (length "And because") sentence))))
         assertBool "continuation" (not ("\ESC[1m" `isInfixOf` T.unpack (styleProof (T.pack continuation))))
     , testCase "the headline and the conclusion are bold throughout" $ do
         T.unpack (styleProof (T.pack conclusion)) @?= "\ESC[1m" ++ conclusion ++ "\ESC[0m"

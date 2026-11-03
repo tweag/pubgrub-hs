@@ -115,9 +115,10 @@ styleProof = T.intercalate "\n" . go False . T.lines
         (run, rest)    -> dim (T.unwords run) : dimRuns rest
 
     -- How many leading tokens make up the connective: "Because", "And because",
-    -- and "1. And because"; a continuation line has none.
+    -- and either with a line number, "1. Because"; a continuation line has none.
     openerOf ws = case ws of
         (n : "And" : "because" : _) | isNumber n -> 3
+        (n : "Because" : _) | isNumber n         -> 2
         ("And" : "because" : _)                  -> 2
         ("Because" : _)                          -> 1
         _                                        -> 0
