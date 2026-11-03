@@ -157,8 +157,11 @@ addRequestHeaders opts req =
         -> [HttpClient.Header]
     finalizeHeader (name, strs) = [(name, BS.intercalate ", " (reverse strs))]
 
+    -- Append to the header's values, adding the header when it is absent.
     insert :: Eq a => a -> [b] -> [(a, [b])] -> [(a, [b])]
-    insert x y = modifyAssocList x (++ y)
+    insert x y acc = case lookup x acc of
+        Nothing -> acc ++ [(x, y)]
+        Just _  -> modifyAssocList x (++ y) acc
 
     -- Modifies the first matching element only.
     modifyAssocList :: Eq a => a -> (b -> b) -> [(a, b)] -> [(a, b)]
