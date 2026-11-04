@@ -496,10 +496,10 @@ Two things implement this:
   1.7", asserted of every instance. That pinned a whole solve and became the unexplained
   first premise of its proof.
 
-No problem in the gate's set has this shape, so its verdict agreement does not cover
-the rule. `pubgrub-cabal/test/FlagSolveSpec.hs` and `pubgrub-cabal/test/StoreSpec.hs`
-each hold a "self-dependencies" case. Run by hand at the pin, the two solvers agree on
-all 22 releases of this shape that a rough scan of the index found.
+`acme-zero ==0.0.2` is in the corpus, so the gate's verdict agreement covers the rule.
+`pubgrub-cabal/test/FlagSolveSpec.hs` and `pubgrub-cabal/test/StoreSpec.hs` each hold a
+"self-dependencies" case. Run by hand at the pin, the two solvers agree on all 22
+releases of this shape that a rough scan of the index found.
 
 cabal has one exception, and it does not arise here. `Builder.extendOpen` keeps a
 reverse-dependency edge for a *setup* self-dependency, so the cycle forces a different
@@ -583,7 +583,7 @@ taking.
 Each dependency fact was paired with a hole-is-empty fact instead of with the next
 dependency fact. Once the siblings were absorbed, rule 1 appeared in **14 of the 17**
 problems harvested then, having only ever been seen in the spec's own worked example.
-Today it fires on 4 of the corpus's 20 ([failure-cases.md](failure-cases.md)).
+Today it fires on 4 of the corpus's 21 ([failure-cases.md](failure-cases.md)).
 
 **Rule 5 recomputes nothing, and that is its soundness argument.** Resolving a unit
 clause `{p ∈ r}` against a dependency fact on the pivot `p` unions the two terms about
@@ -675,8 +675,8 @@ which is why the wall rule goes first wherever it applies.
 
 Neither names a seed, since the headline has just said it, nor a pinned package as
 the culprit, since the wall says it in fewer words. Over the corpus the line
-appears on 14 of 20 problems, ten by the wall rule and four by the pivot rule; the
-six without it are the proofs of two sentences, where the proof is already the
+appears on 14 of 21 problems, ten by the wall rule and four by the pivot rule; the
+seven without it are the proofs of one or two sentences, where the proof is already the
 summary. Every guard fails the safe way: one that does not hold means no line, never
 a wrong one. The harness carries the whole
 block, wrapped lines included, and the gate is untouched because the line opens
@@ -986,7 +986,7 @@ which Cabal admits; `base <=4.21` against `4.21.0.0`, which Cabal excludes. On t
 machine three latest releases flip their verdict on base 4.21.0.0: `curryer-rpc` and
 `double-x-encoding`, which write `<=4.21`, solve here and fail under cabal;
 `ghc-debugger`, which writes `>4.21`, the reverse. None is in the problem set, so the
-gate's verdict agreement holds at 26/26. **This is the one place the two solvers read
+gate's verdict agreement holds at 27/27. **This is the one place the two solvers read
 the same index differently, and it is by decision.** The baseline keeps cabal's
 order, because that is what cabal does.
 

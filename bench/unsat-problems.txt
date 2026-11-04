@@ -26,7 +26,7 @@
 #    libpq installed, hpqtypes-extras resolves.
 #  * cabal solves setup and build-tool depends (solveExecutables = True) and we do
 #    not (the driver solves neither namespace). On a package with a custom Setup.hs
-#    the two solvers are answering different questions. Of the 20 targets below,
+#    the two solvers are answering different questions. Of the 21 targets below,
 #    liquidhaskell has one; check before adding.
 #
 #  * Every target below is PINNED to one version. An unconstrained target obliges
@@ -80,6 +80,11 @@ matterhorn ==90000.1.1          # 8 against 17; was 16 against 18 with 11 no-ver
 dhall ==1.42.3, aeson ==2.3.1.0     # dhall itself caps aeson <2.3
 hlint ==3.10, aeson ==2.3.1.0       # via deriving-aeson
 yesod ==1.6.2.3, aeson ==2.3.1.0    # via yesod-persistent and persistent
+
+# --- a release its own dependency excludes --------------------------------------
+# Found by scanning the index, not in a build report. Nothing else in either
+# problem set holds the agreement gate to this rule (docs/DESIGN.md §8).
+acme-zero ==0.0.2               # its library depends on acme-zero ==0
 
 # --- positive controls: these RESOLVE here --------------------------------------
 # Each failed on Hackage's builder and succeeds here, which is the point: a

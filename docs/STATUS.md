@@ -35,7 +35,7 @@
 | Test suites and benchmarks | read only when the reduction is asked, per release (`releaseOf` takes a `Stanzas`): a planner enables them for a local package and never for a dependency, as cabal's does; the driver passes none ([DESIGN.md §15](DESIGN.md#15-a-component-that-is-not-buildable-contributes-no-dependencies)) |
 | Explanations | `PubGrub.Report` prints a proof that follows the spec's own reporting algorithm |
 | cabal baseline | `pubgrub --cabal <target>` runs cabal's modular solver over the same index |
-| Regression gate | `scripts/gate.sh` runs 26 problems through both solvers and fails on any regression |
+| Regression gate | `scripts/gate.sh` runs 27 problems through both solvers and fails on any regression |
 | Harness | `pubgrub-harness` measures both solvers over both sets, three runs each, and writes `bench/output/benchmark.md` and `showcase.md`. It measures; the gate decides |
 
 **The rung ladder.** The end-to-end loop was built first, and cabal-model fidelity
@@ -138,12 +138,13 @@ helps only one kind is not a change that helps.
 
 ### 2.2 Against cabal, on the failure corpus
 
-20 real failures, every target pinned to one version: 17 harvested from Hackage's
-build reports, and three found by solving pairs of popular packages together, each
-of which resolves alone. [failure-cases.md](failure-cases.md) has the methods, the
+21 real failures, every target pinned to one version: 17 harvested from Hackage's
+build reports, three found by solving pairs of popular packages together, each of
+which resolves alone, and one from a scan of the index for a release its own dependency
+excludes. [failure-cases.md](failure-cases.md) has the methods, the
 six failure kinds, and the per-problem table.
 
-**We are shorter than cabal on all 20: 76 proof sentences against cabal's 193.** No
+**We are shorter than cabal on all 21: 77 proof sentences against cabal's 198.** No
 `no version for …` line is left anywhere in the corpus. `scripts/gate.sh` holds both
 totals as ceilings. Measured on 2026-11-04 at the pinned index-state.
 
@@ -194,7 +195,7 @@ a completeness column before it can render such a problem fairly.
   [§3.1](#31-flags-are-fixed-at-their-declared-defaults-unless-asked).
 - **cabal solves setup and build-tool dependencies and we do not.** On a package with
   a custom `Setup.hs` the two solvers answer different questions.
-- **Verdict agreement covers these 26 problems, not every package.**
+- **Verdict agreement covers these 27 problems, not every package.**
 
 ---
 
@@ -305,7 +306,7 @@ dependencies that select them.
 
 Flag search is built, behind `--flags search` ([§3.1](#31-flags-are-fixed-at-their-declared-defaults-unless-asked),
 [flags-as-variables.md](flags-as-variables.md)): every automatic flag is a solver
-variable, both solvers search them, and the gate agrees 26/26 under either model.
+variable, both solvers search them, and the gate agrees 27/27 under either model.
 What is left is in [flags-as-variables.md §6](flags-as-variables.md): user flag
 constraints, a dedicated sentence for a derived step that names a flag, and a
 measured answer to whether flags should be decided right after their owner. The gate's recorded baselines are for `fixed`; moving them to `search`
@@ -494,7 +495,7 @@ anchors are `:595` (reporting case 1), `:651` (case 2.ii), `:668` and `:671` (ca
 
 | deliverable | state |
 | --- | --- |
-| **Explanation showcase** — real failing problems, pubgrub-hs against cabal, side by side | **the problem set exists and we win on all of it, and all of it is pinned.** 20 real failures with every target pinned, six failure kinds, four positive controls. Shorter than cabal on 20 of 20: 76 proof sentences against 193. Shorter on two of the three benchmark unsat problems. Both of the spec's published examples are golden tests, and the linear one matches sentence for sentence. `pubgrub-harness` renders the two explanations as adjacent blocks for the 16 comparable problems, and the 2026-11-04 run is [reports/showcase.md](reports/showcase.md): shorter on 16 of 16 by sentences, 59 against 150 lines; on screen lines at 80 columns 159 against 337, shorter on 15 and equal on one. **On an unconstrained target the record inverts** ([§2.2](#22-against-cabal-on-the-failure-corpus)), and no such problem is in the corpus or the showcase |
+| **Explanation showcase** — real failing problems, pubgrub-hs against cabal, side by side | **the problem set exists and we win on all of it, and all of it is pinned.** 21 real failures with every target pinned, six failure kinds, four positive controls. Shorter than cabal on 21 of 21: 77 proof sentences against 198. Shorter on two of the three benchmark unsat problems. Both of the spec's published examples are golden tests, and the linear one matches sentence for sentence. `pubgrub-harness` renders the two explanations as adjacent blocks for the 17 comparable problems, and the 2026-11-04 run is [reports/showcase.md](reports/showcase.md): shorter on 17 of 17 by sentences, 60 against 155 lines; on screen lines at 80 columns 161 against 346, shorter on 16 and equal on one. **On an unconstrained target the record inverts** ([§2.2](#22-against-cabal-on-the-failure-corpus)), and no such problem is in the corpus or the showcase |
 | **Benchmark report** — time and peak residency on real problems | **current numbers exist** for six problems, three sat and three unsat, both solvers. We use less peak memory, are faster and allocate less on all six. The 2026-11-04 run is [reports/benchmark.md](reports/benchmark.md). Its caveats: timings are medians of three runs against ±25% noise, cabal's lazy per-release parsing lands in its `solve` phase and cannot be separated without changing the work, and the 29 MB memory floor is unexplained |
 
 The baseline and the shared index are done. `cabal-install-solver` drives cabal's
@@ -502,7 +503,7 @@ resolver from the same `withWorld`, which is what makes the comparison
 apples-to-apples rather than arranged.
 
 The gate decides and the harness measures, and neither replaces the other.
-`scripts/gate.sh` runs both solvers over all 26 problems once and fails on any
+`scripts/gate.sh` runs both solvers over all 27 problems once and fails on any
 regression in verdict agreement or proof length. `pubgrub-harness` runs them three
 times, diffs the plans, separates the phases, and writes the two reports. The harness
 drives the `pubgrub` executable as a child process, once per solver, problem and

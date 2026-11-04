@@ -96,7 +96,7 @@ scripts/gate.sh               # everything
 OUT=/tmp/gate scripts/gate.sh # keep the per-problem logs
 ```
 
-Eight gates over one pass of 26 problems: problem count, the 20-case failure corpus,
+Eight gates over one pass of 27 problems: problem count, the 21-case failure corpus,
 verdict agreement, proof length against cabal's message, the proof and no-version
 totals, the golden proofs, the pkg-config modelling tests, and the whole suite.
 
@@ -162,10 +162,10 @@ project's Hindsight bank, has why it is shaped this way.
   `aeson <2` measure search on an unsatisfiable problem. `yesod` measures search on a
   satisfiable one. A change that helps only one kind is not a change that helps. Check
   all three.
-- [`bench/unsat-problems.txt`](../bench/unsat-problems.txt) — 20 real failures for
+- [`bench/unsat-problems.txt`](../bench/unsat-problems.txt) — 21 real failures for
   *explanations*, every target pinned, plus four positive controls left commented out.
   See [failure-cases.md](failure-cases.md). `scripts/gate.sh` and the harness both run
-  the 20; the harness renders the 16 not marked `showcase:exclude`.
+  the 21; the harness renders the 17 not marked `showcase:exclude`.
 
 ### Reading a run by hand
 
@@ -195,8 +195,8 @@ the search; `render` is printing the answer. Under `--cabal` the stats line is
 every clause propagation judged against the partial solution, one per clause per
 round; `rejudged` is the part of it judged in the round right after a backtrack.
 Neither has a trace line, so the awk cannot count them and `check-stats.sh` does not
-compare them, and a `-v` trace is the same with or without them. On the 26 problems at
-the pin, `rejudged` is 57,597 of 199,766 judgements, 29%. Read either next to
+compare them, and a `-v` trace is the same with or without them. On the 27 problems at
+the pin, `rejudged` is 57,597 of 199,769 judgements, 29%. Read either next to
 allocation: a judgement costs about 50 bytes, so even a large cut in `judged` can be
 noise in the run ([DESIGN.md](DESIGN.md) §5).
 
@@ -336,8 +336,8 @@ Four things to keep in mind when reading a comparison.
 
 For the explanation deliverable the comparable quantity is **length**: our proof
 against cabal's message. The harness's `showcase.md` prints both per problem, and
-`scripts/gate.sh` holds the corpus totals as ceilings. Over the 20-case corpus cabal's
-message runs 7 to 17 lines. Ours has no bound on length, and on an unconstrained
+`scripts/gate.sh` holds the corpus totals as ceilings. Over the 21-case corpus cabal's
+message runs 5 to 17 lines. Ours has no bound on length, and on an unconstrained
 target it is the longer text (STATUS.md §2.2).
 
 **A proof is counted by connective, not by line number.** The reporter numbers only
@@ -350,7 +350,7 @@ the opening words instead: `Because`, `And because`, `So, because`, `Thus,`.
 A quiet run is also a counted run: `--stats` folds the solver's messages into counters
 in-process and prints two lines after the answer, so timing and the search columns come
 from the same run, and the harness times such runs. `scripts/check-stats.sh` holds those
-counters to `bench/summarise.awk`, number for number, on all 26 problems.
+counters to `bench/summarise.awk`, number for number, on all 27 problems.
 
 `-v` is different: the trace prints to stdout, `aeson <2` prints thousands of lines, and
 an elapsed time taken with `-v` is an upper bound.

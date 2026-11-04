@@ -19,7 +19,7 @@ proof against a golden file.
 **Both questions are measured, and neither answer is an unqualified yes.** We are faster
 than cabal, use less peak memory and allocate less on all six benchmark problems, though
 that is six problems, and cabal also solves setup and build-tool dependencies there and
-we do not. Our failure proof is shorter than cabal's message on all 20 real failures in
+we do not. Our failure proof is shorter than cabal's message on all 21 real failures in
 the corpus. That record holds only where every target is pinned to a version, and every
 corpus target is: on a problem with an *unconstrained* target a complete proof has to
 refute every release of it, where cabal's message is a search trace that stops at the
@@ -169,14 +169,14 @@ So, because lens <4 is requested, version solving failed.
 ```
 
 That is 7 sentences where cabal prints 18 lines for the same problem. Across a corpus
-of 20 real Hackage failures, every target pinned, we are shorter on all 20: 76
-sentences against cabal's 193.
+of 21 real Hackage failures, every target pinned, we are shorter on all 21: 77
+sentences against cabal's 198.
 
 ## Test
 
 ```sh
 cabal test all              # the suites of the three packages that have them, and pubgrub's doctests
-scripts/gate.sh             # every check that must not regress, over 26 real problems
+scripts/gate.sh             # every check that must not regress, over 27 real problems
 cabal run pubgrub-harness   # both solvers over both problem sets; writes bench/output/
 ```
 

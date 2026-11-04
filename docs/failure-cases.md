@@ -72,7 +72,7 @@ it. Lowering the index-state does not help: the
 un-absorbed window sits at the newest state, since a major release published long
 before `T` has been caught up with by `T`.
 
-## The 20 that reproduce, against cabal
+## The 21 that reproduce, against cabal
 
 ghc-9.12.2, base-4.21.0.0, and this machine's pkg-config database. Absent there:
 `libpq`, `libzmq`, `blas`, `lapack`. Present: `cairo`, `pango`, `gtk+-2.0`, `gtk+-3.0`,
@@ -89,6 +89,7 @@ is true but not a cause, so a proof carrying one is explaining less than it coul
 
 | target | kind | ours | cabal | noVer |
 | --- | --- | --- | --- | --- |
+| `acme-zero ==0.0.2` | a release its own dependency excludes | **1** | 5 | 0 |
 | `cabal-install ==3.18.1.0` | Cabal-syntax / hackage-security | **2** | 12 | 0 |
 | `haddock ==2.29.1` | base bound, seven windows | **2** | 7 | 0 |
 | `hadolint ==2.15.1` | `time` vs language-docker | **2** | 9 | 0 |
@@ -110,10 +111,12 @@ is true but not a cause, so a proof carrying one is explaining less than it coul
 | `hlint ==3.10, aeson ==2.3.1.0` | two targets, via deriving-aeson | **5** | 9 | 0 |
 | `yesod ==1.6.2.3, aeson ==2.3.1.0` | two targets, via yesod-persistent and persistent | **9** | 11 | 0 |
 
-**Shorter on all 20: 76 proof sentences against cabal's 193**, and no `no version`
+**Shorter on all 21: 77 proof sentences against cabal's 198**, and no `no version`
 line left in the whole set. The margin is narrowest on the `yesod` pair (9 against
 11) and widest on `cabal-install` (2 against 12). Our longest is the `yesod` pair at
-9, against cabal's longest message at 17 on `matterhorn`.
+9, against cabal's longest message at 17 on `matterhorn`. `acme-zero` came from a scan
+of the index, not a build report, so that the agreement gate covers a release its own
+dependency excludes ([DESIGN.md §8](DESIGN.md#8-a-dependency-of-p-on-p-is-checked-not-solved)).
 
 [`scripts/gate.sh`](../scripts/gate.sh) re-runs every row, fails if our proof is longer
 than cabal's message on any of them, and holds the sentence total and the `no version`
@@ -122,7 +125,7 @@ total as ceilings, so a regression here fails the gate rather than being noticed
 Two things this table is evidence for beyond length:
 
 - **The chain fusion fires in the wild.** `depends on X which depends on Y` appears in
-  4 of the 20: `atelier-testing`, `cabal-install`, `futhark` and the `yesod` pair. That
+  4 of the 21: `atelier-testing`, `cabal-install`, `futhark` and the `yesod` pair. That
   is why the empty-range clutter is not cosmetic ([DESIGN.md](DESIGN.md) §9, rule 5):
   those holes keep the fusion from pairing.
 - **`references/pubgrub.md:476` pays.** `hpqtypes-extras` says
@@ -147,7 +150,7 @@ failures in it are real rather than an artefact of the environment.
   ([STATUS.md](STATUS.md) §3.1). That is a restriction of the problem, and it removes
   exactly the escape cabal's *automatic* flags would provide.
 - **cabal solves setup and build-tool depends and we do not.** On a package with a
-  custom `Setup.hs` the two are answering different questions. Of the 20 targets,
+  custom `Setup.hs` the two are answering different questions. Of the 21 targets,
   `liquidhaskell` has one.
 - **Every target is pinned to one version**, and the length record holds only there.
   See the next section.
@@ -185,8 +188,8 @@ writes `bench/output/showcase.md`: the environment and the three restrictions, t
 excluded problems and why, a summary table, then per problem our proof and cabal's
 `Could not resolve dependencies:` block as adjacent fenced blocks, with the counts.
 The four reason-mismatched problems are run and measured and not rendered, so the
-headline it prints is "shorter on 16 of 16 comparable problems", by sentences; by
-screen lines at 80 columns it is shorter on 15 and equal on the `hlint` pair.
+headline it prints is "shorter on 17 of 17 comparable problems", by sentences; by
+screen lines at 80 columns it is shorter on 16 and equal on the `hlint` pair.
 `scripts/gate.sh`
 does the deciding half: it fails on any regression in verdict agreement or proof
 length. See [STATUS.md](STATUS.md) §7 and [benchmarking.md](benchmarking.md).

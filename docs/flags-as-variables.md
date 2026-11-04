@@ -116,8 +116,8 @@ self-dependency cases the same harness carries.
 Index-state `2026-09-09T02:42:09Z` (`bench/index-state`), this machine. Every count
 below held when re-run on 2026-11-04.
 
-**The gate under `--flags fixed`** is the recorded baseline, unchanged: 26/26
-agreement, 20/20 corpus cases unsat, 76 proof sentences, 0 no-version lines,
+**The gate under `--flags fixed`** is the recorded baseline, unchanged: 27/27
+agreement, 21/21 corpus cases unsat, 77 proof sentences, 0 no-version lines,
 golden proofs intact, the test suite passing.
 
 **The gate under `--flags search`, both solvers searching automatic flags**
@@ -125,10 +125,10 @@ golden proofs intact, the test suite passing.
 
 | gate | result |
 |---|---|
-| agreement | 26/26, both models |
-| corpus | 18/20 reproduce as unsat: `cabal-install ==3.18.1.0` and `futhark ==0.27.1` now resolve, for cabal as well. Their failures were artefacts of fixing flags |
-| vs-cabal | shorter than cabal on all 18 remaining |
-| proof sentences | 67 over the corpus (76 before, minus the 9 of the two now-solvable problems); every other corpus proof has the same sentence count |
+| agreement | 27/27, both models |
+| corpus | 19/21 reproduce as unsat: `cabal-install ==3.18.1.0` and `futhark ==0.27.1` now resolve, for cabal as well. Their failures were artefacts of fixing flags |
+| vs-cabal | shorter than cabal on all 19 remaining |
+| proof sentences | 68 over the corpus (77 before, minus the 9 of the two now-solvable problems); every other corpus proof has the same sentence count |
 | no-version lines | 0 |
 | golden, pkgconfig, unit | pass |
 
@@ -160,7 +160,7 @@ with a `split-base` flag enter the proof:
         bytestring <0.9.1.0 requires base <4.2.
 
 Each flag costs two or three sentences to refute both of its values. The gate
-ceiling of 76 is over the corpus only, so these two do not move it, but a
+ceiling of 77 is over the corpus only, so these two do not move it, but a
 problem-set change that brought flag-heavy failures into the corpus would.
 
 **Plans** fold the flags back: `tasty 1.5.4 +unix` in `vector`'s tree,

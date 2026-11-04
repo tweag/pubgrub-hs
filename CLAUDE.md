@@ -90,8 +90,8 @@ stops at the first wall, and on such problems our proof is the longer text
 (`docs/STATUS.md` §2.2).
 
 **`scripts/gate.sh` decides whether a change is kept.** Eight gates over one pass of
-the problem set: problem count, the 20-case failure corpus, verdict agreement over all
-26 problems, proof length against cabal's own message, the proof and no-version
+the problem set: problem count, the 21-case failure corpus, verdict agreement over all
+27 problems, proof length against cabal's own message, the proof and no-version
 totals, the golden proofs, the pkg-config modelling tests, and the whole suite. One
 line per gate, non-zero exit on any regression.
 
@@ -103,7 +103,7 @@ everything the local index holds. **Move the pin in the change that re-measures.
 It holds five numeric baselines. Only the problem count is exact. The other four are
 floors or ceilings rather than targets. Beating one exits 0, and prints `IMPROVED`
 except on the corpus floor, which prints `ok` however many reproduce. **Move a baseline in the change that earns it.** The two proof ceilings are
-currently tight — 76 sentences and 0 no-version lines — so a reporting change has to
+currently tight — 77 sentences and 0 no-version lines — so a reporting change has to
 earn its way past them.
 
 **[`docs/benchmarking.md`](docs/benchmarking.md) is the reference for measuring

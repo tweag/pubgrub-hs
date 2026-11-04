@@ -10,7 +10,7 @@
 #
 #   problems   the union set still holds every problem it is meant to
 #   corpus     every problem in bench/unsat-problems.txt still fails to resolve
-#              under our solver (docs/failure-cases.md: all 20 reproduce here)
+#              under our solver (docs/failure-cases.md: all 21 reproduce here)
 #   agreement  ours and cabal's solver return the SAME verdict, over the union of
 #              bench/problems.txt and bench/unsat-problems.txt
 #   vs-cabal   our proof is no longer than cabal's message on any corpus problem
@@ -33,10 +33,10 @@ cd "$(dirname "$0")/.." || exit 1
 #
 # The proof baselines are over the CORPUS only, so adding a problem to
 # bench/problems.txt moves MIN_AGREEMENT and EXPECT_PROBLEMS and nothing else.
-: "${MIN_AGREEMENT:=26}"    # problems where both solvers return the same verdict
-: "${EXPECT_PROBLEMS:=26}"  # problems in the union set. A drop means a lost case
-: "${EXPECT_CORPUS:=20}"    # reproducible failure cases
-: "${MAX_PROOF:=76}"        # total proof sentences over the corpus (ceiling)
+: "${MIN_AGREEMENT:=27}"    # problems where both solvers return the same verdict
+: "${EXPECT_PROBLEMS:=27}"  # problems in the union set. A drop means a lost case
+: "${EXPECT_CORPUS:=21}"    # reproducible failure cases
+: "${MAX_PROOF:=77}"        # total proof sentences over the corpus (ceiling)
 : "${MAX_NOVER:=0}"         # total "no version for" lines over the corpus (ceiling)
 
 OUT=${OUT:-$(mktemp -d)}

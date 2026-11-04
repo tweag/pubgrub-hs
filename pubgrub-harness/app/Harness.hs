@@ -812,7 +812,7 @@ showcaseReport cfg env results =
           , "" ]
           ++ [ "_" <> probNote p <> "_" | not (T.null (probNote p)) ]
           ++ [ ""
-          , "**pubgrub-hs** (" <> sentences ours <> " sentences, " <> verdictText (mVerdict ours) <> ")"
+          , "**pubgrub-hs** (" <> sentencesText ours <> ", " <> verdictText (mVerdict ours) <> ")"
           , "" ]
           ++ fenced (if null (mProof ours) then ["(no proof)"] else withHeadline ours (mProof ours))
           ++ [ ""
@@ -820,7 +820,7 @@ showcaseReport cfg env results =
              , "" ]
           ++ fenced (if null (mMessage cabal) then ["(no message)"] else mMessage cabal)
           ++ [ ""
-             , sentences ours <> " sentences against " <> lines' cabal <> " lines; "
+             , sentencesText ours <> " against " <> lines' cabal <> " lines; "
                 <> screen ours <> " screen lines against " <> screenAt80 cabal <> "." ]
         | (p, ours, cabal) <- comparable ]
   where
@@ -846,6 +846,7 @@ showcaseReport cfg env results =
     cabalScreenTotal = sum (map cabalScreen comparable)
     cabalTotal = sum (map cabalCount comparable)
     sentences m = tshow (length (filter isProofLine (mProof m)))
+    sentencesText m = sentences m <> if sentences m == "1" then " sentence" else " sentences"
     lines' m = tshow (length (mMessage m))
     tshow :: Show a => a -> Text
     tshow = T.pack . show

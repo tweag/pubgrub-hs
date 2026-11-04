@@ -258,21 +258,22 @@ The fix is to say it once, which is what `PubGrub.Cabal.onlyInstalled` and the p
 do. It is also what cabal does, as an input constraint. A proof line reads `base is
 pinned to 4.21.0.0 (installed)`.
 
-**Fifteen events remain over the 26 problems at the pin, of two kinds.** Neither prints
+**Sixteen events remain over the 27 problems at the pin, of two kinds.** Neither prints
 a `no version for` line.
 
 - **The first query for a boot package**, when the range admits no installed unit: 13
-  of the 15. The provider answers `Nothing` with the fact beside it, and the event still
+  of the 16. The provider answers `Nothing` with the fact beside it, and the event still
   counts. Stating all eight facts up front, at level 0, closes this and takes `lens` to a
   two-line proof, but it costs `aeson` 41% more allocation and 466 more decisions.
   Measured and rejected.
-- **A range holding only releases that cannot be built here**: `hpqtypes` and
-  `secp256k1-haskell`. The scan's unbuildable facts ride out with the `Nothing`, so the
-  proof names the reason.
+- **A range holding only releases the scan rules out**: `hpqtypes` and
+  `secp256k1-haskell`, which cannot be built here, and `acme-zero`, whose own dependency
+  excludes it. The scan's facts ride out with the `Nothing`, so the proof names the
+  reason.
 
 Two other kinds do not occur. `widen` puts a declared bound into a term verbatim, so a
 range can hold a window no release occupies, and narrowing it away was measured and
-rejected ([STATUS.md](STATUS.md) §5.2), but none of the 15 is one. And a search cannot
+rejected ([STATUS.md](STATUS.md) §5.2), but none of the 16 is one. And a search cannot
 end by finding nothing below the oldest release, because the first release's slot has
 no lower bound ([DESIGN.md](DESIGN.md) §4, `references/pubgrub.md:468`): a depender term
 that starts there has no `<first` complement to discover empty.
