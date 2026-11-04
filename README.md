@@ -210,13 +210,14 @@ docs/               STATUS.md first. See docs/STATUS.md §6 for what each file d
   comparison. That is a restriction of the problem, not a property of either solver.
   It makes the comparison fair, and it makes some real failures unreachable, because
   cabal's automatic flags are exactly what it would flip to escape one. `--flags
-  search` lifts it for both solvers; the recorded numbers were taken without it.
+  search` lifts it for automatic flags, in both solvers; the recorded numbers were
+  taken without it.
 - **We solve one version per package name.** cabal solves qualified goals and can
   legitimately plan two versions of one package, one for the library and one for a
   setup script.
 
 **Not modelled:** setup and build-tool dependencies, public sublibraries,
-`preferred-versions`, user flag constraints, and buildability under a flag.
+`preferred-versions`, and user flag constraints.
 
 **Reports:** `cabal run pubgrub-harness` writes `bench/output/benchmark.md` (both
 solvers over `bench/problems.txt`: medians of three runs, phases, residency,

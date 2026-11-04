@@ -275,10 +275,9 @@ wrong edit is, not the argument. Read the section before you touch the code.
 [`docs/STATUS.md`](docs/STATUS.md) §3 states each one and why: flags fixed at their
 declared defaults unless `--flags search` is given (§3.1), and one version per
 package name (§3.2, where the shelved qualified-goals design is). Setup and
-build-tool dependencies, public sublibraries, `preferred-versions`, user flag
-constraints and buildability under a flag are not built; §4 says what each owes, and
-§5 lists what is settled or was measured and rejected. The rung ladder is STATUS.md
-§1.
+build-tool dependencies, public sublibraries, `preferred-versions` and user flag
+constraints are not built; §4 says what each owes, and §5 lists what is settled or
+was measured and rejected. The rung ladder is STATUS.md §1.
 
 ## Reporting
 
