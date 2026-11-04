@@ -411,7 +411,7 @@ optionsParser =
         <*> option (eitherReader parsePlan) (long "plan" <> metavar "tree|lines" <> value Tree <> help "Render a plan as a dependency tree (default) or as one 'plan:' line per package")
         <*> flag Ours Cabal (long "cabal" <> help "Run cabal's solver instead of the native solver")
         <*> option (eitherReader parseIndexState) (long "index-state" <> metavar "TIMESTAMP" <> value IndexHead <> help "Solve against the index as it was at this time, e.g. 2016-09-24T17:47:48Z, as cabal's --index-state does (default: everything the local index holds, refreshed at most weekly)")
-        <*> option (eitherReader parseFlags) (long "flags" <> metavar "fixed|search" <> value FixedFlags <> help "Fix every flag at its declared default (default), or search the automatic flags, in both solvers (spike)")
+        <*> option (eitherReader parseFlags) (long "flags" <> metavar "fixed|search" <> value FixedFlags <> help "Fix every flag at its declared default (default), or search the automatic flags, in both solvers")
         <*> many (option (eitherReader parseTarget) (long "constraint" <> metavar "'PKG RANGE'" <> help "A package with the range it must be in if it is chosen, as one argument: --constraint 'aeson <2'. Repeat for more than one. Applies to both solvers"))
         <*> some (argument (eitherReader parseTarget) (metavar "TARGET..." <> help "A package to solve for, with an optional version range, as one argument: 'aeson' or 'aeson <2'. Repeat for more than one."))
 

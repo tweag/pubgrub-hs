@@ -598,7 +598,7 @@ warningLines cfg results
     parses =
         [ "the derived index is behind the Hackage index: "
           <> T.intercalate ", " stale
-          <> " parsed `.cabal` files. Re-run `cabal run pubgrub-index` before quoting anything"
+          <> " parsed `.cabal` files. Re-run `cabal run pubgrub-index -- --index-state` at this run's index-state before quoting anything"
         | not (null stale) ]
     stale = [ probText p | (p, ours, _) <- results, Just r <- [mReads ours], rdParses r > 0 ]
     -- One line per (solver, set of absent lines), not one per problem: an old
