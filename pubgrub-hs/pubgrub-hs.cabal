@@ -10,9 +10,10 @@ build-type:      Simple
 extra-doc-files: CHANGELOG.md
 synopsis:        The Cabal bridge around pubgrub and pubgrub-cabal
 description:
-    The library the unpublished executables share: the Hackage index reader,
-    the derived index, the compiler's world on this machine, and cabal's own
-    solver as the baseline. The solver is the @pubgrub@ package and its cabal
+    The library behind the @pubgrub@ and @pubgrub-index@ executables: the
+    Hackage index reader, the derived index, the compiler, installed packages
+    and pkg-config database on this machine, and cabal's own solver as the
+    baseline. The solver is the @pubgrub@ package and its cabal
     instantiation is @pubgrub-cabal@, both in this repository.
 
 common warnings

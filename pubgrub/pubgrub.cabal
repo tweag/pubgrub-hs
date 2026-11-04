@@ -13,8 +13,8 @@ description:
     of a failure is worded by the domain.
 
     Start with the tutorial in "PubGrub.Tutorial". "PubGrub.Cookbook" has
-    how-to guides, and "PubGrub" explains the model and documents everything
-    the library exports. The domain of Haskell packages is the @pubgrub-cabal@
+    how-to guides, and "PubGrub" explains the model and re-exports what a user
+    normally needs. The domain of Haskell packages is the @pubgrub-cabal@
     package.
 category:           Distribution
 license:            BSD-3-Clause

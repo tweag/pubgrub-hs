@@ -10,8 +10,9 @@ build-type:      Simple
 extra-doc-files: CHANGELOG.md
 synopsis:        The benchmark and explanation harness for pubgrub
 description:
-    The one command that produces both deliverables. It drives the @pubgrub@
-    executable as a child process and depends on neither solver library.
+    The one command that produces the benchmark report and the explanation
+    showcase. It drives the @pubgrub@ executable as a child process and depends
+    on neither solver library.
 
 common warnings
     ghc-options: -Wall

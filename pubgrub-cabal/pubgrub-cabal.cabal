@@ -6,7 +6,8 @@ description:
     The cabal domain for the @pubgrub@ solver: a package name or one of its
     automatic flags is a variable, an installed unit or a source release is a
     value, a dependency's declared range is one symbolic set of instances, and
-    the facts a @.cabal@ file states are the leaves of every proof.
+    the leaves of every proof are what the request asks for, what a @.cabal@
+    file states, and what the compiler and the machine rule out.
 
     It provides the translation from @GenericPackageDescription@ and an
     installed package set into the solver's input (@PubGrub.Cabal.Flatten@,

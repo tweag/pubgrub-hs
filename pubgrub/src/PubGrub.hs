@@ -1,14 +1,15 @@
--- | PubGrub is a version-solving algorithm. Given a set of requests,
--- it finds a value for every variable or explains why there is none.
--- This module re-exports everything a user of the library needs.
+-- | PubGrub is a version-solving algorithm. Given a set of requests, it finds
+-- a value for every variable they need or explains why there is no such choice.
+-- This module re-exports what a user of the library normally needs.
 --
 -- = Where to start
 --
 -- * To learn the library by building something with it, follow
 --   "PubGrub.Tutorial".
 -- * For a task in hand (versions and ranges, requests and constraints, a
---   provider over an index, explanations in a domain's words, watching the
---   search, releasing a lock), see the recipes in "PubGrub.Cookbook".
+--   provider over an index, merging facts, explanations in a domain's words,
+--   watching the search, releasing a lock), see the recipes in
+--   "PubGrub.Cookbook".
 -- * For what each name means, read on: the sections below are the reference,
 --   and the modules they come from say more.
 --
@@ -45,9 +46,9 @@
 -- Every derived incompatibility remembers the two it came from. When a
 -- conflict rests on the seeds alone, no decision can be undone to avoid it, and
 -- the solve fails. The incompatibility it ends with is the root of a tree of
--- reasoning whose leaves are the facts the solver was given: the proof that
--- there is no solution. "PubGrub.Derivation" reads that tree, and
--- "PubGrub.Report" writes it out as numbered sentences that the domain words.
+-- reasoning whose leaves are the facts the solver was given or found: the proof
+-- that there is no solution. "PubGrub.Derivation" reads that tree, and
+-- "PubGrub.Report" writes it out as sentences that the domain words.
 --
 -- = Modules
 --
@@ -55,7 +56,7 @@
 -- * "PubGrub.Term" and "PubGrub.SetOps": terms, and the set operations a
 --   domain's sets provide. The class is re-exported here and its methods are
 --   not, since @empty@, @union@ and @intersect@ are names every other set
---   library uses too: a domain that writes an instance imports
+--   library uses too: code that writes an instance or combines sets imports
 --   "PubGrub.SetOps" for them.
 -- * "PubGrub.Provider": the provider and its contract.
 -- * "PubGrub.Solver": 'solve'.

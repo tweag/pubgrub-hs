@@ -369,7 +369,7 @@ flattenWith env at = go (Lit True)
 --
 -- The /library's/ buildability is deliberately not gated here. It is a stronger
 -- fact — an unbuildable library makes the whole release unusable, not merely
--- dependency-free — and 'unbuildableAtDefaults' already carries it to the solver
+-- dependency-free — and 'unbuildableStored' already carries it to the solver
 -- with the reason attached, which is what lets a proof name the missing
 -- @pkg-config@ module.
 componentDeps :: Stanzas -> Platform -> CompilerInfo -> GenericPackageDescription -> GuardedDeps
@@ -785,8 +785,8 @@ data FlagModel
     = FixedFlags
       -- ^ every flag at its declared default ('componentDepsAtDefaultsStored')
     | FlagPackages
-      -- ^ each automatic flag is a solver variable of its own
-      -- ('PubGrub.Variable.FlagVar'); manual flags stay at their defaults
+      -- ^ each automatic flag is a solver variable of its own; manual flags
+      -- stay at their defaults
     deriving (Eq, Show)
 
 -- | What a flag resolves to under a model. Under 'FixedFlags' every flag is its

@@ -19,13 +19,12 @@
 --
 -- == The second line
 --
--- A second sentence names the package the search gave up on: \"No version of
--- regex is compatible with ghcide >=2.15.0.0, lsp-types >=2.0.0.0 and regex-tdfa
--- >=1.3.1.0 together, and lsp-types >=2.0.0.0 depends on regex.\" It is a
+-- A second sentence names the package the search gave up on: \"lsp-types
+-- >=2.0.0.0 needs regex, and no version of regex is compatible with ghcide
+-- >=2.15.0.0, lsp-types >=2.0.0.0 and regex-tdfa >=1.3.1.0 together.\" It is a
 -- derived step read out, not a summary written over the proof, and two rules
--- produce it, tried in the order of 'culprit'. Every guard in them fails the
--- safe way — 'isSubsetOf' and 'equivalent' are one-sided — so doubt means no
--- line, never a wrong one.
+-- produce it, tried in the order of 'culprit'. A guard that does not hold means
+-- no line, never a wrong one.
 module PubGrub.Cabal.Report.Headline
     ( headline
     ) where
@@ -121,8 +120,7 @@ walled root = nub (concat [wallPackage c | c <- externals root])
 -- The window is what the seeds force ('inPlay'): @x@ must sit in the
 -- intersection of the in-play leaves' ranges for it. The line is only printed
 -- when that window lies inside the union of the ranges the wall steps refute,
--- so \"no x there builds\" is exactly what those steps say. 'isSubsetOf' is
--- one-sided the safe way.
+-- so \"no x there builds\" is exactly what those steps say.
 wallStory :: Rule (Incompatibility Var) Text
 wallStory root = do
     let steps = everywhere (wallStep root) root
@@ -223,8 +221,7 @@ dropped n a b =
 -- | Does some step in this subtree narrow @p@: resolve on it and keep it? The
 -- step's term for @p@ is then the union of its causes' two terms and differs
 -- from both; a package the causes merely share is intersected instead, and a
--- pivot whose union equals one side learnt nothing. 'equivalent' is one-sided
--- the safe way: doubt means no candidate.
+-- pivot whose union equals one side learnt nothing.
 narrowedBelow :: Var -> Incompatibility Var -> Bool
 narrowedBelow p n = case derivedFrom n of
     Just (a, b) -> narrowedAt p n a b || narrowedBelow p a || narrowedBelow p b

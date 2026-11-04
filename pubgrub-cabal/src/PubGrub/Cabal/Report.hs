@@ -87,8 +87,7 @@ reportHeadline = headline . collapseNoInstances
 -- requires @q ∈ Rᵢ@, so @p ∈ ⋃S@ requires @q ∈ ⋃R@ — but a line may not claim
 -- to justify more of @p@ than the step it is attached to concluded, and the
 -- last two guards are what stop it: the conclusion really is \"p requires q\",
--- and the collapsed depender range is one it covers. 'isSubsetOf' is one-sided
--- the safe way: it can only refuse a collapse that would have been fine.
+-- and the collapsed depender range is one it covers.
 samePairRun :: Rule (Incompatibility Var) (Line Var)
 samePairRun step = do
     (d, e) <- chainStep step

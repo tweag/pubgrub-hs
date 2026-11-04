@@ -169,7 +169,8 @@ data World = World
     --
     -- What each solver does with an unsatisfiable @pkgconfig-depends@ still
     -- differs: cabal rules out that branch of the flag tree, while we drop the
-    -- release from the candidate list and state which module was missing (see
+    -- release from the candidate list, or under @--flags search@ ban the flag
+    -- value that needs it, and state which module was missing (see
     -- 'relUnbuildable').
     }
 
@@ -209,7 +210,7 @@ withWorld cache manager state act =
 -- faster, because a tar read and a parse are cheap next to the search. It is
 -- here so that the repeat count can be seen, and so that splitting the
 -- provider into pick and consequences would not read every candidate's
--- description twice (@docs\/flags-semantics.md@ §8).
+-- description twice.
 --
 -- Parse failures are cached too: a malformed description is a stable fact
 -- about the index.

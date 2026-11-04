@@ -59,8 +59,8 @@ import           PubGrub
 --
 -- When a variable's values are versions, use 'Version' for the values and
 -- 'VersionSet' for the sets: ranges of versions, built from bounds. Make the
--- variable type an instance of 'Domain', naming the other three, and give
--- 'singleton':
+-- variable type an instance of 'Domain', naming the types of its values, sets
+-- and facts, and give 'singleton':
 --
 -- > newtype Name = Name Text
 -- >     deriving (Eq, Ord, Show)
@@ -79,14 +79,15 @@ import           PubGrub
 -- >     singleton _ = singletonVersionSet
 --
 -- The fact type is what explanations are made from: give it one constructor
--- per kind of fact the provider states, carrying what a sentence about it
--- needs. The four constructors here are the four kinds of fact the recipes
--- state. A domain can also say which facts merge, which is one more line in
--- this instance; [How to merge facts that say the same thing](#g:4) adds it.
+-- per kind of fact the request and the provider state, carrying what a sentence
+-- about it needs. The four constructors here are the four kinds of fact the
+-- recipes state. A domain can also say which facts merge, which is one more line
+-- in this instance; [How to merge facts that say the same thing](#g:4) adds it.
 --
 -- Build ranges from their bounds. @'halfOpenVersionSet' lo ('Just' hi)@ is
 -- @>=lo && \<hi@, and 'aboveVersionSet', 'belowVersionSet',
--- 'singletonVersionSet' and the 'SetOps' operations make the rest:
+-- 'singletonVersionSet' and the 'SetOps' operations make the rest. The recipes
+-- write their ranges with this:
 --
 -- > range :: [Int] -> [Int] -> VersionSet
 -- > range lo hi = halfOpenVersionSet (mkVersion lo) (Just (mkVersion hi))
@@ -116,8 +117,8 @@ import           PubGrub
 -- Give both to 'solve' in one list. A constraint narrows the choice for a
 -- package the plan needs, and does not bring into the plan a package nothing
 -- requires. A conflict among the seeds alone ends the solve, and the
--- explanation's last line names the requests and constraints it rests on. The
--- next recipe solves with both.
+-- explanation ends with the requests and constraints it rests on. The next
+-- recipe solves with both.
 
 -- $provider
 --
@@ -262,11 +263,9 @@ import           PubGrub
 -- t'Formatter' gives it. 'mkFormatter' builds one from the domain's three
 -- sentences: one for each kind of fact, one for the solver's finding that a
 -- package has no version in a set, and how to name a package with a set of
--- versions, from which 'summaryWith' makes the conclusions. The three other
--- fields of t'Formatter' are hooks for rules of your own, described in
--- "PubGrub.Report", which do nothing until set by record update: a pass over
--- the proof before it is written, rules that say a line, and rules that say two
--- facts as one premise. This domain sets the last, below:
+-- versions, from which 'summaryWith' makes the conclusions. Its other fields
+-- hold rules of your own, set by record update ("PubGrub.Report" describes
+-- them). This domain sets 'clauseRules', below:
 --
 -- > name :: Name -> VersionSet -> Text
 -- > name (Name p) s = p <> " " <> pretty s
@@ -300,7 +299,7 @@ import           PubGrub
 -- >     pure (name p ps <> " depends on " <> name q qs <> " which depends on " <> name r rs)
 --
 -- Then render a failure. Any 'Left' other than 'NoSolution' is a bug, in the
--- provider or in the solver, not a verdict on the index:
+-- seeds, in the provider or in the solver, not a verdict on the index:
 --
 -- > why :: Index -> [Incompatibility Name] -> Text
 -- > why index seeds = case runIdentity (solve mempty (provider index) seeds) of
@@ -324,9 +323,10 @@ import           PubGrub
 -- $watching
 --
 -- 'solve' sends a 'SolverMsg' for each step of the search to the @LogAction@ it
--- is given, from co-log-core. To print the steps, solve in 'IO' with
--- @LogAction (mapM_ T.putStrLn . describe)@. To collect them, solve in a monad
--- that can, such as a pair with a list:
+-- is given, from co-log-core, and the provider runs in the same monad. To print
+-- the steps, solve in 'IO' with @LogAction (mapM_ T.putStrLn . describe)@. To
+-- collect them, solve in a monad that can, such as a pair with a list, and lift
+-- the provider into it:
 --
 -- > searchLog :: Index -> [Incompatibility Name] -> [Text]
 -- > searchLog index seeds = fst (solve logger (Provider expandLogged) seeds)
@@ -374,7 +374,7 @@ import           PubGrub
 -- >             requests ++ [constrain p (singletonVersionSet x) | (p, x) <- Map.toList held]
 --
 -- Here the lock holds @util@ and @extra@ at 1, and the request now asks for
--- @util >=2@. @util@ is released and @extra@ stays at 1:
+-- @util >=2 && \<3@. @util@ is released and @extra@ stays at 1:
 --
 -- @
 -- ghci> either (const Nothing) Just (solveWithLock example (Map.fromList [(util, mkVersion [1]), (extra, mkVersion [1])]) [request app fullVersionSet, request util (range [2] [3]), request extra fullVersionSet])

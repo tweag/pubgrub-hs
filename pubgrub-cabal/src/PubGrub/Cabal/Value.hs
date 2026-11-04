@@ -2,8 +2,8 @@
 --
 -- A package variable takes an 'Instance'; a flag variable takes a 'Bool'. A
 -- value is therefore a sum, 'Value'. A /set/ of values is not: the subsets of
--- @A + B@ are the pairs of a subset of @A@ and a subset of @B@, so 'ValueSet'
--- is the product of an 'InstanceSet' and a 'BoolSet'. Every set operation is
+-- @A + B@ are the pairs of a subset of @A@ and a subset of @B@, so t'ValueSet'
+-- is the product of an 'InstanceSet' and a t'BoolSet'. Every set operation is
 -- componentwise and total, with no case for sets \"of different kinds\" — a
 -- package variable's set simply has an empty flag component, and a flag
 -- variable's set an empty instance component. 'InstanceSet' is the same shape

@@ -99,7 +99,7 @@ maximumOn f = foldl' pick Nothing
 -- | The satisfier of an incompatibility is the latest of its terms' satisfiers.
 -- When the satisfier is a derivation and the previous satisfier sits at its
 -- level, resolution continues with the satisfier's cause; otherwise it
--- backtracks to the previous satisfier's level (at least 1).
+-- backtracks to the previous satisfier's level.
 --
 -- Every term of a satisfied incompatibility has a satisfier, so 'satisfierOf'
 -- returning 'Nothing' means the partial solution and 'psRelation' disagree.
@@ -459,12 +459,10 @@ solve logA provider seeds
         -- same set twice, which is the property termination rests on. Only a fact
         -- about @p@ alone covers anything: one with a term about another variable
         -- rules its values out only while that term holds, and @p@ would be
-        -- offered the same set again whenever it does not. 'isEmpty' is
-        -- one-sided on a set — it may miss that a set is empty — and it
-        -- errs in the safe direction here: a redundant clause, never a missing one.
+        -- offered the same set again whenever it does not.
         banRest p range facts
             -- Said nothing: the range itself, untouched. A @difference@ against the
-            -- empty set would give an equivalent but differently shaped DNF, and so
+            -- empty set would give an equivalent but differently shaped set, and so
             -- change the search for every provider that states no facts.
             | [] <- stated = landed (noValues p range)
             | isEmpty leftover = (,) IntSet.empty

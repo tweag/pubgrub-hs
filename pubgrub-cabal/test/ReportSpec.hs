@@ -1,4 +1,4 @@
--- | Tests for 'PubGrub.Report.collapseNoInstances', the post-pass that absorbs
+-- | Tests for 'PubGrub.Cabal.Report.collapseNoInstances', the post-pass that absorbs
 -- \"no version for @p@ in @r@\" leaves into the sibling they were resolved against.
 --
 -- The rendered output of the pass is covered end to end by @PaperSpec@'s golden

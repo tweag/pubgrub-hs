@@ -11,7 +11,7 @@ extra-doc-files: CHANGELOG.md
 synopsis:        The pubgrub driver and the derived-index builder
 description:
     The @pubgrub@ executable solves for one or more targets with either solver,
-    pubgrub or cabal's own, over the same index and the same world. The
+    pubgrub or cabal's own, over the same index and installed packages. The
     @pubgrub-index@ executable builds the derived index the bridge reads.
 
 common warnings

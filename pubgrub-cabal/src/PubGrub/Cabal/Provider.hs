@@ -485,15 +485,19 @@ mkExpand logA preference installedDb source = expand'
     --
     -- A dependency of @p@ on @p@ itself is dropped rather than stated: on the
     -- source side by the @depPkgName dep /= pn@ filter above, and here by
-    -- 'closureEdges', which emits no edge between two units of one package. It is not a
-    -- version constraint. @lens 1.7@ declares a dependency on @lens ==1.7@
+    -- 'closureEdges', which emits no edge between two units of one package.
+    -- @lens 1.7@ declares a dependency on @lens ==1.7@
     -- because one of its executables is built against its own library: an
     -- /intra-package/ edge, resolved inside the package. Stated as a fact it
     -- says something much stronger and false: that every instance of @lens@
     -- must be @1.7@.
     --
-    -- This is cabal's rule. Its solver's @extendOpen@
-    -- (@Distribution.Solver.Modular.Builder@) adds no goal and no edge when
+    -- Cabal's validator still checks the range of a library self-dependency
+    -- against the chosen version, so it refuses a release whose self-dependency
+    -- excludes itself. Dropping the range is where we differ from it.
+    --
+    -- The goal and the edge are cabal's rule. Its solver's @extendOpen@
+    -- (@Distribution.Solver.Modular.Builder@) adds neither when
     -- @qpn == qpn'@, /except/ for a setup dependency, where it adds a
     -- reverse-dependency edge so that the cycle makes the solver pick a
     -- different instance for the setup script; and @isInternal@

@@ -77,7 +77,7 @@ asHole c = case asNoValues c of
 -- @(depender, its range, dependee, its range)@. A fact under a flag guard is not
 -- this view: every rule built on it reads the fact as "p in S depends on q in
 -- R", which a guarded fact does not say, and such facts are rendered from their
--- cause instead. 'PubGrub.Incompatibility.fromDependency' drops the dependee
+-- cause instead. 'PubGrub.Cabal.fromDependency' drops the dependee
 -- term when the dependency is unsatisfiable, and then there is no \"depends on\"
 -- left to render: the clause is a bare ban on the depender and reads as one.
 asDependency :: Rule (Incompatibility Var) (PackageName, InstanceSet, PackageName, InstanceSet)
@@ -107,9 +107,8 @@ unions (s : ss) = Just (go s ss)
     go x []       = x
     go x (y : ys) = x `union` go y ys
 
--- | Two terms of the same polarity over equivalent sets. 'equivalent' is the
--- semantic test: 'InstanceSet' is non-canonical, so two terms that mean the
--- same thing rarely look the same.
+-- | Two terms of the same polarity over the same set. 'InstanceSet' is
+-- canonical, so equality is the semantic test.
 sameTerm :: Term ValueSet -> Term ValueSet -> Bool
 sameTerm = (==)
 

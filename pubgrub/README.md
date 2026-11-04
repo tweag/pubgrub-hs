@@ -30,8 +30,9 @@ The documentation is in the package's modules:
   solves in it, breaks it, and explains the failure. The proof above is its
   output.
 - **[`PubGrub.Cookbook`][cookbook]** — how-to guides: versions and ranges,
-  requests and constraints, a provider over an index of releases,
-  explanations in your own words, watching the search, releasing a lock.
+  requests and constraints, a provider over an index of releases, merging
+  facts that say the same thing, explanations in your own words, watching the
+  search, releasing a lock.
 - **[`PubGrub`][front]** — how the solver sees a problem, and the reference
   for everything the library exports.
 

@@ -173,8 +173,8 @@ renderSolverStep = id
 -- consumed by a solve that runs inside the bracket.
 --
 -- A release whose @.cabal@ does not parse throws when its description is
--- forced. Our own provider skips such a release with a warning
--- (@docs\/flags-semantics.md@ §1.5); a @SourcePackage@ has no way to say "not
+-- forced. Our own provider skips such a release with a warning; a
+-- @SourcePackage@ has no way to say "not
 -- really here", so in that one case the two solvers disagree about the
 -- universe, loudly rather than silently.
 sourcePackageIndex :: FlagModel -> IndexHandle -> IO (PackageIndex (SourcePackage ()))

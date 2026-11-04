@@ -3,10 +3,14 @@
 -- | A first solve: from an empty file to a plan, and from a broken world to an
 -- explanation of why it has no plan.
 --
+-- PubGrub is a version solver. Given packages, their versions and what each
+-- version needs, it chooses versions that fit together, which we call a /plan/,
+-- or, when no such choice exists, it explains why.
+--
 -- In this tutorial we will describe a small world of three packages to the
 -- solver, ask it for a plan, and then break the world so that no plan exists
--- and have the solver say why. Along the way we will meet the four things every
--- use of the library involves: a /domain/, the /incompatibilities/ stated in it,
+-- and have the solver say why. Along the way we will meet the four things a use
+-- of the library involves: a /domain/, the /incompatibilities/ stated in it,
 -- a /provider/ that answers the solver's questions, and a /formatter/ that puts
 -- a failure into words.
 --
@@ -81,17 +85,17 @@ import           PubGrub
 -- > import           PubGrub
 --
 -- Start a session in that directory with @cabal repl@. After cabal has built
--- the dependencies you get a @ghci>@ prompt, and GHCi says
--- @Ok, one module loaded.@ Keep this session open. Each time you add to
--- @Toy.hs@, type @:reload@ and check that it says the same again.
+-- the dependencies, GHCi says @Ok, one module loaded.@ and gives you a @ghci>@
+-- prompt. Keep this session open. Each time you add to @Toy.hs@, type @:reload@
+-- and check that it says @Ok, one module reloaded.@
 
 -- $domain
 --
 -- The solver does not know what it is solving for. We tell it, by making the
 -- type of the /variables/ (here, a package) an instance of 'Domain' that names
 -- three more types: what a /value/ is (a version), what a /set of values/ is,
--- and what a /fact/ about the world is. The fact type is for explanations
--- only; we will use it at the end.
+-- and what a /fact/ about the world is. The solver does not interpret a fact:
+-- facts are what explanations are made from, and we will use them at the end.
 --
 -- Add to @Toy.hs@:
 --
@@ -108,8 +112,8 @@ import           PubGrub
 -- >     type FactOf Pkg = ToyFact
 -- >     singleton _ v = Set.singleton v
 --
--- The variable type names the domain: every other type in the library takes
--- it as a parameter, and an @Incompatibility Pkg@ is one over this world of
+-- The variable type names the domain: the library's types that belong to a
+-- domain take it as a parameter, so an @Incompatibility Pkg@ is one about these
 -- packages. @Pkg@ is a newtype rather than @String@ so that the instance is
 -- ours. 'singleton' is the one function the domain has to supply: the set
 -- that holds exactly one value.
@@ -238,13 +242,13 @@ import           PubGrub
 --
 -- When there is no plan, 'solve' answers @'Left' ('NoSolution' root)@. The
 -- incompatibility @root@ carries the whole chain of reasoning that led to the
--- failure, and 'reportConflict' writes it out as a numbered proof. It needs a
+-- failure, and 'reportConflict' writes it out as a proof. It needs a
 -- t'Formatter', which 'mkFormatter' builds from three things: the words for
 -- each fact, the words for the solver's own finding that a package has none
 -- of a set of versions, and how to name a package with a set of versions,
 -- from which the conclusions are made. Any other 'Left' is not a verdict on
--- the world but a bug, in our provider or in the solver, and @why@ says only
--- that. Add:
+-- the world but a bug, in our requests, in our provider or in the solver, and
+-- @why@ says only that. Add:
 --
 -- > versions :: Set Int -> Text
 -- > versions vs = T.intercalate " or " (map (T.pack . show) (Set.toList vs))
@@ -279,10 +283,11 @@ import           PubGrub
 -- So, because app 1 depends on lib 1 or 2 and app 1 is requested, version solving failed.
 -- @
 --
--- Each line takes facts we stated, or an earlier conclusion, and draws a new
--- conclusion. The first line is numbered because a later line uses it. The last
--- line ends with the request, @app 1@: everything above it shows that the
--- request cannot be met. Every sentence in it came from our @formatter@.
+-- Each line takes facts, or an earlier conclusion, and draws a new conclusion.
+-- The first line is numbered because a later line uses it. The last line rests
+-- on the request, @app 1@: everything above it shows that the request cannot be
+-- met. What each fact says and how a package is named came from our @formatter@;
+-- the connectives, and words such as \"is forbidden\", are the library's.
 --
 -- The original world still has a plan, and @explain@ says so:
 --

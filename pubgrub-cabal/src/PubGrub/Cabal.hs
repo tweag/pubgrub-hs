@@ -3,13 +3,13 @@
 -- | The cabal domain: the solver instantiated for cabal packages.
 --
 -- A variable is a package name or one automatic flag of a package; a value is
--- an instance or a Boolean, and a set of values is a set of instances or a set
--- of Booleans ('PubGrub.Cabal.Value'). The facts are what a @.cabal@ file states
--- and what the request asks for. The constructors here are the only way a fact
--- of this domain is built: the provider states facts through them, and
--- 'PubGrub.Store' rebuilds a merged clause through them, so a clause's cause
--- always agrees with its terms. What the solver learns from the facts is the
--- core's own 'Cause'.
+-- an instance (a pre-installed unit or a source release) or a Boolean, and a set
+-- of values is a set of instances or a set of Booleans ("PubGrub.Cabal.Value").
+-- The facts are what a @.cabal@ file states, what this machine rules out and
+-- what the request asks for. The provider states facts through the constructors
+-- here, and the domain's 'mergeRule' rebuilds a merged clause through them, so a
+-- clause's cause agrees with its terms. What the solver learns from the facts is
+-- the core's own 'Cause'.
 module PubGrub.Cabal
     ( -- * Variables
       Flag (..)
@@ -111,7 +111,7 @@ instance Pretty Var where
 -- --------------------------------------------------------------------------
 
 -- | The domain of cabal packages: its variables are 'Var', a package or a
--- flag, and that type names the instantiation, as in @'Incompatibility' Var@.
+-- flag, and that type names the instantiation, as in @t'Incompatibility' Var@.
 instance Domain Var where
     type ValueOf Var = Value
     type SetOf Var = ValueSet
@@ -166,7 +166,7 @@ data UnbuildableReason
 -- in front of the targets to be printed, planned and filtered out again.
 --
 -- A seed is a unit clause, so propagation turns it into a derivation at decision
--- level 0 before anything is decided; 'PubGrub.Solver' recognises a conflict that
+-- level 0 before anything is decided; "PubGrub.Solver" recognises a conflict that
 -- rests on those derivations alone as the end of the search.
 request :: PackageName -> InstanceSet -> Incompatibility Var
 request p s = seed (CauseRequest p s) (PackageVar p) (Negative (instanceSet s))
@@ -244,7 +244,7 @@ onlyInstalled p installed anySource =
 -- is empty, which reads as \"no version for foo in …\" when the versions exist
 -- and cannot be built here.
 --
--- The adjacent versions are not gathered here. 'PubGrub.Store' merges two of
+-- The adjacent versions are not gathered here. The domain's 'mergeRule' merges two of
 -- these facts about the same package under the same guard and with the same
 -- reasons into one clause over the union of their instances, and when the
 -- instances are adjacent release slots the union is one contiguous range. Two
