@@ -254,7 +254,8 @@ data ReleaseSource m = ReleaseSource
 --    by, and one 'declaresFlag' clause per automatic flag it declares.
 --
 -- Releases that cannot be built here are stated as 'unbuildable' facts on the
--- way past, and those facts are returned even when no value is offered.
+-- way past, and those facts are returned even when no value is offered. So is a
+-- release whose dependency on its own package excludes it.
 mkExpand
     :: forall m
      . Monad m
@@ -386,6 +387,10 @@ mkExpand logA preference installedDb source = expand'
             -- unit clause over the flags that reach it.
             Right release | Just why <- NE.nonEmpty (unconditionallyUnbuildable release) ->
                 scan pn range (unbuildableFact pn slot why : stated) rest
+            -- A release whose dependency on its own package excludes it under
+            -- any assignment cannot be chosen either, and goes the same way.
+            Right release | excluded@(_ : _) <- selfExclusions pn v slot release ->
+                scan pn range (excluded ++ stated) rest
             Right release
                 | not (BuildSource v `memberInstance` range) -> scan pn range stated rest
                 | otherwise -> do
@@ -395,7 +400,8 @@ mkExpand logA preference installedDb source = expand'
                     -- dependency clause per guarded occurrence and
                     -- disjunct of its guard, each naming the flags it
                     -- holds under. A dependency on the package itself is
-                    -- dropped (see 'consequencesOfUsePreInstalled').
+                    -- dropped, unless it excludes the release under some
+                    -- flags (see 'excludesItself').
                     let flags = relAutomatic release
                         declared = [declaresFlag pn (slotInstances slot) f | f <- flags]
                         -- A library node unusable under some flag values:
@@ -417,7 +423,7 @@ mkExpand logA preference installedDb source = expand'
                             | (guard, deps) <- relGuarded release
                             , pins <- expandGuard guard
                             , dep <- deps
-                            , depPkgName dep /= pn
+                            , depPkgName dep /= pn || excludesItself pn v dep
                             ]
                     pure (Just (PackageValue (BuildSource v)), reverse stated ++ declared ++ unbuildableUnder ++ catMaybes incs)
 
@@ -483,32 +489,8 @@ mkExpand logA preference installedDb source = expand'
     -- through the closure in one fixpoint (rather than learning one hop per
     -- decision), and a report about any edge stays true.
     --
-    -- A dependency of @p@ on @p@ itself is dropped rather than stated: on the
-    -- source side by the @depPkgName dep /= pn@ filter above, and here by
-    -- 'closureEdges', which emits no edge between two units of one package.
-    -- @lens 1.7@ declares a dependency on @lens ==1.7@
-    -- because one of its executables is built against its own library: an
-    -- /intra-package/ edge, resolved inside the package. Stated as a fact it
-    -- says something much stronger and false: that every instance of @lens@
-    -- must be @1.7@.
-    --
-    -- Cabal's validator still checks the range of a library self-dependency
-    -- against the chosen version, so it refuses a release whose self-dependency
-    -- excludes itself. Dropping the range is where we differ from it.
-    --
-    -- The goal and the edge are cabal's rule. Its solver's @extendOpen@
-    -- (@Distribution.Solver.Modular.Builder@) adds neither when
-    -- @qpn == qpn'@, /except/ for a setup dependency, where it adds a
-    -- reverse-dependency edge so that the cycle makes the solver pick a
-    -- different instance for the setup script; and @isInternal@
-    -- (@Distribution.Solver.Modular.IndexConversion@) drops a
-    -- @build-tool-depends@ on the package's own executable. Neither exception
-    -- arises here, because this rule states no setup or build-tool
-    -- dependencies: they ride in 'Release' for a planner to solve in a
-    -- namespace of their own. Qualified goals would not subsume the rule
-    -- either: a library dependency inherits its depender's qualifier
-    -- (@qualifyDeps@'s @inheritedQ@), so an executable's dependency on its own
-    -- library stays a self-dependency under any qualifier scheme.
+    -- 'closureEdges' emits no edge between two units of one package, for the
+    -- reason 'excludesItself' gives.
     consequencesOfUsePreInstalled pip =
             pure
                 [ fromDependency
@@ -559,7 +541,49 @@ mkExpand logA preference installedDb source = expand'
                         (slotInstances dependers)
                         (Map.fromList g)
                         (depPkgName dep)
-                        (widen (depPkgName dep) (VersionSet.fromVersionRange (depVerRange dep)))
+                        (declaredRange dep)
+
+    -- Whether a dependency is on the release's own package, with a range that
+    -- excludes the release. Such a dependency is the only kind of @p@ on @p@ that
+    -- is stated. @lens 1.7@ declares a dependency on @lens ==1.7@ because one of
+    -- its executables is built against its own library: an /intra-package/ edge,
+    -- resolved inside the package, with nothing to solve for.
+    --
+    -- The range still says something about the release. @acme-zero 0.0.2@
+    -- declares @acme-zero ==0@, so no plan can honour it. Cabal's validator
+    -- checks the range whichever component declares it (@Validate.merge@), and
+    -- 'fromDependency' intersects the two terms into a ban on just the releases
+    -- outside it. Nothing is stated when the range admits the release, because
+    -- that clause would ban nothing.
+    --
+    -- That no goal and no edge are added is cabal's rule too. Its solver's
+    -- @extendOpen@ (@Distribution.Solver.Modular.Builder@) adds neither when
+    -- @qpn == qpn'@, /except/ for a setup dependency, where it adds a
+    -- reverse-dependency edge so that the cycle makes the solver pick a
+    -- different instance for the setup script; and @isInternal@
+    -- (@Distribution.Solver.Modular.IndexConversion@) drops a
+    -- @build-tool-depends@ on the package's own executable. Neither exception
+    -- arises here, because this rule states no setup or build-tool
+    -- dependencies: they ride in 'Release' for a planner to solve in a
+    -- namespace of their own. Qualified goals would not subsume the rule
+    -- either: a library dependency inherits its depender's qualifier
+    -- (@qualifyDeps@'s @inheritedQ@), so an executable's dependency on its own
+    -- library stays a self-dependency under any qualifier scheme.
+    excludesItself pn v dep =
+        depPkgName dep == pn && not (BuildSource v `memberInstance` declaredRange dep)
+
+    -- The bans on a release from its own dependencies that hold under every
+    -- assignment. One under a flag is an ordinary guarded fact ('guardedInc'): the
+    -- release is still offered, and propagation flips the flag.
+    selfExclusions pn v slot release =
+        [ fromDependency pn (slotInstances slot) Map.empty pn (declaredRange dep)
+        | (guard, deps) <- relGuarded release
+        , Map.empty `elem` expandGuard guard
+        , dep <- deps
+        , excludesItself pn v dep
+        ]
+
+    declaredRange dep = widen (depPkgName dep) (VersionSet.fromVersionRange (depVerRange dep))
 
     -- A pin by flag name, as its declaration among the release's automatic flags.
     asFlagOf flags (name, b) = (\f -> (f, b)) <$> find ((== name) . flagName) flags

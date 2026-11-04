@@ -236,9 +236,6 @@ docs/               STATUS.md first. See docs/STATUS.md §6 for what each file d
   release's are read for a caller to solve separately, so on a package with a custom
   `Setup.hs` the two solvers answer different questions.
 
-**One known difference in verdict:** a release whose dependency on its own library
-excludes its own version gets a plan from us and none from cabal (`acme-zero ==0.0.2`).
-
 **Not modelled:** public sublibraries, `preferred-versions`, and a driver option for
 user flag constraints (`--constraint 'p +f'`; the library has the seed).
 

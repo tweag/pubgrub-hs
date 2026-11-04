@@ -62,7 +62,7 @@ design decision per section, with the evidence that earned it.
 
 ```sh
 cabal build all
-cabal test all                       # 307 tests over the three packages that have them, and pubgrub's doctests
+cabal test all                       # 310 tests over the three packages that have them, and pubgrub's doctests
 cabal run exe:pubgrub -- aeson              # the driver; add -v for the search trace
 cabal run exe:pubgrub -- 'aeson <2'         # a target is ONE argument: package and range
 cabal run exe:pubgrub -- hlint 'aeson <2'   # several targets, solved together
@@ -253,8 +253,9 @@ wrong edit is, not the argument. Read the section before you touch the code.
 - **The derived index is a cache that follows the index by block** — DESIGN §6. It
   stores the pre-environment form; raise `storeFormatVersion` on any encoding change.
 - **Memoise the reduced form, never the parse tree** — DESIGN §11.
-- **A dependency of `p` on `p` is dropped**, range included, in two halves. Cabal
-  checks the range, so the verdicts can differ — DESIGN §8.
+- **A dependency of `p` on `p` adds no goal and no edge, and its range is still
+  checked**: a release the range excludes is banned, and otherwise nothing is stated —
+  DESIGN §8.
 - **An unbuildable component contributes no dependencies**, through Cabal-syntax's
   own `addBuildableCondition`; the library is not gated — DESIGN §15.
 - **Build tools and `setup-depends` are not dependencies** — DESIGN §16. They ride in

@@ -678,6 +678,9 @@ dependencyMap provider solution =
                 | inc <- incs
                 , Fact (CauseDependency p _ _ (d, _)) <- [incompCause inc]
                 , p == pn
+                -- A release's dependency on its own package bans a release; it
+                -- is not an edge of the plan.
+                , d /= pn
                 ]
         pure (pn, deps)
 

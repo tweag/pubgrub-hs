@@ -294,7 +294,7 @@ tests =
         , bootPackageStatesItself
         , unbuildableStatesItself
         , unbuildableUnderFlag
-        , selfDependencyDropped
+        , selfDependency
         ]
 
 -- | 1. The declared default is offered first, so a world that solves at the
@@ -633,35 +633,62 @@ unbuildableStatesItself =
         , (pkg "foo", Pkg [] [Release v2 [], Release v1 [always [pkg "gone"]]])
         ]
 
--- | 9. Also not about flags: a release that declares a dependency on __itself__
--- must not produce a fact about its own package. It is an intra-package edge,
--- resolved inside the package, and dropping it is cabal's rule
--- (@Distribution.Solver.Modular.Builder.extendOpen@).
-selfDependencyDropped :: TestTree
-selfDependencyDropped =
+-- | 9. Also not about flags: a release that declares a dependency on __itself__.
+-- Where the range admits the release it is an intra-package edge, resolved inside
+-- the package, and produces no fact about its own package. Where the range
+-- excludes the release no plan can honour it, and the release is ruled out. Both
+-- are cabal's verdicts (@Distribution.Solver.Modular.Builder.extendOpen@ and
+-- @Distribution.Solver.Modular.Validate.merge@).
+selfDependency :: TestTree
+selfDependency =
     testGroup
         "self-dependencies"
-        [ testCase "a release depending on itself states nothing about itself" $ do
+        [ testCase "a range admitting the release states nothing about itself" $ do
             incs <- runTestM expandSelfDep
             [q | Fact (CauseDependency _ _ _ (q, _)) <- map incompCause incs, q == pkg "p"] @?= []
         , testCase "its other dependencies are still stated" $ do
             incs <- runTestM expandSelfDep
             [q | Fact (CauseDependency _ _ _ (q, _)) <- map incompCause incs] @?= [pkg "q"]
         , testCase "and the world still solves" $ do
-            result <- solveWorld selfDepWorld
+            result <- solveWorld admittingWorld
             result @?= Right (solutionOf [(pkg "root", v1, []), (pkg "p", v1, []), (pkg "q", v1, [])])
+        , testCase "a release its own range excludes is passed over for the next" $ do
+            result <- solveWorld
+                [ (pkg "root", plain [pkg "p"])
+                , (pkg "p", Pkg [] [Release v1 [], Release v2 [(Lit True, [depAt (pkg "p") v1])]])
+                ]
+            result @?= Right (solutionOf [(pkg "root", v1, []), (pkg "p", v1, [])])
+        , testCase "with no other release, the proof names the dependency" $ do
+            result <- solveWorld
+                [ (pkg "root", plain [pkg "p"])
+                , (pkg "p", Pkg [] [Release v1 [(Lit True, [depAt (pkg "p") v2])]])
+                ]
+            case result of
+                Right sol -> assertFailure ("expected no solution, got " ++ show (Map.keys sol))
+                Left proof ->
+                    assertBool
+                        ("the proof should say p depends on p ==2.0.0:\n" <> T.unpack proof)
+                        (T.pack "depends on p ==2.0.0" `T.isInfixOf` proof)
+        , testCase "excluded only under a flag, the flag is flipped" $ do
+            result <- solveWorld
+                [ (pkg "root", plain [pkg "p"])
+                , (pkg "p", Pkg [(tests', True)] [Release v1 [(Var tests', [depAt (pkg "p") v2])]])
+                ]
+            result @?= Right (solutionOf [(pkg "root", v1, []), (pkg "p", v1, [(tests', False)])])
         ]
   where
-    selfDepWorld =
+    tests' = flg "tests"
+
+    admittingWorld =
         [ (pkg "root", plain [pkg "p"])
-        , (pkg "p", Pkg [] [Release v1 [(Lit True, [depAt (pkg "p") v2, dep (pkg "q")])]])
+        , (pkg "p", Pkg [] [Release v1 [(Lit True, [depAt (pkg "p") v1, dep (pkg "q")])]])
         , (pkg "q", leaf)
         ]
 
     depAt p v = mkDependency p (thisVersion (V.toCabalVersion v)) mainLibSet
 
     expandSelfDep = do
-        let provider = worldProviderUnder FlagPackages [] selfDepWorld
+        let provider = worldProviderUnder FlagPackages [] admittingWorld
         result <- expand provider (PackageVar (pkg "p")) (instanceSet (sourceInstances VersionSet.fullVersionSet))
         case result of
             (Just (PackageValue (BuildSource _)), incs) -> pure incs

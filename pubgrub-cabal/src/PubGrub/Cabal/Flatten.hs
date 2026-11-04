@@ -220,8 +220,8 @@ type PkgConfigPresent = PkgconfigDependency -> Bool
 -- add is read the same way as the rest: flag-guarded, gated on their own
 -- @buildable:@ ('gateOnBuildable'), their build tools alongside
 -- ('componentTools'). A test suite's dependency on its own package's library
--- is an intra-package edge, resolved inside the package and not a version
--- constraint on it, so the provider rule drops it, as it does for an executable.
+-- is an intra-package edge, resolved inside the package, so the provider rule
+-- drops it, as it does for an executable, unless its range excludes the release.
 data Stanzas = Stanzas
     { withTests      :: Bool
     , withBenchmarks :: Bool

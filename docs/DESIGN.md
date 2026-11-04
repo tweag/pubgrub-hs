@@ -467,7 +467,7 @@ Stating all eight facts up front, at level 0, would take `lens <4` to a two-line
 proof. It was
 measured and rejected: it costs `aeson <2` 41% more allocation and 466 more decisions.
 
-## 8. A dependency of `p` on `p` is dropped
+## 8. A dependency of `p` on `p` is checked, not solved
 
 Real packages declare these constantly, because an executable or sublibrary of `p` is
 built against `p`'s library. It is an intra-package edge resolved inside the package,
@@ -475,29 +475,31 @@ so it adds no goal and no edge. Cabal's solver does the same: `Builder.extendOpe
 neither when `qpn == qpn'`, and `not $ isInternal pkg exeDep` drops a build tool on the
 package's own executable.
 
-**We drop the range as well, and there we differ from cabal.** Cabal's validator still
-checks a library self-dependency's range against the chosen version (`Validate.merge`),
-so it refuses a release whose self-dependency excludes itself. We state nothing, so
-`acme-zero ==0.0.2` and `shuffle ==0.1.3.0` get a plan here and none from cabal, and
-Cabal's configure step would refuse that plan. `lens 1.7`'s `lens ==1.7` includes itself,
-so both solvers accept it. No problem in the gate's set has this shape, so its verdict
-agreement does not see the difference.
+**The range is still a fact about the release.** Cabal's validator checks it against the
+chosen version, whichever component declares it (`Validate.merge`), and so do we.
+`acme-zero 0.0.2` declares `acme-zero ==0`, and the executables of `NXT 0.2.4` declare
+`NXT ==0.2.3`. No plan can honour either, and Cabal's configure step would refuse one.
+`lens 1.7`'s `lens ==1.7` includes itself, so both solvers accept it.
 
-Two changes are in place:
+Two things implement this:
 
-- `PubGrub.Cabal.Provider` filters the occurrence out, so no such clause is minted.
+- `PubGrub.Cabal.Provider` states the occurrence only where its range excludes the
+  release (`excludesItself`). If it does under any assignment, the scan passes over the
+  release as it does an unbuildable one, and the proof names the dependency: `shuffle
+  >=0.1.3.0 && <0.1.3.1 depends on shuffle ==0.1.2.0`. Under a flag it is a guarded fact,
+  and propagation flips the flag. Where the range admits the release, nothing is stated.
 - `fromDependency` builds its terms with `Map.fromListWith intersectTerm` (in
   `PubGrub.Incompatibility.incompatibility`), so two entries about one variable are
-  intersected rather than overwritten.
+  intersected rather than overwritten. That makes the clause a ban on just the releases
+  outside the range. With `Map.fromList`, which keeps the last binding, `lens 1.7`'s
+  `lens ==1.7` became the unconditional `{lens: Negative ==1.7}` — "lens must be exactly
+  1.7", asserted of every instance. That pinned a whole solve and became the unexplained
+  first premise of its proof.
 
-The second one alone makes the clause honest: it bans no release when the range
-includes the depender, and bans the depender when it does not, which is cabal's verdict.
-Without it, `Map.fromList` kept the
-last binding, and `lens 1.7`'s `lens ==1.7` became the unconditional
-`{lens: Negative ==1.7}` — "lens must be exactly 1.7", asserted of every instance.
-That pinned a whole solve and became the unexplained first premise of its proof.
-`pubgrub-cabal/test/StoreSpec.hs` and `pubgrub-cabal/test/FlagSolveSpec.hs` each hold a
-"self-dependencies" case, and each was verified to fail without its own half.
+No problem in the gate's set has this shape, so its verdict agreement does not cover
+the rule. `pubgrub-cabal/test/FlagSolveSpec.hs` and `pubgrub-cabal/test/StoreSpec.hs`
+each hold a "self-dependencies" case. Run by hand at the pin, the two solvers agree on
+all 22 releases of this shape that a rough scan of the index found.
 
 cabal has one exception, and it does not arise here. `Builder.extendOpen` keeps a
 reverse-dependency edge for a *setup* self-dependency, so the cycle forces a different
@@ -1116,9 +1118,9 @@ and never those of their dependencies. So the choice is an argument of the reduc
 which compares build plans, passes `noStanzas` throughout. When read, a test suite or
 benchmark is a component like any other — flag-guarded, gated on its own `buildable:`
 through the same `addBuildableCondition`, its build tools in `relTools` — and its
-dependency on its own package's library is the self-dependency
-[§8](#8-a-dependency-of-p-on-p-is-dropped) drops, so enabling the stanzas pins
-nothing. The derived index stores both trees beside the others (`srTests`,
+dependency on its own package's library is a self-dependency
+([§8](#8-a-dependency-of-p-on-p-is-checked-not-solved)), so enabling the stanzas pins
+nothing unless its range excludes the release. The derived index stores both trees beside the others (`srTests`,
 `srBenchmarks`), and `pubgrub-cabal/test/ReleaseSpec.hs` solves a local package with
 its tests on over a world of dependencies with theirs off.
 

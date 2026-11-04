@@ -196,10 +196,7 @@ a completeness column before it can render such a problem fairly.
   [§3.1](#31-flags-are-fixed-at-their-declared-defaults-unless-asked).
 - **cabal solves setup and build-tool dependencies and we do not.** On a package with
   a custom `Setup.hs` the two solvers answer different questions.
-- **Verdict agreement covers these 26 problems, not every package.** One known
-  difference falls outside them: a release whose dependency on its own library excludes
-  its own version gets a plan from us and none from cabal, as `acme-zero ==0.0.2` does
-  ([DESIGN.md §8](DESIGN.md#8-a-dependency-of-p-on-p-is-dropped)).
+- **Verdict agreement covers these 26 problems, not every package.**
 
 ---
 
@@ -290,7 +287,7 @@ What this leaves: the driver solves neither namespace, so our plan still lacks t
 and the comparison on that point is of two different questions. Qualified goals stay
 shelved ([§3.2](#32-one-version-per-package-name)): nothing here needs them. The setup
 self-dependency exception cabal keeps
-([DESIGN.md §8](DESIGN.md#8-a-dependency-of-p-on-p-is-dropped)) belongs to whoever solves
+([DESIGN.md §8](DESIGN.md#8-a-dependency-of-p-on-p-is-checked-not-solved)) belongs to whoever solves
 the setup namespace.
 
 ### 4.2 Public sublibraries (rung 5)

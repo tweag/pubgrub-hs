@@ -6,9 +6,8 @@
 -- The 'Stanzas' decide whether a release's test suites and benchmarks are
 -- dependencies of it: a planner says yes for a local package under @cabal
 -- test@ and no for everything else. And a test suite depends on its own
--- package's library — the intra-package edge @docs\/DESIGN.md@ §8 drops — so
--- turning the stanzas on must neither pin the package to itself nor fail the
--- solve.
+-- package's library — an intra-package edge, @docs\/DESIGN.md@ §8 — so turning
+-- the stanzas on must neither pin the package to itself nor fail the solve.
 module ReleaseSpec (tests) where
 
 import           Control.Exception                            (toException)

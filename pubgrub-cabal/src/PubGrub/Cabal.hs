@@ -288,9 +288,8 @@ unbuildable p s guard why =
 -- Positive (V \\ R)@, exactly \"no instance of p in @V@ falls outside its own
 -- requirement @R@\". Keeping only one of the two terms would be wrong:
 -- @{p: Negative R}@ alone asserts \"p must be in R\" of every instance of @p@
--- rather than of those in @V@. The provider drops a release's dependency on its
--- own package before it gets here, as cabal does, so this case is the safety
--- net rather than the rule.
+-- rather than of those in @V@. The provider states a release's dependency on its
+-- own package only when the range excludes that release, as a ban on it.
 fromDependency :: PackageName -> InstanceSet -> Guard -> PackageName -> InstanceSet -> Incompatibility Var
 fromDependency pkgName pkgSet guard depName depSet =
     fact
