@@ -939,7 +939,7 @@ default nursery cabal's peak on `vector` read 50.7 MB before the change and 65.8
 after; under the 256 KB nursery it read 64.3 MB and 66.0 MB. The first pair is the
 sampling moving, not the heap: `maximum residency` is the largest heap at any major
 collection, and with a 4 MB nursery there are six of them in a short run. The
-2026-10-08 table in [STATUS.md §2.1](STATUS.md#21-against-cabal-on-the-benchmark-set) carries cabal's
+table in [STATUS.md §2.1](STATUS.md#21-against-cabal-on-the-benchmark-set) carries cabal's
 higher figures for that reason, not because cabal changed.
 [benchmarking.md](benchmarking.md) records the check.
 

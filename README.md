@@ -16,15 +16,16 @@ Cabal flags, buildability, and installed boot packages. All six worked examples 
 the PubGrub spec are tests, and the two error-reporting examples assert the printed
 proof against a golden file.
 
-**Both questions are measured, and neither answer is an unqualified yes.** We use less
-peak memory than cabal on every problem we measure, and our failure proof is shorter
-than cabal's message on all 20 real failures in the corpus. That record holds only
-where every target is pinned to a version, and every corpus target is: on a problem
-with an *unconstrained* target a complete proof has to refute every release of it, where
-cabal's message is a search trace that stops at the first wall it hit, and on the 23
-such problems of the 2026-09-10 sweep we were the longer text on 21. Two more rows go
-the other way: cabal is faster on `yesod` and allocates less there, and cabal's
-message on `aeson <2` is shorter than our proof.
+**Both questions are measured, and neither answer is an unqualified yes.** We are faster
+than cabal, use less peak memory and allocate less on all six benchmark problems, though
+that is six problems, and cabal also solves setup and build-tool dependencies there and
+we do not. Our failure proof is shorter than cabal's message on all 20 real failures in
+the corpus. That record holds only where every target is pinned to a version, and every
+corpus target is: on a problem with an *unconstrained* target a complete proof has to
+refute every release of it, where cabal's message is a search trace that stops at the
+first wall it hit, and on the 23 such problems of the 2026-09-10 sweep we were the longer
+text on 21. On the benchmark set too, cabal's message on `aeson <2` is shorter than our
+proof.
 
 The benchmark report and the explanation showcase in [`docs/reports/`](docs/reports/)
 are the evidence, each dated in its header. [`docs/STATUS.md`](docs/STATUS.md) is what the

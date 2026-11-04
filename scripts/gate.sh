@@ -28,7 +28,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
 # --- baselines --------------------------------------------------------------
-# Measured on 2026-09-22 at the index-state in bench/index-state. See the
+# Measured on 2026-11-04 at the index-state in bench/index-state. See the
 # header: floors and ceilings, not targets.
 #
 # The proof baselines are over the CORPUS only, so adding a problem to

@@ -55,7 +55,7 @@ is added one rung at a time; each rung leaves a runnable solver.
 
 ## 2. The numbers
 
-Measured by `pubgrub-harness` on 2026-10-08 at index-state `2026-09-09T02:42:09Z`:
+Measured by `pubgrub-harness` on 2026-11-04 at index-state `2026-09-09T02:42:09Z`:
 one desktop, GHC 9.12.4, medians of three runs, no trace. The two reports as generated are in
 [reports/](reports/). Read
 [benchmarking.md](benchmarking.md) before you quote any figure below. The short version:
@@ -70,29 +70,27 @@ the better of the two. `sat` means a plan exists, and `UNSAT` that none does.
 
 | problem | verdict | ours | cabal | our world / solve | cabal world / index / solve | our residency | cabal residency | our allocation | cabal allocation | our proof | cabal's message |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `vector` | both sat | **0.35** | 0.69 | 0.33 / 0.02 | 0.34 / 0.10 / 0.23 | **27.0** | 72.3 MB | **0.55** | 1.04 GB | — | — |
-| `pandoc` | both sat | **0.81** | 1.14 | 0.33 / 0.47 | 0.30 / 0.10 / 0.70 | **43.8** | 103.3 MB | **1.80** | 1.97 GB | — | — |
-| `conduit <1.3` | both UNSAT | **0.37** | 1.12 | 0.35 / 0.01 | 0.45 / 0.15 / 0.49 | **27.0** | 72.3 MB | **0.54** | 1.50 GB | **9** | 12 |
-| `lens <4` | both UNSAT | **0.61** | 1.89 | 0.51 / 0.10 | 0.68 / 0.21 / 1.00 | **27.0** | 72.3 MB | **0.68** | 2.06 GB | **7** | 18 |
-| `aeson <2` | both UNSAT | **1.06** | 2.23 | 0.64 / 0.41 | 0.42 / 0.14 / 1.61 | **27.0** | 93.1 MB | **1.18** | 5.60 GB | 38 | **26** |
-| `yesod` | both sat | 2.53 | **1.61** | 0.44 / 2.06 | 0.42 / 0.13 / 1.00 | **43.5** | 100.2 MB | 5.07 | **2.10** GB | — | — |
+| `vector` | both sat | **0.87** | 1.31 | 0.82 / 0.02 | 0.80 / 0.16 / 0.32 | **29.2** | 75.6 MB | **0.49** | 1.05 GB | — | — |
+| `pandoc` | both sat | **1.25** | 1.98 | 0.85 / 0.37 | 0.82 / 0.15 / 0.95 | **50.4** | 93.8 MB | **0.93** | 1.99 GB | — | — |
+| `conduit <1.3` | both UNSAT | **0.86** | 1.52 | 0.81 / 0.01 | 0.80 / 0.16 / 0.51 | **29.2** | 75.6 MB | **0.50** | 1.52 GB | **9** | 12 |
+| `lens <4` | both UNSAT | **0.93** | 1.71 | 0.84 / 0.04 | 0.80 / 0.17 / 0.62 | **29.2** | 75.6 MB | **0.55** | 2.08 GB | **7** | 18 |
+| `aeson <2` | both UNSAT | **0.90** | 2.70 | 0.77 / 0.11 | 0.80 / 0.18 / 1.68 | **29.2** | 95.6 MB | **0.57** | 5.62 GB | 38 | **26** |
+| `yesod` | both sat | **1.34** | 2.13 | 0.78 / 0.54 | 0.88 / 0.19 / 1.04 | **50.1** | 96.3 MB | **1.10** | 2.12 GB | — | — |
 
-All six verdicts agree. We use **2.3–3.4× less peak memory on all six**. We are faster
-on five of six and allocate less on five of six. The host carried a load of about 2
-from `lens` onwards on this run, which is why those rows are slower on both sides
-than `vector`, `pandoc` and `conduit`, and than the same rows a quarter of an hour
-earlier; residency and allocation did not move, and they carry the comparison.
+All six verdicts agree. We use **1.9–3.3× less peak memory on all six**, are 1.5–3×
+faster and allocate 1.9–9.9× less.
 
 **The phases say where our time goes, and it is not the solve.** Opening the world
-(the index, the installed database and the pkg-config database) costs 0.3–0.35 s on
-a quiet run, on both sides. Our solve is under 0.2 s on three of the six problems, and
-`pandoc`'s half second is reads, not search. Only `yesod` has a solve phase that
-matters. cabal's `index` phase is small because the work it names is lazy and lands
+(the index, the installed database and the pkg-config database) costs about 0.8 s on
+both sides, which is most of our elapsed time on every row. Our solve is under 0.2 s on
+four of the six problems, `pandoc`'s 0.37 s is reads rather than search, and `yesod`'s
+0.54 s is the only one with real search in it. cabal's `index` phase is small because the work it names is lazy and lands
 in its `solve` ([§2.3](#23-what-these-numbers-do-not-establish)).
 
-**`yesod` is where we lose, and it is the most useful row in the table.** cabal is
-1.6× faster on it and allocates 2.4× less. It is the only *satisfiable* problem in the
-set with real search in it: `vector` and `pandoc` resolve almost straight through.
+**`yesod` is where we have the most left to gain, and it is the most useful row in the
+table.** It is the only *satisfiable* problem in the set with real search in it:
+`vector` and `pandoc` resolve almost straight through. Our lead there is the smallest
+on allocation, at 1.9×.
 
 It is diagnosed: **half its decisions re-derive a prefix that was already correct**,
 because decisions are ordered by discovery rather than by the spec's heuristic. See
@@ -147,7 +145,7 @@ six failure kinds, and the per-problem table.
 
 **We are shorter than cabal on all 20: 76 proof sentences against cabal's 193.** No
 `no version for …` line is left anywhere in the corpus. `scripts/gate.sh` holds both
-totals as ceilings. Measured on 2026-10-08 at the pinned index-state.
+totals as ceilings. Measured on 2026-11-04 at the pinned index-state.
 
 `cabal-install ==3.18.1.0` is the widest margin at 2 sentences against 12. `yesod
 ==1.6.2.3, aeson ==2.3.1.0` is the narrowest at 9 against 11.
@@ -169,7 +167,7 @@ a completeness column before it can render such a problem fairly.
 
 ### 2.3 What these numbers do not establish
 
-- **The memory floor is unexplained.** Every solve pays about 27 MB before it does any
+- **The memory floor is unexplained.** Every solve pays about 29 MB before it does any
   work of its own, of which about 2 MB is the index-state read
   ([DESIGN.md §13](DESIGN.md#13-the-index-is-read-at-an-index-state)). The package-to-versions map
   does not explain it: doubling the map's per-element overhead moved peak residency
@@ -179,7 +177,7 @@ a completeness column before it can render such a problem fairly.
 
   What sits *above* the floor is understood: the memoised reduced forms, so residency
   tracks how many releases a solve read. That is why `pandoc` and `yesod` sit at
-  about 43 MB.
+  about 50 MB.
 - **cabal's index work is not separated from its solve, and cannot be.** The `world`
   phase — index open, installed database, pkg-config database — is separated on both
   sides. The two solvers then do different index work: ours decodes a release when it
@@ -315,7 +313,7 @@ means re-measuring the corpus, where two problems become solvable.
 
 ### 4.5 Open questions
 
-1. **What does the 27 MB memory floor consist of?** It is the first thing to settle,
+1. **What does the 29 MB memory floor consist of?** It is the first thing to settle,
    because the memory claim is the strongest one the project has and the floor is most
    of it. See [§2.3](#23-what-these-numbers-do-not-establish).
 2. **Should `expand` split back into "pick" then "consequences"?** The reference Rust
@@ -496,8 +494,8 @@ anchors are `:595` (reporting case 1), `:651` (case 2.ii), `:668` and `:671` (ca
 
 | deliverable | state |
 | --- | --- |
-| **Explanation showcase** — real failing problems, pubgrub-hs against cabal, side by side | **the problem set exists and we win on all of it, and all of it is pinned.** 20 real failures with every target pinned, six failure kinds, four positive controls. Shorter than cabal on 20 of 20: 76 proof sentences against 193. Shorter on two of the three benchmark unsat problems. Both of the spec's published examples are golden tests, and the linear one matches sentence for sentence. `pubgrub-harness` renders the two explanations as adjacent blocks for the 16 comparable problems, and the 2026-10-08 run is [reports/showcase.md](reports/showcase.md): shorter on 16 of 16 by sentences, 59 against 150 lines; on screen lines at 80 columns 159 against 337, shorter on 15 and equal on one. **On an unconstrained target the record inverts** ([§2.2](#22-against-cabal-on-the-failure-corpus)), and no such problem is in the corpus or the showcase |
-| **Benchmark report** — time and peak residency on real problems | **current numbers exist** for six problems, three sat and three unsat, both solvers. We use less peak memory on all six, and are faster and leaner in allocation on five of six. `yesod` is the exception on both. The 2026-10-08 run is [reports/benchmark.md](reports/benchmark.md). Its caveats: timings are medians of three runs against ±25% noise, cabal's lazy per-release parsing lands in its `solve` phase and cannot be separated without changing the work, and the 27 MB memory floor is unexplained |
+| **Explanation showcase** — real failing problems, pubgrub-hs against cabal, side by side | **the problem set exists and we win on all of it, and all of it is pinned.** 20 real failures with every target pinned, six failure kinds, four positive controls. Shorter than cabal on 20 of 20: 76 proof sentences against 193. Shorter on two of the three benchmark unsat problems. Both of the spec's published examples are golden tests, and the linear one matches sentence for sentence. `pubgrub-harness` renders the two explanations as adjacent blocks for the 16 comparable problems, and the 2026-11-04 run is [reports/showcase.md](reports/showcase.md): shorter on 16 of 16 by sentences, 59 against 150 lines; on screen lines at 80 columns 159 against 337, shorter on 15 and equal on one. **On an unconstrained target the record inverts** ([§2.2](#22-against-cabal-on-the-failure-corpus)), and no such problem is in the corpus or the showcase |
+| **Benchmark report** — time and peak residency on real problems | **current numbers exist** for six problems, three sat and three unsat, both solvers. We use less peak memory, are faster and allocate less on all six. The 2026-11-04 run is [reports/benchmark.md](reports/benchmark.md). Its caveats: timings are medians of three runs against ±25% noise, cabal's lazy per-release parsing lands in its `solve` phase and cannot be separated without changing the work, and the 29 MB memory floor is unexplained |
 
 The baseline and the shared index are done. `cabal-install-solver` drives cabal's
 resolver from the same `withWorld`, which is what makes the comparison

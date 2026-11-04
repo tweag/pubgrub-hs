@@ -247,7 +247,7 @@ fragmentation.
 `maximum residency` from `+RTS -s` is the live heap as the garbage collector saw it.
 STATUS.md quotes the second.
 
-**The ~27 MB floor is unexplained**, and it is the weakest link in the strongest claim
+**The ~29 MB floor is unexplained**, and it is the weakest link in the strongest claim
 the project has. Doubling the per-element overhead of the package-to-versions map, long
 assumed to dominate it, moved the floor by 0.5%. A ratio whose numerator nobody can
 account for is not evidence, however reproducible it is.

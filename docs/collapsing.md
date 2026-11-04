@@ -140,7 +140,7 @@ clause.
 
 **`yesod` is the largest case.** With the walk off it did not finish in 90 s:
 thousands of decisions, every conflict at depth 0. With it on, it resolves in about
-**2.5 s** with 828 decisions and 14 conflicts. Churn is exactly what a pre-emptively
+**1.3 s** with 828 decisions and 14 conflicts. Churn is exactly what a pre-emptively
 wide clause removes.
 
 **If read-dominated problems ever matter more than search, `pandoc` is the row to

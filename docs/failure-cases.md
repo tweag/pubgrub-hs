@@ -77,7 +77,7 @@ before `T` has been caught up with by `T`.
 ghc-9.12.2, base-4.21.0.0, and this machine's pkg-config database. Absent there:
 `libpq`, `libzmq`, `blas`, `lapack`. Present: `cairo`, `pango`, `gtk+-2.0`, `gtk+-3.0`,
 `gtk4`, `gio-2.0`, `zlib`, `libsodium`, `libgit2`. Every problem runs in under 3 s.
-Measured on 2026-09-22 at index-state `2026-09-09T02:42:09Z`. cabal's message
+Measured on 2026-11-04 at index-state `2026-09-09T02:42:09Z`. cabal's message
 lengths move with the index when it is not pinned: `haskoin-store-data` and
 `atelier-testing` each grew by two lines between the 2026-08-20 and 2026-09-03
 snapshots. Ours did not move.
