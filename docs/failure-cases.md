@@ -1,11 +1,8 @@
 # Failure cases: the unsat problem set
 
-The explanation deliverable needs problems that **fail**. This file is that set, the
-method that found it, and what it says about our proofs against cabal's messages.
-
-Before it existed the project had three failing problems, all found by accident while
-measuring something else. A small problem set chosen to measure search cannot report on
-a path it never walks.
+The explanation deliverable needs problems that **fail**: unsatisfiable problems, "unsat"
+for short. This file is that set, the method that found it, and what it says about our
+proofs against cabal's messages.
 
 The problems themselves are [`bench/unsat-problems.txt`](../bench/unsat-problems.txt),
 which carries the per-problem notes. This file is the argument around them.
@@ -47,29 +44,31 @@ they are worth as much as the failures (below).
 4. **Installed-graph conflict** — the clash is with what an *installed* boot package
    requires, not with anything on Hackage: `cpsa`'s `deepseq <1.5` against the
    installed `bytestring`, which requires `deepseq ==1.5.1.0`.
-5. **Unknown package** — a dependency that is not on Hackage at all: `cabal-install
-   3.18.1.0` needs `hooks-exe`.
+5. **Unknown package** — a dependency the builder could not find on Hackage: `cabal-install
+   3.18.1.0` needs `hooks-exe`. `hooks-exe` is published at the pinned index-state, where
+   `cabal-install` fails over `hackage-security` and `Cabal-syntax` instead.
 6. **Unsupported language** — `requires unknown language GHC2024` (`numhask`,
    `okf-core`). A per-release rejection of exactly the shape buildability has, but
    coming from the toolchain rather than the index. **Not reproducible here** (our
    `Cabal-syntax` knows GHC2024) and we have no model for it.
 
-Kinds 1–5 all reproduce. Kind 6 does not, and is recorded so nobody hunts it twice.
+Kinds 1–4 reproduce in the corpus, kinds 3 and 4 only in cabal's message: our proofs of
+`atelier-testing` and `cpsa` go through `base`. Kind 5 has no specimen there at the pin. Kind 6 does
+not reproduce, and is recorded so nobody hunts it twice.
 
 ## A second source: two targets that each resolve alone
 
-A build report can only show a package failing against the compiler and the
-machine, and every one of the 17 above turns on a boot package, a missing C library
-or a dead range. A conflict *between two packages* needs two targets, so the second
-method solves pairs of popular packages together after checking that each resolves
-alone at the pinned index-state: if both do, a failure of the pair is a conflict
-between them and nothing else.
+A build report can only show one package failing, and most of the 17 it found turn on
+a boot package, a missing C library or a dead range. A conflict *between two requested
+packages* needs two targets, so the second method solves pairs of popular packages
+together after checking that each resolves alone at the pinned index-state: if both
+do, a failure of the pair is a conflict between them and nothing else.
 
 **Pinning every target is what makes it work.** 153 pairs of unconstrained popular
 packages gave 153 resolutions, because the solver is free to pick an older release
 of either. With every target pinned to its latest release the same packages give
 three failures, all of them `aeson 2.3.1.0` against a depender still capped below
-it, and no boot package anywhere. Lowering the index-state does not help: the
+it. Lowering the index-state does not help: the
 un-absorbed window sits at the newest state, since a major release published long
 before `T` has been caught up with by `T`.
 
@@ -90,7 +89,7 @@ is true but not a cause, so a proof carrying one is explaining less than it coul
 
 | target | kind | ours | cabal | noVer |
 | --- | --- | --- | --- | --- |
-| `cabal-install ==3.18.1.0` | Cabal / hackage-security | **2** | 12 | 0 |
+| `cabal-install ==3.18.1.0` | Cabal-syntax / hackage-security | **2** | 12 | 0 |
 | `haddock ==2.29.1` | base bound, seven windows | **2** | 7 | 0 |
 | `hadolint ==2.15.1` | `time` vs language-docker | **2** | 9 | 0 |
 | `hpqtypes-extras ==1.20.0.0` | pkg-config `libpq` | **2** | 7 | 0 |
@@ -116,27 +115,25 @@ line left in the whole set. The margin is narrowest on the `yesod` pair (9 again
 11) and widest on `cabal-install` (2 against 12). Our longest is the `yesod` pair at
 9, against cabal's longest message at 17 on `matterhorn`.
 
-[`scripts/gate.sh`](../scripts/gate.sh) re-runs every row and holds both totals as
-ceilings, so a regression here fails the gate rather than being noticed later.
+[`scripts/gate.sh`](../scripts/gate.sh) re-runs every row, fails if our proof is longer
+than cabal's message on any of them, and holds the sentence total and the `no version`
+total as ceilings, so a regression here fails the gate rather than being noticed later.
 
 Two things this table is evidence for beyond length:
 
 - **The chain fusion fires in the wild.** `depends on X which depends on Y` appears in
-  14 of the first 17. It had only ever been seen in the spec's own worked example, so it
-  looked like a rule that never fires on real input. That is also what made the empty-range
-  clutter look cosmetic ([DESIGN.md](DESIGN.md) §9, rule 5): those holes were what
-  kept the fusion from pairing.
+  4 of the 20: `atelier-testing`, `cabal-install`, `futhark` and the `yesod` pair. That
+  is why the empty-range clutter is not cosmetic ([DESIGN.md](DESIGN.md) §9, rule 5):
+  those holes keep the fusion from pairing.
 - **`references/pubgrub.md:476` pays.** `hpqtypes-extras` says
   `hpqtypes >=1.10.0.2 needs pkg-config package libpq, which is not found` where
-  cabal says `pkg-config package libpq-any, not found in the pkg-config database`. Both name the module, and ours takes two sentences against eight lines.
-  Our solver used to say `no version for hpqtypes in >=1.13`, which is the symptom
-  and sounds false, and then `cannot be built here`, which is the verdict without
-  the module.
+  cabal says `pkg-config package libpq-any, not found in the pkg-config database`. Both
+  name the module, and ours takes two sentences against seven lines.
 
 ### The positive controls
 
-`vulkan ==3.27`, `dataframe-csv ==2.3.0.0`, `xmobar ==0.51.1`, `timeplot ==1.0.33`
-and `gloss ==1.13.2.2` all failed on Hackage's builder and **resolve here**.
+`vulkan ==3.27`, `xmobar ==0.51.1`, `timeplot ==1.0.33` and `gloss ==1.13.2.2` all
+failed on Hackage's builder and **resolve here**.
 `vulkan` is the clearest: the builder had no pkg-config `vulkan`, this
 machine does. A problem set for explanations needs these, or it cannot show that the
 failures in it are real rather than an artefact of the environment.
@@ -150,7 +147,8 @@ failures in it are real rather than an artefact of the environment.
   ([STATUS.md](STATUS.md) §3.1). That is a restriction of the problem, and it removes
   exactly the escape cabal's *automatic* flags would provide.
 - **cabal solves setup and build-tool depends and we do not.** On a package with a
-  custom `Setup.hs` the two are answering different questions. None of the 20 has one.
+  custom `Setup.hs` the two are answering different questions. Of the 20 targets,
+  `liquidhaskell` has one.
 - **Every target is pinned to one version**, and the length record holds only there.
   See the next section.
 - **Four of them fail for different reasons on the two sides** (`atelier-testing`,

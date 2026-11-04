@@ -20,9 +20,9 @@
 #   unit       the whole test suite
 #
 # Baselines are the five numbers below. EXPECT_PROBLEMS is exact. The other four
-# are floors or ceilings, not targets: a run that beats one prints IMPROVED and
-# still exits 0, and the number here is then stale on purpose — move it in the
-# same change that earned it.
+# are floors or ceilings, not targets: a run that beats one still exits 0, and
+# prints IMPROVED except on the corpus floor. The number here is then stale on
+# purpose — move it in the same change that earned it.
 set -uo pipefail
 
 cd "$(dirname "$0")/.." || exit 1

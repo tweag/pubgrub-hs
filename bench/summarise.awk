@@ -4,8 +4,8 @@
 #
 #   pubgrub -v 'aeson <2' | awk -f bench/summarise.awk
 #
-# Every number here is a count of trace lines, which is why a run cannot be both
-# quiet and counted (see docs/benchmarking.md, "The one thing that is missing").
+# Every number here is a count of trace lines. --stats counts the same numbers
+# in-process (see docs/benchmarking.md, "Quiet and counted").
 #
 # depth: the "resolving at" lines between a Conflict and its Learned, one per
 # resolution step. A deep entry is a single clause learned over many iterations,

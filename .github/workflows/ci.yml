@@ -325,7 +325,7 @@ jobs:
             (cd "$dir" && cabal check)
           done
 
-  # The documentation of every package with a library, built with
+  # The documentation of the two packages published to Hackage, built with
   # RELEASE_GHC: a tarball for Hackage (`cabal upload --documentation`),
   # which the release publishes, and the documentation of the whole project
   # from cabal haddock-project, which the pages job publishes. Both link to

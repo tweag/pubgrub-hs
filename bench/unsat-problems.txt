@@ -25,9 +25,9 @@
 #    cairo, pango, gtk, zlib, libsodium and libgit2 are present. On a machine with
 #    libpq installed, hpqtypes-extras resolves.
 #  * cabal solves setup and build-tool depends (solveExecutables = True) and we do
-#    not (rung 4 is unbuilt). On a package with a custom Setup.hs the two solvers
-#    are answering different questions. None of the 20 below has one, but check
-#    before adding.
+#    not (the driver solves neither namespace). On a package with a custom Setup.hs
+#    the two solvers are answering different questions. Of the 20 targets below,
+#    liquidhaskell has one; check before adding.
 #
 #  * Every target below is PINNED to one version. An unconstrained target obliges
 #    a complete proof to refute every one of its releases, where cabal's message
@@ -37,7 +37,7 @@
 
 # --- pkg-config: a C library this machine does not have -------------------------
 # The most common kind among popular packages, and the one that exercises
-# references/pubgrub.md:474 — every release in range is unbuildable, so the proof
+# references/pubgrub.md:475 — every release in range is unbuildable, so the proof
 # has to say so rather than call the range empty.
 hpqtypes-extras ==1.20.0.0      # libpq. 2 lines against cabal's 7
 haskoin-store-data ==1.6.0      # libsecp256k1, two hops down through haskoin-core showcase:exclude (fails for a different reason than cabal)
@@ -55,14 +55,14 @@ hjsonschema ==1.10.0            # base and bytestring, via aeson
 
 # --- dead range: a declared bound naming a version never published -------------
 # `widen` puts the declared range into the term verbatim, so the dead space survives
-# into the proof. Narrowing it was measured and rejected twice (docs/STATUS.md §5.2).
-atelier-testing ==0.2.0.0       # atelier-core >=0.3 && <0.3.0.0, and two more showcase:exclude (fails for a different reason than cabal)
+# into the proof. Narrowing it was measured and rejected (docs/STATUS.md §5.2).
+atelier-testing ==0.2.0.0       # atelier-core >=0.3 && <0.4, and two more showcase:exclude (fails for a different reason than cabal)
 cpsa ==4.4.9                    # deepseq, two slots against installed base
 happstack-hsp ==7.3.7.8         # template-haskell history
 
 # --- plain dependency conflict, no boot package involved -----------------------
 hadolint ==2.15.1               # time, against language-docker. The cleanest specimen
-cabal-install ==3.18.1.0        # Cabal / hackage-security showcase:exclude (fails for a different reason than cabal)
+cabal-install ==3.18.1.0        # Cabal-syntax / hackage-security showcase:exclude (fails for a different reason than cabal)
 futhark ==0.27.1                # regex / time chain showcase:exclude (fails for a different reason than cabal)
 
 # --- the two long chains -------------------------------------------------------
@@ -71,7 +71,7 @@ futhark ==0.27.1                # regex / time chain showcase:exclude (fails for
 scion-browser ==0.5.0           # 4 sentences against cabal's 11; was 16 against 12
 matterhorn ==90000.1.1          # 8 against 17; was 16 against 18 with 11 no-version lines
 
-# --- two targets, no boot package anywhere -------------------------------------
+# --- two targets ---------------------------------------------------------------
 # Each target resolves ALONE at the pinned index-state, so the failure is a
 # conflict between the two: aeson 2.3.1.0 against a depender still capped below
 # it. Found by pinning every target to its latest release and solving pairs of
@@ -86,7 +86,6 @@ yesod ==1.6.2.3, aeson ==2.3.1.0    # via yesod-persistent and persistent
 # problem set for explanations has to contain problems that do not fail, or it
 # cannot show that a failure was real. Uncomment to run them.
 # vulkan ==3.27                 # builder lacked pkg-config vulkan; this machine has it
-# dataframe-csv ==2.3.0.0
 # xmobar ==0.51.1
 # timeplot ==1.0.33
 # gloss ==1.13.2.2

@@ -1,17 +1,24 @@
 # Cabal's build model
 
-> **Status: forward-looking reference. None of this is implemented.** A model of
-> *Cabal's* build structure — components, scopes, build units, installed units, setup
-> programs, Backpack — not of our solver. It is the reference for **rungs 4 and 5**
-> (setup and build-tool dependencies, public sublibraries), which have not been
-> started.
+> **Status: reference.** A model of *Cabal's* build structure — components, scopes,
+> build units, installed units, setup programs, Backpack — not of our solver. It is
+> the reference for **rungs 4 and 5** (setup and build-tool dependencies, public
+> sublibraries; [STATUS.md](STATUS.md) §1).
 >
 > **"Scope" here is cabal's "qualifier".** `Distribution.Solver.Types.PackagePath`
-> calls it `Qualifier`, and that is the word `../CLAUDE.md` and the shelved
-> qualified-goals design use. Same concept, two names. Read them as synonyms.
+> calls it `Qualifier`, and that is the word the shelved qualified-goals design uses
+> ([STATUS.md](STATUS.md) §3.2). Same concept, two names. Read them as synonyms.
 >
-> The solver as built handles one component per package and ignores scopes entirely.
-> See [STATUS.md](STATUS.md) §3.2.
+> **How much of this the code has.** The solver decides one version per package name
+> and has no scopes. `PubGrub.Cabal.Flatten` reads the dependencies of a package's
+> library, sublibraries, foreign libraries and executables together, and of its test
+> suites and benchmarks when the caller's `Stanzas` ask. `PubGrub.Cabal.Installed`
+> holds installed units. Build tools and setup dependencies are read and carried in
+> `Release` (`relTools`, `relSetup`) for a planner to solve in a namespace of its own,
+> linked to the main plan by a `Preference` rather than by scopes
+> ([DESIGN.md](DESIGN.md) §16); the driver solves neither. A library selector is not
+> checked (`q:n` counts as a dependency on `q`), and build units and Backpack are not
+> implemented.
 
 ## Scope of this specification
 
@@ -23,7 +30,8 @@ The following Cabal features are intentionally simplified or ignored:
 * Cabal command-line target selectors are ignored.
 * the detailed semantics of `buildable: false` are ignored here. The solver does
   implement it: `PubGrub.Cabal.Flatten`'s `buildableCondition` and
-  `buildableAtDefaults`, plus `pkgconfig-depends` against the machine's real
+  `unbuildableAtDefaults`, plus `pkgconfig-depends` against the `PkgConfigPresent`
+  predicate its caller passes, which the driver answers from the machine's real
   `pkg-config` database.
 * custom setup scripts are treated as opaque package-level build procedures.
 * Backpack is modelled only at the level needed to describe requirements, mixins, instantiations, and definite/indefinite units.
@@ -84,17 +92,16 @@ Therefore, the main library of package `p` is identified as:
 library p
 ```
 
-This convention makes component identity unambiguous, even when a source package contains multiple components with the same textual name but different kinds.
+This convention keeps the main library of `foo` and a component of another kind with the same name apart, which is the ordinary case for a package that ships a tool of its own name.
 
 For example, the following are distinct component identities:
 
 ```text
 library foo
 executable foo
-test foo
-benchmark foo
-foreign-library foo
 ```
+
+The main library may share its name with one component of another kind. No two named sections may share a name, whatever their kinds: the parser accepts it, the solver does not look, and Cabal's configure step refuses it. `cabal check` reports it for all but foreign libraries.
 
 ## Ordinary and optional components
 
@@ -165,11 +172,13 @@ choose a source package foo-v such that:
   foo-v contains library component internal
 ```
 
+A package other than `foo` can select that library only if its `visibility` is `public`.
+
 Library dependencies and executable dependencies have different semantics during the build.
 
 A library dependency is resolved in the current scope.
 
-An executable dependency is a build-time dependency. It is resolved in a fresh executable dependency scope. The executable artefact produced in that scope is made available to the depender, but the library choices used to build that executable do not enter the depender’s scope.
+An executable dependency is a build-time dependency. It is resolved in an executable dependency scope. The executable artefact produced in that scope is made available to the depender, but the library choices used to build that executable do not enter the depender’s scope.
 
 ## Setup programs
 
@@ -208,6 +217,8 @@ disable tests for all non-local dependency packages
 disable benchmarks for all non-local dependency packages
 ```
 
+Cabal's solver holds the local half as a preference unless the user asked for tests or benchmarks explicitly: it tries a stanza enabled and disables it when a plan needs that.
+
 If tests or benchmarks are enabled for a package occurrence, the enabled test and benchmark components contribute build units and dependency constraints to that occurrence’s scope.
 
 If tests or benchmarks are disabled for a package occurrence, those components contribute no build units and no dependency constraints.
@@ -226,6 +237,8 @@ Different scopes may make different package choices for the same package name. T
 
 The same source package version may also appear in multiple scopes. When this happens, each occurrence belongs to its own scope and may have its own selected configuration, dependency assignment, build units, and Backpack instantiations.
 
+Cabal's solver is narrower than this model. Its single instance restriction lets one scope choose a package instance (a source version or one installed unit) and requires any other scope that uses that instance to link to the choice, which forces equal flags and stanzas and linked dependencies ([solving-problem.md](solving-problem.md) §4.7).
+
 A build unit is always scoped. A build unit is created by configuring a component of a package choice within a particular scope.
 
 Therefore, the same source package component may give rise to different build units in different scopes.
@@ -240,11 +253,11 @@ A dependency edge determines how scopes are used:
 
 ```text
 ordinary library dependencies are resolved in the current scope
-executable dependencies are resolved in fresh executable dependency scopes
+executable dependencies are resolved in executable dependency scopes
 setup dependencies are resolved in setup scopes
 ```
 
-Package choices made in one scope do not constrain package choices made in another scope, except through the explicit artefact or unit made available across the dependency edge.
+Package choices made in one scope do not constrain package choices made in another scope, except through the explicit artefact or unit made available across the dependency edge and, in Cabal's solver, through the single instance restriction above.
 
 ## The main project scope
 
@@ -276,9 +289,9 @@ The package choices made in the main project scope apply only within that scope.
 
 ## Executable dependency scopes
 
-Each executable dependency is resolved in its own executable dependency scope.
-
 An executable dependency scope is a separate coherence domain created for building an executable dependency.
+
+Cabal keys the scope by the package names of the depender and the dependee (`QualExe`). So every dependency of `p1` on an executable of `p2` shares one scope, at every version of `p1`, and dependencies on executables of different packages do not.
 
 The executable dependency scope contains the executable component being built, together with the library dependencies needed to build it.
 
@@ -288,13 +301,13 @@ The resulting executable artefact is made available to the depender.
 
 The libraries used to build the executable dependency do not enter the depender’s scope.
 
-Therefore, different executable dependencies may use package versions and build configurations that differ from those chosen in the main project scope or in other executable dependency scopes.
+Therefore, executable dependencies in different scopes may use package versions and build configurations that differ from those chosen in the main project scope or in other executable dependency scopes.
 
 ## Setup scopes
 
-Each setup program is resolved in a setup scope.
-
 A setup scope is a separate coherence domain created for building and running a setup program.
+
+Cabal keys the scope by package name (`QualSetup`). So every occurrence of a package shares one setup scope, and a setup dependency's own setup program uses that dependency's setup scope instead of a nested one.
 
 The setup scope contains the setup program and the library dependencies needed to build and run it.
 

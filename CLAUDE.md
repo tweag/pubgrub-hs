@@ -17,7 +17,7 @@ The deliverables are two evidence artifacts: an explanation showcase (real faili
 problems, side by side) and a benchmark report (time and peak residency).
 
 This is a **native** implementation — unit propagation and conflict resolution in
-Haskell. There is no ASP component and there never was.
+Haskell. There is no answer-set programming (ASP) component and there never was.
 
 ## Where to look first
 
@@ -52,8 +52,7 @@ design decision per section, with the evidence that earned it.
   test files, decision records). State the rule or the reason itself. The two rules
   below are for plain comments and for answers.
 - **Cite `references/pubgrub.md` by line.** Check the line first. `:596`, `:601`,
-  `:640`, `:643` and `:670` are blank, and each has been cited before. As of
-  2026-09-03 no citation in the tree lands on a blank line.
+  `:640`, `:643` and `:670` are blank, and each has been cited before.
 - **Cite the Rust reference by function name, not by line.** `references/pubgrub` and
   `references/pubgrub-guide` are nested git repos, so cloning this repository does not
   get them, and their line numbers move with upstream. Write `merge_dependents`, not
@@ -63,7 +62,7 @@ design decision per section, with the evidence that earned it.
 
 ```sh
 cabal build all
-cabal test all                       # 300 tests over the three packages that have them, and pubgrub's doctests
+cabal test all                       # 307 tests over the three packages that have them, and pubgrub's doctests
 cabal run exe:pubgrub -- aeson              # the driver; add -v for the search trace
 cabal run exe:pubgrub -- 'aeson <2'         # a target is ONE argument: package and range
 cabal run exe:pubgrub -- hlint 'aeson <2'   # several targets, solved together
@@ -72,7 +71,7 @@ cabal run exe:pubgrub -- --cabal aeson      # cabal's solver, same index (the ba
 cabal run exe:pubgrub -- --flags search aeson   # search the automatic flags, either solver (default: fixed at defaults)
 cabal run exe:pubgrub -- --constraint 'aeson <2' pandoc   # a range aeson must be in if chosen, either solver; repeatable
 cabal run exe:pubgrub -- --index-state 2026-09-03T00:00:00Z aeson   # the index as it was then, either solver
-cabal run pubgrub-index -- --index-state "$(cat bench/index-state)"   # the derived index at the pin (~120 s, once per refresh)
+cabal run pubgrub-index -- --index-state "$(cat bench/index-state)"   # the derived index at the pin (a few minutes, once per pin)
 scripts/gate.sh                      # every check that must not regress
 cabal run pubgrub-harness            # both solvers, both sets; writes bench/output/{benchmark,showcase}.md
 scripts/check-stats.sh               # --stats against bench/summarise.awk, every problem
@@ -102,8 +101,8 @@ Every run in it, and every harness run, is pinned to the index-state in
 everything the local index holds. **Move the pin in the change that re-measures.**
 
 It holds five numeric baselines. Only the problem count is exact. The other four are
-floors or ceilings rather than targets, and beating one prints `IMPROVED` and still
-exits 0. **Move a baseline in the change that earns it.** The two proof ceilings are
+floors or ceilings rather than targets. Beating one exits 0, and prints `IMPROVED`
+except on the corpus floor, which prints `ok` however many reproduce. **Move a baseline in the change that earns it.** The two proof ceilings are
 currently tight — 76 sentences and 0 no-version lines — so a reporting change has to
 earn its way past them.
 
@@ -129,7 +128,8 @@ pubgrub (package) ──── base, containers, text, co-log-core. Nothing from
   Version/VersionSet as batteries. test: a toy domain that imports none of cabal
         ▲  one callback: Provider.expand; one instance: Domain Var
 pubgrub-cabal (package) ──── pubgrub, Cabal-syntax, base, containers, text, co-log-core
-  the cabal domain (PubGrub.Cabal: Var, Flag, Value, InstanceSet, the facts), the
+  the cabal domain (PubGrub.Cabal: Var, Flag, the facts; PubGrub.Cabal.Value and
+  PubGrub.Cabal.InstanceSet: the values and their sets), the
   renderer (PubGrub.Cabal.Report: the words, the headline, the five rules), the .cabal
   flatten (PubGrub.Cabal.Flatten) with the machine passed in as plain data, the
   installed set (PubGrub.Cabal.Installed), and the provider rule
@@ -161,7 +161,7 @@ pubgrub-harness (package, unpublished)
 | `pubgrub-doctest` test-suite `pubgrub-doctests` | `pubgrub-doctest/Main.hs` — runs the `pubgrub` library's `>>>` Haddock examples through `doctest-parallel` (decision 0069). A package of its own, unpublished, so that a project building `pubgrub` from source (latti does) need not solve for the `Cabal < 3.17` that `doctest-parallel` 0.4 requires. It finds the library through the GHC environment file that `write-ghc-environment-files: always` in `cabal.project` writes, so on a clean tree build before testing |
 | `pubgrub-cabal` library | `pubgrub-cabal/src/` — `PubGrub/Cabal.hs` and `PubGrub/Cabal/{Value,InstanceSet,PreInstalled,Version,VersionSet,Pretty,Flatten,Installed,Provider,Report}.hs`, `PubGrub/Cabal/Report/{Rule,Wording,Headline,Layout}.hs`. Cabal-syntax only. `cabal check` clean |
 | `pubgrub-cabal` test-suite | `pubgrub-cabal/test/` — 10 spec modules plus `test/golden/` |
-| `pubgrub-hs` library | `pubgrub-hs/src/` — the bridge: `Bridge/{Hackage,Provider}.hs`, `Bridge/Hackage/{HttpClient,Store,Unlifted}.hs`, `Bridge/Cabal/{Baseline,InstalledPkg}.hs` |
+| `pubgrub-hs` library | `pubgrub-hs/src/` — the bridge: `Bridge/{Hackage,Log,Provider}.hs`, `Bridge/Hackage/{HttpClient,Store,Unlifted}.hs`, `Bridge/Cabal/{Baseline,InstalledPkg}.hs` |
 | `pubgrub-hs` test-suite | `pubgrub-hs/test/` — the 3 spec modules that need the bridge or `cabal-install-solver` |
 | `pubgrub-cli` executable `pubgrub` | `pubgrub-cli/app/Main.hs` — the CLI driver. Name it `exe:pubgrub` to cabal: plain `pubgrub` is the solver package |
 | `pubgrub-cli` executable `pubgrub-index` | `pubgrub-cli/app/BuildIndex.hs` — builds the derived index |
@@ -171,21 +171,22 @@ pubgrub-harness (package, unpublished)
 
 - `Bridge.Hackage` — bootstraps and refreshes the index through `hackage-security`,
   keeps a disk-cached package-to-versions map, and reads one release's `.cabal`
-  through `indexLookupCabal` plus `parseGenericPackageDescription`. Under
-  `--flags fixed` the baseline marks every flag manual before cabal sees it.
+  from the tar block of the revision in force (`lookupGPD`). Under `--flags fixed`
+  the baseline marks every flag manual before cabal sees it (`markFlagsManual`).
 - `Bridge.Hackage.Store` — the derived index. Every release parsed once, ahead of
   time, into the pre-environment form.
-- `PubGrub.Cabal.Flatten` — reads two things off one walk of a conditional tree
-  (`flattenWith`): the `build-depends`, and the `BuildInfo` that decides buildability
-  (`buildable:` plus `pkgconfig-depends` against a `PkgConfigPresent` predicate, library
-  only). The machine is an argument — `Platform`, `CompilerInfo`, the predicate — never
-  read here. `componentTools` and `setupDeps` read what a release owes to other
-  namespaces off the same walk, and keep it out of `GuardedDeps`. Dependencies come from the four components cabal includes unconditionally —
+- `PubGrub.Cabal.Flatten` — reads three things off one walk of a conditional tree
+  (`flattenWith`): the `build-depends`, the build tools (`componentTools`), and the
+  `BuildInfo` that decides buildability (`buildable:` plus `pkgconfig-depends` against a
+  `PkgConfigPresent` predicate, library only). The machine is an argument — `Platform`,
+  `CompilerInfo`, the predicate — never read here. The build tools and `setupDeps`,
+  which reads the unconditional `setup-depends`, are what a release owes to other
+  namespaces, and stay out of `GuardedDeps`. Dependencies come from the four components cabal includes unconditionally —
   library, sublibraries, foreign libraries, executables — and the last three are gated
   on their own `buildable:` through Cabal-syntax's `addBuildableCondition`. Test suites
   and benchmarks are read only when the caller's `Stanzas` ask, per release, the way a
   planner enables them for a local package. The trees are our own `Tree`, and
-  `fromCondTree` is the one function that depends on the Cabal-syntax version.
+  `fromCondTree` is the one function here that depends on the Cabal-syntax version.
 - `Bridge.Cabal.Baseline` — drives `Distribution.Solver.Modular.modularResolver` over
   our index. It builds a `PackageIndex (SourcePackage ())`. `modularResolver` runs
   `convPIs` itself.
@@ -198,8 +199,8 @@ pubgrub-harness (package, unpublished)
   descriptions calls the first, and the bridge's `releaseReader` memoises them over an
   index entry. `PubGrub.Cabal.Installed` is the installed set and its unit graph.
 - `Bridge.Provider` — the world on this machine. `withWorld` opens the index, the
-  installed database and the `pkg-config` database **once**, and both solvers are fed
-  from it. That is what makes the comparison structural rather than arranged.
+  installed database and the `pkg-config` database, and each solver runs through it, in
+  a process of its own. That is what makes the comparison structural rather than arranged.
   `releaseReader` turns an index entry into a `Release`, through the derived index
   where there is one, and `pkgConfigPresent` is the predicate from cabal's own db.
 
@@ -218,12 +219,12 @@ it, and tracing its imports shows three uses:
 2. **CLI-convenience types** (`UserConstraint`, `IndexState`, `defaultMaxBackjumps`) —
    trivially replaceable, and most of what `Distribution.Client.Dependency` provides
    actually originates in `cabal-install-solver`'s `Distribution.Solver.Types.*`.
-3. **setup-deps types** — needed only at rung 4, and likely reconstructible from
-   `setupBuildInfo`.
+3. **setup-deps types** — not needed: `setupDeps` reads `setupBuildInfo` directly.
 
-`UserConstraint` is the one that forces our hand. It is a scope plus a
-`PackageProperty`, it lives in `cabal-install`, and it is richer than Cabal-syntax's
-version-only `PackageVersionConstraint`. So we define our own constraint type.
+`UserConstraint` is a scope plus a `PackageProperty`, it lives in `cabal-install`, and
+we do not use it. A target or a `--constraint` is a package name and a `VersionRange`,
+parsed as Cabal-syntax's `PackageVersionConstraint`, and `Bridge.Cabal.Baseline` builds
+cabal's `PackageConstraint` values from those directly.
 
 **Still to handle: `preferred-versions`.** Neither solver reads it.
 
@@ -232,7 +233,7 @@ version-only `PackageVersionConstraint`. So we define our own constraint type.
 its time and block, and a run at `--index-state T` reads each release's last entry at
 or before `T` by block. `hackage-security`'s own lookup by name answers with the last
 revision in the whole tar, which is right only at the head, so nothing reads through
-it any more.
+it.
 
 ## Invariants you can break by accident
 
@@ -252,7 +253,8 @@ wrong edit is, not the argument. Read the section before you touch the code.
 - **The derived index is a cache that follows the index by block** — DESIGN §6. It
   stores the pre-environment form; raise `storeFormatVersion` on any encoding change.
 - **Memoise the reduced form, never the parse tree** — DESIGN §11.
-- **A dependency of `p` on `p` is dropped**, in two load-bearing halves — DESIGN §8.
+- **A dependency of `p` on `p` is dropped**, range included, in two halves. Cabal
+  checks the range, so the verdicts can differ — DESIGN §8.
 - **An unbuildable component contributes no dependencies**, through Cabal-syntax's
   own `addBuildableCondition`; the library is not gated — DESIGN §15.
 - **Build tools and `setup-depends` are not dependencies** — DESIGN §16. They ride in
@@ -275,8 +277,9 @@ wrong edit is, not the argument. Read the section before you touch the code.
 [`docs/STATUS.md`](docs/STATUS.md) §3 states each one and why: flags fixed at their
 declared defaults unless `--flags search` is given (§3.1), and one version per
 package name (§3.2, where the shelved qualified-goals design is). Setup and
-build-tool dependencies, public sublibraries, `preferred-versions` and user flag
-constraints are not built; §4 says what each owes, and §5 lists what is settled or
+build-tool dependencies are read and not solved; public sublibraries,
+`preferred-versions` and a driver option for user flag constraints are not built. §4
+says what each owes, and §5 lists what is settled or
 was measured and rejected. The rung ladder is STATUS.md §1.
 
 ## Reporting
@@ -294,10 +297,11 @@ examples, so a wording change earns its way past them.
 
 ## Conventions
 
-- GHC 9.12 or 9.14 (`base >=4.21 && <4.23`, CI on 9.14.1); `cabal-version: 3.0` in every package
+- GHC 9.12 or 9.14 (`base >=4.21 && <4.23`, CI on 9.12.2 and 9.14.1); `pubgrub` alone
+  also builds on 9.10 (`base >=4.20`, CI on 9.10.3); `cabal-version: 3.0` in every package
 - `default-language: GHC2021` on every component, with
-  `default-extensions: ImportQualifiedPost`. The test-suite is the one stanza that
-  lacks the extension.
+  `default-extensions: ImportQualifiedPost`. The test-suites of `pubgrub-cabal`,
+  `pubgrub-hs` and `pubgrub-doctest` lack the extension.
 - `-Wall` everywhere. Once the API stabilises, treat warnings as errors.
 - No partial functions (`head`, `fromJust`). Use pattern matching or `Maybe`/`Either`.
 - Prefer `newtype` wrappers over type aliases for domain types.

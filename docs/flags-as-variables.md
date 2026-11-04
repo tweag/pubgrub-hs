@@ -1,6 +1,6 @@
 # Flags as solver variables
 
-> **Status:** current, since 2026-10-08. The default is still `--flags fixed`,
+> **Status:** current. The default is `--flags fixed`,
 > under which every flag takes its declared default and the recorded gate
 > baselines were taken; `--flags search` makes every automatic flag a variable,
 > for both solvers. The argument and the evidence are [DESIGN.md §3](DESIGN.md#3-a-flag-is-a-variable-and-a-decision-is-one-variables-value);
@@ -11,6 +11,11 @@
 > `references/What is Answer Set Programming.md`.
 
 ## 1. The model
+
+A `.cabal` file can make a dependency conditional on a flag. A manual flag is the
+user's to set; an automatic flag is the solver's to flip if that makes a plan
+possible. Here an automatic flag gets a solver variable of its own, beside its
+package's, and the package's value says nothing about flags.
 
 ```haskell
 data Flag = Flag { flagName :: FlagName, flagDefault :: Bool }   -- PubGrub.Cabal
@@ -53,17 +58,25 @@ When a source release `p-v` is decided (`PubGrub.Cabal.Provider.mkExpand`):
   offers the declared default where the set admits it, read off the variable.
   Nothing else ever derives a positive term for a flag, so a flag is only
   decided while a release declaring it is decided;
-- per guarded occurrence and per disjunct of its guard:
-  `fromDependency p span guard q range`, the clause
+- per guarded occurrence and per disjunct of its guard (each alternative of an
+  `||`): `fromDependency p span guard q range`, the clause
   `{ p: Positive span, p:f₁: Positive {b₁}, …, q: Negative range }`. The span
-  is widened across neighbours that carry the same occurrence *and* declare
-  the same automatic flags with the same defaults, since the flag variables
-  are named by both (`spanningOccurrenceWith`, `sameFlags`). An empty guard is
-  an ordinary dependency fact.
+  is widened across neighbours that carry the same occurrence. Under a guard
+  they must also declare the same automatic flags with the same defaults,
+  since the flag variables are named by both (`spanningOccurrenceWith`,
+  `sameFlags`). An empty guard is an ordinary dependency fact;
+- per library node that cannot be built under some flag values, and per
+  disjunct of its guard: `unbuildable p slot guard why`, the clause
+  `{ p: Positive slot, p:f₁: Positive {b₁}, … }`. The release is still offered:
+  propagation derives the other value of the one open flag, so the flag flips
+  and the release stays. A node that cannot be built however the flags fall
+  rules the release out instead, and the provider states that with an empty
+  guard and moves on to the next release.
 
 The store merges a dependency fact only with one under the same guard
-(`PubGrub.Store.MergeDep` carries the `Guard`) and a `declaresFlag` clause
-with one for the same flag, so adjacent releases collapse exactly as unguarded
+(`MergeDep`, in `PubGrub.Cabal`, carries the `Guard`), a `declaresFlag` clause
+with one for the same flag, and an unbuildable fact with one under the same
+guard for the same reasons, so adjacent releases collapse exactly as unguarded
 facts do.
 
 Under `--flags fixed` a release has no automatic flags, so none of the above
@@ -71,40 +84,41 @@ is emitted and the dependencies are the ones its defaults select — the path
 every number in `STATUS.md` was measured on. The baseline marks every flag
 manual under `fixed` only (`Bridge.Cabal.Baseline.sourcePackageIndex`), so
 under `search` cabal searches the same flags and the comparison stays
-structural. The derived index records which flags are manual (`srManual`,
-`storeFormatVersion` 5).
+structural. The derived index records which flags are manual (`srManual`).
 
 ## 3. Reporting and output
 
 - A flag term reads as its owner with a sign: `foo +fast`, `foo -fast`, `foo
   flag fast` when either value is in (`PubGrub.Cabal.Report.Wording.bare`).
-- A guarded leaf reads "foo >=1 && <2 with +fast depends on bar"; the owner's
+- A guarded leaf reads "foo >=1 && <2 with +fast depends on bar", or "foo >=1 && <2
+  with +sys needs pkg-config package zlib, which is not found"; the owner's
   clause reads "foo >=1 && <2 declares flag fast".
-- The driver folds decided flags into their owners (`PubGrub.Cabal.Value.foldFlags`,
+- The driver folds decided flags into their owners (`PubGrub.Cabal.foldFlags`,
   giving `Resolved = Installed | Built Version FlagAssignment`), so the tree
   shows `tasty 1.5.4 +unix` and the `plan:` lines keep one entry per package.
 
 ## 4. Tests
 
-`test/FlagSolveSpec.hs`: defaults used; a flag flips when its default branch is
-unsatisfiable; the same world is unsat under `fixed`; two flags with one viable
-assignment; unsat over both values with the proof naming `+fast` and `-fast`;
-an unmentioned flag stays at its default and costs no package decision; an
+`pubgrub-cabal/test/FlagSolveSpec.hs`: defaults used; a flag flips when its default
+branch is unsatisfiable; the same world is unsat under `fixed`; a flag held at a
+value by `flagConstraint`; a `Preference` tried before the default; two flags with
+one viable assignment; unsat over both values with the proof naming `+fast` and
+`-fast`; an unmentioned flag stays at its default and costs no package decision; an
 irrelevant flag does not multiply a version-level retry, nor do two; the newest
-release is kept with a flipped flag rather than downgraded; plus the boot,
-unbuildable and self-dependency cases the same harness carries.
-`test/InstanceSetSpec.hs` is a model-based spec of the reduced `InstanceSet`
-and of `BoolSet`.
+release is kept with a flipped flag rather than downgraded; a release unbuildable
+under a flag value is kept with the flag flipped; plus the boot, unbuildable and
+self-dependency cases the same harness carries.
+`pubgrub-cabal/test/InstanceSetSpec.hs` is a model-based spec of the reduced
+`InstanceSet` and of `BoolSet`.
 
 ## 5. Measurements
 
-Index-state `2026-09-09T02:42:09Z` (`bench/index-state`), this machine, after
-the removal of the cell representation. Identical, line for line, to the spike
-that preceded it except for the wording of the owner's clause.
+Index-state `2026-09-09T02:42:09Z` (`bench/index-state`), this machine. Every count
+below held when re-run on 2026-11-04.
 
 **The gate under `--flags fixed`** is the recorded baseline, unchanged: 26/26
 agreement, 20/20 corpus cases unsat, 76 proof sentences, 0 no-version lines,
-golden proofs intact, 229 tests.
+golden proofs intact, the test suite passing.
 
 **The gate under `--flags search`, both solvers searching automatic flags**
 (`EXE` pointed at a wrapper that adds the option):
@@ -129,8 +143,11 @@ golden proofs intact, 229 tests.
 | aeson <2 | 319 → 352 | 58 → 64 |
 | yesod | 828 → 919 | 14 → 11 |
 
-The extra decisions are the flags themselves, one per automatic flag of each
-decided release. `yesod` resolves 91 more decisions and three fewer conflicts.
+On `vector` the extra decisions are its 4 flags. On `pandoc` there are 63 flag
+decisions (47 distinct, the rest re-decided after its one conflict) and one package
+decision fewer. On `conduit <1.3` and `aeson <2` they are search: the first decides no
+flag and the second one, and the extra conflicts re-decide packages. `yesod` makes 110
+flag decisions over 50 flags, for 91 more decisions overall and three fewer conflicts.
 
 **Proof length on the bench unsat problems:** `aeson <2` 38 → 47 sentences and
 `conduit <1.3` 9 → 15; `lens <4` unchanged. Both grow where ancient releases
@@ -154,7 +171,7 @@ cabal's on `vector` under both models.
 
 - **User flag constraints** (`--constraint 'p +f'`): a level-0 constraint on the
   flag variable, `PubGrub.Cabal.flagConstraint`, "if the flag is in play, it is at
-  this value". The seed is built (2026-10-14) and tested; no driver option parses
+  this value". The seed is built and tested; no driver option parses
   one yet, and cabal's solver is passed none.
 - **Proof wording in derived steps.** Leaves have their sentences; a derived
   step whose terms include a flag goes through the generic summary, which

@@ -1,19 +1,21 @@
 # Related work — the Potassco literature, mapped onto our problems
 
-> **What this is.** A reading map. For each external paper: which problem *in this
+> **What this is.** A reading map of the literature around Potassco, the Potsdam
+> Answer Set Solving Collection. For each external paper: which problem *in this
 > repository* it speaks to, what it actually says, and what it does **not** settle.
 > Every entry is anchored to a file or section here, so it is usable as a pointer
 > rather than a bibliography.
 >
 > **Dated.** Written when a package's value carried its flags and `InstanceSet` was a
-> DNF of cells. That model was retired on 2026-10-08 ([flags-as-variables.md](flags-as-variables.md));
+> disjunctive normal form (DNF) of cells. That model was retired on 2026-10-08 ([flags-as-variables.md](flags-as-variables.md));
 > the entries below that speak to `FlagPin`, `pruneCells` and one-sided emptiness
 > now describe a retired model (decision records `decision-0010` to `decision-0019` and
 > `decision-0054` to `decision-0056` in the project's Hindsight bank),
 > not the code.
 >
 > **What this is not.** Not authoritative on anything. It cites no rule and creates
-> none. In particular it **does not reopen the ASP decision** — see
+> none. In particular it **does not reopen the decision against answer-set programming
+> (ASP)** — see
 > [STATUS.md](STATUS.md) §5.1, which still stands: there is no ASP
 > component, there never was one, and none of this argues for adding one. What
 > changed is that we now know some of our design problems have a formal literature,
@@ -34,7 +36,7 @@
 
 The single most useful thing in it is §1: **someone else solved our exact problem
 with the opposite representation, and published the bill.** If you read one entry,
-read that one. §2 is the most useful for anyone formalising the kernel, because it
+read that one. §2 is the most useful for anyone formalising the core, because it
 supplies the *shape of the theorem* we currently only state in prose.
 
 Ranked by how much each one bears on live work:
@@ -49,7 +51,7 @@ Ranked by how much each one bears on live work:
 | three-state `FlagPin` | retired with the cell DNF on 2026-10-08 | §2.3 (analogy only) |
 | correctness of conflict resolution | stated in prose only; nothing in the repo proves it | §3 |
 | over-specific learned clauses (the old "2^k") | one fact per guarded occurrence, [`collapsing.md`](collapsing.md) — **landed** | §8 |
-| prefer-installed / prefer-defaults / prefer-newest | `PubGrub.Cabal.Provider`'s decision order: installed first, then newest; a flag's default rides in its identity, so it is offered first ([`flags-as-variables.md`](flags-as-variables.md) §1) | §5 |
+| prefer-installed / prefer-defaults / prefer-newest | the order `PubGrub.Cabal.Provider` offers values in: a caller's `Preference`, then installed, then newest; a flag's default rides in its identity, so it is offered first unless a `Preference` names the flag ([`flags-as-variables.md`](flags-as-variables.md) §1) | §5 |
 | explaining failure | `PubGrub.Report` | §6 |
 
 ---
@@ -68,7 +70,8 @@ TPLP-submission draft, extending a PoS'11 paper of the same title, which extends
 ICLP'11 technical communication *Multi-Criteria Optimization in Answer Set
 Programming* ([DROPS](https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.ICLP.2011.1)).
 
-Read the two together: the first is the front end (CUDF → facts), the second is the
+Read the two together: the first is the front end (the Common Upgradeability
+Description Format, CUDF → facts), the second is the
 encoding plus the optimization algorithm.
 
 ### 1.1 It is the extensional encoding, with the invoice attached
@@ -84,7 +87,7 @@ matching version — its Figure 4 has
 `depends(inst, 1, id_{{(dep,3),(dep,2),(dep,1)}})` alongside three `satisfies` facts.
 That is exactly the O(#versions-on-Hackage)-per-dependency cost that
 `references/pubgrub.md:1172` names as one of the four things separating PubGrub from
-CDCL and answer-set solving, and that our `InstanceSet` exists to avoid.
+conflict-driven clause learning (CDCL) and answer-set solving, and that our `InstanceSet` exists to avoid.
 
 **Why this matters to us.** The dropped directions (Hindsight document
 `decision-log-dropped-directions`) argue against the extensional `Set Instance` from first principles. This paper is the empirical
@@ -121,10 +124,10 @@ Two riders, both of which bear on us:
   pulls in all installed versions of everything in the old installation). So
   preference is not free of universe size. Directly relevant if rung 3's
   prefer-installed ever becomes an objective rather than a heuristic (§5).
-- **Its line 2 is a cheap UNSAT check with no explanation**: it "identifies cases in
-  which install or upgrade targets remain unsatisfiable, regardless of further
-  preprocessing, so that `∅` can be immediately returned." Fast, and useless for
-  deliverable 1. A reminder of what "detects unsatisfiability" is worth on its own.
+- **Its line 2 is a cheap unsatisfiability check with no explanation**: it "identifies
+  cases in which install or upgrade targets remain unsatisfiable, regardless of further
+  preprocessing, so that `∅` can be immediately returned." Fast, and useless for the
+  explanation deliverable. A reminder of what "detects unsatisfiability" is worth on its own.
 
 ### 1.3 The companion paper contains a version of our collapsing rule
 
@@ -149,9 +152,9 @@ hold"). Two differences worth noticing:
 - **Side.** Their `id_P` interning is the *dependee*-side dual: two dependencies whose
   matching-version sets coincide share one constant, so they collapse. We cannot do
   that, because we never compute the matching set — the price of §1.1 running the
-  other way. Note that [`collapsing.md`](collapsing.md) §2 establishes we *can* key on
-  the dependee term structurally, for the narrower reason that `widen`-minted terms are
-  canonical by construction.
+  other way. [`collapsing.md`](collapsing.md) §2 establishes we *can* key on the
+  dependee term structurally, for the narrower reason that `InstanceSet` is canonical
+  and has a lawful `Eq`.
 
 The `:` connective is also the closest thing in their language to a flag guard, which
 makes this the nearest published relative of our guarded emission
@@ -220,17 +223,19 @@ and, on §5:
 Give up precision to be able to work incrementally, then prove the approximation is
 *safe*. That was the retired specification's O3/O4 — never claim
 emptiness wrongly, may fail to notice it — as a general principle, with the proof
-obligations named. Useful for any formal statement about `isEmpty`: the obligation
-is one-directional (`isEmpty ⟹ denotation empty`), which is what the test suite
-already asserts and what the theory says is the correct shape.
+obligations named. Useful for any formal statement about an approximate check: the
+obligation is one-directional (`isEmpty ⟹ denotation empty`), which is what the
+theory says is the correct shape. `isEmpty` itself is exact now, and the test suite
+asserts that direction because its model is a finite sample ([STATUS.md](STATUS.md)
+§5.1).
 
 ### 2.3 More truth values, for the same structural reason (analogy, not identity)
 
 To keep the operators monotone they "resort to concepts borrowed from ID-logic", and
 work with two- and four-valued contextual interpretations. We needed three `FlagPin`
 states because a two-valued pin is not closed under negation
-(retired with the cell DNF, decision record
-`decision-0054-a-flag-is-a-solver-variable-keyed-by-its-declaration`).
+(decision record `decision-0013-two-state-flag-pins-three-states`, retired with the
+cell DNF in `decision-0054-a-flag-is-a-solver-variable-keyed-by-its-declaration`).
 
 **Flagged as an analogy.** The mechanisms are not the same and nothing here transfers
 formally. It is worth one line only because "we tried two values and the operator
@@ -281,11 +286,13 @@ is ours, their learning is conflict resolution. This is the rigorous account of 
 machinery `pubgrub/src/PubGrub/Solver.hs` implements, and the peer-reviewed check on the
 resolvent argument.
 
-**The instructive delta.** Their nogoods are over *ground atoms*, so propagation is
-complete and a term either is or is not satisfied. Ours are over intensional terms,
-which is precisely where `Relation.Inconclusive` comes from. If you want a one-line
-answer to "why does our propagation have a third outcome when the literature's does
-not", it is this difference and nothing else.
+**The instructive delta.** Their nogoods are over *ground atoms*, and a partial
+assignment leaves an atom true, false or unassigned, so a nogood can be violated, have
+a unit-resulting literal, or neither. Ours are over intensional terms, so a variable
+already narrowed can still be undecided against a term: `foo ^1.0.0` is inconclusive
+for `foo ^1.5.0` (`references/pubgrub.md:102`). `incompRelation` treats an unmentioned
+variable and an inconclusive term alike, and only the second (`Relation.Inconclusive`)
+has no counterpart over ground atoms.
 
 ---
 
@@ -300,8 +307,8 @@ Generation.** TPLP 17(4):408–461. *(no Gebser, unread)*
 
 The principled form of what we built by hand: do not ground the ordered domain,
 attach a propagator to it, and accept that the propagator's incompleteness is sound
-but weaker. Our `InstanceSet` is a theory in this sense and `isEmpty` is its
-(incomplete) check. Relevant mostly as vocabulary, and as the architecture a
+but weaker. Our `InstanceSet` is a theory in this sense and `isEmpty` is its check,
+exact since 2026-10-08, so that incompleteness has no counterpart here. Relevant mostly as vocabulary, and as the architecture a
 differential oracle would use (§7) — since it is the one that avoids §1.1's expansion.
 
 ---
@@ -326,8 +333,8 @@ paper's payload is what that costs:
 
 Lexicographic descent over priority levels fights conflict-driven learning, because
 learned constraints resting on a speculative bound must be retractable. Our
-preferences are decision-*order* heuristics precisely so we never meet this. **If the
-PoC ever wants the best plan rather than a plan, this paper is the cost estimate** —
+preferences only order the values the provider offers, precisely so we never meet this.
+**If the proof of concept ever wants the best plan rather than a plan, this paper is the cost estimate** —
 and §1.2's rider applies too: adding an objective widens the relevant universe.
 
 That heuristics are a legitimate alternative mechanism, rather than a shortcut, is
@@ -336,13 +343,13 @@ itself published:
 **Gebser, M., Kaufmann, B., Otero, R., Romero, J., Schaub, T., & Wanko, P. (2013).
 Domain-Specific Heuristics in Answer Set Programming.** AAAI'13 *(unread)* —
 declarative decision heuristics as a first-class construct. The direct analogue of
-our prefer-installed, prefer-default, prefer-newest decision order.
+our prefer-installed, prefer-default, prefer-newest order.
 
 For the general theory of preference, if it is ever wanted: **asprin** (Brewka,
 Delgrande, Romero & Schaub, AAAI'15:1467–1474, and *A general framework for
 preferences in answer set programming*, AIJ 325:104023, 2023). *(no Gebser, unread)*
-Not currently relevant — we have three fixed preference rules, not a preference
-language.
+Not currently relevant — we have three fixed preference rules and a caller's map of
+preferred values (`PubGrub.Cabal.Provider.Preference`), not a preference language.
 
 ---
 
@@ -356,7 +363,7 @@ Read this as *support* for [STATUS.md](STATUS.md) §5.1 rather than as a
 technique to borrow. Explaining "no answer set" in ASP requires a separate
 meta-encoding layer bolted on top of the solver, and what it produces is a diagnosis
 of a *logic program*, not a proof about packages and versions in cabal's range syntax.
-Deliverable 1 is half the point of the PoC. This is the evidence that a general-purpose
+The explanation deliverable is half the point of the proof of concept. This is the evidence that a general-purpose
 solver does not hand it to you.
 
 ---
@@ -374,14 +381,16 @@ space:
 
 - **Theory propagators.** The concrete route to an oracle that does *not* pay §1.1's
   expansion: keep versions and flags symbolic, reuse our own `VersionSet` logic as the
-  theory, let clingo supply CDCL. If a SAT/UNSAT oracle for differential testing is
-  ever built, build it this way, not as a plain encoding.
-- **ASPIF, as boundary discipline.** Their split is grounder | solver. Ours is
-  `pubgrub-hs` (the bridge) | `pubgrub`, and the mapping is closer than it looks — our `Provider` is
-  playing the grounder's role, being the only component that consults the index
-  (`expand'` is where reality is consulted). Their argument is that pinning that
-  interface down as a narrow explicit format is what let three grounders and a dozen
-  solvers interoperate. Our version of that contract is a typeclass plus prose.
+  theory, let clingo supply CDCL. If an oracle that decides satisfiability for
+  differential testing is ever built, build it this way, not as a plain encoding.
+- **ASPIF, as boundary discipline.** Their split is grounder | solver. Ours is the
+  provider | `pubgrub`, and the mapping is closer than it looks — our `Provider` is
+  playing the grounder's role, being the only thing the solver asks about the index
+  (`PubGrub.Cabal.Provider.mkExpand` is where reality is consulted, through a
+  `ReleaseSource` the bridge supplies). Their argument is that it is good practice to
+  make such an interface explicit as an intermediate language, which also allows for
+  alternative downstream solvers or transformations. Our version of that contract is
+  the one-function `Provider` plus prose.
 
 **Also relevant:** multi-shot solving, i.e. assumption-based incremental re-solving
 over a program that grows — **Gebser, M., Kaminski, R., Kaufmann, B., & Schaub, T.
@@ -399,16 +408,16 @@ answer is to write more ASP, and we want Haskell emitting cabal-syntax sentences
 ## 8. The defect we called "2^k", and what it is actually called
 
 Worth a section because the internal name was misleading, and because it is now
-**fixed** — the flag axis landed 2026-08-05 (`decision-log-index`, Era 7), and since 2026-10-08 a guarded dependency's terms name only the flags the
-guard mentions ([`flags-as-variables.md`](flags-as-variables.md)).
+**fixed** — since 2026-10-08 a guarded dependency's terms name only the flags the guard
+mentions ([`flags-as-variables.md`](flags-as-variables.md)).
 
 **The defect was not really exponential arithmetic. It was an over-specific learned
 clause.** The depender term named a single point in the version × assignment space, so
 refuting it failed to *generalise* to the sibling assignments of the same version, and
 the solver rediscovered the same conflict once per irrelevant assignment. Stated that
 way it is a standard CDCL failure mode — a learned constraint that does not cover the
-symmetric branches — and "2^k" was only the worst-case count it produced. The residue
-after that is bounded by the number of **guard regions**, not by 2^k over every
+symmetric branches — and "2^k" was only the worst-case count it produced. Merging those
+clauses left a residue bounded by the number of **guard regions**, not by 2^k over every
 declared flag; the costs that remained because a decision was still a point instance
 went with the flag-in-value model on 2026-10-08.
 

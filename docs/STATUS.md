@@ -12,8 +12,8 @@
 > Hindsight bank, one document per decision: `decision-log-index` lists the records in
 > order, and `decision-log-dropped-directions` lists the directions that were dropped.
 >
-> **Checked against the tree on 2026-10-21.** 300 tests pass over the three packages and
-> [`scripts/gate.sh`](../scripts/gate.sh) passes, at the index-state pinned in
+> **Last run on 2026-11-04.** The test suites and
+> [`scripts/gate.sh`](../scripts/gate.sh) passed, at the index-state pinned in
 > [`bench/index-state`](../bench/index-state), `2026-09-09T02:42:09Z`.
 
 ---
@@ -22,18 +22,18 @@
 
 | area | state |
 | --- | --- |
-| Packages | `pubgrub` (the solver, over any domain) and `pubgrub-cabal` (the cabal domain) are separate packages with `cabal check` clean, ready for Hackage and not yet uploaded. `pubgrub` exports its API and none of the solver's machinery (decision 0068), and its documentation is a tutorial (`PubGrub.Tutorial`), how-to guides (`PubGrub.Cookbook`) and a reference with no Haddock warning, whose code and examples the tests run; three unpublished packages keep the bridge (`pubgrub-hs`), the driver (`pubgrub-cli`) and the harness (`pubgrub-harness`) ([DESIGN.md §1](DESIGN.md#1-the-core-knows-nothing-about-cabal)) |
+| Packages | `pubgrub` (the solver, over any domain) and `pubgrub-cabal` (the cabal domain) are separate packages with `cabal check` clean, ready for Hackage and not yet uploaded. `pubgrub` exports its API and none of the solver's machinery (decision 0068), and its documentation is a tutorial (`PubGrub.Tutorial`), how-to guides (`PubGrub.Cookbook`) and a reference with no Haddock warning, whose code and examples the tests run; four unpublished packages keep the doctests (`pubgrub-doctest`), the bridge (`pubgrub-hs`), the driver (`pubgrub-cli`) and the harness (`pubgrub-harness`) ([DESIGN.md §1](DESIGN.md#1-the-core-knows-nothing-about-cabal)) |
 | Hackage index | our own reader over the cached `01-index.tar`, through `hackage-security`. No `cabal-install` dependency |
 | Index-state | `--index-state T` gives both solvers the index as it was at `T`, revisions included, with cabal's semantics. A run prints the state it is really at |
-| Derived index | every release parsed once into `_cache/derived-index.cbor`. A read is a CBOR decode, served only for the revision in force |
+| Derived index | every release parsed once into `_cache/derived-index.cbor`. A read is a decode of CBOR (Concise Binary Object Representation), served only for the revision in force |
 | Version ranges | full. The solver resolves real packages end to end |
 | Constraints | `--constraint 'p R'`, repeatable, for both solvers: a range `p` must be in if it is chosen. A second seed kind in the core (`constraint`, and `flagConstraint` for a flag held at a value), and `conflictSet` reads the variables of a failed solve's derivation ([DESIGN.md §10](DESIGN.md#10-the-request-is-a-list-of-seeds)) |
 | Version order | ours, not Cabal's: trailing zeros are insignificant, so `1.2` and `1.2.0.0` are one version. Cabal's type stops at the bridge ([DESIGN.md §14](DESIGN.md#14-versions-compare-with-trailing-zeros-insignificant)) |
 | Flags | fixed at their declared defaults by default; `--flags search` makes every automatic flag a solver variable, on both sides ([§3.1](#31-flags-are-fixed-at-their-declared-defaults-unless-asked)) |
-| Boot packages | the installed database becomes instances. A boot package offers installed units or nothing |
-| Buildability | a release whose library cannot be built here is not offered, and the proof says why: the `pkg-config` module that is missing, by name, or `buildable: False`. Under `--flags search` a library unbuildable only under some flag value is offered, and that value is banned by a guarded clause the proof states as "foo with +sys needs pkg-config package zlib" ([DESIGN.md §15](DESIGN.md#15-a-component-that-is-not-buildable-contributes-no-dependencies)) |
+| Boot packages | the installed database becomes instances. A non-reinstallable package, such as `base` or `template-haskell`, offers installed units or nothing; any other tries its installed unit first and can fall back to source ([DESIGN.md §7](DESIGN.md#7-boot-packages-are-installed-only)) |
+| Buildability | a release whose library cannot be built here is not offered, and the proof says why: the `pkg-config` module that is missing, by name, or `buildable: False`. Under `--flags search` a library unbuildable only under some flag value is offered, and that value is banned by a guarded clause the proof states as "foo with +sys needs pkg-config package zlib, which is not found" ([DESIGN.md §15](DESIGN.md#15-a-component-that-is-not-buildable-contributes-no-dependencies)) |
 | Test suites and benchmarks | read only when the reduction is asked, per release (`releaseOf` takes a `Stanzas`): a planner enables them for a local package and never for a dependency, as cabal's does; the driver passes none ([DESIGN.md §15](DESIGN.md#15-a-component-that-is-not-buildable-contributes-no-dependencies)) |
-| Explanations | `PubGrub.Report` prints a numbered proof that follows the spec's own reporting algorithm |
+| Explanations | `PubGrub.Report` prints a proof that follows the spec's own reporting algorithm |
 | cabal baseline | `pubgrub --cabal <target>` runs cabal's modular solver over the same index |
 | Regression gate | `scripts/gate.sh` runs 26 problems through both solvers and fails on any regression |
 | Harness | `pubgrub-harness` measures both solvers over both sets, three runs each, and writes `bench/output/benchmark.md` and `showcase.md`. It measures; the gate decides |
@@ -66,7 +66,7 @@ allocation is the stable stand-in for time.
 
 `pubgrub-harness` over [`bench/problems.txt`](../bench/problems.txt). Residency is
 `maximum residency` from `+RTS -s`. Times are seconds, medians of three. Bold marks
-the better of the two.
+the better of the two. `sat` means a plan exists, and `UNSAT` that none does.
 
 | problem | verdict | ours | cabal | our world / solve | cabal world / index / solve | our residency | cabal residency | our allocation | cabal allocation | our proof | cabal's message |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -85,7 +85,7 @@ earlier; residency and allocation did not move, and they carry the comparison.
 
 **The phases say where our time goes, and it is not the solve.** Opening the world
 (the index, the installed database and the pkg-config database) costs 0.3–0.35 s on
-a quiet run, on both sides. Our solve is under 0.2 s on four of the six problems, and
+a quiet run, on both sides. Our solve is under 0.2 s on three of the six problems, and
 `pandoc`'s half second is reads, not search. Only `yesod` has a solve phase that
 matters. cabal's `index` phase is small because the work it names is lazy and lands
 in its `solve` ([§2.3](#23-what-these-numbers-do-not-establish)).
@@ -93,8 +93,6 @@ in its `solve` ([§2.3](#23-what-these-numbers-do-not-establish)).
 **`yesod` is where we lose, and it is the most useful row in the table.** cabal is
 1.6× faster on it and allocates 2.4× less. It is the only *satisfiable* problem in the
 set with real search in it: `vector` and `pandoc` resolve almost straight through.
-Every other row is either a walk-through or an unsatisfiable proof, so until `yesod`
-was enabled the set could not report this at all.
 
 It is diagnosed: **half its decisions re-derive a prefix that was already correct**,
 because decisions are ordered by discovery rather than by the spec's heuristic. See
@@ -114,33 +112,25 @@ Our search counts on the same run:
 Every parse count is zero because the derived index answers every read
 ([DESIGN.md §6](DESIGN.md#6-the-derived-index-makes-a-read-a-decode)). That holds only
 while the store holds the revision a run wants: each entry is stored at the revision
-in force when the store was built and served only for that revision, so a store built
-at the head of the index leaves a pinned run to parse every release revised since the
-pin — 18 of them on this set, a month after the pin — and a refresh leaves every
-release published since the build to be parsed. Build with
+in force at the index-state the store was built at and served only for that revision,
+so a store built at the head of the index leaves a pinned run to parse every release
+revised since the pin — 18 of them on this set, a month after the pin — and a run at the
+head parses everything published or revised after the store's state. Pinned runs are
+unaffected by a refresh. Build with
 `pubgrub-index --index-state` at the pin in `bench/index-state`, as this run was, and
 a non-zero `parses` is the tell that it was not.
 Reading the index at an index-state costs the world phase about 0.16 GB of
 allocation and 2 MB of residency on every run
 ([DESIGN.md §13](DESIGN.md#13-the-index-is-read-at-an-index-state)), which is visible on the smallest
-rows and nowhere else. The changes that moved these counts, the first-release slot
-rule ([DESIGN.md §4](DESIGN.md#4-a-release-owns-a-slot-not-a-point)), the version order
-([DESIGN.md §14](DESIGN.md#14-versions-compare-with-trailing-zeros-insignificant)), the buildability
-gate ([DESIGN.md §15](DESIGN.md#15-a-component-that-is-not-buildable-contributes-no-dependencies))
-and the seeds ([DESIGN.md §10](DESIGN.md#10-the-request-is-a-list-of-seeds), one
-decision fewer everywhere), each record their before-and-after where they are
-described.
+rows and nowhere else.
 
 **The plan diff finds one known gap and nothing else.** On the three satisfiable
 problems our plan is a *subset* of cabal's, and the two agree on every package they
-share: 38, 190 and 180. cabal's plans additionally carry `Cabal`, `Cabal-syntax` and
-`hsc2hs`, and for `pandoc` also `alex`, `cabal-doctest`, `happy` and `happy-lib`.
-Every one is a setup or build-tool dependency, rung 4.
+share: 38, 190 and 180. cabal's plans for `pandoc` and `yesod` additionally carry
+`Cabal`, `Cabal-syntax` and `hsc2hs`, and for `pandoc` also `alex`, `cabal-doctest`,
+`happy` and `happy-lib`. Every one is a setup or build-tool dependency, rung 4.
 
-**We carry nothing cabal's plans do not** — until 2026-09-10 `pandoc` carried
-`network-bsd`, `network-run` and `time-manager` and `yesod` five more, every one of
-them out of an executable stanza marked `buildable: False`
-([DESIGN.md §15](DESIGN.md#15-a-component-that-is-not-buildable-contributes-no-dependencies)).
+**We carry nothing cabal's plans do not.**
 
 **The three kinds of problem are not interchangeable.** `vector` and `pandoc` measure
 index throughput, and `pandoc` has one conflict, so neither can show a search
@@ -182,8 +172,8 @@ a completeness column before it can render such a problem fairly.
 - **The memory floor is unexplained.** Every solve pays about 27 MB before it does any
   work of its own, of which about 2 MB is the index-state read
   ([DESIGN.md §13](DESIGN.md#13-the-index-is-read-at-an-index-state)). The package-to-versions map
-  was long assumed to dominate that floor. Doubling the map's per-element overhead
-  moved peak residency by 0.5%. The memory claim is the strongest one the project
+  does not explain it: doubling the map's per-element overhead moved peak residency
+  by 0.5%. The memory claim is the strongest one the project
   has, and most of it is a number nobody can account for. Settle this first
   ([§4.5](#45-open-questions)).
 
@@ -193,7 +183,7 @@ a completeness column before it can render such a problem fairly.
 - **cabal's index work is not separated from its solve, and cannot be.** The `world`
   phase — index open, installed database, pkg-config database — is separated on both
   sides. The two solvers then do different index work: ours decodes a release when it
-  expands a package; cabal's resolver wants a record for all 152,987 releases before
+  expands a package; cabal's resolver wants a record for all of about 153,500 releases before
   it starts, and its `index` phase is only the eager allocation of those records. The
   `PackageIndex` and every `.cabal` parse are lazy and land in cabal's `solve` phase.
   Forcing them earlier would make a solve pay for releases it never touches, which
@@ -206,6 +196,10 @@ a completeness column before it can render such a problem fairly.
   [§3.1](#31-flags-are-fixed-at-their-declared-defaults-unless-asked).
 - **cabal solves setup and build-tool dependencies and we do not.** On a package with
   a custom `Setup.hs` the two solvers answer different questions.
+- **Verdict agreement covers these 26 problems, not every package.** One known
+  difference falls outside them: a release whose dependency on its own library excludes
+  its own version gets a plan from us and none from cabal, as `acme-zero ==0.0.2` does
+  ([DESIGN.md §8](DESIGN.md#8-a-dependency-of-p-on-p-is-dropped)).
 
 ---
 
@@ -225,7 +219,7 @@ Both solvers are told, and each takes it differently:
   a guard that reaches the provider mentions automatic flags only.
 - **cabal's, at the index build.** Under `fixed`, `Bridge.Cabal.Baseline.sourcePackageIndex`
   marks every flag manual, so cabal's `enforceManualFlags` prunes every branch whose
-  value is neither the default nor named by a user constraint. We pass no user
+  value is neither the default nor named by a user flag constraint. We pass no flag
   constraints. Under `search` the descriptions are left as written.
 
 Both solvers see one index either way, which is what keeps the comparison structural.
@@ -266,26 +260,27 @@ Three points from the design survive:
 - it does **not** fix self-dependencies. `qualifyDeps`'s `inheritedQ` gives a library
   dependency its depender's qualifier, so `qpn == qpn'` under any qualifier scheme.
 
-Setup and build-tool dependencies (rung 4) and public sublibraries (rung 5) are not
-built. What each owes is [§4](#4-what-is-planned).
+Setup and build-tool dependencies (rung 4) are read but not solved, and public
+sublibraries (rung 5) are not built. What each owes is [§4](#4-what-is-planned).
 
 ---
 
 ## 4. What is planned
 
-The rungs not yet built, what has a specification and no code, and the questions
-still open. **Do not assume any of it exists in the code.**
+What rungs 4 and 5 still owe, what is specified and not built, and the questions
+still open. **Beyond what [§4.1](#41-setup-and-build-tool-dependencies-rung-4) and
+[§4.3](#43-specified-not-built) say exists, assume none of it is in the code.**
 
 ### 4.1 Setup and build-tool dependencies (rung 4)
 
-Built on 2026-10-14, in a shape decided by the planner that consumes this solver
-rather than by cabal's: **a build tool or a `Setup.hs` is another namespace's problem,
+Built in a shape decided by the planner that consumes this solver rather than by
+cabal's: **a build tool or a `Setup.hs` is another namespace's problem,
 and the main solve reads neither.** `PubGrub.Cabal.Flatten.componentTools` reads
 `build-tool-depends` and the legacy `build-tools` cabal knows how to translate off the
 same four component trees as `componentDeps`, flag-guarded and gated on buildability
 the same way, minus the release's own executables; `setupDeps` reads
 `setup-depends`. Both ride in `Release` (`relTools`, `relSetup`) and in the derived
-index (`storeFormatVersion` 8), and `GuardedDeps` does not contain them. A planner
+index, and `GuardedDeps` does not contain them. A planner
 seeds a solve of its own from them, with the main plan's choices as a
 `PubGrub.Cabal.Provider.Preference`, tried before installed and newest
 ([DESIGN.md §16](DESIGN.md#16-build-tools-and-setup-dependencies-are-another-namespaces)).
@@ -301,7 +296,8 @@ the setup namespace.
 ### 4.2 Public sublibraries (rung 5)
 
 Not started. [cabal-build-model.md](cabal-build-model.md) is the reference, and
-[solving-problem.md](solving-problem.md) §2 states the problem.
+[solving-problem.md](solving-problem.md) §1.2 and §1.4 state named libraries and the
+dependencies that select them.
 
 ### 4.3 Specified, not built
 
@@ -328,9 +324,9 @@ means re-measuring the corpus, where two problems become solvable.
 2. **Should `expand` split back into "pick" then "consequences"?** The reference Rust
    implementation keeps them as two methods. A design item, not a decision; the
    flag-variable model made it cheaper to leave as is, since a release's consequences
-   no longer depend on an assignment.
-3. **Decision order is chosen by discovery, and on `yesod` that costs 4.4× the
-   decisions.** Diagnosed, not fixed — see
+   do not depend on an assignment.
+3. **Decision order is chosen by discovery, and on `yesod` that costs about 4.6
+   decisions per package, against 1.4 on `pandoc`.** Diagnosed, not fixed — see
    [DESIGN.md §12](DESIGN.md#12-decision-order-is-discovery-order-and-yesod-is-the-bill).
 4. **How far can the walk go?** It is unbounded today, so widening reads the whole
    version list in the worst case. A cap stays sound, because maximality of the span
@@ -357,11 +353,11 @@ time.
 - **Sets stay intensional.** An extensional `Set Instance` is not a cheaper PubGrub. It
   is the encoding PubGrub exists to avoid.
 - **A flag is a variable keyed by its declaration, and the value carries no flags.**
-  Decided 2026-10-08, reversing the earlier "flags live in the value". The
-  conditional existence a flag variable needs is one clause from its owner
-  (`declaresFlag`), not machinery; what the earlier model bought with a DNF of cells
-  and three pin states, this gets from `VersionSet` and a `Bool`. Do not key a flag
-  variable by release: that loses the cross-release merge for nothing.
+  The conditional existence a flag variable needs is one clause from its owner
+  (`declaresFlag`), not machinery; what putting flags in the value bought with a
+  disjunctive normal form of cells and three pin states, this gets from `VersionSet`
+  and a `Bool`. Do not key a flag variable by release: that loses the cross-release
+  merge for nothing.
 - **The provider never answers "nothing available" for a set that admits a value.**
   The one obligation of the retired flag-in-value specification that survives as a
   live requirement. Under the variable model a release has exactly one instance, so
@@ -371,7 +367,7 @@ time.
   only check `isEmpty ⟹ empty`. The algebra itself is exact.
 - **Do not chase byte-parity with pub's output.** `^1.0.0` is Dart. cabal writes
   `>=1.0.0 && <2`. Same sentences, cabal's syntax.
-- **No ASP component.** An early plan to encode solving for Clingo was dropped before
+- **No answer-set programming (ASP) component.** An early plan to encode solving for Clingo was dropped before
   any code existed. A generic solver's explanations are not PubGrub's explanations,
   and explanation quality is half the point ([related-work.md](related-work.md) §6).
 
@@ -379,16 +375,15 @@ time.
 
 Each is recorded so nobody re-derives it.
 
-**Narrowing declared ranges to published versions.** `PubGrub.Cabal.Provider.widen` puts a
+**Narrowing declared ranges to published versions.** `PubGrub.Cabal.Provider.widenTo` puts a
 declared range into a term verbatim, so version space no release occupies survives.
-Narrowing it with `snapToVersions` was tried twice in August, reverted twice on cost,
-and re-measured on 2026-09-03 on the current tree, where the cost argument no longer
-applies: it moves the search in both directions (`aeson <2` 400 to 320 decisions and
+Narrowing it with `snapToVersions`, measured on 2026-09-03, moves the search in both
+directions (`aeson <2` 400 to 320 decisions and
 11.6% less allocation, `yesod` 827 to 839 decisions and 11.7% more) and it rewrites
 every quoted range in a closed form nobody wrote, down to the user's own `lens <4`
 printing as `lens >=0.1 && <=3.10.3` on the proof's last line. The second is the
 objection, and it holds at any price. Pub never narrows; pubgrub-rs offers
-`Ranges::simplify` and applies it only in the report. `snapToVersions` is kept, tested
+`Ranges::simplify` and its solver never calls it. `snapToVersions` is kept, tested
 and unused.
 
 Its interior half, `PubGrub.VersionSet.fillGaps`, merges the holes between a range's
@@ -396,7 +391,7 @@ intervals that hold no published release and never moves an outer bound. Measure
 same day: every search counter identical on eight problems, allocation within noise,
 one proof line changed (`haddock`'s seven `^>=` windows into `>=4.13.0.0 && <4.20`; since [DESIGN.md §14](DESIGN.md#14-versions-compare-with-trailing-zeros-insignificant) those windows coalesce on construction, and the declared spelling is what prints).
 It is kept in reserve for *derived* terms, which nobody wrote. Applying it to a
-declared range would discard the author's spelling, which [DESIGN.md](DESIGN.md) §2 now keeps.
+declared range would discard the author's spelling, which [DESIGN.md](DESIGN.md) §2 keeps.
 
 **The fewest-versions decision heuristic.** `references/pubgrub.md:446` suggests
 deciding the package with the fewest versions first. It cuts `futhark` decisions by
@@ -437,15 +432,16 @@ HLS's profiled time and 16% of `yesod`'s, in a run whose profiled time is 2.8× 
 real mutator time; the clock puts the comparisons under 5% on HLS. A share of a tiny
 function read off a cost-centre profile is an upper bound, and not a close one.
 
-**Re-judging only what a backtrack moved.** After a conflict, propagation re-judges
-the whole store. Re-judging only the clauses of the variables the backtrack undid
-gives the same search and cuts the post-backtrack judgements by 23% (46% on
-`haskell-language-server`), and allocation moves by under 0.1%: a judgement is too
-cheap for the count to matter. Built and reverted on 2026-10-20 on that evidence, then
-built again on 2026-10-21 (decision 0070) when a synthetic chain of shallow backjumps
-showed the regime the corpus lacks: there the whole-store re-judge is quadratic in the
-number of conflicts. It is in; the numbers for both regimes are in
-[DESIGN.md §5](DESIGN.md#5-dependency-facts-collapse-in-two-places).
+**Re-judging only what a backtrack moved** is in the solver, and the corpus alone
+would not justify it (decision 0070). After a conflict, propagation re-judges the
+clauses of the variables the backtrack moved, the learned clause and the clauses of
+the variable it derives, or the whole store when those variables mention as many
+clauses as it holds. Over the problem set that gives the same search and cuts the
+post-backtrack judgements by 23% (46% on `haskell-language-server`), and allocation
+moves by under 0.1%: a judgement is too cheap for the count to matter. What justifies
+it is a synthetic chain of shallow backjumps, the regime the corpus lacks: there a
+whole-store re-judge is quadratic in the number of conflicts. The numbers for both
+regimes are in [DESIGN.md §5](DESIGN.md#5-dependency-facts-collapse-in-two-places).
 
 ---
 
@@ -456,16 +452,17 @@ specifications mostly do not overlap.
 
 | file | authoritative on | status |
 | --- | --- | --- |
-| [`references/pubgrub.md`](../references/pubgrub.md) | **the algorithm.** A vendored copy of pub's spec | tracked, 1233 lines. Reference — never edit. Before you cite a line, check it: several later citations land on blank lines |
+| [`references/pubgrub.md`](../references/pubgrub.md) | **the algorithm.** A vendored copy of pub's spec | tracked, 1233 lines. Reference — never edit. Before you cite a line, check it: citations have landed on blank lines |
 | [flags-as-variables.md](flags-as-variables.md) | **flags**: an automatic flag as a solver variable, what the provider emits, what it was measured against | current |
 | [`../CLAUDE.md`](../CLAUDE.md) | build commands, architecture, conventions | current |
+| [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | formatting, commit messages, the release process | current |
 | [DESIGN.md](DESIGN.md) | **why the solver is built this way**: one design decision per section, with the evidence behind it | current |
 | [collapsing.md](collapsing.md) | **depender collapsing**: what runs, what it costs, and the five ways to make it cheaper | current |
 | [benchmarking.md](benchmarking.md) | **how to run the tests and benchmarks**, and which numbers to trust | current |
 | [failure-cases.md](failure-cases.md) | **the failure corpus**: where it came from and what is in it | current |
 | [reports/](reports/) | the two reports **as generated** by `pubgrub-harness`, each dated in its header | generated. Regenerate with `cabal run pubgrub-harness` and copy; do not edit |
 | [solving-problem.md](solving-problem.md) | **cabal's dependency solving problem**, stated: inputs, solutions, validity, and the three extensions | specification of cabal's problem, not of our code. Reference for rungs 4 and 5 |
-| [cabal-build-model.md](cabal-build-model.md) | Cabal's **build model** — components, qualifiers, Backpack | reference for rungs 4 and 5. Nothing implemented |
+| [cabal-build-model.md](cabal-build-model.md) | Cabal's **build model** — components, qualifiers, Backpack | reference for rungs 4 and 5. Qualifiers, public sublibraries and Backpack are not implemented |
 | [pubgrub-intro.md](pubgrub-intro.md) | a tutorial introduction to PubGrub | current |
 | [related-work.md](related-work.md) | external literature mapped onto our problems | a reading map. Authoritative on nothing |
 | the decision records in the Hindsight bank (`decision-log-index`) | project history, and the directions that were dropped | narrative. Authoritative on nothing |
@@ -479,8 +476,8 @@ exclude, so the spec was force-added and nothing else under `references/` was.
 
 | under `references/` | tracked? | citations |
 | --- | --- | --- |
-| `pubgrub.md` — pub's spec | ✅ tracked | the original 13 line numbers are exact |
-| six papers on answer-set solving and package management (PDF, each with a `.md` transcription) | ❌ | prose only, from [related-work.md](related-work.md) and [flags-as-variables.md](flags-as-variables.md) |
+| `pubgrub.md` — pub's spec | ✅ tracked | by line |
+| seven documents on answer-set solving and package management (PDF, five with a `.md` transcription) | ❌ | prose only, from [related-work.md](related-work.md) and [flags-as-variables.md](flags-as-variables.md) |
 | `pubgrub/` — the Rust implementation | ❌ a nested git repo | by function name |
 | `pubgrub-guide/` — the internals guide | ❌ a nested git repo | not cited by line |
 | `pub/` — Dart's pub itself | ❌ a nested git repo | not cited |
@@ -494,8 +491,7 @@ that checkout, and its line numbers move with upstream. `merge_dependents` and
 **Check a `pubgrub.md` line before you cite it.** Citations have landed on blank
 lines before: `:596`, `:601`, `:640`, `:643` and `:670` are all empty. The real
 anchors are `:595` (reporting case 1), `:651` (case 2.ii), `:668` and `:671` (case
-3), and `:673`–`:675` (the numbering rule). Every citation in the tree was checked on
-2026-09-03, and none lands on a blank line.
+3), and `:673`–`:675` (the numbering rule).
 
 ---
 
@@ -503,7 +499,7 @@ anchors are `:595` (reporting case 1), `:651` (case 2.ii), `:668` and `:671` (ca
 
 | deliverable | state |
 | --- | --- |
-| **Explanation showcase** — real failing problems, pubgrub-hs against cabal, side by side | **the problem set exists and we win on all of it, and all of it is pinned.** 20 real failures with every target pinned, six failure kinds, five positive controls. Shorter than cabal on 20 of 20: 76 proof sentences against 193. Shorter on two of the three benchmark unsat problems. Both of the spec's published examples are golden tests, and the linear one matches sentence for sentence. `pubgrub-harness` renders the two explanations as adjacent blocks for the 16 comparable problems, and the 2026-10-08 run is [reports/showcase.md](reports/showcase.md): shorter on 16 of 16 by sentences, 59 against 150 lines; on screen lines at 80 columns 159 against 337, shorter on 15 and equal on one. **On an unconstrained target the record inverts** ([§2.2](#22-against-cabal-on-the-failure-corpus)), and no such problem is in the corpus or the showcase |
+| **Explanation showcase** — real failing problems, pubgrub-hs against cabal, side by side | **the problem set exists and we win on all of it, and all of it is pinned.** 20 real failures with every target pinned, six failure kinds, four positive controls. Shorter than cabal on 20 of 20: 76 proof sentences against 193. Shorter on two of the three benchmark unsat problems. Both of the spec's published examples are golden tests, and the linear one matches sentence for sentence. `pubgrub-harness` renders the two explanations as adjacent blocks for the 16 comparable problems, and the 2026-10-08 run is [reports/showcase.md](reports/showcase.md): shorter on 16 of 16 by sentences, 59 against 150 lines; on screen lines at 80 columns 159 against 337, shorter on 15 and equal on one. **On an unconstrained target the record inverts** ([§2.2](#22-against-cabal-on-the-failure-corpus)), and no such problem is in the corpus or the showcase |
 | **Benchmark report** — time and peak residency on real problems | **current numbers exist** for six problems, three sat and three unsat, both solvers. We use less peak memory on all six, and are faster and leaner in allocation on five of six. `yesod` is the exception on both. The 2026-10-08 run is [reports/benchmark.md](reports/benchmark.md). Its caveats: timings are medians of three runs against ±25% noise, cabal's lazy per-release parsing lands in its `solve` phase and cannot be separated without changing the work, and the 27 MB memory floor is unexplained |
 
 The baseline and the shared index are done. `cabal-install-solver` drives cabal's

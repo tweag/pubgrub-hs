@@ -19,8 +19,8 @@
 # that helps. See docs/benchmarking.md.
 
 # --- index throughput: little or no search ---
-vector                  # 39 decisions, 0 conflicts. The floor.
-pandoc                  # 270 decisions, 1 conflict. Reads dominate, so it cannot show
+vector                  # 38 decisions, 0 conflicts. The floor.
+pandoc                  # 265 decisions, 1 conflict. Reads dominate, so it cannot show
                         # a search win. Regressions in read count show up here first.
 
 # --- real search, all three currently UNSAT for both solvers ---
@@ -29,7 +29,7 @@ lens <4
 aeson <2                # the deepest resolution chain in the set
 
 # --- search on a satisfiable problem ---
-yesod                   # 827 decisions, 11 conflicts, ~2.6 s. The only sat problem in
+yesod                   # 828 decisions, 14 conflicts, ~2.5 s. The only sat problem in
                         # the set with real search in it: vector and pandoc resolve
                         # almost straight through. Keep it: a problem nobody re-runs
                         # is a problem whose regressions nobody sees.

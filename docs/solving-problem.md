@@ -17,7 +17,8 @@
 > before solving and do not appear. Every package with a custom build type has a
 > well-formed `custom-setup` stanza. A custom setup script is an opaque build
 > procedure constrained only by its declared dependencies. The `base` qualifier and
-> independent-goal namespaces of cabal's solver are ignored.
+> independent-goal namespaces of cabal's solver are ignored, and so is its check of a
+> component's languages and extensions against the compiler.
 
 ## 1. The core problem
 
@@ -46,8 +47,11 @@ is identified within its source package by a kind and a name:
 ```
 
 The main library of package `p`, when there is one, is the component
-`(library, p)`. Any other library component is a named library. Two components of
-one source package may share a name if their kinds differ.
+`(library, p)`. Any other library component is a named library. The main library
+may share its name with one component of another kind, usually an executable. No two
+named sections may share a name, whatever their kinds (§2): the parser accepts it, the
+solver does not look, and Cabal's configure step refuses it. `cabal check` reports it
+for all but foreign libraries.
 
 Component identity is local to a source package. `foo-1.0` and `foo-1.1` may
 contain different components. So "does this package contain component `x`" is a
@@ -121,7 +125,9 @@ named library `n` of `q`.
 A dependency is a constraint on two things at once: the version of `q`, and the
 presence of the selected component in that version. A version in range that lacks
 the component cannot satisfy the dependency, and neither can one in which the
-selected component is unbuildable (§1.9).
+selected component is unbuildable or is a private library (§1.9). A named library is
+private unless declared `visibility: public`, and a private library can be selected
+only from its own package.
 
 *pkg-config dependencies* are the `pkgconfig-depends:` entries. Each is a module
 name with a version range. Nothing in a plan can satisfy one; only the environment
@@ -129,9 +135,11 @@ can. It is satisfied when `E` lists the module at a version in the range.
 
 An *internal dependency* is a library dependency whose package name is the
 depender's own package. There is nothing to choose for it, since the depender's
-own source package is the only thing that can satisfy it, so it plays no part in
-version solving and its range is not checked. It matters only for build order
-(§1.11).
+own source package is the only thing that can satisfy it. Its range still holds: a
+version outside the range of its own internal dependency cannot be chosen (V2).
+Otherwise it matters for build order (§1.11), and, when it sits under a flag or
+stanza, the solver also rejects it if the package's own component is missing or
+unbuildable.
 
 ### 1.5 Solving is per package
 
@@ -229,7 +237,7 @@ A dependency `d = (q, r, sel)` in `deps(s, α(s))` is *satisfied* by the plan wh
 one of the following holds:
 
 - `choice(q)` is a source package `s' = (q, v')` with `v' ∈ r`, and the selected
-  library is in `inc(s', α(s'))`.
+  library is public and in `inc(s', α(s'))`.
 - `choice(q)` is an installed unit `u` with `ver(u) ∈ r` whose library component
   name matches `sel`.
 
@@ -237,8 +245,9 @@ A plan is *valid* when:
 
 - **V1, roots.** For every local package `l`, `choice(name(l)) = l`.
 - **V2, closure.** For every source package `s` in the range of `choice`, every
-  `d ∈ deps(s, α(s))` is satisfied, and every pkg-config dependency in
-  `pkgdeps(s, α(s))` is satisfied by `E`.
+  `d ∈ deps(s, α(s))` is satisfied, every pkg-config dependency in
+  `pkgdeps(s, α(s))` is satisfied by `E`, and the version of `s` is in the range of
+  every internal dependency of every component in `inc(s, α(s))`.
 - **V3, flags.** For every source package `s = (p, v)` in the range of `choice`
   and every `f ∈ F(s)`:
   - if `f` is manual, `α(s)(f)` is `U_p(f)` when `U_p` defines `f`, and the
@@ -274,8 +283,8 @@ Everything above is a satisfiability problem, and several valid plans usually
 exist. Which one cabal produces is configurable. In general:
 
 - cabal prefers a newer version of a package over an older one;
-- cabal avoids the versions the repository marks as deprecated, choosing one only
-  when no valid plan avoids it;
+- cabal avoids the versions the repository marks as deprecated, trying one only
+  after the search has failed on the others;
 - cabal starts an automatic flag at its declared default and moves off it only
   when forced.
 
@@ -313,7 +322,7 @@ artefacts, they produce no installed unit, and nothing can depend on them.
 User constraints gain one property:
 
 ```text
-stanzas S           S ⊆ { tests, benchmarks }: the optional components of p that are enabled
+stanzas S           S ⊆ { tests, benchmarks }: the optional components of p that must be enabled
 ```
 
 For a source package `s`, `enabled(s)` is the set of its test components, if the
@@ -325,7 +334,9 @@ every test and benchmark component of a local package is enabled
 no test or benchmark component of a dependency package is enabled
 ```
 
-and the user may enable or disable the tests or the benchmarks of any package.
+and the user may enable or disable the tests or the benchmarks of any package. Cabal
+holds the local default as a preference unless the user asked explicitly, so a plan
+with that stanza disabled is valid (§5).
 
 An optional component is included only when it is both enabled and buildable:
 
@@ -405,8 +416,9 @@ requirement of every non-library unit's inclusions must be satisfied.
 
 ### 4.1 Executable dependencies
 
-Executable dependencies are `build-tool-depends:` entries. A dependency gains a
-third kind of selector:
+Executable dependencies are `build-tool-depends:` entries, and the legacy
+`build-tools:` entries cabal can translate to one. A dependency gains a third kind
+of selector:
 
 ```text
 (q, r, sel)       sel ∈ { main library, library n, executable n }
@@ -423,8 +435,10 @@ executable artefact and nothing else: the libraries used to build that executabl
 do not become dependencies of the depender and need not agree with the depender's
 own library choices.
 
-An executable dependency on an executable of the depender's own package is an
-internal dependency, as in §1.4: it plays no part in version solving.
+An executable dependency on the depender's own package is internal too, and cabal
+drops it before solving, range included. The solver checks neither the range nor that
+the executable exists, so such a release passes solving and Cabal's configure step
+then refuses it.
 
 ### 4.2 Setup dependencies
 
@@ -451,8 +465,8 @@ build the setup program need not agree with the package's own library choices.
 A *scope* is a coherence domain. Package-version coherence (§1.8) and, under §3,
 unit coherence hold within a scope. There is no coherence requirement across
 scopes: the same package name may be chosen at different versions in different
-scopes, and the same source package may be chosen in several scopes, each time
-with its own configuration and its own dependency assignment.
+scopes. The same source package or installed unit may be chosen in several scopes
+only under V9 (§4.6).
 
 Scopes are identified by package names, and there are three kinds:
 
@@ -485,8 +499,8 @@ either name alone is wrong: keying by `p1` only would force every executable
 would force one version of `p2`'s executables on the whole plan.
 
 The only thing that crosses a dependency edge between scopes is the artefact: the
-executable, or the setup program. Package choices made in one scope place no
-constraint on package choices made in another.
+executable, or the setup program. Apart from V9, package choices made in one scope
+place no constraint on package choices made in another.
 
 ### 4.4 Occurrences and the plan
 
@@ -508,6 +522,7 @@ User constraints gain a *scope selector*:
 any scope
 the main scope only
 any setup scope
+one named scope, setup(q) or exe(q, p)
 ```
 
 A constraint applies in the scopes its selector names, so a constraint on `p`
@@ -546,10 +561,13 @@ A plan is valid when:
 - **V1, roots.** For every local package `l`, `choice_top(name(l)) = l`.
 - **V2, closure.** For every occurrence `(σ, s)`, every `d ∈ deps(s, α_σ(s))` is
   satisfied (§4.5), every pkg-config dependency in `pkgdeps(s, α_σ(s))` is
-  satisfied by `E`, and if `setup(s)` is not *none*, every `d ∈ setup(s)` is
-  satisfied.
+  satisfied by `E`, the range of every internal library dependency holds as in §1.9,
+and if
+  `setup(s)` is not *none*, every `d ∈ setup(s)` is satisfied.
 - **V3, flags.** V3 of §1.9 holds in every scope, against that scope's `α_σ`,
-  with `U_p` read from the flag constraints that apply in that scope.
+  with `U_p` read from the flag constraints that apply in that scope. One
+  relaxation: a manual flag constrained only in other scopes may also take the
+  constrained value here, so that the occurrences can link (V9).
 - **V4, user constraints.** Every user constraint holds in every scope its
   selector names.
 - **V5, installed linkage.** V5 of §1.9 holds in every scope, against that
@@ -558,7 +576,10 @@ A plan is valid when:
 - **V7, minimality.** Every occurrence is reachable in the occurrence graph from
   some `(top, l)` with `l` a local package.
 - **V8, independence.** No condition relates `choice_σ` and `choice_σ'` for
-  distinct scopes `σ` and `σ'`, beyond the edges of §4.5.
+  distinct scopes `σ` and `σ'`, beyond the edges of §4.5 and V9.
+- **V9, single instance.** When several scopes choose the same source package or the
+  same installed unit, their occurrences are linked: they have equal configurations
+  and enabled stanzas, and their dependencies are linked in turn.
 
 V8 is not a constraint but the explicit absence of one. V7 says which scopes a
 plan has: a scope exists exactly when some occurrence has an edge into it. V6 now
@@ -574,19 +595,18 @@ every such executable must be buildable in it.
 
 ### 4.7 Structure
 
-By V8, the choices in one scope are constrained by other scopes only through the
-roots those scopes hand it: the main scope's roots are the local packages, the
-roots of `exe(p1, p2)` are the executables of `p2` that the occurrences of `p1`
+By V8, apart from V9, the choices in one scope are constrained by other scopes only
+through the roots those scopes hand it: the main scope's roots are the local packages,
+the roots of `exe(p1, p2)` are the executables of `p2` that the occurrences of `p1`
 need, and the roots of `setup(p)` are the setup dependencies of the occurrences of
 `p`. The roots of a scope are therefore determined by occurrences in other scopes,
 and V6 guarantees that this determination is well-founded: there is an order of
 the occurrences in which every occurrence's dependencies are resolved by
 occurrences that come earlier.
 
-Cabal's solver additionally tries to *link* occurrences across scopes, making the
-same choice in two scopes so that one build unit serves both. Linking changes
-which of several valid plans is produced and never makes an invalid plan valid,
-so it is a preference in the sense of §1.10, not a condition stated here.
+Cabal's solver *links* occurrences across scopes, so that one build unit serves
+both. V9 is the condition. Trying a linked choice first, where scopes could also
+choose different versions, is a preference in the sense of §1.10.
 
 ## 5. What this specification leaves open
 
