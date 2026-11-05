@@ -43,7 +43,7 @@ Versions follow the [Haskell Package Versioning Policy](https://pvp.haskell.org/
 - Incrementing a field sets all fields to its right to `0`.
 - `A` changes only by hand, when the maintainer decides that a release deserves a new number. Like a change of `B`, it makes a major release.
 - Release tags are `v` followed by the version, for example `v0.1.0.0`. The first release is `0.1.0.0`.
-- Every package in `cabal.project` has the version of the release.
+- Every package in `cabal.project` has the version of the release. The release task keeps it so; CI does not check it.
 
 The `version:` fields in the `.cabal` files are the only source of the version. Only the release task, and the maintainer in a release PR, change them and the `CHANGELOG.md` files.
 
@@ -55,7 +55,7 @@ The maintainer makes releases.
 2. Run `mise run release-pr`. It reads the commits since the last release tag, sets the next version in every `.cabal` file, regenerates `CHANGELOG.md` and each package's own with [git-cliff](https://git-cliff.org/), and opens a pull request titled `chore(release): VERSION`. If there are no releasable commits, it says so and does nothing.
 3. Review the pull request. The task changes only the `version:` fields, so a release that increments `A` or `B` also needs the bound of `pubgrub-cabal` on `pubgrub` raised by hand, or cabal cannot plan and `ci-ok` fails. To increment `A`, change the version by hand in every `.cabal` file, and change the header of every `CHANGELOG.md` and the commit description to the same version. Edits to a `CHANGELOG.md` are lost at the next release, which regenerates it; wording that must stay goes in `cliff.toml`.
 4. When `ci-ok` passes, merge the pull request with rebase merge.
-5. CI's `release` job sees the release commit on `main`. It publishes a GitHub release with the source distribution and the documentation of `pubgrub` and `pubgrub-cabal` as Hackage takes them, and the `pubgrub` executable for each platform, their `SHA256SUMS`, and the notes from `CHANGELOG.md`. Publishing creates the tag. Then the `pages` job publishes the documentation of the release to <https://tweag.github.io/pubgrub-hs/>.
+5. CI's `release` job sees the release commit on `main`. It publishes a GitHub release with the source distribution and the documentation of `pubgrub` and `pubgrub-cabal` as Hackage takes them, and the `pubgrub` executable for each platform, their `SHA256SUMS`, and the notes from `CHANGELOG.md`. Publishing creates the tag, named from the version in the commit's subject. Then the `pages` job publishes the documentation of the release to <https://tweag.github.io/pubgrub-hs/>.
 6. Verify the release:
 
    ```
