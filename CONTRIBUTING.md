@@ -21,8 +21,8 @@ Two things matter to any change in reporting. The gate and the harness count sen
 the connective that opens them, so a new line must open with none of them. And the golden
 proofs are the spec's own examples, so a wording change earns its way past them.
 
-CI also runs `scripts/check-haddock.sh pubgrub`: no Haddock warning, and every export
-documented.
+CI also runs `scripts/check-haddock.sh pubgrub pubgrub-cabal`: no Haddock warning, and
+every export documented.
 
 ## Invariants you can break by accident
 
