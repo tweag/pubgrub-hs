@@ -1,8 +1,8 @@
 # Contributing
 
-How to read the project is [`CLAUDE.md`](CLAUDE.md); what works and what is planned is
-[`docs/STATUS.md`](docs/STATUS.md). This file is the formatting, commit and release
-process.
+What the project is, and how to build and run it, is the [README](README.md); why it is
+built this way is [`docs/DESIGN.md`](docs/DESIGN.md). This file is how to change it: what
+decides whether a change is kept, the conventions, and the commit and release process.
 
 ## Formatting
 

@@ -1,6 +1,7 @@
 # Running the tests and the benchmarks
 
-How to reproduce every number in [STATUS.md](STATUS.md), and what each one is worth.
+How to reproduce every number in [reports/](reports/) and
+[failure-cases.md](failure-cases.md), and what each one is worth.
 
 ```sh
 cabal test all                # every unit, property and golden test, and pubgrub's doctests
@@ -8,8 +9,6 @@ scripts/gate.sh               # the eight gates that decide whether a change is 
 cabal run pubgrub-harness     # both solvers over both problem sets; writes the two reports
 scripts/check-stats.sh        # --stats against bench/summarise.awk, on every problem
 ```
-
-**STATUS.md §2 holds the current numbers.** This file holds the method.
 
 ---
 
@@ -21,8 +20,8 @@ cabal run pubgrub-index -- --index-state "$(cat bench/index-state)"   # a few mi
 
 This parses every release once into `_cache/derived-index.cbor` (94.8 MB) plus a
 2.5 MB index keyed by tar block. Without it, every release read is a `.cabal` parse at
-about 2 ms. Every number you take is then against a different machine from the one
-STATUS.md describes.
+about 2 ms. Every number you take is then against a different setup from the one the
+reports describe.
 
 The store is a cache. Removing `_cache/derived-index.*` costs speed and never
 correctness, because every miss parses instead. Raise `storeFormatVersion` in
@@ -127,7 +126,7 @@ refresh. Per-run logs are left in `<output>/runs/`.
 It writes two markdown files into `bench/output/`, which is git-ignored. A run meant
 to be quoted is copied into `docs/reports/` on purpose.
 
-- **`benchmark.md`**, from `bench/problems.txt`: the STATUS.md §2.1 table with the
+- **`benchmark.md`**, from `bench/problems.txt`: both solvers' table with the
   phases split out, the search-count table, and a plan diff per satisfiable problem
   over the library domain. A package cabal plans at two versions is reported as its
   qualified goals showing through, not as a disagreement.
@@ -151,8 +150,7 @@ Options: `--exe PATH` (default `$PUBGRUB_EXE`, else `cabal list-bin exe:pubgrub`
 and positional problems.
 
 It measures; it does not decide. `scripts/gate.sh` decides, and neither replaces the
-other. The decision record `decision-0035-one-command-produces-both-deliverables`, in the
-project's Hindsight bank, has why it is shaped this way.
+other.
 
 **There are two problem sets, and they answer different questions.**
 
@@ -213,9 +211,9 @@ It reports three separate read counters, and they mean different things:
 | `decoded` | releases decoded out of the derived index |
 | `reused` | repeat lookups served from the in-memory cache |
 
-The lookup figures STATUS.md quotes (2831 on `pandoc`) are `decoded`.
+The lookup figures the benchmark report quotes (2831 on `pandoc`) are `decoded`.
 
-The decision figures STATUS.md quotes are `deciding`: every time the solver asked the
+The decision figures it quotes are `deciding`: every time the solver asked the
 provider for a decision. `chose` is the subset that produced an instance, and the two
 differ by the `noversion` events. On `lens <4` that is 64 against 62. Quote `deciding`.
 
@@ -236,7 +234,9 @@ no-version events, reads and proof length are the same on every run of the same 
 so a difference in any of them is a real difference. Compare those.
 
 **Elapsed time on a desktop moves by ±25%.** Four runs of `aeson <2` at one commit came
-in at 5.2, 6.5, 6.9 and 7.8 s. Never conclude from a single pair of timings.
+in at 5.2, 6.5, 6.9 and 7.8 s. Never conclude from a single pair of timings. The reports
+give medians of three, which is enough for a median and not for a spread, so they quote
+none.
 
 **Total allocation is the stable stand-in for time.** `+RTS -s` reports it, it barely
 varies between runs, and it caught a 3.9% regression that wall-clock could not resolve.
@@ -245,7 +245,7 @@ varies between runs, and it caught a 3.9% regression that wall-clock could not r
 `/usr/bin/time` is peak RSS, which includes the runtime system's own overhead and
 fragmentation.
 `maximum residency` from `+RTS -s` is the live heap as the garbage collector saw it.
-STATUS.md quotes the second.
+The reports quote the second.
 
 **The ~29 MB floor is unexplained**, and it is the weakest link in the strongest claim
 the project has. Doubling the per-element overhead of the package-to-versions map, long
@@ -302,7 +302,26 @@ the cabal baseline read 50.7 MB before the index-state work and 65.8 MB after, w
 under `+RTS -A256k`, which collects often enough to see the real peak, it read 64.3 MB
 and 66.0 MB. Before attributing a residency change to the code, re-run both sides
 with `-A256k`; if the two agree there, the default-nursery number moved by sampling.
-The STATUS.md §2.1 table carries the default-nursery numbers.
+The benchmark report carries the default-nursery numbers.
+
+## Reading the benchmark report
+
+Figures here are from the report of 2026-11-04.
+
+**Our time mostly goes to opening the world, not to solving.** Opening the index, the
+installed database and the pkg-config database costs about 0.8 s on both sides, which is
+most of our elapsed time on every row. Our solve is under 0.2 s on four of the six
+problems, `pandoc`'s 0.37 s is reads rather than search, and `yesod`'s 0.54 s is the only
+one with real search in it.
+
+**`yesod` is the row with the most left to gain.** It is the only satisfiable problem
+with real search, and our lead on allocation is the smallest there, at 1.9×. The cause is
+diagnosed: half its decisions re-derive a prefix that was already correct
+([DESIGN.md](DESIGN.md) §12).
+
+**The plan diff finds one known gap.** On the three satisfiable problems our plan is a
+subset of cabal's, and the two agree on every package they share. Everything cabal's
+plans add is a setup or build-tool dependency.
 
 ## Comparing against cabal
 
@@ -322,8 +341,8 @@ Four things to keep in mind when reading a comparison.
    `solve` phase, and forcing them earlier would make a solve pay for releases it never
    touches, which changes what is measured.
 2. **cabal solves setup and build-tool dependencies and we do not** (`solveExecutables
-   = True`, against a driver that solves neither namespace, STATUS.md §4.1). On a
-   package with a custom setup the two are not solving the same problem.
+   = True`, against a driver that solves neither namespace, [DESIGN.md](DESIGN.md) §16).
+   On a package with a custom setup the two are not solving the same problem.
 3. **cabal's plan is printed by component, and must be read that way.** cabal solves
    *qualified goals*, so a setup or executable dependency is solved in its own domain.
    `Setup.hs` can be built against a different `mtl` than the library, and one plan can
@@ -338,7 +357,8 @@ For the explanation deliverable the comparable quantity is **length**: our proof
 against cabal's message. The harness's `showcase.md` prints both per problem, and
 `scripts/gate.sh` holds the corpus totals as ceilings. Over the 21-case corpus cabal's
 message runs 5 to 17 lines. Ours has no bound on length, and on an unconstrained
-target it is the longer text (STATUS.md §2.2).
+target it is the longer text ([failure-cases.md](failure-cases.md)). Verdict agreement
+covers these 27 problems, not every package.
 
 **A proof is counted by connective, not by line number.** The reporter numbers only
 the conclusions it refers back to (`references/pubgrub.md:673`). In a linear

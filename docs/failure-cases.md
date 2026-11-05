@@ -74,10 +74,9 @@ before `T` has been caught up with by `T`.
 
 ## The 21 that reproduce, against cabal
 
-ghc-9.12.2, base-4.21.0.0, and this machine's pkg-config database. Absent there:
-`libpq`, `libzmq`, `blas`, `lapack`. Present: `cairo`, `pango`, `gtk+-2.0`, `gtk+-3.0`,
-`gtk4`, `gio-2.0`, `zlib`, `libsodium`, `libgit2`. Every problem runs in under 3 s.
-Measured on 2026-11-04 at index-state `2026-09-09T02:42:09Z`. cabal's message
+The run behind this table is [reports/showcase.md](reports/showcase.md), whose header
+records the compiler, the index-state and which pkg-config modules the machine has. The
+four problems the showcase excludes come from the same run. cabal's message
 lengths move with the index when it is not pinned: `haskoin-store-data` and
 `atelier-testing` each grew by two lines between the 2026-08-20 and 2026-09-03
 snapshots. Ours did not move.
@@ -147,7 +146,7 @@ failures in it are real rather than an artefact of the environment.
   or on the local pkg-config db. Install `libpq` and `hpqtypes-extras` resolves. Any
   published figure has to state the environment.
 - **Both solvers run with every flag pinned to its declared default**
-  ([STATUS.md](STATUS.md) §3.1). That is a restriction of the problem, and it removes
+  ([DESIGN.md](DESIGN.md) §3). That is a restriction of the problem, and it removes
   exactly the escape cabal's *automatic* flags would provide.
 - **cabal solves setup and build-tool depends and we do not.** On a package with a
   custom `Setup.hs` the two are answering different questions. Of the 21 targets,
@@ -180,20 +179,3 @@ cabal's trace is not the right measure for them, since the trace explains one re
 and the proof explains all of them, so the showcase needs a completeness column
 before it can render such a problem fairly. Until then, every number quoted from this
 corpus is a number about pinned targets.
-
-## How this is rendered
-
-`cabal run pubgrub-harness -- --set corpus` runs both solvers over every row and
-writes `bench/output/showcase.md`: the environment and the three restrictions, the
-excluded problems and why, a summary table, then per problem our proof and cabal's
-`Could not resolve dependencies:` block as adjacent fenced blocks, with the counts.
-The four reason-mismatched problems are run and measured and not rendered, so the
-headline it prints is "shorter on 17 of 17 comparable problems", by sentences; by
-screen lines at 80 columns it is shorter on 16 and equal on the `hlint` pair.
-`scripts/gate.sh`
-does the deciding half: it fails on any regression in verdict agreement or proof
-length. See [STATUS.md](STATUS.md) §7 and [benchmarking.md](benchmarking.md).
-
-One habit worth keeping in any tool over this corpus: read a child's output as
-bytes and pass `-a` to `grep`. A tool that reads a proof as text and meets a byte
-it cannot decode counts zero lines and looks like a passing measurement.

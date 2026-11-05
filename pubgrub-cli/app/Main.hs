@@ -499,8 +499,8 @@ runOurs opts t0 counters provider seeds = do
 -- one 'IO' action per release (~153k 'SourcePackage' records, each with a
 -- deferred parse), but the 'PackageIndex' over them is built lazily when the
 -- solver first looks a package up, and every @.cabal@ parse happens on demand
--- inside the solve. So @index@ is the record allocation only, and most of what
--- STATUS.md §2.3 calls cabal's index cost lands in @solve@. Forcing the index
+-- inside the solve. So @index@ is the record allocation only, and most of cabal's
+-- index cost lands in @solve@. Forcing the index
 -- here would move the number, not the work — and would change what is being
 -- measured, since a solve that never touches most of the index would then pay
 -- for all of it.

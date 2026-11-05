@@ -28,9 +28,8 @@ text on 21. On the benchmark set too, cabal's message on `aeson <2` is shorter t
 proof.
 
 The benchmark report and the explanation showcase in [`docs/reports/`](docs/reports/)
-are the evidence, each dated in its header. [`docs/STATUS.md`](docs/STATUS.md) is what the
-repository contains now and what is planned, [`docs/DESIGN.md`](docs/DESIGN.md) why
-it is built that way, and [`CLAUDE.md`](CLAUDE.md) the architecture.
+are the evidence, each dated in its header. [Documentation](#documentation) lists the
+rest.
 
 [PubGrub]: https://github.com/dart-lang/pub/blob/master/doc/solver.md
 
@@ -197,6 +196,24 @@ Each [release](https://github.com/tweag/pubgrub-hs/releases) also has the
 documentation of `pubgrub` and `pubgrub-cabal`, as
 `PACKAGE-VERSION-docs.tar.gz`, in the format Hackage takes.
 
+In this repository:
+
+- [`docs/reports/`](docs/reports/): the benchmark report and the explanation showcase,
+  as `pubgrub-harness` generated them.
+- [`docs/DESIGN.md`](docs/DESIGN.md): why the solver is built this way, one decision per
+  section, with the evidence and what was measured and rejected.
+- [`docs/benchmarking.md`](docs/benchmarking.md): how to run the tests and the benchmarks,
+  and which numbers to trust.
+- [`docs/failure-cases.md`](docs/failure-cases.md): where the failure corpus came from
+  and what it does not measure.
+- [`docs/pubgrub-intro.md`](docs/pubgrub-intro.md): an introduction to the algorithm, and
+  how it differs from cabal's modular solver.
+- [`docs/solving-problem.md`](docs/solving-problem.md): the problem cabal's solver
+  answers, stated as a specification, including what public sublibraries would need.
+- [`references/pubgrub.md`](references/pubgrub.md): a copy of pub's specification of
+  PubGrub, the authority on the algorithm.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md): how to change the project and make a release.
+
 ## Layout
 
 Six packages in one `cabal.project`. `pubgrub` and `pubgrub-cabal` are meant for Hackage.
@@ -217,7 +234,7 @@ pubgrub-hs/         the Cabal bridge, unpublished: reads the Hackage index, reso
                     index as the baseline. Its tests are the ones that need it.
 pubgrub-cli/        the `pubgrub` driver and the `pubgrub-index` builder, unpublished.
 pubgrub-harness/    the `pubgrub-harness` executable, unpublished.
-docs/               STATUS.md first. See docs/STATUS.md §6 for what each file decides.
+docs/               see Documentation above.
 ```
 
 ## Caveats
