@@ -41,6 +41,7 @@ data InstalledPkg = InstalledPkg
     }
     deriving (Eq, Show)
 
+-- | The installed units, indexed by unit id and by package name.
 data InstalledDb = InstalledDb
     { idbById   :: Map UnitId InstalledPkg
     , idbByName :: Map PackageName [InstalledPkg]
@@ -63,6 +64,7 @@ mkInstalledDb pkgs =
         | Set.member (ipUnitId p) seen = go seen ps
         | otherwise = p : go (Set.insert (ipUnitId p) seen) ps
 
+-- | The unit as the solver's value, in the solver's version type.
 toPreInstalled :: InstalledPkg -> PreInstalledPackage
 toPreInstalled p =
     PreInstalledPackage
@@ -164,5 +166,7 @@ nonReinstallablePackages =
             , "template-haskell"
             ])
 
+-- | Is the package on the list of those that can only come from the compiler's
+-- installed set?
 isNonReinstallable :: PackageName -> Bool
 isNonReinstallable = (`Set.member` nonReinstallablePackages)

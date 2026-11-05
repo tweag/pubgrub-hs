@@ -93,6 +93,7 @@ singletonInstance :: Instance -> InstanceSet
 singletonInstance (UsePreInstalled pip) = InstanceSet (Set.singleton pip) VersionSet.emptyVersionSet
 singletonInstance (BuildSource v)       = sourceInstances (VersionSet.singletonVersionSet v)
 
+-- | Is the instance in the set?
 memberInstance :: Instance -> InstanceSet -> Bool
 memberInstance (UsePreInstalled pip) s = Set.member pip (isInstalled s)
 memberInstance (BuildSource v) s       = VersionSet.contains (isSource s) v

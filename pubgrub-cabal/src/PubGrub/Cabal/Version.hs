@@ -14,8 +14,10 @@ module PubGrub.Cabal.Version
 import qualified Distribution.Types.Version as Cabal
 import           PubGrub.Version
 
+-- | A Cabal version as the solver's.
 fromCabalVersion :: Cabal.Version -> Version
 fromCabalVersion = mkVersion . Cabal.versionNumbers
 
+-- | The Cabal version a solver's version came from.
 toCabalVersion :: Version -> Cabal.Version
 toCabalVersion = Cabal.mkVersion . versionNumbers

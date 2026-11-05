@@ -44,11 +44,13 @@ import           PubGrub.SetOps             (SetOps (..))
 -- Values
 -- --------------------------------------------------------------------------
 
+-- | What a variable takes: an instance for a package, a Boolean for a flag.
 data Value
     = PackageValue Instance
     | FlagValue Bool
     deriving (Eq, Ord, Show)
 
+-- | The instance a package's value holds; nothing for a flag's.
 valueInstance :: Value -> Maybe Instance
 valueInstance (PackageValue i) = Just i
 valueInstance (FlagValue _)    = Nothing
@@ -78,14 +80,17 @@ instance SetOps BoolSet where
     isSubsetOf (BoolSet f t) (BoolSet f' t') = (f' || not f) && (t' || not t)
     isDisjoint (BoolSet f t) (BoolSet f' t') = not (f && f') && not (t && t')
 
+-- | The set holding exactly one of a flag's values.
 boolSet :: Bool -> BoolSet
 boolSet True  = BoolSet False True
 boolSet False = BoolSet True False
 
+-- | The sets holding both of a flag's values, and neither.
 bothValues, neitherValue :: BoolSet
 bothValues = BoolSet True True
 neitherValue = BoolSet False False
 
+-- | Is the flag's value in the set?
 memberBool :: Bool -> BoolSet -> Bool
 memberBool True  = allowsTrue
 memberBool False = allowsFalse
@@ -132,6 +137,7 @@ singletonValue :: Value -> ValueSet
 singletonValue (PackageValue i) = instanceSet (singletonInstance i)
 singletonValue (FlagValue b)    = flagSet (boolSet b)
 
+-- | Is the value in the set?
 memberValue :: Value -> ValueSet -> Bool
 memberValue (PackageValue i) s = memberInstance i (vsInstances s)
 memberValue (FlagValue b) s    = memberBool b (vsFlags s)
@@ -153,6 +159,7 @@ data Resolved
     | Built Version FlagAssignment
     deriving (Eq, Show)
 
+-- | The instance a plan's entry decided on, without its flags.
 resolvedInstance :: Resolved -> Instance
 resolvedInstance (Installed pip) = UsePreInstalled pip
 resolvedInstance (Built v _)     = BuildSource v

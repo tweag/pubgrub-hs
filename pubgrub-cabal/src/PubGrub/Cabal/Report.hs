@@ -7,9 +7,9 @@
 -- ("PubGrub.Cabal.Report.Wording"), a pass over the tree before the walk
 -- ('collapseNoInstances'), and the rules that say a step in fewer lines than
 -- the PubGrub algorithm's cases would. Three of those are this package's rather
--- than the algorithm's — 'samePairRun', 'wideningRun' and 'collapseNoInstances' —
+-- than the algorithm's — @samePairRun@, @wideningRun@ and 'collapseNoInstances' —
 -- and each carries its soundness argument where it is defined. The two clause
--- rules the algorithm names as special cases, 'chainOfTwo' and 'sharedDepender',
+-- rules the algorithm names as special cases, @chainOfTwo@ and @sharedDepender@,
 -- are here too rather than in the core, because what a dependency is the core
 -- does not know.
 --
@@ -272,7 +272,7 @@ sharedDepender (c1, c2) = do
 --  * __the dependee's whole range is empty.__ Then the union over the pivot is ⊤, the
 --    dependee entry drops out of the resolvent, and rebuilding would produce a
 --    dependency fact whose dependee range is /gone/ — the proof would say \"haddock
---    >=2.29.1 is forbidden\" and never mention @base@. 'dependsOnNothing' renders
+--    >=2.29.1 is forbidden\" and never mention @base@. @dependsOnNothing@ renders
 --    that case as \"depends on … , which has no versions\", which keeps the range,
 --    so the guard here is that the node must still carry a term for both packages.
 collapseNoInstances :: Incompatibility Var -> Incompatibility Var

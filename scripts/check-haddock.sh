@@ -14,9 +14,24 @@ fi
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
 
+# Haddock finds no page for the names GHC generates for a Generic instance (Rep_*)
+# and an associated type instance (D:R:*). Nothing in the source could give them
+# one, so those warnings say nothing about the documentation.
+generated=$(for name in \
+  PubGrub.Cabal.D:R:SetOfVar \
+  PubGrub.Cabal.D:R:ValueOfVar \
+  PubGrub.Cabal.D:R:FactOfVar \
+  PubGrub.Cabal.Flatten.Rep_Branch \
+  PubGrub.Cabal.Flatten.Rep_LibNode \
+  PubGrub.Cabal.Flatten.Rep_Node \
+  PubGrub.Cabal.Flatten.Rep_StoredRelease \
+  PubGrub.Cabal.Flatten.Rep_Tree; do
+  printf -- '--ignore-link-symbol=%s ' "$name"
+done)
+
 status=0
 for pkg in "$@"; do
-  if ! cabal haddock "$pkg" >"$log" 2>&1; then
+  if ! cabal haddock "$pkg" --haddock-options="$generated" >"$log" 2>&1; then
     cat "$log" >&2
     exit 1
   fi

@@ -43,7 +43,7 @@
 --   guard is always a formula over flag /names/.
 -- * /A formula, not a flag/. @flag(a) && !flag(b)@ is one guard mentioning two
 --   flags. Do not picture one flag per guard.
--- * /Accumulated down the tree/. 'flattenWith' starts at @Lit True@ and
+-- * /Accumulated down the tree/. @flattenWith@ starts at @Lit True@ and
 --   pushes conditions down: the @if@ branch gets @guard \`cAnd\` cond@, the
 --   @else@ branch @guard \`cAnd\` cNot cond@. A dependency nested two levels deep
 --   carries both conditions conjoined; nesting produces a longer formula, not
@@ -57,7 +57,7 @@
 --
 -- == One walk, two entry points
 --
--- Everything is read off the __pre-environment form__, 'StoredRelease': the
+-- Everything is read off the __pre-environment form__, t'StoredRelease': the
 -- component trees as the @.cabal@ file wrote them, with the environment's
 -- conditions unresolved and each node reduced to what is ever consulted. The
 -- description-taking functions ('componentDeps', 'buildableCondition', …) go
@@ -101,7 +101,7 @@ module PubGrub.Cabal.Flatten (
     -- still undecided: the conditional trees as they were written, with
     -- 'ConfVar' conditions unresolved. This is the form a derived index stores,
     -- because parsing is 106x the cost of flattening and only the flatten
-    -- depends on the machine ('envConfVar' resolves @os@\/@arch@\/@impl@, and
+    -- depends on the machine (@envConfVar@ resolves @os@\/@arch@\/@impl@, and
     -- 'buildableCondition' additionally resolves @pkgconfig-depends@).
     StoredRelease (..),
     LibNode (..),
@@ -188,6 +188,7 @@ import           PubGrub.Cabal                                 (UnbuildableReaso
 import           PubGrub.Cabal.VersionSet                      (VersionSet)
 import qualified PubGrub.Cabal.VersionSet                      as VS
 
+-- | A condition over a package's flags alone, the environment resolved away.
 type Guard = Condition FlagName
 
 -- | A package's dependencies as flag-guarded groups: each dependency list is
@@ -218,7 +219,7 @@ type PkgConfigPresent = PkgconfigDependency -> Bool
 -- the choice is made where a release is reduced, by whoever reduces it, and a
 -- solve for a build plan passes 'noStanzas' for every release. What the stanzas
 -- add is read the same way as the rest: flag-guarded, gated on their own
--- @buildable:@ ('gateOnBuildable'), their build tools alongside
+-- @buildable:@ (@gateOnBuildable@), their build tools alongside
 -- ('componentTools'). A test suite's dependency on its own package's library
 -- is an intra-package edge, resolved inside the package, so the provider rule
 -- drops it, as it does for an executable, unless its range excludes the release.
@@ -285,7 +286,7 @@ evalCond flags = go
 -- parameter was only ever a copy of @targetBuildDepends@ (the parser filled it
 -- from there, and cabal's solver reads the field in 3.18 where it read the copy
 -- before), so reading the field is the same answer on either side of the
--- change. 'fromCondTree' is the one place the Cabal-syntax version is
+-- change. @fromCondTree@ is the one place the Cabal-syntax version is
 -- consulted.
 data Tree a = Tree
     { treeData     :: a
@@ -295,7 +296,7 @@ data Tree a = Tree
 
 -- | An @if@ block: its condition, the tree under it, and the @else@ tree if
 -- there is one. The condition is over 'ConfVar', unresolved: resolving
--- @os@\/@arch@\/@impl@ is the walk's business ('flattenWith'), not the tree's.
+-- @os@\/@arch@\/@impl@ is the walk's business (@flattenWith@), not the tree's.
 data Branch a = Branch
     { branchCondition :: Condition ConfVar
     , branchIfTrue    :: Tree a
@@ -350,7 +351,7 @@ flattenWith env at = go (Lit True)
 -- against the given platform and compiler.
 --
 -- Those four are exactly the components cabal's solver includes unconditionally.
--- Test-suites and benchmarks are read only when the 'Stanzas' ask for them, as
+-- Test-suites and benchmarks are read only when the t'Stanzas' ask for them, as
 -- they are there: cabal puts them behind a stanza that a plain @cabal build@
 -- never enables, so a solve for a build plan does not drag in a package's own
 -- test dependencies, and a planner enables them per local package.
@@ -393,7 +394,7 @@ componentDeps stanzas platform compiler = depsWith Left stanzas platform compile
 -- defaults.
 --
 -- An /undeclared/ flag named by a condition resolves to 'False', matching the
--- convention 'evalCond' documents. It should not arise — a guard mentions only
+-- convention @evalCond@ documents. It should not arise — a guard mentions only
 -- flags its own release declares.
 --
 -- This is what cabal's own solver does with a flag marked manual: it pins it to
@@ -566,6 +567,7 @@ expandGuard = go
     go (CNot (COr a b))  = go (CAnd (CNot a) (CNot b))
     go (CNot (CNot c))   = go c
 
+-- | A condition over flags in @.cabal@ syntax, such as @flag(a) && !flag(b)@.
 parseCondition :: CabalParsing m => m (Condition FlagName)
 parseCondition = condOr
   where
@@ -581,6 +583,7 @@ parseCondition = condOr
     oper s = sp >> string s >> sp
     sp = spaces
 
+-- | The assignments of 'expandGuard' as text, such as @{+a -b}@.
 prettyMap :: [Map FlagName Bool] -> String
 prettyMap = unwords . map (\m -> "{" ++ unwords [ bool "-" "+" b ++ unFlagName f | (f, b) <- Map.toList m ] ++ "}")
 
@@ -609,7 +612,7 @@ prettyMap = unwords . map (\m -> "{" ++ unwords [ bool "-" "+" b ++ unFlagName f
 -- --------------------------------------------------------------------------
 
 -- | A release's build-tool dependencies as flag-guarded groups, the shape of
--- 'GuardedDeps': each 'ExeDependency' names the package, the executable and the
+-- 'GuardedDeps': each t'ExeDependency' names the package, the executable and the
 -- range, as @build-tool-depends@ writes it.
 --
 -- __Not a dependency of the release in this solver's eyes__, and kept out of
@@ -649,7 +652,7 @@ toolsOf self exes bi =
     ]
 
 -- | The release's build tools, flag-guarded, read off the same component
--- trees as 'componentDeps' — the same 'Stanzas' choice — and gated on
+-- trees as 'componentDeps' — the same t'Stanzas' choice — and gated on
 -- buildability the same way.
 componentTools :: Stanzas -> Platform -> CompilerInfo -> GenericPackageDescription -> GuardedTools
 componentTools stanzas platform compiler = toolsWith Left stanzas platform compiler . toStored
@@ -708,16 +711,15 @@ data LibNode = LibNode
     deriving (Eq, Show, Generic)
 
 -- | What is kept of any other component's node: its dependencies and its build
--- tools. Buildability is already in the guards ('gateOnBuildable').
+-- tools. Buildability is already in the guards (@gateOnBuildable@).
 data Node = Node
     { nodeDeps  :: [Dependency]
     , nodeTools :: [ExeDependency]
     }
     deriving (Eq, Show, Generic)
 
--- | One release, parsed and no further. The trees are the @.cabal@ file's own
--- ('Tree'), so the resolvers over them are the existing walk rather than a
--- paraphrase of it.
+-- | One release, parsed and no further. Each t'Tree' is the @.cabal@ file's own,
+-- so the resolvers over them are the existing walk rather than a paraphrase of it.
 data StoredRelease = StoredRelease
     { srFlags      :: [(FlagName, Bool)]
     , srManual     :: [FlagName]
@@ -793,7 +795,7 @@ data FlagModel
 -- default. Under 'FlagPackages' a manual flag is its default and only an
 -- automatic flag stays symbolic, so a guard reaching the provider names
 -- automatic flags only. A flag the release does not declare is 'False' under
--- either, the convention 'evalCond' documents.
+-- either, the convention @evalCond@ documents.
 storedFlagEnv :: FlagModel -> StoredRelease -> FlagName -> Either FlagName Bool
 storedFlagEnv model sr f
     | model == FlagPackages, Map.member f defaults, f `notElem` srManual sr = Left f

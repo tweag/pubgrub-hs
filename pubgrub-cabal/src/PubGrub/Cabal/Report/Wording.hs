@@ -59,7 +59,7 @@ import qualified PubGrub.Report                 as Report
 import           PubGrub.Term                   (Term)
 
 -- | The cabal domain's words, with no rules and no pass: the half of a
--- 'Formatter' that this module owns. "PubGrub.Cabal.Report" adds the rest.
+-- t'Formatter' that this module owns. "PubGrub.Cabal.Report" adds the rest.
 wording :: Formatter Var
 wording =
     Formatter
@@ -82,15 +82,19 @@ named :: Var -> ValueSet -> Text
 named (PackageVar p) s = namedP p (vsInstances s)
 named v s              = bare v s
 
+-- | 'named' where the sentence does not call for \"every version of\": a package
+-- set admitting every version reads as the bare name.
 bare :: Var -> ValueSet -> Text
 bare (PackageVar p) s = bareP p (vsInstances s)
 bare (FlagVar p f) s  = pretty p <> " " <> flagText f (vsFlags s)
 
+-- | 'named' for a package and its set of instances.
 namedP :: PackageName -> InstanceSet -> Text
 namedP p s
     | isEveryVersion s = "every version of " <> pretty p
     | otherwise        = pretty p <> " " <> pretty s
 
+-- | 'bare' for a package and its set of instances.
 bareP :: PackageName -> InstanceSet -> Text
 bareP p s
     | isEveryVersion s = pretty p
@@ -181,5 +185,6 @@ reasons why =
 summary :: Incompatibility Var -> Text
 summary c = summaryTerms (incompTerms c)
 
+-- | 'summary' over the terms alone.
 summaryTerms :: Map Var (Term ValueSet) -> Text
 summaryTerms = summaryWith named bare

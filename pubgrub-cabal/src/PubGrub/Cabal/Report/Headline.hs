@@ -23,8 +23,8 @@
 -- >=2.0.0.0 needs regex, and no version of regex is compatible with ghcide
 -- >=2.15.0.0, lsp-types >=2.0.0.0 and regex-tdfa >=1.3.1.0 together.\" It is a
 -- derived step read out, not a summary written over the proof, and two rules
--- produce it, tried in the order of 'culprit'. A guard that does not hold means
--- no line, never a wrong one.
+-- produce it, tried in turn. A guard that does not hold means no line, never a
+-- wrong one.
 module PubGrub.Cabal.Report.Headline
     ( headline
     ) where

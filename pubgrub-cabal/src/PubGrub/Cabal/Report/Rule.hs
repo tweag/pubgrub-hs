@@ -6,7 +6,7 @@
 --
 --  * __reads a view__ of the tree — 'chainStep', 'asDependency', 'runWhile' —
 --    and declines if the tree is not that shape;
---  * __states a guard__ that keeps the sentence sound — 'guard' over
+--  * __states a guard__ that keeps the sentence sound — @guard@ over
 --    'PubGrub.SetOps.isSubsetOf', 'sameTerms' — and declines if it fails;
 --  * __says the sentence__, on its last line.
 --
@@ -90,10 +90,12 @@ asDependency c = case asFact c of
 -- Views of terms
 -- --------------------------------------------------------------------------
 
+-- | The set of a positive term; nothing for a negative one.
 positive :: Term a -> Maybe a
 positive (Positive s) = Just s
 positive _            = Nothing
 
+-- | The set of a negative term; nothing for a positive one.
 negative :: Term a -> Maybe a
 negative (Negative s) = Just s
 negative _            = Nothing

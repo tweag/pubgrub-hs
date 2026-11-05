@@ -3,7 +3,7 @@
 --
 -- A package's instances are its installed units ('UsePreInstalled', from the
 -- compiler's package database) together with its source releases (lazily,
--- through a 'ReleaseSource'). After a caller's 'Preference', the choice is
+-- through a t'ReleaseSource'). After a caller's 'Preference', the choice is
 -- __strict prefer-installed__: if the offered set admits an installed unit,
 -- commit to the newest such unit and pin its whole transitive closure to the
 -- exact units it was built against; otherwise pick the newest source release
@@ -11,7 +11,7 @@
 -- installed units and source releases its range admits.
 --
 -- 'mkExpand' takes its world as arguments, an installed database and a
--- 'ReleaseSource', so the same rule runs over an in-memory world as over
+-- t'ReleaseSource', so the same rule runs over an in-memory world as over
 -- Hackage. Nothing here reads an index or a package database, and nothing here
 -- needs more of the cabal ecosystem than @Cabal-syntax@: opening the index and
 -- the compiler's world, and reading a release out of them, is the caller's
@@ -121,6 +121,8 @@ data ParseError
     | ParseException SomeException
     deriving Show
 
+-- | One source release, reduced to what the rule reads: its automatic flags, its
+-- guarded dependencies and what it owes to other namespaces.
 data Release = Release
     { relAutomatic   :: [Flag]
     -- ^ the automatic flags, each a solver variable of its own. Empty under
@@ -146,15 +148,15 @@ data Release = Release
     }
 
 -- | The reduction of a parsed description to what the rule reads: the one
--- route from a @.cabal@ file to a 'Release', for any tool that holds the
--- descriptions itself and builds a 'ReleaseSource' out of them.
+-- route from a @.cabal@ file to a t'Release', for any tool that holds the
+-- descriptions itself and builds a t'ReleaseSource' out of them.
 --
 -- The machine is an argument and never read here: the platform and compiler
 -- resolve the @os@\/@arch@\/@impl@ conditions, and the @pkg-config@ predicate
 -- decides buildability. The flag model decides which flags stay symbolic:
 -- under 'FixedFlags' every flag is its declared default and 'relAutomatic' is
 -- empty; under 'FlagPackages' each automatic flag is a solver variable and the
--- guards name it. The 'Stanzas' decide whether the release's test suites and
+-- guards name it. The t'Stanzas' decide whether the release's test suites and
 -- benchmarks count — 'PubGrub.Cabal.Flatten.noStanzas' for a dependency, and a
 -- planner's choice for a local package. A caller that keeps releases in their
 -- pre-environment form goes through 'releaseOfStored' instead, which is the
@@ -171,7 +173,7 @@ releaseOf model stanzas platform compiler present =
     releaseOfStored model stanzas platform compiler present . toStored
 
 -- | 'releaseOf' over the pre-environment form a derived index keeps
--- ('PubGrub.Cabal.Flatten.StoredRelease'). Everything a 'Release' holds is
+-- ('PubGrub.Cabal.Flatten.StoredRelease'). Everything a t'Release' holds is
 -- independent of the flag assignment, so it is derived once per release and
 -- reused for every assignment tried against it.
 releaseOfStored
@@ -205,13 +207,14 @@ releaseOfStored model stanzas platform compiler present sr =
 -- flag the preference does not name is offered at its declared default.
 type Preference = PackageName -> Maybe (Version, Map FlagName Bool)
 
+-- | Prefers nothing, so every choice falls to installed, then newest.
 noPreference :: Preference
 noPreference = const Nothing
 
 
 -- | Where a package's /source releases/ come from: which versions exist, and how
 -- to read one. These are the only two questions 'mkExpand' asks about the
--- source side; how a @.cabal@ file is found and reduced to a 'Release' is the
+-- source side; how a @.cabal@ file is found and reduced to a t'Release' is the
 -- caller's business.
 --
 -- Installed units are deliberately /not/ here. They are not releases: they have
@@ -232,8 +235,8 @@ data ReleaseSource m = ReleaseSource
 -- an installed world and a source world.
 --
 -- The constraint is 'Monad' plus a text 'LogAction' for its one warning (an
--- unparseable release), and __not__ 'MonadIO': reading a release runs in
--- whatever @m@ the 'ReleaseSource' was built in, so an in-memory world can
+-- unparseable release), and __not__ @MonadIO@: reading a release runs in
+-- whatever @m@ the t'ReleaseSource' was built in, so an in-memory world can
 -- drive the rule purely, and a tool with its own logging hands over an action
 -- rather than adopting a monad.
 --
@@ -750,7 +753,7 @@ newtype Slot = Slot VersionSet
 -- dependency occurrence: the one incompatibility over the run that the PubGrub
 -- algorithm asks for.
 --
--- It is a 'Slot' for the same reason one release's slot is: the invariant the
+-- It is a t'Slot' for the same reason one release's slot is: the invariant the
 -- type protects is that a depender term is never a single version, and a span
 -- satisfies that more strongly. The caller establishes the run, by reading
 -- every release in it; within this module, 'mkExpand' does so when it widens a
