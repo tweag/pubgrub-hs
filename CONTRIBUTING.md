@@ -4,11 +4,89 @@ What the project is, and how to build and run it, is the [README](README.md); wh
 built this way is [`docs/DESIGN.md`](docs/DESIGN.md). This file is how to change it: what
 decides whether a change is kept, the conventions, and the commit and release process.
 
+## What decides whether a change is kept
+
+`scripts/gate.sh` does: eight gates over 27 real problems, one line per gate and a
+non-zero exit on any regression. It holds five numeric baselines. Only the problem count
+is exact, and the others are floors or ceilings. Move a baseline in the change that earns
+it. The two proof ceilings are tight, 77 sentences and no `no version` line, so a reporting
+change has to earn its way past them.
+
+Every run in the gate and the harness is pinned to the index-state in `bench/index-state`,
+so the numbers stop moving with the weekly index refresh. Move the pin in the change that
+re-measures. [`docs/benchmarking.md`](docs/benchmarking.md) has the details, and is the
+reference for measuring anything.
+
+Two things matter to any change in reporting. The gate and the harness count sentences by
+the connective that opens them, so a new line must open with none of them. And the golden
+proofs are the spec's own examples, so a wording change earns its way past them.
+
+CI also runs `scripts/check-haddock.sh pubgrub`: no Haddock warning, and every export
+documented.
+
+## Invariants you can break by accident
+
+Each of these is a decision whose argument and evidence are in
+[`docs/DESIGN.md`](docs/DESIGN.md). The line here says what the plausible wrong edit is.
+Read the section before you touch the code.
+
+- **A flag is a solver variable, and the value carries no flags** (§2, §3). `InstanceSet`
+  is an installed set plus one version range, canonical and exact; `Var` is a package name
+  or a `(package, Flag)` pair, and `Flag` is a name *with its declared default*. Do not put
+  flags back into the value, and do not key a flag variable by release.
+- **`PubGrub.Store` merges on insert and keeps scan position** (§5). A merge replaces the
+  clause where it sits, and the merged clause stays a leaf. Propagation judges only the
+  dirty clauses and acts on the newest actionable one; mark every change to a variable's
+  term or a clause's terms dirty, or the search changes.
+- **The derived index is a cache that follows the index by block** (§6). It stores the
+  pre-environment form; raise `storeFormatVersion` on any encoding change.
+- **Memoise the reduced form, never the parse tree** (§11).
+- **A dependency of `p` on `p` adds no goal and no edge, and its range is still checked**
+  (§8): a release the range excludes is banned, and otherwise nothing is stated.
+- **An unbuildable component contributes no dependencies** (§15), through Cabal-syntax's
+  own `addBuildableCondition`; the library is not gated.
+- **Build tools and `setup-depends` are not dependencies** (§16). They ride in `Release` as
+  `relTools` and `relSetup` for a planner to solve in a namespace of its own, and `mkExpand`
+  tries a `Preference` before installed and newest. Do not fold them into `GuardedDeps`.
+- **Boot packages are installed-only** (§7).
+- **A depender term names a slot, not a version**, and the first slot has no lower bound
+  (§4).
+- **A guarded dependency's flag terms are positive and name the depender's own flags**, and
+  a fact merges only with one under the same guard (§3, §5).
+- **Versions compare with trailing zeros insignificant**, and Cabal's type stops at the
+  bridge (§14).
+- **The request is a list of seeds** (§10): the terminal test, the level-0 backtrack floor
+  and the closing step all rest on it.
+- **Decision order is discovery order**, measured against the spec's (§12).
+
+## Conventions
+
+- GHC 9.12 or 9.14 (`base >=4.21 && <4.23`). `pubgrub` alone also builds on 9.10
+  (`base >=4.20`). `cabal-version: 3.0` in every package.
+- `default-language: GHC2021` on every component, with
+  `default-extensions: ImportQualifiedPost`. The test-suites of `pubgrub-cabal`,
+  `pubgrub-hs` and `pubgrub-doctest` lack the extension.
+- `-Wall` everywhere.
+- No partial functions (`head`, `fromJust`). Use pattern matching or `Maybe`/`Either`.
+- Prefer `newtype` wrappers over type aliases for domain types.
+
+## Citations
+
+- **Cite nothing external in a Haddock.** The Haddocks of `pubgrub` and `pubgrub-cabal` are
+  read on Hackage, where none of this repository can be opened. They name no other project,
+  cite no spec line, and point at nothing in the harness or in `docs/`. State the rule or
+  the reason itself. The two rules below are for plain comments and documents.
+- **Cite `references/pubgrub.md` by line, and check the line first.** Citations have landed
+  on blank lines before.
+- **Cite the Rust implementation, pubgrub-rs, by function name, not by line.** This
+  repository does not carry it, and its line numbers move with upstream. Write
+  `merge_dependents`, not `:173`.
+
 ## Formatting
 
 Every Haskell file is formatted by [stylish-haskell](https://github.com/haskell/stylish-haskell)
 with [`.stylish-haskell.yaml`](.stylish-haskell.yaml), at the version pinned in
-`mise.toml`. `mise run format` formats the tree, and `mise run format --check` reports
+`mise.toml`. Run `mise run format` before committing; `mise run format --check` reports
 the files it would change. CI runs the check, and `ci-ok` fails on it. CI installs the
 tools from `mise.lock`, so run `mise lock` after changing a version in `mise.toml`.
 

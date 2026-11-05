@@ -237,6 +237,19 @@ pubgrub-harness/    the `pubgrub-harness` executable, unpublished.
 docs/               see Documentation above.
 ```
 
+Each package builds on the one before it, and the harness runs the driver as a child
+process, so it depends on neither library:
+
+```
+pubgrub <── pubgrub-cabal <── pubgrub-hs <── pubgrub-cli <·· pubgrub-harness
+```
+
+The boundary is hard. `cabal-install-solver` is a dependency of `pubgrub-hs` and
+`pubgrub-cli` only, and nothing here depends on `cabal-install`. That is what lets another
+tool drive the solver over its own index with `pubgrub` and `pubgrub-cabal` alone, and what
+lets those two go to Hackage. `pubgrub-hs` builds one package index and feeds it to both
+cabal's `modularResolver`, the baseline, and our own provider.
+
 ## Caveats
 
 **Three deliberate limits**, and any published number has to state them:

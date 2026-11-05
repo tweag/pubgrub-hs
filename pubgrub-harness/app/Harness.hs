@@ -5,11 +5,8 @@
 -- It drives the @pubgrub@ executable as a child process — once per solver, per
 -- problem, per repetition — reads what the child prints, and writes two markdown
 -- reports: @benchmark.md@ over @bench/problems.txt@ and @showcase.md@ over
--- @bench/unsat-problems.txt@. See the decision record
--- @decision-0035-one-command-produces-both-deliverables@ in the project's
--- Hindsight bank for why it is a separate executable and why it measures a
--- child rather than calling the solvers itself (peak memory is a per-process
--- number).
+-- @bench/unsat-problems.txt@. It measures a child rather than calling the solvers
+-- itself because peak memory is a per-process number.
 --
 -- It measures; it does not decide. @scripts/gate.sh@ decides whether a change is
 -- kept.

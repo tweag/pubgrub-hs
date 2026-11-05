@@ -1,5 +1,8 @@
 {-# LANGUAGE CPP   #-}
 {-# LANGUAGE GADTs #-}
+-- | The Hackage index: bootstraps and refreshes it through @hackage-security@, keeps a
+-- disk-cached map from package to versions, and reads one release's @.cabal@ from the
+-- tar block of the revision in force.
 module Bridge.Hackage where
 
 import           Bridge.Log                                   (WithLog, logMsg)

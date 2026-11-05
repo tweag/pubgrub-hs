@@ -53,6 +53,16 @@ Keep a filter on these. `pubgrub-cabal-test` finds its golden files relative to
 run from the project root creates `test/golden/` there and passes. `cabal test` runs it
 in the package's directory.
 
+`pubgrub-test` compiles the library's sources itself, so it can test the modules the
+library does not expose. Its `Toy` domain imports nothing from `PubGrub.Cabal`, so the core
+leaning on cabal is a compile error there first, and `ToyDomainSpec` and `CookbookSpec` fail
+if the code blocks or printed results of `PubGrub.Tutorial` and `PubGrub.Cookbook` drift
+from what the tests run. `pubgrub-doctests` is a package of its own, so that a project
+building `pubgrub` from source need not solve for the `Cabal < 3.17` that `doctest-parallel`
+requires. It finds the library through the GHC environment file that
+`write-ghc-environment-files: always` in `cabal.project` writes, so on a clean tree build
+before testing.
+
 Three groups repay knowing about.
 
 - **`InstanceSet`** — differential properties comparing the real set type against an
