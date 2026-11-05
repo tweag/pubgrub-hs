@@ -4,10 +4,10 @@
 > the evidence that earned it. These are the decisions that are expensive to reverse,
 > or that were reversed once already.
 >
-> **What this is not.** Not a status and not a specification. What the repository
-> contains now is [STATUS.md](STATUS.md); the specifications it names overrule this
-> file; how the project got here is the decision log in the project's
-> Hindsight bank, one document per decision, indexed by `decision-log-index`.
+> **What this is not.** Not the algorithm: that is
+> [`references/pubgrub.md`](../references/pubgrub.md), and it overrules this file. Not
+> the current numbers either: a figure here is the one that decided the question when
+> it was measured, and today's are in [reports/](reports/).
 
 ---
 
@@ -20,6 +20,15 @@ nothing from the cabal ecosystem. `pubgrub-cabal`, the cabal domain, adds
 unpublished `pubgrub-hs` package. The three are separate
 packages in one `cabal.project`, the first two with `cabal check` clean, so the split
 is a `build-depends` line rather than a sublibrary's visibility flag.
+
+**`cabal-install` is avoidable, including for the baseline.** A comparison built on it
+would use it for three things. Index acquisition is the only substantial one, and we
+do that ourselves through `hackage-security`. Its convenience types (`UserConstraint`,
+`IndexState`, `defaultMaxBackjumps`) are easily replaced: a target or a `--constraint`
+is a package name and a `VersionRange`, parsed as Cabal-syntax's
+`PackageVersionConstraint`, and `Bridge.Cabal.Baseline` builds cabal's
+`PackageConstraint` values from those. Its setup-dependency types are not needed,
+since `setupDeps` reads `setupBuildInfo` directly.
 
 The seam is one callback, `PubGrub.Provider.expand`. It takes a variable and the set of
 values it may still take. It answers with at most one value and the incompatibilities
@@ -66,10 +75,8 @@ needs no variable: it is
 `SetOps.empty`, one per set type, because a set of values of a sum type is a product
 (§3).
 
-Nothing observable changed when this was done: the gate came out identical, the
-goldens unchanged, and the suite at the same count. What it buys is that the solver
-module states its own assumptions, and can be read or tested against a toy domain
-without `Cabal-syntax` in sight. `pubgrub/test/Toy.hs` is that domain — a package is
+So the solver module states its own assumptions, and can be read or tested against a
+toy domain without `Cabal-syntax` in sight. `pubgrub/test/Toy.hs` is that domain — a package is
 a name, a value an `Int`, a set a `Set Int`, a fact one of two sentences — and it
 imports nothing from `PubGrub.Cabal`, so the core leaning on cabal again is a compile
 error there before it is anything else. It is also the code of `PubGrub.Tutorial`, line
@@ -85,7 +92,8 @@ This is not a local preference. `references/pubgrub.md:1172` makes it one of the
 things that separate PubGrub from conflict-driven clause learning (CDCL) and from
 answer-set solving. Expanding a range
 into concrete versions costs work, and the result has to be turned back into a range
-to talk to a user.
+to talk to a user. An extensional `Set Instance` is not a cheaper PubGrub. It is the
+encoding PubGrub exists to avoid.
 
 The invoice for that choice is small, because the flag axis does not live in the set
 (§3):
@@ -95,6 +103,9 @@ The invoice for that choice is small, because the flag axis does not live in the
   are equal. `SetOps.equivalent` is kept where a test wants to say what it is asking.
 - **Every operation is exact, and `isEmpty` answers both ways.** With flags elsewhere,
   difference is interval arithmetic.
+- **No complement.** Four operations plus emptiness. Negation lives in `Term` as a
+  polarity flip, and a complement needs a universe of values that nothing in the
+  algorithm ever asks for.
 - **No enumeration, still.** A range admits versions the index does not have. Only
   `PubGrub.Cabal.Provider` consults reality, and it enumerates from the index and filters by
   `memberInstance`. So "non-empty" means non-empty in version space, which is why a
@@ -114,8 +125,7 @@ The invoice for that choice is small, because the flag axis does not live in the
   `incompRelation` a strict fold over the clause's terms rather than a walk over
   their list, HLS under `--flags search` went from 8.92 GB allocated to 2.84 GB and
   `yesod` from 6.23 GB to 2.15 GB, with mutator time down 42% and 41% in
-  interleaved runs and every search count and the gate unchanged. Five commits on
-  2026-10-19, prompted by latti's profile.
+  interleaved runs and every search count and the gate unchanged.
 
 **A version set remembers how it was spelled.** `VersionSet` carries the text of the
 range it was built from beside its canonical intervals. Only `declare` sets that tag,
@@ -127,15 +137,6 @@ nobody wrote, prints canonically. Cabal itself never re-sugars: `fromVersionInte
 rebuilds `==v` and nothing else. This is pub_semver's caret class, a plain range that
 knows its own spelling; there too the sugar survives exactly as far as the declared
 constraint is passed along unchanged. The solver's algebra still runs on intervals.
-
-**What was here before.** Until 2026-10-08 the source half was a disjunctive normal
-form (DNF): a list of cells, each a version range crossed with pinned flags, with three
-states per pin and subsumption pruning between operations, measured at 28,293 cells
-without pruning against 41 with. That representation, its non-canonicity and its
-one-sided emptiness are recorded in the decision records `decision-0010` to
-`decision-0019` and `decision-0054` to `decision-0056`, and in
-`decision-log-dropped-directions`. It was removed
-when flags became variables.
 
 ## 3. A flag is a variable, and a decision is one variable's value
 
@@ -188,16 +189,66 @@ lost: a flag has no value when its owner is absent, and a representation that dr
 the widened term as universal would forget that the owner is required.
 
 **Manual flags are not variables.** They are resolved at their defaults when the
-release is flattened; `--flags fixed` treats every flag that way and is the default.
+release is flattened (`PubGrub.Cabal.Flatten.componentDepsStored`). `--flags fixed`,
+the default, treats every flag that way, and `--flags search` makes every automatic
+flag a variable, for both solvers.
 
-**Why not the flag inside the value.** The earlier design put a total flag
-assignment into each instance and the pins into each set, so that one variable per
-package sufficed. It bought that with the DNF of §2 and with three states per pin,
-and conflict resolution had to learn "this release with this flag" one assignment
-at a time unless facts were collapsed per guard. The argument for it and the price
-are in the decision records `decision-0013` to `decision-0019` and
-`decision-log-dropped-directions`;
-[flags-as-variables.md](flags-as-variables.md) records the measurement that moved it.
+**Both solvers are told, and each takes it differently.** Ours takes it at flatten
+time, so a guard that reaches the provider mentions automatic flags only. Under
+`fixed`, `Bridge.Cabal.Baseline.sourcePackageIndex` marks every flag manual, so
+cabal's `enforceManualFlags` prunes every branch whose value is neither the default
+nor named by a user flag constraint, and we pass no flag constraints. Under `search`
+the descriptions are left as written. Two consequences for anyone reading a number
+taken under `fixed`. A manual flag is not *weak*, so cabal's `deferWeakFlagChoices`
+stops deferring the flags that influence dependencies, which perturbs cabal's goal
+ordering as well as its flag values. And an automatic flag is exactly what cabal would
+have flipped to escape an unsatisfiable dependency, so some problems that resolve
+under `search` do not under `fixed`. Both solvers fail together, so the comparison is
+fair, but it is a restriction of the problem, and a published result must say which
+model it ran.
+
+**Why not the flag inside the value.** The earlier design put a total flag assignment
+into each instance and the pins into each set, so that one variable per package
+sufficed. It bought that with a set that was a disjunctive normal form of cells (28,293
+of them without pruning, against 41 with) and had no canonical form, with three states
+per pin, and with conflict resolution learning "this release with this flag" one
+assignment at a time unless facts were collapsed per guard. A variable gets the same
+from `VersionSet`, a `Bool` and one clause from the owner. Do not key a flag variable
+by release: that loses the cross-release merge for nothing.
+
+**What a proof and a plan say.** A flag term reads as its owner with a sign: `foo
++fast`, `foo -fast`, or `foo flag fast` when either value is in. A guarded leaf reads
+"foo >=1 && <2 with +fast depends on bar", and the owner's clause "foo >=1 && <2
+declares flag fast". The driver folds decided flags into their owners
+(`PubGrub.Cabal.foldFlags`), so a tree shows `tasty 1.5.4 +unix` and the `plan:` lines
+keep one entry per package.
+
+**What searching costs**, measured on 2026-11-04 at the pin. The gate under `search`,
+both solvers searching: agreement 27/27; 19 of the 21 corpus cases still unsat, since
+`cabal-install ==3.18.1.0` and `futhark ==0.27.1` resolve, for cabal as well, so their
+failures were artefacts of fixing flags; shorter than cabal on all 19; every other
+corpus proof the same length. The search counts below are the benchmark problems.
+
+| problem | decisions `fixed` → `search` | conflicts `fixed` → `search` |
+| --- | --- | --- |
+| `vector` | 38 → 42 | 0 → 0 |
+| `pandoc` | 265 → 327 | 1 → 1 |
+| `conduit <1.3` | 15 → 24 | 8 → 12 |
+| `lens <4` | 64 → 64 | 23 → 23 |
+| `aeson <2` | 319 → 352 | 58 → 64 |
+| `yesod` | 828 → 919 | 14 → 11 |
+
+Proofs grow where ancient releases with a `split-base` flag enter them: `aeson <2` 38
+→ 47 sentences and `conduit <1.3` 9 → 15, since each flag costs two or three sentences
+to refute both of its values. Neither is in the corpus, so the gate's ceiling does not
+see them, and a flag-heavy failure added to the corpus would move it. The gate's ceilings
+are recorded for `fixed`, and moving them to `search` means re-measuring the corpus and
+deciding whether to keep the two problems that become solvable.
+
+**What is left.** The seed for a user flag constraint exists
+(`PubGrub.Cabal.flagConstraint`), and no driver option parses one. A derived step whose
+terms include a flag goes through the generic summary, with no sentence of its own.
+Whether deciding a flag right after its owner changes the search is unmeasured.
 
 ## 4. A release owns a slot, not a point
 
@@ -237,6 +288,21 @@ depender term changes which conflict the search meets first, and on that problem
 new order is worse. The rule is the spec's and it is kept; the row is here so the
 cost is not rediscovered as a regression.
 
+**Narrowing a declared range to the published versions was measured and rejected.**
+`PubGrub.Cabal.Provider.widenTo` puts a declared range into a term verbatim, so version
+space no release occupies survives. Narrowing it with `snapToVersions`, measured on
+2026-09-03, moves the search in both directions (`aeson <2` 400 to 320 decisions and
+11.6% less allocation, `yesod` 827 to 839 decisions and 11.7% more), and it rewrites
+every quoted range in a closed form nobody wrote, down to the user's own `lens <4`
+printing as `lens >=0.1 && <=3.10.3` on the proof's last line. The second is the
+objection, and it holds at any price. Pub never narrows, and pubgrub-rs offers
+`Ranges::simplify` and its solver never calls it. `snapToVersions` is kept, tested and
+unused. Its interior half, `PubGrub.VersionSet.fillGaps`, merges the holes between a
+range's intervals that hold no release and never moves an outer bound. Measured the
+same day, it left every search counter identical on eight problems and changed one
+proof line. It is kept in reserve for *derived* terms, which nobody wrote; on a
+declared range it would discard the author's spelling (§2).
+
 ## 5. Dependency facts collapse in two places
 
 `references/pubgrub.md:456` requires identical dependencies of adjacent releases of
@@ -245,9 +311,13 @@ the depender to be one incompatibility. It asks for
 mechanisms deliver that, and both run.
 
 **At generation time.** `spanningOccurrenceWith` in `PubGrub.Cabal.Provider.mkExpand` walks out from the
-decided release and reads its neighbours. It extends the depender's range while the
-*guarded occurrence* is identical — same guard and same dependency, not the whole
-dependency set.
+decided release in both directions and reads its neighbours. It extends the depender's
+range while the *guarded occurrence* is identical: same guard and same dependency. Not
+the whole dependency set, which would keep the fact about `q` one release wide because
+two releases differ on something else. Under a guard a neighbour must also declare the
+same automatic flags with the same defaults (`sameFlags`), since the flag variables are
+named by them. The walk stops at an unparseable neighbour: spanning it would claim a
+fact about a release nobody could read.
 
 **At insert time.** [`PubGrub.Store`](../pubgrub/src/PubGrub/Store.hs) unions the depender
 terms of two facts that agree about the dependee and the guard, as they arrive. Two
@@ -257,7 +327,10 @@ half of the rule. Two runs ruled out for different
 reasons stay two facts, so a proof never puts one release's missing module on the
 other's range. Which facts qualify, and what the merged clause is, is the cabal
 domain's `mergeRule` in [`PubGrub.Cabal`](../pubgrub-cabal/src/PubGrub/Cabal.hs); the store only
-compares keys.
+compares keys. A clause is keyed by its cause rather than its terms for the sake of the
+unsatisfiable dependency: `fromDependency` drops the dependee's term and the clause
+becomes a unit ban on the depender, but the cause still names the dependee, so two such
+clauses about one dependee merge. A derived clause has no key.
 
 Merging is sound because the two clauses `¬(p ∈ A ∧ q ∉ R)` and `¬(p ∈ B ∧ q ∉ R)`
 together give `¬(p ∈ A∪B ∧ q ∉ R)`. Each half was established separately, so the
@@ -297,27 +370,17 @@ whole store only when those are most of it. A backtrack changes the term of ever
 variable with an assignment above the level it goes back to and of no other, so
 re-judging only those variables' clauses, the learned clause, the conflict and the
 clauses of the variable the learned clause derives gives the same actionable set,
-and `backtrack` answers with the variables it moved. That was first built on
-2026-10-20 and not kept: it cut the post-backtrack judgements from 68,271 to 52,348
-over the 26 problems at the pin and on `haskell-language-server` from 74,857 to
-40,313, with every count identical, but allocation moved by under 0.1% either way,
-because the corpus's backjumps go far enough that the moved variables mention most
-of the store, and collecting their clauses cost about what judging them saved. The
-2026-10-21 review measured the other regime, which the corpus does not have: a
-synthetic chain of N packages whose newer versions each need a package with no
-versions, so that every package costs V−1 one-level backjumps. There the full
-re-judge is conflicts × store, quadratic in N: 2.6 million judgements and 0.6 s at
-N=100, 249 million and 58 s at N=1000. Re-judging the moved variables' clauses
-takes N=300 from 22.6 million judgements, 3.4 s and 3.3 GB to 0.5 million, 0.45 s and
-1.7 GB, and N=1000 from 58 s to 4.7 s. How the set is collected is a cost choice
-between two equal results, and the first two ways tried both lost somewhere: a
-union per variable rebuilds its accumulator because clause ids interleave, which
-cost 5% on a far-backjump chain and 14% on a problem whose duplicate facts give a
-few variables thousands of clauses; one set from every id listed cost that second
-problem 80%. So the mentions are counted first, which allocates nothing, and the
-store is read whole when they are at least its size. On the corpus every count is
-identical, yesod's judgements fall from 36,409 to 33,731, pandoc's single far
-backjump still reads the whole store, and allocation moves by under 0.02%.
+and `backtrack` answers with the variables it moved. The corpus alone would not justify
+this: its backjumps go far enough that the moved variables mention most of the store,
+and allocation moves by under 0.1%. What justifies it is a regime the corpus does not
+have, a synthetic chain of N packages whose newer versions each need a package with no
+versions, so that every package costs V−1 one-level backjumps. There the full re-judge
+is conflicts × store, quadratic in N, and re-judging the moved variables' clauses takes
+N=1000 from 58 s to 4.7 s. How the set is collected is a cost choice between two equal
+results. A union per variable rebuilds its accumulator, because clause ids interleave,
+and one set from every id listed cost a problem whose duplicate facts give a few
+variables thousands of clauses 80%. So the mentions are counted first, which allocates
+nothing, and the store is read whole when they are at least its size.
 
 The merge key names a
 clause id, so a merge is a lookup rather than a walk down the list comparing keys
@@ -353,13 +416,71 @@ release at a time:
 | `conduit <1.3` decisions | 137 | **16** |
 | `yesod` elapsed | did not finish in 90 s | **2.49 s** |
 
-**What it costs, and who pays.** `pandoc` has one conflict, so the walk buys it
-nothing and it pays for the neighbours anyway: 167 reads become 2873. The cost lands on
-memory, at 22.6 → 33.1 MB of peak residency. Allocation moves by under 1% and the
-elapsed times are inside the noise band. If read-dominated problems ever matter more than search,
-`pandoc` is the row to attack, and the lever is walking *less*.
-[collapsing.md](collapsing.md) §4 holds the five ways to walk less and what each is
-worth.
+**What it costs, and who pays.** Whether a neighbour carries the same dependency cannot
+be known without reading it, and the cost falls where the benefit does not. `pandoc` has
+one conflict, so the walk buys it nothing and it pays for the neighbours anyway: 167
+reads become 2873. The cost lands on memory, at 22.6 → 33.1 MB of peak residency.
+Allocation moves by under 1% and the elapsed times are inside the noise band. That is
+the price of a read as a decode, 0.073 ms. As a parse, 2.007 ms and about 7.7 MB of
+allocation, the same walk cost `pandoc` 6.6 times the elapsed time, 81.0 MB of residency
+and 17.31 GB of allocation.
+
+**Merging did the work, and the walk pays its debt.** Measured apart, with the walk
+still on, merging took `aeson <2` from 4.24 to 2.66 GB and `lens <4`'s proof from 80
+sentences to 37. But a merge widens a clause only after the solver has expanded the
+second release, so it cannot prevent a re-expansion the way a pre-emptively wide clause
+can. Without the walk `conduit <1.3` makes 137 decisions and `aeson <2` 758; with it, 16
+and 309. That is why both run.
+
+**Widening can lengthen a proof.** A wider clause changes which conflict surfaces first,
+and a different conflict has a different explanation. `matterhorn` went from 6 to 10
+sentences by finding a `hashable` conflict whose proof walked a bound history one
+adjacent pair at a time; rule 3 of the reporter ([§9](#9-the-report-follows-the-specs-reporting-algorithm))
+took it to 8. That collapse is not `:456`'s: it merges facts whose dependee ranges
+differ, and `:456` merges facts whose dependee range is identical.
+
+**Ways to walk less, if read-dominated problems ever matter more than search.** `pandoc`
+is the row to attack. These were weighed while a neighbour cost a parse, and the derived
+index removed most of that cost instead, so none is built.
+
+- **Downward only.** It does not halve the reads, because the provider's scan reads
+  every newer release before it settles, so the up-walk re-treads memoised releases. It
+  saves time, and gives up the spec's exact upper bound (`references/pubgrub.md:466`).
+- **Cache the span.** The key must include the version the walk starts from, or the
+  cache must store the run and check that the version lies in it. Keyed on package, guard
+  and dependency alone it is unsound: one occurrence can appear in two runs separated by
+  a release that lacks it. This buys back traversal and comparison, not reads.
+- **Bound the walk to k steps.** The only one of the three that caps reads, and nothing
+  caps them today. Any sub-range whose releases all carry the occurrence is sound, so `k`
+  is a free knob. But the benefit comes from long runs, so a small `k` loses most of the
+  win and a large one keeps most of the cost.
+- **Walk only where there is search.** Emit per slot on a package's first expansion, and
+  walk once it has been refuted. `pandoc` re-expands almost nothing, so it would barely
+  walk. Untried, and the most interesting, though "has this package been refuted" is
+  state the provider does not keep. pubgrub-rs's `DependencyProvider::prioritize` keys
+  on conflict count for the same reason, on the decision side.
+
+**Testing the range before reading the release was measured and rejected.** `scan` reads
+each release of a package, newest first, and tests whether the offered range admits it
+only after the read. Reading only the admitted releases saved 0.8% of decodes at the
+pin, and none on the three large problems, because a later scan's out-of-range reads are
+memo hits already. It also lost explanation: the first scan of a package states the
+unbuildable fact of every release it reads, and the store merges those into one clause.
+`haskoin-store-data`'s headline went from `secp256k1-haskell >=0.1.6 needs pkg-config
+package libsecp256k1` once to the same reason three times, one per slot the solver then
+had to ask about, and its search from 123 to 219 decisions. The eager read is explanation
+work, not waste.
+
+**Indexing a release's occurrences for the walk was measured and rejected.** `carries`,
+the test the walk puts to each neighbour, searches every guarded group's list and
+compares whole ranges. A cost-centre profile put that at 19% of
+`haskell-language-server`'s time, so a lazy map from package name to occurrences was
+built and measured over ten interleaved runs: search identical; mutator time 0% on HLS
+under flag search, −3% on `yesod` and −12% on `pandoc`; allocation +3–5%. The one
+problem that gains is the one that is nearly all walk, and allocation is the metric that
+holds still. **The 19% was the profiler's**: the clock puts those comparisons under 5%
+on HLS. A share of a tiny function read off a cost-centre profile is an upper bound, and
+not a close one.
 
 ## 6. The derived index makes a read a decode
 
@@ -466,6 +587,12 @@ when measured, and prints it as `no version for base in >=4.5 && <4.7`.
 Stating all eight facts up front, at level 0, would take `lens <4` to a two-line
 proof. It was
 measured and rejected: it costs `aeson <2` 41% more allocation and 466 more decisions.
+
+**A `noversion` count is not a `no version for` line.** Sixteen events remain over the
+27 problems at the pin, and neither kind prints one. Thirteen are the first query for a
+boot package whose range admits no installed unit, where the provider answers `Nothing`
+with the fact beside it. The others are ranges holding only releases the scan rules out
+(`hpqtypes`, `secp256k1-haskell`, `acme-zero`), whose facts ride out with the `Nothing`.
 
 ## 8. A dependency of `p` on `p` is checked, not solved
 
@@ -610,7 +737,7 @@ negative ones "either X or Y", and a clause with several terms reads "P requires
 or N2" or "if P1 and P2 then N1 or N2". A boot package's fact names the version it
 is pinned to, `base is pinned to 4.21.0.0 (installed)`: the bound that failed is only
 legible against that version, and nothing else in the proof states it — 13 of the
-16 showcase proofs turn on it. An installed unit is written by version,
+17 showcase proofs turn on it. An installed unit is written by version,
 `base 4.21.0.0 (installed)`, never by unit id, and not at all when a source range
 in the same set already admits its version. An unbuildable release's fact names what
 rules it out, `hpqtypes >=1.10.0.2 needs pkg-config package libpq, which is not
@@ -682,34 +809,20 @@ a wrong one. The harness carries the whole
 block, wrapped lines included, and the gate is untouched because the line opens
 with no connective.
 
-**The driver wraps, the reporter does not.** A proof sentence runs to nearly 300
-characters on `hjsonschema`, and a terminal that wraps it by itself breaks inside a
-range. `wrapProof` wraps every line, at `COLUMNS` where stdout is a terminal and the
-shell exports it and at 80 columns otherwise, with a four-space hanging indent and a
-range kept whole: a token that
-opens with a comparison, `&&`, `||`, `(installed)` or a bare version sticks to the
-token before it, a preposition joins what is before it to its object, so "depends
-on bytestring >=0.10.4 && <0.11" is one atom, and a break falls only between such
-atoms. An atom too long for a line of its own breaks before a `||`, the one seam a
-range has. `reportConflict`
-itself is unwrapped, so the golden proofs stay the spec's sentences one per line,
-and a continuation line starts with the indent, which neither the gate nor the
-harness counts as a sentence. The harness keeps the proof as the driver printed it,
-continuation lines and the blank line between two branches included.
+**The driver wraps and colours, the reporter does not.** A proof sentence runs to nearly
+300 characters on `hjsonschema`, and a terminal that wraps it by itself breaks inside a
+range, so `wrapProof` keeps a range whole. `reportConflict` itself is unwrapped, so the
+golden proofs stay the spec's sentences one per line, and a continuation line starts
+with an indent that neither the gate nor the harness counts as a sentence. `styleProof`
+dims the ranges so a reader can skim the package names. It applies only when stdout is
+a terminal, `NO_COLOR` is unset and `TERM` is not `dumb`, so the gate, the harness and
+every log read plain text.
 
-**The showcase counts screen lines as well as sentences.** A sentence can run to
-nearly 300 characters and cabal's lines are unwrapped, so a count of sentences against
-lines flatters neither side honestly. The showcase therefore also gives our proof's
-non-blank lines as printed, wrapped at 80, against cabal's lines at 80 columns, each
-counted as the rows it fills. The gate still counts sentences.
-
-**Colour is a terminal-only layer.** `styleProof` dims every range token, so the
-package names stand out by contrast and a reader can skim the names and skip the
-bounds; bolds the connective that opens a sentence, so sentences can be told from
-their continuation lines; and bolds the headline and the `So,` line throughout.
-Stripping the escapes gives the input back. The driver applies it only when stdout
-is a terminal, `NO_COLOR` is unset and `TERM` is not `dumb`, so the gate, the
-harness and every log read plain text. There is no `--color` flag.
+**The showcase counts screen lines as well as sentences.** A sentence can be long and
+cabal's lines are unwrapped, so a count of sentences against lines flatters neither side
+honestly. The showcase therefore also gives our proof's non-blank lines as printed,
+wrapped at 80, against cabal's lines at 80 columns, each counted as the rows it fills.
+The gate still counts sentences.
 
 **A declared range is quoted as written.** The dependee term of a dependency fact is
 the declared range with its spelling attached (§2), and the store merge keeps that
@@ -733,9 +846,7 @@ from `:1150` only in which facts the derivation happened to pair.
 `Bridge.Provider.withProvider` because widening a range to instances needs the
 installed db. They are the spec's opening incompatibility
 (`references/pubgrub.md:252`) with the request stated directly, so no package stands
-in front of the targets to be decided, printed or filtered out of a plan. Decided on
-2026-07-30, built on 2026-09-22 (decision record
-`decision-0051-the-request-is-a-list-of-incompatibilities`).
+in front of the targets to be decided, printed or filtered out of a plan.
 
 The seeds propagate to derivations at decision level 0 before anything is decided,
 and three things follow:
@@ -762,15 +873,10 @@ and three things follow:
   "satisfied" with, so the two agree; if a term survived anyway the line would still
   read as failure, because that is what it is.
 
-What it changed, measured on the 26 gate problems: every verdict the same, every
-proof the same length with "X is requested" as its last fact, the paper's two
-golden proofs changed on their last line only, and every problem has one decision
-fewer.
-
 **The other seed is a constraint** (2026-10-14): "if `p` is chosen, it is in `R`",
 the unit clause `{p: Positive ¬R}` with cause `CauseConstraint`, built by
 `PubGrub.Cabal.constraint` from the allowed set and its complement, because the core
-has no complement ([STATUS.md §5.1](STATUS.md#51-settled--not-planned-do-not-reopen))
+has no complement ([§2](#2-version-sets-are-intensional))
 and a package's universe includes the compiler's installed units, which only the
 provider side knows: `PubGrub.Cabal.Provider.constrainTo` computes it from the
 `InstalledDb`. A flag held at a value is the two-valued case, `flagConstraint`, over
@@ -810,7 +916,7 @@ fewest versions that match the outstanding constraint", because that "tends to f
 conflicts earlier if any exist". We do not do that, and `yesod` is what it costs.
 
 **What happened on `yesod`**, read off the trace at the time (later changes moved these
-counts; today's are in [STATUS.md §2.1](STATUS.md#21-against-cabal-on-the-benchmark-set)):
+counts; today's are in [reports/benchmark.md](reports/benchmark.md)):
 
 | | |
 | --- | --- |
@@ -837,23 +943,6 @@ already correct.**
 `pandoc` is the control. Same size plan (194 packages), 270 decisions, 1.39 per
 package.
 
-**Where the cost landed.** A profiled run (`+RTS -p`, 4.64 GB, matching the normal
-4.44 GB), taken while the source half was still cells (§2) and propagation still
-rescanned the store (§5), put it in the solver, not the provider:
-
-| | time | allocation |
-| --- | --- | --- |
-| propagation and term intersection (`intersectTerm`, `termIntersectionFor`, `incompRelation`, `isEmptyTerm`) | 27.7% | 23.1% |
-| the clause store (`insertClause`) | 7.0% | 16.3% |
-| the cell algebra | 6.8% | 5.2% |
-| derived-index decode, which is the walk's reads | 8.0% | 8.4% |
-| the provider itself | 1.8% | 1.0% |
-
-Every decision then paid a propagation pass over a clause store that grew with the
-solve. So cost tracked decisions, and 4.4× the decisions was 4.4× the propagation. **The
-walk was not the problem** — it was 8% of allocation, and it is what took `futhark` from
-4287 decisions to 807.
-
 **Two ways out, and neither is free.**
 
 - **Order decisions by fewest matching versions**, as pub does. This was
@@ -866,12 +955,12 @@ walk was not the problem** — it was 8% of allocation, and it is what took `fut
   count has to come from the provider.
 - **Make a re-decision cheap.** The incompatibilities a decided instance entails are a
   pure function of that instance, and they are rebuilt — walk included — on every one
-  of the 6 or 7 re-decisions. Memoising them per instance does not remove the redundant
-  propagation, the larger half in that profile, so this is the smaller lever.
+  of the 6 or 7 re-decisions. Memoising them per instance leaves the redundant
+  propagation in place.
 
-**What is not the cause**, each checked: the walk (8% of allocation), the derived index
-(a read is 0.073 ms), the number of conflicts (11 is small), and proof rendering
-(`yesod` is satisfiable and prints no proof).
+**What is not the cause**, each checked: the derived index (a read is 0.073 ms), the
+number of conflicts (11 is small), and proof rendering (`yesod` is satisfiable and prints
+no proof).
 
 ## 13. The index is read at an index-state
 
@@ -938,9 +1027,7 @@ revision in force so that none of them keeps the version map alive. Under the
 default nursery cabal's peak on `vector` read 50.7 MB before the change and 65.8 MB
 after; under the 256 KB nursery it read 64.3 MB and 66.0 MB. The first pair is the
 sampling moving, not the heap: `maximum residency` is the largest heap at any major
-collection, and with a 4 MB nursery there are six of them in a short run. The
-table in [STATUS.md §2.1](STATUS.md#21-against-cabal-on-the-benchmark-set) carries cabal's
-higher figures for that reason, not because cabal changed.
+collection, and with a 4 MB nursery there are six of them in a short run.
 [benchmarking.md](benchmarking.md) records the check.
 
 ---
@@ -999,32 +1086,13 @@ its `.cabal`. `Bridge.Provider` reads that set and converts back on every releas
 read. The `impl(ghc …)` guard in `PubGrub.Cabal.Flatten` keeps Cabal's `withinRange`:
 that is cabal's rule for the compiler guard and the baseline uses the same one.
 
-**What it did to the search, same machine, same index-state, either side of the
-change.**
-
-Nine of the 23 problems moved and fourteen did not. The eight phantom no-version
-incompatibilities are gone, and the sixteen real ones are untouched:
-
-| | decisions | conflicts | no-version events |
-| --- | --- | --- | --- |
-| `conduit <1.3` | 19 → **16** | 9 → **8** | 2 → **1** |
-| `aeson <2` | 400 → **320** | 68 → **58** | 0 → 0 |
-| `yesod` | 827 → 839 | 11 → 14 | 1 → **0** |
-| `language-puppet ==1.5.1` | 10 → **9** | 6 → **5** | 1 → **0** |
-| `cpsa ==4.4.9` | 11 → **9** | 4 → **3** | 2 → **1** |
-| `cabal-install ==3.18.1.0` | 65 → **61** | 5 → 5 | 1 → **0** |
-| `futhark ==0.27.1` | 686 → 688 | 7 → 7 | 0 → 0 |
-| `scion-browser ==0.5.0` | 186 → **169** | 23 → **21** | 3 → **1** |
-| `matterhorn ==90000.1.1` | 584 → **581** | 30 → 30 | 2 → **1** |
-
-`aeson <2` is the same 400 to 320 that narrowing declared ranges to published
-versions produced on 2026-09-03 ([STATUS.md §5.2](STATUS.md#52-measured-and-rejected)),
-now for free: the user's own `<2` and the slot bound `2.0.0.0` are one cut. `yesod`
-pays twelve decisions and three conflicts, the search-path luck
-[§4](#4-a-release-owns-a-slot-not-a-point) records for a wider depender term, and
-it is the only row that got worse. The proofs kept their 61 sentences.
-`scion-browser` lost its phantom interval, and `hjsonschema`'s proof took a different
-route through `aeson` at the same length.
+**What it did to the search.** Nine of the 23 problems moved and fourteen did not, and
+the eight phantom no-version incompatibilities went. `aeson <2` went from 400 decisions
+to 320, the same gain narrowing declared ranges produced
+([§4](#4-a-release-owns-a-slot-not-a-point)), now for free: the user's own `<2` and the
+slot bound `2.0.0.0` are one cut. `yesod` paid twelve decisions and three conflicts, the
+search-path luck §4 records for a wider depender term, and it was the only row that got
+clearly worse. The proofs kept their length.
 
 **The normal form is computed once, at `mkVersion`.** `Eq` and `Ord` read it on
 every comparison, and a solve compares versions far more often than it makes them:
@@ -1066,8 +1134,7 @@ read `condTreeConstraints` and ignored the node's `buildable:`, so we did. That 
 made `optparse-applicative ==0.15.1.0` alongside `warp` unsolvable here and solvable
 for cabal. The same fault put `network-bsd`, `network-run` and `time-manager` in our
 `pandoc` plan and five extra packages in our `yesod` plan, through the
-`buildable: False` stanzas of `tls-server`, `tls-client` and `crypton-socks-example`
-([STATUS.md §2.1](STATUS.md#21-against-cabal-on-the-benchmark-set)).
+`buildable: False` stanzas of `tls-server`, `tls-client` and `crypton-socks-example`.
 
 **The library's buildability is deliberately not gated here.** It is a stronger fact
 — an unbuildable library makes the whole release unusable, not merely
@@ -1142,11 +1209,23 @@ content, so when two solves pick the same version, flags and dependencies they a
 build with no solver cooperation, and nothing needs identity across scopes: a
 `Setup.hs` never links against the project's libraries, a build tool's dependencies
 never reach the code it generates, and what does need one instance — Template Haskell
-and plugins — is `build-depends` in the main namespace. Decided by latti on 2026-10-14
-(`latti/DESIGN.md` §5, "one solve per namespace, linked by preference"); the
-one-version-per-name model this solver already has is exactly one namespace, so
-nothing qualified is needed here, which is also why the qualified-goals design stays
-shelved ([STATUS.md §3.2](STATUS.md#32-one-version-per-package-name)).
+and plugins — is `build-depends` in the main namespace. The one-version-per-name model
+this solver already has is exactly one namespace, so nothing qualified is needed here.
+
+**What that leaves.** The driver solves neither namespace, so our plan lacks the `alex`,
+`happy`, `hsc2hs` and `Cabal` cabal's plans carry, and on that point the comparison is of
+two different questions. A cabal plan can also name one package twice at the same
+version, once installed and once to be built: that is two scopes showing through after
+`convCP` strips the qualifiers from the identities, so read a cabal plan by component, or
+a flat list will look like a contradiction.
+
+**Qualified goals are designed and shelved.** Three points survive for whoever revives
+them. The scope belongs on the variable, not on the instance, since a release of `mtl` is
+the same release in either scope, so `incompTerms` becomes `Map QPN (Term InstanceSet)`.
+Override-rather-than-nest is load-bearing: cabal limits itself to one qualifier because
+nesting "very quickly leads to infinite search trees". And they do not fix
+self-dependencies: `qualifyDeps`'s `inheritedQ` gives a library dependency its depender's
+qualifier, so `qpn == qpn'` under any qualifier scheme.
 
 **What links the namespaces is a preference, never an incompatibility.**
 `PubGrub.Cabal.Provider.Preference` is a map from package name to a version and an

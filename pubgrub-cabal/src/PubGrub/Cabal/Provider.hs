@@ -334,7 +334,7 @@ mkExpand logA preference installedDb source = expand'
     -- the range first saves almost no reads, since a later scan's
     -- out-of-range reads are memo hits, and the solver then learns an
     -- unbuildable fact one slot at a time and the proof names it once per
-    -- slot (measured, docs/STATUS.md §5.2).
+    -- slot (measured, docs/DESIGN.md §5).
     --
     -- @stated@ accumulates the facts about releases the scan rejects on the
     -- way past. They ride out with whichever release it settles on, and with
@@ -440,8 +440,7 @@ mkExpand logA preference installedDb source = expand'
     -- is where cabal puts it: up front shortened @lens '<4'@'s proof to two
     -- lines but cost @aeson '<2'@ 41% more allocation and 466 more decisions,
     -- because the extra level-0 derivations change which satisfier conflict
-    -- resolution picks. That is search-path luck rather than a principle
-    -- (decision record decision-0024-the-no-version-rise-explained).
+    -- resolution picks. That is search-path luck rather than a principle.
     onlyInstalledFact pn
         | isNonReinstallable pn = [onlyInstalled pn (installedVersionsOf pn) anySourceRelease]
         | otherwise = []
@@ -521,7 +520,7 @@ mkExpand logA preference installedDb source = expand'
     -- The walk is affordable because a neighbour read is a decode from the
     -- derived index rather than a parse (0.073 ms against 2.007 ms). It costs
     -- @pandoc@ 22.6 → 33.1 MB of residency and under 1% of allocation;
-    -- docs/collapsing.md has the trade, and the ways to walk less if
+    -- docs/DESIGN.md §5 has the trade, and the ways to walk less if
     -- read-dominated problems ever matter more.
     --
     -- The guard's pins name flags; each is looked up among the release's
@@ -615,7 +614,7 @@ mkExpand logA preference installedDb source = expand'
     -- Each neighbour tried costs a release read, so the walk is only as cheap
     -- as the 'ReleaseSource' makes a read. As a parse (2.0 ms and ~7.7 MB each)
     -- it took @pandoc@, a problem with a single conflict, from 167 reads to
-    -- 2834 and from 22.9 MB of residency to 81.0 MB (docs/collapsing.md).
+    -- 2834 and from 22.9 MB of residency to 81.0 MB (docs/DESIGN.md §5).
     spanningOccurrenceWith admit pn v slot guard dep = do
         lo <- walk Set.lookupLT v
         hi <- walk Set.lookupGT v
@@ -641,7 +640,7 @@ mkExpand logA preference installedDb source = expand'
         -- A linear search of every group's list. A map from package name to
         -- occurrences was measured against it: search identical, mutator time
         -- 0% to −12%, allocation +3–5% on every problem, so it was not kept
-        -- (docs/STATUS.md §5.2). The cost-centre profile's 13–16% for
+        -- (docs/DESIGN.md §5). The cost-centre profile's 13–16% for
         -- @Eq Dependency@ here is mostly the profiler's own overhead.
         carries neighbour =
             any (\(g, ds) -> g == guard && dep `elem` ds) (relGuarded neighbour)

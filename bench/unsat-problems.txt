@@ -55,7 +55,7 @@ hjsonschema ==1.10.0            # base and bytestring, via aeson
 
 # --- dead range: a declared bound naming a version never published -------------
 # `widen` puts the declared range into the term verbatim, so the dead space survives
-# into the proof. Narrowing it was measured and rejected (docs/STATUS.md §5.2).
+# into the proof. Narrowing it was measured and rejected (docs/DESIGN.md §4).
 atelier-testing ==0.2.0.0       # atelier-core >=0.3 && <0.4, and two more showcase:exclude (fails for a different reason than cabal)
 cpsa ==4.4.9                    # deepseq, two slots against installed base
 happstack-hsp ==7.3.7.8         # template-haskell history

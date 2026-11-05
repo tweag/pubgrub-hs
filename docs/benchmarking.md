@@ -255,7 +255,7 @@ account for is not evidence, however reproducible it is.
 **What sits above the floor is known: the memoised reduced forms.** Residency tracks
 **how many releases were read**, which is a number the solver's own strategy moves.
 `pandoc` sits above the floor because the collapsing walk reads 2831 releases where
-the solve needs about 170 ([collapsing.md](collapsing.md) §3). Record residency on
+the solve needs about 170 ([DESIGN.md](DESIGN.md) §5). Record residency on
 every run, not only when it looks interesting.
 
 **Pin the index-state, or the problem moves.** The Hackage index refreshes itself at

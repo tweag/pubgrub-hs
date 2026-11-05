@@ -1,15 +1,14 @@
 # PubGrub: A Dependency Solver for Haskell Packages
 
-> **What this is.** A tutorial introduction to the PubGrub algorithm, and the gentlest
-> starting point in the repository.
+> **What this is.** An introduction to the PubGrub algorithm, and the gentlest starting
+> point in the repository. To use the library, read the `PubGrub.Tutorial` module instead.
 >
 > **What decides.** `references/pubgrub.md` is the authority on the algorithm. Where
 > this file and the spec disagree, the spec is right. This file exists to make the spec
 > readable, not to replace it.
 >
 > **What it does not cover.** Flags, which are the part that took the most work. That
-> is [flags-as-variables.md](flags-as-variables.md). For the current state of the code,
-> see [STATUS.md](STATUS.md).
+> is [DESIGN.md §3](DESIGN.md#3-a-flag-is-a-variable-and-a-decision-is-one-variables-value).
 
 This document introduces the PubGrub version-solving algorithm and how this project implements it. All examples use Cabal package names and the version syntax of the Package Versioning Policy (PVP). The goal is to make the algorithm understandable, not to prove it correct.
 
@@ -17,7 +16,7 @@ This document introduces the PubGrub version-solving algorithm and how this proj
 
 ## 1. What Is a Dependency Solver?
 
-When you run `cabal install`, Cabal must find a single version for every package in the transitive dependency closure such that all constraints are satisfied simultaneously. (Setup scripts and build tools can differ. This tutorial leaves them out.) Here is the message from cabal's solver on `dhall ==1.42.3` and `aeson ==2.3.1.0` requested together, with two long lists of versions cut short at the `…`:
+When you run `cabal install`, Cabal must find a single version for every package in the transitive dependency closure such that all constraints are satisfied simultaneously. (Setup scripts and build tools can differ. This introduction leaves them out.) Here is the message from cabal's solver on `dhall ==1.42.3` and `aeson ==2.3.1.0` requested together, with two long lists of versions cut short at the `…`:
 
 ```
 Could not resolve dependencies:
@@ -50,9 +49,9 @@ The naive approach — enumerate every combination of versions and test consiste
 Two abstractions anchor the algorithm, and one callback connects it to the world.
 
 **Values.** The solver's variables are the things it assigns values to. For most of
-this tutorial, read a variable as a package name. In this project a package's value is
+this introduction, read a variable as a package name. In this project a package's value is
 an `Instance` — one concrete way of having a package, either a pre-installed unit or a
-source release. An automatic flag is a variable too, with a Boolean value (§10).
+source release. An automatic flag is a variable too, with a Boolean value (§9).
 
 **Value sets.** The algebra needs the empty set, three operations and an emptiness test:
 `empty`, `intersect`, `union`, `difference`, `isEmpty`. It needs **no complement**. A
@@ -95,8 +94,9 @@ Four points about it:
 
 The choice and its consequences always travel together, so the solver never holds one
 without the other. The reference Rust implementation keeps them as two methods
-(`choose_version` and `get_dependencies`), and splitting ours back is an open question
-([STATUS.md](STATUS.md) §4.5).
+(`choose_version` and `get_dependencies`). Whether to split ours back is an open question,
+made cheaper to leave by the flag-variable model, under which a release's consequences do
+not depend on an assignment.
 
 > **PVP vs SemVer.** Cabal uses the [Package Versioning Policy](https://pvp.haskell.org/). In PVP, `^>=1.2` means `>= 1.2 && < 1.3` — the two *leftmost* version components form the major version. This differs from SemVer's `^1.2`, which means `>= 1.2.0 && < 2.0.0`. Be careful when reading Cargo or npm documentation: their version range semantics differ.
 
@@ -225,8 +225,9 @@ More precisely, for a specific version `v` of `aeson`:
 Adjacent versions with identical dependency ranges are collapsed into a single
 incompatibility covering the whole range (`references/pubgrub.md:456`). That cuts the
 number of incompatibilities, and it lets the solver reason about many versions at once
-instead of learning about them one at a time. See [collapsing.md](collapsing.md) for how
-this project does it.
+instead of learning about them one at a time. See
+[DESIGN.md §5](DESIGN.md#5-dependency-facts-collapse-in-two-places) for how this project
+does it.
 
 **3. Conflict-derived incompatibility**
 
@@ -337,7 +338,7 @@ For a source release, the incompatibilities it returns are the release's depende
 
 The depender term is at least the release's **slot**, not the single version: the half-open range from `v` up to the next release that exists, with no lower bound on the first release's slot. The provider widens it across neighbours that carry the same dependency, and adjacent slots touch, so they can merge. That is
 `references/pubgrub.md:456`'s adjacent-version collapsing, and
-[collapsing.md](collapsing.md) explains it.
+[DESIGN.md §5](DESIGN.md#5-dependency-facts-collapse-in-two-places) explains it.
 
 > **Lazy loading.** `expand` is called only when a package is actually decided. The solver never loads the full dependency graph up front. This is what makes PubGrub tractable for a registry the size of Hackage.
 >
@@ -443,21 +444,11 @@ reason not to reach for an off-the-shelf solver.
    deliver.
 
 > **There is no ASP component in this project, and there never was.** An early plan to
-> encode solving for Clingo was dropped before any code was written. See
-> [STATUS.md](STATUS.md) §5.1.
+> encode solving for Clingo was dropped before any code was written.
 
 ---
 
-## 9. Where the code is
-
-For the current layout and the invariants, read [`../CLAUDE.md`](../CLAUDE.md). For the
-rung ladder, what is built, what is specified and what is open, read
-[STATUS.md](STATUS.md).
-
----
-
-
-## 10. Comparison to the Cabal Modular Solver
+## 9. Comparison to the Cabal Modular Solver
 
 Cabal ships its own dependency solver, first described by Andres Löh and Duncan Coutts at the Haskell Implementors' Workshop 2011. Understanding its design clarifies what PubGrub does differently and why.
 
@@ -521,9 +512,9 @@ The modular solver handles two features of the Cabal dependency problem that the
 
 **Boolean flags.** Cabal `.cabal` files can declare conditional dependencies gated on boolean flags (for example, `flag use-bytestring-builder`). The modular solver interleaves flag decisions with package decisions.
 
-PubGrub as specified treats dependencies as unconditional. Handling flags needs either a pre-expansion of every flag combination, a richer value domain, or more variables. This project takes the third: an automatic flag is a solver variable of its own, decided after the release that declares it, and a guarded dependency is an incompatibility whose terms name the flags it holds under ([flags-as-variables.md](flags-as-variables.md)).
+PubGrub as specified treats dependencies as unconditional. Handling flags needs either a pre-expansion of every flag combination, a richer value domain, or more variables. This project takes the third: an automatic flag is a solver variable of its own, decided after the release that declares it, and a guarded dependency is an incompatibility whose terms name the flags it holds under ([DESIGN.md §3](DESIGN.md#3-a-flag-is-a-variable-and-a-decision-is-one-variables-value)).
 
-Note that flags are **fixed at their declared defaults unless `--flags search` is given**, on both sides of the comparison, and the recorded benchmark and showcase numbers were taken that way. See [STATUS.md](STATUS.md) §3.1.
+Note that flags are **fixed at their declared defaults unless `--flags search` is given**, on both sides of the comparison, and the recorded benchmark and showcase numbers were taken that way.
 
 **Installed against new instances.** The modular solver distinguishes packages already installed in the GHC package database from new packages to be downloaded, and it prefers installed instances. Our provider does the same, in `expand`. The distinction is not built into the algorithm: it lives entirely in the provider, which is where an `Instance` can be a pre-installed unit.
 
