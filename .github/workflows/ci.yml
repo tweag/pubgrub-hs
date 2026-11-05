@@ -464,7 +464,7 @@ jobs:
   # (workflow_dispatch, on any branch), gets the same files as a release.
   dist:
     name: dist
-    needs: [build, test, sdist, docs]
+    needs: [test, sdist, docs]
     runs-on: ubuntu-latest
     steps:
       - name: Download release archives
