@@ -36,8 +36,8 @@ it is built that way, and [`CLAUDE.md`](CLAUDE.md) the architecture.
 
 ## Install
 
-Releases ship the `pubgrub` executable, the source distribution of every package and
-the documentation of `pubgrub` and `pubgrub-cabal`. Building from the checkout is
+Releases ship the `pubgrub` executable, and the source distribution and the
+documentation of `pubgrub` and `pubgrub-cabal`. Building from the checkout is
 [Build](#build) below.
 
 ### Pre-built binaries
@@ -66,7 +66,7 @@ Add `@VERSION` to pin a version, for example `github:tweag/pubgrub-hs@0.1.0.0`. 
 
 ### From source
 
-Each release has the source distribution of every package, `PACKAGE-VERSION.tar.gz`. The `pubgrub` executable is in `pubgrub-cli`, which depends on the unpublished `pubgrub-hs`, so a source distribution alone does not install it: build it from a checkout of the release's tag, as in [Build](#build) below, with `cabal install exe:pubgrub`. The source distributions of `pubgrub` and `pubgrub-cabal` are what goes to Hackage.
+Each release has the source distributions of `pubgrub` and `pubgrub-cabal`, `PACKAGE-VERSION.tar.gz`, which are what goes to Hackage. The `pubgrub` executable is in `pubgrub-cli`, which is not published and has no source distribution there: build it from a checkout of the release's tag, as in [Build](#build) below, with `cabal install exe:pubgrub`.
 
 ## Requirements
 

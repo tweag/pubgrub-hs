@@ -3,17 +3,16 @@ name: CI
 # build compiles the project once per target and GHC, runs its test suites,
 # and uploads the executables as an archive; test unpacks that archive on a
 # separate runner, without a build tree, and runs the executables; sdist
-# makes the source distribution of every package in cabal.project; hackage
-# builds and tests the two published packages from their source
-# distributions alone, on the GHCs they claim; docs makes the Haddock
-# documentation for Hackage and for GitHub Pages; dist checks the versions of
-# the tested archives, the source distributions and the documentation
-# tarballs, and uploads them with SHA256SUMS as one artifact; format checks
-# that every Haskell file is as stylish-haskell writes it; commits checks the
-# commit messages of a PR; ci-ok is the one check that the ruleset requires;
-# release publishes dist when the head of main is a release commit, made by
-# `mise run release-pr`; pages then publishes the documentation to GitHub
-# Pages. Nothing is rebuilt after testing.
+# makes the source distributions of the two published packages; hackage
+# builds and tests them from those tarballs alone, on the GHCs they claim;
+# docs makes the Haddock documentation for Hackage and for GitHub Pages; dist
+# checks the versions of the tested archives, the source distributions and
+# the documentation tarballs, and uploads them with SHA256SUMS as one
+# artifact; format checks that every Haskell file is as stylish-haskell writes
+# it; commits checks the commit messages of a PR; ci-ok is the one check that
+# the ruleset requires; release publishes dist when the head of main is a
+# release commit, made by `mise run release-pr`; pages then publishes the
+# documentation to GitHub Pages. Nothing is rebuilt after testing.
 #
 # A manual run (Actions > CI > Run workflow, or `gh workflow run ci.yml
 # --ref BRANCH`) makes every artifact of a release, in dist, without
@@ -224,7 +223,7 @@ jobs:
             "bin/$exe" --version
           done
 
-  # The source distributions of every package in cabal.project, as cabal
+  # The source distributions of the two packages meant for Hackage, as cabal
   # sdist makes them: only the files that the .cabal files list, unlike a
   # checkout of the repository. cabal sdist needs no GHC and its tarballs
   # are reproducible.
@@ -241,7 +240,7 @@ jobs:
           cabal-update: false
 
       - name: Make source distributions
-        run: cabal sdist all -o sdist
+        run: cabal sdist pubgrub pubgrub-cabal -o sdist
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -249,12 +248,13 @@ jobs:
           path: sdist/*.tar.gz
           if-no-files-found: error
 
-  # The two packages meant for Hackage, built and tested from their source
-  # distributions alone: no cabal.project of the repository, so their own
-  # bounds have to solve. Each runs on every GHC its tested-with claims.
-  # cabal check is what Hackage runs on upload.
+  # The two packages meant for Hackage, built and tested from the tarballs of
+  # the sdist job alone: no checkout and no cabal.project of the repository,
+  # so their own bounds have to solve. Each runs on every GHC its tested-with
+  # claims. cabal check is what Hackage runs on upload.
   hackage:
     name: Hackage packages, GHC ${{ matrix.ghc }}
+    needs: sdist
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -269,22 +269,25 @@ jobs:
     env:
       PACKAGES: ${{ matrix.packages }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
       - uses: haskell-actions/setup@0f8e8c99d88aeb3fbfd523f1ef2c6f762d10d64d # v2.12.1
         id: setup
         with:
           ghc-version: ${{ matrix.ghc }}
           cabal-version: ${{ env.CABAL_VERSION }}
 
-      # PACKAGES is a list of names, split into words on purpose.
+      - name: Download source distributions
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sdist
+          path: sdist
+
+      # PACKAGES is a list of names, split into words on purpose. The digit
+      # keeps pubgrub from matching the tarball of pubgrub-cabal.
       - name: Unpack the source distributions
         run: |
-          # shellcheck disable=SC2086
-          cabal sdist $PACKAGES -o sdist
           mkdir unpacked
-          for tarball in sdist/*.tar.gz; do
-            tar -xzf "$tarball" -C unpacked
+          for package in $PACKAGES; do
+            tar -xzf "sdist/$package"-[0-9]*.tar.gz -C unpacked
           done
           {
             echo "packages:"
@@ -471,9 +474,9 @@ jobs:
           name: docs
           path: docs
 
-      # Every package has the same version, the version of the release, and
-      # so does everything else. No archives means that RELEASE_GHC is not
-      # in the matrix.
+      # Every published package has the same version, the version of the
+      # release, and so does everything else. No archives means that
+      # RELEASE_GHC is not in the matrix.
       - name: Check versions
         id: check
         run: |
