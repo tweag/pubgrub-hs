@@ -355,8 +355,8 @@ data SolveError v
 deriving stock instance (Eq (v), Eq (ValueOf v), Eq (SetOf v), Eq (FactOf v)) => Eq (SolveError v)
 deriving stock instance (Show (v), Show (ValueOf v), Show (SetOf v), Show (FactOf v)) => Show (SolveError v)
 
--- | What the solver is doing, one message per step of the search. 'solve'
--- sends them to the log action it is given.
+-- | What the solver is doing: one message per step of the search, and 'Judged'
+-- per round of propagation. 'solve' sends them to the log action it is given.
 data SolverMsg v
     = -- | About to ask the provider for a value of the variable in the set.
       Deciding (v) (SetOf v)
@@ -377,9 +377,11 @@ data SolverMsg v
     | -- | The solver undid every decision above this level. A level is the
       -- number of decisions in force.
       Backtracked Int
-    | -- | One round of propagation examined this many incompatibilities, the
-      -- ones that may have changed since the last. The round right after a
-      -- 'Backtracked' re-examines what the backtrack undid.
+    | -- | One round of propagation judged this many incompatibilities, the ones
+      -- that may have changed since the last. The round right after a
+      -- 'Backtracked' judges again what the backtrack undid. This measures the
+      -- solver's work and is not a step of the search: another release may
+      -- change these counts without changing what the solver decides.
       Judged Int
 
 deriving stock instance (Eq (v), Eq (ValueOf v), Eq (SetOf v), Eq (FactOf v)) => Eq (SolverMsg v)
