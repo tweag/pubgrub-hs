@@ -466,7 +466,8 @@ A *scope* is a coherence domain. Package-version coherence (§1.8) and, under §
 unit coherence hold within a scope. There is no coherence requirement across
 scopes: the same package name may be chosen at different versions in different
 scopes. The same source package or installed unit may be chosen in several scopes
-only under V9 (§4.6).
+only under V9 (§4.6). Cabal's solver calls a scope a *qualifier*
+(`Distribution.Solver.Types.PackagePath`, with `QualSetup` and `QualExe`).
 
 Scopes are identified by package names, and there are three kinds:
 
