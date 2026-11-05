@@ -414,29 +414,22 @@ jobs:
           path: site
 
   # Every tracked Haskell file must be as stylish-haskell writes it, with
-  # .stylish-haskell.yaml. The binary is the release's static one, checked
-  # against its hash, and the task is the one `mise run format` runs locally.
+  # .stylish-haskell.yaml. mise installs what mise.lock records, and the task
+  # is the one that formats the tree locally. The action's tool cache stays
+  # off, here and in commits: mise does not check a restored tool against
+  # mise.lock.
   format:
     name: format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install stylish-haskell
-        env:
-          # The same version as in mise.toml.
-          VERSION: 0.15.1.0
-          SHA256: 40b51887f0ed35dc4b98288ab517888b5aa0cf1d2fa8b4782f11ea140e74e9aa
-        run: |
-          name="stylish-haskell-v${VERSION}-linux-x86_64"
-          curl -fsSL -o "$RUNNER_TEMP/$name.tar.gz" \
-            "https://github.com/haskell/stylish-haskell/releases/download/v${VERSION}/$name.tar.gz"
-          echo "$SHA256  $RUNNER_TEMP/$name.tar.gz" | sha256sum --check --strict
-          tar xzf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          cache: false
 
       - name: Check formatting
-        run: .mise/tasks/format --check
+        run: mise run format --check
 
   # Every commit of a PR must follow Conventional Commits, with a type that a
   # commit parser in cliff.toml knows: the release task reads them to choose
@@ -451,17 +444,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Check Conventional Commits
-        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4.9.1
+
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
-          # The same version as in mise.toml.
-          version: v2.14.2
-          args: --verbose origin/${{ github.base_ref }}..${{ github.event.pull_request.head.sha }}
+          cache: false
+
+      - name: Check Conventional Commits
         env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GIT_CLIFF__GIT__FILTER_UNCONVENTIONAL: "false"
           GIT_CLIFF__GIT__FILTER_COMMITS: "false"
           GIT_CLIFF__GIT__REQUIRE_CONVENTIONAL: "true"
           GIT_CLIFF__GIT__FAIL_ON_UNMATCHED_COMMIT: "true"
+        run: git-cliff --verbose "origin/$GITHUB_BASE_REF..$HEAD_SHA"
 
   # Everything that a release publishes, in one artifact "dist": the archives
   # built with RELEASE_GHC, the source distributions, the documentation

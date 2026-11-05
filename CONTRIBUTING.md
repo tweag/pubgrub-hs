@@ -9,7 +9,8 @@ process.
 Every Haskell file is formatted by [stylish-haskell](https://github.com/haskell/stylish-haskell)
 with [`.stylish-haskell.yaml`](.stylish-haskell.yaml), at the version pinned in
 `mise.toml`. `mise run format` formats the tree, and `mise run format --check` reports
-the files it would change. CI runs the check, and `ci-ok` fails on it.
+the files it would change. CI runs the check, and `ci-ok` fails on it. CI installs the
+tools from `mise.lock`, so run `mise lock` after changing a version in `mise.toml`.
 
 ## Commit messages
 
