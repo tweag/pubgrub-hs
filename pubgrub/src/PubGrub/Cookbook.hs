@@ -29,7 +29,7 @@
 -- > import           Data.Text             (Text)
 -- > import qualified Data.Text             as T
 -- > import           PubGrub
--- > import           PubGrub.SetOps        (isSubsetOf, union)
+-- > import           PubGrub.SetOps        (isSubsetOf)
 module PubGrub.Cookbook
     ( -- * How to give a domain versions and ranges
       -- $versions
@@ -217,19 +217,19 @@ import           PubGrub
 --
 -- A provider that states the same dependency for each of several releases gives
 -- the solver several facts where one would do. A t'MergeRule' tells the solver
--- which incompatibilities can be stated as one: those with the same key are
--- merged as they arrive. Here, two dependencies with the same depender and the
--- same dependee range merge into one over both depender ranges:
+-- which incompatibilities can be stated as one: it splits each into a key and a
+-- part, and those with the same key are merged as they arrive, their parts
+-- combined with @<>@, which for a 'VersionSet' is union. Here, two dependencies
+-- with the same depender and the same dependee range merge into one over both
+-- depender ranges:
 --
 -- > sameDependency :: MergeRule Name
 -- > sameDependency =
 -- >     MergeRule
--- >         { mergeKey = \i -> case incompCause i of
--- >             Fact (DependsOn p _ q qs) -> Just (p, q, qs)
--- >             _                         -> Nothing
--- >         , mergeWith = \old new -> case (incompCause old, incompCause new) of
--- >             (Fact (DependsOn p ps q qs), Fact (DependsOn _ ps' _ _)) -> dependsOn p (ps `union` ps') q qs
--- >             _ -> old
+-- >         { mergeParts = \i -> case incompCause i of
+-- >             Fact (DependsOn p ps q qs) -> Just ((p, q, qs), ps)
+-- >             _                          -> Nothing
+-- >         , mergeBuild = \(p, q, qs) ps -> dependsOn p ps q qs
 -- >         }
 --
 -- Name the rule in the domain's instance, as 'mergeRule': add this line to the
@@ -237,18 +237,17 @@ import           PubGrub
 --
 -- >     mergeRule = sameDependency
 --
--- Check two things. The merged fact replaces both, so it must say exactly what
+-- Check one thing. The merged fact replaces both, so it must say exactly what
 -- the two said together; a union of depender ranges does, since \"@lib@ in @a@
 -- or @b@ needs @util@ in @r@\" is both \"@lib@ in @a@ needs @util@ in @r@\" and
--- \"@lib@ in @b@ needs @util@ in @r@\". And the merged fact must have the key
--- its parts had.
+-- \"@lib@ in @b@ needs @util@ in @r@\".
 --
 -- The dependencies of @lib@ 1 and @lib@ 2 on @util@ are stated over their
 -- slots, which touch, so the merged fact is one range:
 --
 -- @
--- ghci> let dep x = dependsOn lib (slot (map fst (example Map.! lib)) x) util (range [1] [3])
--- ghci> pretty (incompTerms (mergeWith sameDependency (dep (mkVersion [1])) (dep (mkVersion [2]))) Map.! lib)
+-- ghci> let slotOf = slot (map fst (example Map.! lib))
+-- ghci> pretty (slotOf (mkVersion [1]) <> slotOf (mkVersion [2]))
 -- \"\<2.1\"
 -- @
 --

@@ -119,7 +119,7 @@ instance Domain Var where
 
     singleton _ = singletonValue
 
-    mergeRule = MergeRule mergeKey mergeWith
+    mergeRule = MergeRule mergeParts mergeBuild
 
 -- --------------------------------------------------------------------------
 -- Facts
@@ -253,11 +253,12 @@ onlyInstalled p installed anySource =
 --
 -- The reasons are there for the proof only, like the installed versions of
 -- 'onlyInstalled': the clause's terms are the ban, and the reasons are what the
--- sentence says instead of a bare \"cannot be built\".
+-- sentence says instead of a bare \"cannot be built\". The sentence gives them
+-- sorted, not in the order of the @.cabal@.
 unbuildable :: PackageName -> InstanceSet -> Guard -> NonEmpty UnbuildableReason -> Incompatibility Var
 unbuildable p s guard why =
     fact
-        (CauseUnbuildable p s guard why)
+        (CauseUnbuildable p s guard (NE.nub (NE.sort why)))
         ( (PackageVar p, Positive (instanceSet s))
             : [(FlagVar p f, Positive (flagSet (boolSet b))) | (f, b) <- Map.toList guard]
         )
@@ -333,8 +334,9 @@ declaresFlag p s f =
 -- reasons under the same flags are the same fact about two runs of releases;
 -- merging them is how the adjacent versions of 'unbuildable' are gathered.
 -- Merging two runs ruled out for different reasons would put one release's
--- missing module on the other's range in the proof. The reasons compare as a
--- set, so their order in the @.cabal@ does not keep two identical facts apart.
+-- missing module on the other's range in the proof. 'unbuildable' keeps the
+-- reasons sorted and without repeats, so their order in the @.cabal@ does not
+-- keep two identical facts apart.
 --
 -- The dependee set is compared with 'Eq', which 'InstanceSet' has lawfully:
 -- both of its halves are canonical. The depender term is in no key: it is what
@@ -346,44 +348,35 @@ data MergeKey
       -- in 'PubGrub.Store' holds term for term
     | MergeDeclares PackageName Flag
       -- ^ two releases declaring the same flag: one clause over both
-    | MergeUnbuildable PackageName Guard (Set UnbuildableReason)
+    | MergeUnbuildable PackageName Guard (NonEmpty UnbuildableReason)
     deriving (Eq, Ord)
 
--- | The key of a clause that may take part in a merge: a dependency fact, a
--- flag declaration or an unbuildable fact.
+-- | The key and the depender set of a clause that may take part in a merge: a
+-- dependency fact, a flag declaration or an unbuildable fact.
 --
 -- A clause is keyed by its /cause/ rather than by its term map, because the
 -- term map may have lost what is needed: 'fromDependency' drops the dependee
 -- entry when the dependency is unsatisfiable, and the unit ban that remains does
 -- not say which dependee it came from. The cause still names it, so two such
 -- clauses about the same dependee merge.
-mergeKey :: Incompatibility Var -> Maybe MergeKey
-mergeKey i = case incompCause i of
-    Fact (CauseDependency p _ g (q, depSet)) -> Just (MergeDep p q g depSet)
-    Fact (CauseDeclaresFlag p _ f)           -> Just (MergeDeclares p f)
-    Fact (CauseUnbuildable p _ g why)        -> Just (MergeUnbuildable p g (Set.fromList (NE.toList why)))
+mergeParts :: Incompatibility Var -> Maybe (MergeKey, InstanceSet)
+mergeParts i = case incompCause i of
+    Fact (CauseDependency p s g (q, depSet)) -> Just (MergeDep p q g depSet, s)
+    Fact (CauseDeclaresFlag p s f)           -> Just (MergeDeclares p f, s)
+    Fact (CauseUnbuildable p s g why)        -> Just (MergeUnbuildable p g why, s)
     _                                        -> Nothing
 
--- | The union of two clauses carrying the same key, rebuilt through the
--- constructor of their kind so that the cause stays a leaf cause with the
--- unioned term ('PubGrub.Store' says why that matters).
-mergeWith :: Incompatibility Var -> Incompatibility Var -> Incompatibility Var
-mergeWith c new = case (incompCause c, incompCause new) of
-    (Fact (CauseDependency p aSet g (q, depSet)), Fact (CauseDependency _ bSet _ _)) ->
-        fromDependency p (aSet `union` bSet) g q depSet
-    (Fact (CauseDeclaresFlag p aSet f), Fact (CauseDeclaresFlag _ bSet _)) ->
-        declaresFlag p (aSet `union` bSet) f
-    -- Two unit clauses banning instances of the same package: ¬(p ∈ A) and
-    -- ¬(p ∈ B) is ¬(p ∈ A∪B), so the union claims nothing new. Slots touch, so
-    -- for runs of adjacent unbuildable releases the union is one contiguous
-    -- range, which is what references/pubgrub.md:476 asks to be stated.
-    -- The key made the two reason sets equal, so the existing clause's
-    -- reasons are the merged clause's.
-    (Fact (CauseUnbuildable p aSet g why), Fact (CauseUnbuildable _ bSet _ _)) ->
-        unbuildable p (aSet `union` bSet) g why
-    -- Unreachable: equal keys imply the same kind of cause. If it were
-    -- reached, the newer clause would be lost.
-    _ -> c
+-- | The clause of a key over a depender set, rebuilt through the constructor of
+-- its kind so that the cause stays a leaf cause with the unioned term
+-- ('PubGrub.Store' says why that matters).
+mergeBuild :: MergeKey -> InstanceSet -> Incompatibility Var
+mergeBuild (MergeDep p q g depSet) s    = fromDependency p s g q depSet
+mergeBuild (MergeDeclares p f) s        = declaresFlag p s f
+-- Two unit clauses banning instances of the same package: ¬(p ∈ A) and
+-- ¬(p ∈ B) is ¬(p ∈ A∪B), so the union claims nothing new. Slots touch, so for
+-- runs of adjacent unbuildable releases the union is one contiguous range, which
+-- is what references/pubgrub.md:476 asks to be stated.
+mergeBuild (MergeUnbuildable p g why) s = unbuildable p s g why
 
 -- --------------------------------------------------------------------------
 -- The answer

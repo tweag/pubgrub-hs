@@ -15,7 +15,7 @@ import qualified Data.Set              as Set
 import           Data.Text             (Text)
 import qualified Data.Text             as T
 import           PubGrub
-import           PubGrub.SetOps        (isSubsetOf, union)
+import           PubGrub.SetOps        (isSubsetOf)
 
 newtype Name = Name Text
     deriving (Eq, Ord, Show)
@@ -102,12 +102,10 @@ plan index seeds = case runIdentity (solve mempty (provider index) seeds) of
 sameDependency :: MergeRule Name
 sameDependency =
     MergeRule
-        { mergeKey = \i -> case incompCause i of
-            Fact (DependsOn p _ q qs) -> Just (p, q, qs)
-            _                         -> Nothing
-        , mergeWith = \old new -> case (incompCause old, incompCause new) of
-            (Fact (DependsOn p ps q qs), Fact (DependsOn _ ps' _ _)) -> dependsOn p (ps `union` ps') q qs
-            _ -> old
+        { mergeParts = \i -> case incompCause i of
+            Fact (DependsOn p ps q qs) -> Just ((p, q, qs), ps)
+            _                          -> Nothing
+        , mergeBuild = \(p, q, qs) ps -> dependsOn p ps q qs
         }
 
 name :: Name -> VersionSet -> Text

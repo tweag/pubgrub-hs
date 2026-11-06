@@ -7,8 +7,7 @@ module CookbookSpec (tests) where
 import qualified Data.Map.Strict  as Map
 import qualified Data.Text        as T
 import           DocCode          (codeMatches)
-import           PubGrub          (Incompatibility (..), MergeRule (..),
-                                   Pretty (..), fullVersionSet, mkVersion,
+import           PubGrub          (Pretty (..), fullVersionSet, mkVersion,
                                    singletonVersionSet)
 import           Test.Tasty       (TestTree, testGroup)
 import           Test.Tasty.HUnit (testCase, (@?=))
@@ -36,8 +35,8 @@ tests =
                     , "So, because app >=0 is requested and util >=3 && <4 is required by a constraint, version solving failed."
                     ]
         , testCase "two dependencies over touching slots merge into one" $
-            let dep x = dependsOn lib (slot (map fst (example Map.! lib)) x) util (range [1] [3])
-             in pretty (incompTerms (mergeWith sameDependency (dep (mkVersion [1])) (dep (mkVersion [2]))) Map.! lib)
+            let slotOf = slot (map fst (example Map.! lib))
+             in pretty (slotOf (mkVersion [1]) <> slotOf (mkVersion [2]))
                     @?= "<2.1"
         , testCase "a release passed over, with its reason" $
             why example [request lib (singletonVersionSet (mkVersion [2, 1]))]

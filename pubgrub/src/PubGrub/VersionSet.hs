@@ -358,6 +358,10 @@ complementVersionSet vs = fromCuts (go (Cut version0 Before) (cutsOf vs))
         | hi == Unbounded = [(prev, lo)]
         | otherwise = (prev, lo) : go hi rest
 
+-- | Under union.
+instance Semigroup VersionSet where
+    (<>) = unionVersionSet
+
 -- | Version sets as the solver's sets. 'difference' goes through
 -- 'complementVersionSet', which a version set has because versions have a
 -- lowest one and no highest.

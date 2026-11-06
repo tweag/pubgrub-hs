@@ -12,7 +12,7 @@
 -- 'CauseDependency' leaf rather than a derived node).
 --
 -- The store itself is the core's and is not exported; the core's own tests hold
--- it to its invariants under any rule that keeps 'MergeRule''s law. What is
+-- it to its invariants under any rule. What is
 -- tested here is cabal's rule, through 'Store' below: a model of the core's
 -- store that applies the domain's rule on insert the way the store does.
 module StoreSpec (tests) where
@@ -69,11 +69,12 @@ emptyStore = Store []
 -- clause sits, or put it at the front: what the core's store does.
 insertClause :: Domain d => Incompatibility d -> Store d -> Store d
 insertClause i (Store cs) = case mergeRule of
-    MergeRule{mergeKey, mergeWith} -> case mergeKey i of
+    MergeRule{mergeParts, mergeBuild} -> case mergeParts i of
         Nothing -> Store (i : cs)
-        Just k -> case break ((== Just k) . mergeKey) cs of
-            (newer, existing : older) -> Store (newer ++ mergeWith existing i : older)
-            (_, [])                   -> Store (i : cs)
+        Just (k, s) -> case break ((== Just k) . fmap fst . mergeParts) cs of
+            (newer, existing : older)
+                | Just (first, held) <- mergeParts existing -> Store (newer ++ mergeBuild first (held <> s) : older)
+            _ -> Store (i : cs)
 
 -- | Insert several, leaving them at the front in the order given.
 insertClauses :: Domain d => [Incompatibility d] -> Store d -> Store d

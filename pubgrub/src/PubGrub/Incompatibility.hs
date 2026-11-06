@@ -36,6 +36,7 @@ module PubGrub.Incompatibility
 
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import           Data.Void       (Void, absurd)
 import           PubGrub.SetOps  (SetOps (..))
 import           PubGrub.Term    (Term (..), anyTerm, intersectTerm, isTopTerm,
                                   unionTerm)
@@ -80,12 +81,12 @@ class (Ord v, SetOps (SetOf v)) => Domain v where
     mergeRule :: MergeRule v
     mergeRule = noMerging
 
--- | A merge rule: two incompatibilities with the same key are one piece of
--- knowledge in two parts, and 'mergeWith' is the one incompatibility that
--- states both. The solver keeps at most one incompatibility per key: one that
--- arrives with a key already taken is merged into the one that has it, which
--- keeps its place in the order the solver judges them in. The key type is the
--- rule's own.
+-- | A merge rule: it splits an incompatibility into a key and a part. Two with
+-- the same key are one piece of knowledge in two parts, the parts combine with
+-- @<>@, and 'mergeBuild' makes the one incompatibility that states the result.
+-- The solver keeps at most one incompatibility per key: one that arrives with a
+-- key already taken is merged into the one that has it, which keeps its place in
+-- the order the solver judges them in. The two types are the rule's own.
 --
 -- Merging pays where a provider states a dependency once per release. If two
 -- releases of @p@ both need @q@ in @r@, the solver is given one incompatibility
@@ -93,34 +94,28 @@ class (Ord v, SetOps (SetOf v)) => Domain v where
 -- @p@ is one of the two releases, without knowing which, is enough to conclude
 -- that @q@ is in @r@. A proof then states the dependency once.
 --
--- __Soundness.__ The merged incompatibility replaces both parts, so it must say
--- exactly what the two say together. Merging @{p: Positive a, q: Negative r}@
--- with @{p: Positive b, q: Negative r}@ into
--- @{p: Positive (a ∪ b), q: Negative r}@ is sound, because "@p@ in @a ∪ b@"
--- is "@p@ in @a@ or @p@ in @b@".
---
--- __The law.__ A merged incompatibility has the key its parts had: whenever
--- @mergeKey a == Just k@ and @mergeKey b == Just k@,
---
--- @
--- mergeKey (mergeWith a b) == Just k
--- @
---
--- The solver files the merged incompatibility under @k@ without asking again.
--- Nothing else is required: a merge may change which variables the
+-- __The law.__ The merged incompatibility replaces both, so it must say exactly
+-- what the two say together: whenever @mergeParts a == Just (k, x)@ and
+-- @mergeParts b == Just (k, y)@, @mergeBuild k (x <> y)@ forbids exactly what @a@
+-- and @b@ forbid between them. 'Semigroup' cannot check this. Merging
+-- @{p: Positive a, q: Negative r}@ with @{p: Positive b, q: Negative r}@ into
+-- @{p: Positive (a ∪ b), q: Negative r}@ keeps it, because "@p@ in @a ∪ b@" is
+-- "@p@ in @a@ or @p@ in @b@", so the key is @(p, q, r)@ and the part is the set
+-- under union. Nothing else is required: a merge may change which variables the
 -- incompatibility mentions.
-data MergeRule v = forall k. Ord k => MergeRule
-    { mergeKey  :: Incompatibility v -> Maybe k
-      -- ^ the key of an incompatibility that may be merged, or 'Nothing' for
-      -- one that is never merged
-    , mergeWith :: Incompatibility v -> Incompatibility v -> Incompatibility v
-      -- ^ the incompatibility already held and the arriving one, both with the
-      -- same key, to the one that replaces them
+data MergeRule v = forall k s. (Ord k, Semigroup s) => MergeRule
+    { mergeParts :: Incompatibility v -> Maybe (k, s)
+      -- ^ the key and the part of an incompatibility that may be merged, or
+      -- 'Nothing' for one that is never merged
+    , mergeBuild :: k -> s -> Incompatibility v
+      -- ^ the incompatibility that states a key and a part: the key the first
+      -- of them arrived with, and the @<>@ of their parts in the order they
+      -- arrived
     }
 
 -- | No two clauses merge.
 noMerging :: MergeRule v
-noMerging = MergeRule{mergeKey = const (Nothing :: Maybe ()), mergeWith = const}
+noMerging = MergeRule{mergeParts = const (Nothing :: Maybe (Void, ())), mergeBuild = \k _ -> absurd k}
 
 -- --------------------------------------------------------------------------
 -- Incompatibility

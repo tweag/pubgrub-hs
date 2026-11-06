@@ -70,6 +70,10 @@ data InstanceSet = InstanceSet
     }
     deriving (Eq, Ord, Show)
 
+-- | Under union.
+instance Semigroup InstanceSet where
+    (<>) = union
+
 instance SetOps InstanceSet where
     empty = emptyInstanceSet
     union a b = InstanceSet (isInstalled a `Set.union` isInstalled b) (isSource a `union` isSource b)

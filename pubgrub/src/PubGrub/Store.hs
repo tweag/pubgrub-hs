@@ -72,11 +72,12 @@
 --
 -- == What the store assumes of its rule, and what it does not
 --
--- The store is correct for any t'MergeRule' that keeps its one law: a merged
--- clause has the key its two halves had. It assumes nothing else about what
--- the rule does. A merge may change which variables a clause mentions, and the
--- index follows it, dropping a variable no clause mentions any more. 'valid'
--- states every invariant the store keeps.
+-- The store's invariants hold for any t'MergeRule'. It holds each key with its
+-- part and never takes a merged clause apart again, so it assumes nothing about
+-- what the rule builds; the rule's law is what makes a merge sound, and the store
+-- does not depend on it. A merge may change which variables a clause mentions,
+-- and the index follows it, dropping a variable no clause mentions any more.
+-- 'valid' states every invariant the store keeps.
 module PubGrub.Store
     ( Store
     , ClauseId
@@ -123,14 +124,18 @@ data Store v = Store
     , stNext    :: !ClauseId
     }
 
--- | The rule's key for each clause that has one, mapped to that clause's id,
--- with the rule itself. The key type is the rule's own and existential, as in
--- t'MergeRule', and only here: the store only ever asks whether a key is
--- present.
-data MergeIndex v = forall k. Ord k => MergeIndex
-    { miTargets :: !(Map k ClauseId)
-    , miKey     :: Incompatibility v -> Maybe k
-    , miMerge   :: Incompatibility v -> Incompatibility v -> Incompatibility v
+-- | The clause a key names, the key it first arrived with, and the part it has
+-- grown to. Keys that compare equal may still differ, in how a range is spelled
+-- for one, and a merged clause says what the first one said.
+data Target k s = Target !ClauseId !k !s
+
+-- | The rule's key for each clause that has one, mapped to that clause's id and
+-- part, with the rule itself. The two types are the rule's own and existential,
+-- as in t'MergeRule', and only here.
+data MergeIndex v = forall k s. (Ord k, Semigroup s) => MergeIndex
+    { miTargets :: !(Map k (Target k s))
+    , miParts   :: Incompatibility v -> Maybe (k, s)
+    , miBuild   :: k -> s -> Incompatibility v
     }
 
 -- | The empty store, under the domain's 'mergeRule'.
@@ -139,28 +144,29 @@ emptyStore = emptyStoreWith mergeRule
 
 -- | The empty store, under the given rule.
 emptyStoreWith :: MergeRule v -> Store v
-emptyStoreWith MergeRule{mergeKey, mergeWith} =
+emptyStoreWith MergeRule{mergeParts, mergeBuild} =
     Store
         { stClauses = IntMap.empty
         , stIndex = Map.empty
-        , stMerging = MergeIndex{miTargets = Map.empty, miKey = mergeKey, miMerge = mergeWith}
+        , stMerging = MergeIndex{miTargets = Map.empty, miParts = mergeParts, miBuild = mergeBuild}
         , stNext = 0
         }
 
--- | Where an arriving clause goes: 'Left' the id of the clause it merges into,
--- or 'Right' the index with the clause registered under its key at the given
--- id. A clause without a key leaves the index as it was.
-place :: ClauseId -> Incompatibility v -> MergeIndex v -> Either ClauseId (MergeIndex v)
-place c i mi@(MergeIndex targets key merge) = case key i of
-    Nothing -> Right mi
-    Just k -> (\targets' -> MergeIndex targets' key merge) <$> Map.alterF slot k targets
-  where
-    slot (Just target) = Left target
-    slot Nothing       = Right (Just c)
-
--- | The rule's merge of the existing clause and the arriving one.
-mergeOf :: MergeIndex v -> Incompatibility v -> Incompatibility v -> Incompatibility v
-mergeOf MergeIndex{miMerge} = miMerge
+-- | Where an arriving clause goes: the id it lands at, the clause that is there
+-- afterwards, and the index with the clause's part added. A clause whose key is
+-- free lands at the given id as it arrived; one whose key is taken lands at that
+-- clause's id, as what the rule builds; one without a key leaves the index as it
+-- was.
+place :: ClauseId -> Incompatibility v -> MergeIndex v -> (ClauseId, Incompatibility v, MergeIndex v)
+place c i mi@(MergeIndex targets parts build) = case parts i of
+    Nothing -> (c, i, mi)
+    Just (k, s) ->
+        let slot Nothing = ((c, i), Just (Target c k s))
+            slot (Just (Target t first old)) =
+                let merged = old <> s
+                 in ((t, build first merged), Just (Target t first merged))
+            ((landed, clause), targets') = Map.alterF slot k targets
+         in (landed, clause, MergeIndex targets' parts build)
 
 -- | The clauses in scan order, newest first.
 storeClauses :: Store v -> [Incompatibility v]
@@ -170,34 +176,22 @@ storeClauses Store{stClauses} = IntMap.foldl (flip (:)) [] stClauses
 -- Either way, the id of the clause that results: the one merged into, or a new
 -- one.
 insertClause :: Domain v => Incompatibility v -> Store v -> (ClauseId, Store v)
-insertClause i store@Store{stClauses, stIndex, stMerging, stNext} =
+insertClause i Store{stClauses, stIndex, stMerging, stNext} =
     case place stNext i stMerging of
-        Left target -> (target, mergeInto target)
-        Right merging ->
-            ( stNext
-            , store
-                { stClauses = IntMap.insert stNext i stClauses
-                , stIndex = index stNext (incompTerms i) stIndex
+        -- A merge lands on a clause that is there, in place: the id, and so the
+        -- scan position, is the one it had, and the index moves only the
+        -- variables the merge added or dropped.
+        (c, landed, merging) ->
+            ( c
+            , Store
+                { stClauses = IntMap.insert c landed stClauses
+                , stIndex = case IntMap.lookup c stClauses of
+                    Nothing       -> index c (incompTerms landed) stIndex
+                    Just existing -> reindex c (incompTerms existing) (incompTerms landed) stIndex
                 , stMerging = merging
-                , stNext = stNext + 1
+                , stNext = if c == stNext then stNext + 1 else stNext
                 }
             )
-  where
-    -- Replace the clause at @target@ with the merge of it and @i@, in place: the
-    -- id, and so the scan position, is the one the existing clause had. The
-    -- index moves only the variables the merge added or dropped.
-    --
-    -- A key names a clause that is there — 'valid' holds it, and the tests hold
-    -- 'valid' — so the 'Nothing' branch is unreachable. If it is ever reached,
-    -- the arriving clause takes the id its key names, which makes the store
-    -- valid again rather than leaving a key that names nothing.
-    mergeInto target =
-        let (merged, ix) = case IntMap.lookup target stClauses of
-                Nothing -> (i, index target (incompTerms i) stIndex)
-                Just existing ->
-                    let m = mergeOf stMerging existing i
-                     in (m, reindex target (incompTerms existing) (incompTerms m) stIndex)
-         in store{stClauses = IntMap.insert target merged stClauses, stIndex = ix}
 
 -- | Insert several clauses, preserving their order at the front: @insertClauses
 -- [a,b,c]@ leaves the store scanning @a@, @b@, @c@, then what was there before,
@@ -229,22 +223,18 @@ storeSize Store{stClauses} = IntMap.size stClauses
 --
 -- * the index is exactly the variables the clauses mention, each mapped to the
 --   clauses that mention it, so no variable maps to no clause;
--- * the merge index is exactly the clauses that have a key, by key, so a key
---   names a clause that is there and no two clauses share a key;
+-- * every key names a clause that is there, and no two keys name the same one;
 -- * every id is below the next one.
---
--- The second holds only under a rule that keeps its law (see t'MergeRule'): a
--- merge that changes the key leaves the old key naming the merged clause.
 valid :: Domain v => Store v -> Bool
-valid Store{stClauses, stIndex, stMerging = MergeIndex{miTargets, miKey}, stNext} =
+valid Store{stClauses, stIndex, stMerging = MergeIndex{miTargets}, stNext} =
     stIndex == mentions
-        && length keyed == Map.size miTargets
-        && Map.fromList keyed == miTargets
+        && all (`IntMap.member` stClauses) targets
+        && IntSet.size (IntSet.fromList targets) == length targets
         && maybe True ((< stNext) . fst) (IntMap.lookupMax stClauses)
   where
     clauses = IntMap.toList stClauses
     mentions = Map.fromListWith IntSet.union [(v, IntSet.singleton c) | (c, i) <- clauses, v <- Map.keys (incompTerms i)]
-    keyed = [(k, c) | (c, i) <- clauses, Just k <- [miKey i]]
+    targets = [t | Target t _ _ <- Map.elems miTargets]
 
 -- | File a clause under each variable it mentions, and the inverse. 'unindex'
 -- drops a variable that no clause mentions any more.

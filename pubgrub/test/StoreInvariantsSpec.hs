@@ -1,19 +1,19 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | 'PubGrub.Store' as a data structure: its invariants ('valid') under any
--- merge rule that keeps 'MergeRule''s law, not only under cabal's.
+-- merge rule, not only under cabal's.
 --
 -- Cabal's rule widens a depender term and never changes which variables a
 -- clause mentions. The rules here do what it does not: one replaces a clause by
 -- whatever arrived, so a merge can drop variables and add others, and one
--- unions the two clauses' terms, so a merge can only add them. A rule that
--- breaks the law is here too, to show that 'valid' catches it.
+-- unions the two clauses' terms, so a merge can only add them. One builds a
+-- clause under another key, which the store does not ask about.
 module StoreInvariantsSpec (tests) where
 
 import qualified Data.IntSet             as IntSet
 import           Data.List               (nub)
 import qualified Data.Map.Strict         as Map
-import           Data.Maybe              (fromMaybe)
+import           Data.Semigroup          (First (..), Last (..))
 import           Data.Set                (Set)
 import qualified Data.Set                as Set
 import           PubGrub.Incompatibility (Cause (..), Domain (..),
@@ -92,22 +92,26 @@ keyOf i = case incompCause i of
     Fact t -> Just t
     _      -> Nothing
 
+-- | The key, and the clause's own value of a part.
+partsBy :: (Incompatibility V -> s) -> Incompatibility V -> Maybe (Int, s)
+partsBy part i = (\k -> (k, part i)) <$> keyOf i
+
 -- | The arriving clause replaces the existing one: a merge may drop any
 -- variable and add any other.
 replacing :: MergeRule V
-replacing = MergeRule{mergeKey = keyOf, mergeWith = \_ new -> new}
+replacing = MergeRule{mergeParts = partsBy Last, mergeBuild = const getLast}
 
 -- | The merged clause mentions every variable either half did.
 widening :: MergeRule V
 widening =
     MergeRule
-        { mergeKey = keyOf
-        , mergeWith = \old new -> Incompatibility (Map.union (incompTerms old) (incompTerms new)) (incompCause old)
+        { mergeParts = partsBy (\i -> (incompTerms i, First (incompCause i)))
+        , mergeBuild = \_ (terms, First cause) -> Incompatibility terms cause
         }
 
--- | Breaks the law: the merged clause has another key.
+-- | The merged clause has another key.
 rekeying :: MergeRule V
-rekeying = MergeRule{mergeKey = keyOf, mergeWith = \_ new -> new{incompCause = Fact (100 + fromMaybe 0 (keyOf new))}}
+rekeying = MergeRule{mergeParts = partsBy Last, mergeBuild = \k (Last new) -> new{incompCause = Fact (100 + k)}}
 
 -- | Every store along the way is valid.
 validThroughout :: MergeRule V -> [Op] -> Bool
@@ -153,11 +157,16 @@ tests =
             clausesOf (V 1) store @?= IntSet.empty
             clausesOf (V 2) store @?= IntSet.singleton 0
             valid store @?= True
-        , testCase "a rule that changes the key is caught" $ do
-            let store =
-                    snd . insertClause (clause (Spec 0 True [(1, True, [1])])) . snd $
-                        insertClause (clause (Spec 0 True [(1, True, [2])])) (emptyStoreWith rekeying)
-            valid store @?= False
+        , testProperty "valid throughout, a merge changing the key" (validThroughout rekeying)
+        , testCase "a clause built under another key is still found by its first key" $ do
+            let insert s = snd . insertClause (clause s)
+                store =
+                    insert (Spec 0 True [(1, True, [3])])
+                        . insert (Spec 0 True [(1, True, [1])])
+                        . insert (Spec 0 True [(1, True, [2])])
+                        $ emptyStoreWith rekeying
+            length (storeClauses store) @?= 1
+            valid store @?= True
         , testCase "a clause compares and shows structurally, cause included" $ do
             let a = clause (Spec 0 True [(1, True, [1]), (2, False, [2])])
                 b = clause (Spec 1 True [(1, True, [1]), (2, False, [2])])
