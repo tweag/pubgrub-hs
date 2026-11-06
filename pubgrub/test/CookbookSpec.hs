@@ -7,8 +7,9 @@ module CookbookSpec (tests) where
 import qualified Data.Map.Strict  as Map
 import qualified Data.Text        as T
 import           DocCode          (codeMatches)
-import           PubGrub          (Pretty (..), fullVersionSet, mkVersion,
-                                   singletonVersionSet)
+import           PubGrub          (MergeRule, Pretty (..), fullVersionSet,
+                                   mkVersion, noMerging, singletonVersionSet)
+import           PubGrub.Store    (emptyStoreWith, insertClause, storeClauses)
 import           Test.Tasty       (TestTree, testGroup)
 import           Test.Tasty.HUnit (testCase, (@?=))
 
@@ -38,6 +39,12 @@ tests =
             let slotOf = slot (map fst (example Map.! lib))
              in pretty (slotOf (mkVersion [1]) <> slotOf (mkVersion [2]))
                     @?= "<2.1"
+        , testCase "a fact stated twice is one clause under sameTerms, and two with no rule" $
+            let clausesUnder :: MergeRule Name -> Int
+                clausesUnder rule =
+                    length (storeClauses (snd (insertClause dep (snd (insertClause dep (emptyStoreWith rule))))))
+                dep = dependsOn lib (slot (map fst (example Map.! lib)) (mkVersion [1])) util (range [1] [3])
+             in (clausesUnder sameTerms, clausesUnder noMerging) @?= (1, 2)
         , testCase "a release passed over, with its reason" $
             why example [request lib (singletonVersionSet (mkVersion [2, 1]))]
                 @?= "So, because lib >=2.1 cannot be used: it does not build here and lib ==2.1 is requested, version solving failed."

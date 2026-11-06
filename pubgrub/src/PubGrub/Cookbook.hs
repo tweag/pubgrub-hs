@@ -25,6 +25,7 @@
 -- > import qualified Data.Map.Strict       as Map
 -- > import           Data.Maybe            (isJust)
 -- > import           Data.Ord              (Down (..))
+-- > import           Data.Semigroup        (First (..))
 -- > import qualified Data.Set              as Set
 -- > import           Data.Text             (Text)
 -- > import qualified Data.Text             as T
@@ -254,6 +255,27 @@ import           PubGrub
 -- The plans of the previous recipe are the same with the rule as without it;
 -- what it buys is a shorter search and, in the next recipe, a proof that
 -- states the dependency once.
+--
+-- A domain whose facts do not merge still has a reason to name a rule. When the
+-- solver backtracks and decides a variable again, the provider states that
+-- value's facts again, and with no rule each is one more incompatibility to
+-- judge. On a search that backtracks far and often, that can cost more than the
+-- rest of the search: a synthetic problem took more than ten times as long. A
+-- rule that keeps one incompatibility per set of terms stops it:
+--
+-- > sameTerms :: (Domain v, Ord (SetOf v)) => MergeRule v
+-- > sameTerms =
+-- >     MergeRule
+-- >         { mergeParts = \i -> case incompCause i of
+-- >             Fact _ -> Just (incompTerms i, First i)
+-- >             _      -> Nothing
+-- >         , mergeBuild = \_ (First i) -> i
+-- >         }
+--
+-- It needs 'Ord' on the domain's sets. Two facts with the same terms forbid the
+-- same thing, so keeping the first says all that both said. A rule like
+-- @sameDependency@ already does this for the facts it merges, since a repeated
+-- dependency merges with itself.
 
 -- $explaining
 --

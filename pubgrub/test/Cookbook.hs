@@ -11,6 +11,7 @@ import           Data.Map.Strict       (Map)
 import qualified Data.Map.Strict       as Map
 import           Data.Maybe            (isJust)
 import           Data.Ord              (Down (..))
+import           Data.Semigroup        (First (..))
 import qualified Data.Set              as Set
 import           Data.Text             (Text)
 import qualified Data.Text             as T
@@ -106,6 +107,15 @@ sameDependency =
             Fact (DependsOn p ps q qs) -> Just ((p, q, qs), ps)
             _                          -> Nothing
         , mergeBuild = \(p, q, qs) ps -> dependsOn p ps q qs
+        }
+
+sameTerms :: (Domain v, Ord (SetOf v)) => MergeRule v
+sameTerms =
+    MergeRule
+        { mergeParts = \i -> case incompCause i of
+            Fact _ -> Just (incompTerms i, First i)
+            _      -> Nothing
+        , mergeBuild = \_ (First i) -> i
         }
 
 name :: Name -> VersionSet -> Text

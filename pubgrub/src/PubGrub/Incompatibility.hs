@@ -113,7 +113,9 @@ data MergeRule v = forall k s. (Ord k, Semigroup s) => MergeRule
       -- arrived
     }
 
--- | No two clauses merge.
+-- | No two clauses merge, so a fact the provider states again, when the solver
+-- decides a variable a second time, is a second clause. "PubGrub.Cookbook" has a
+-- rule that stops that.
 noMerging :: MergeRule v
 noMerging = MergeRule{mergeParts = const (Nothing :: Maybe (Void, ())), mergeBuild = \k _ -> absurd k}
 
