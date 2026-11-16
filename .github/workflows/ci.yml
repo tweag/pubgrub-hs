@@ -64,10 +64,10 @@ jobs:
           # Linux builds run on the oldest runner, as the binaries need a
           # glibc at least as new as the one they were built with.
           - target: x86_64-linux
-            build-runner: ubuntu-22.04
+            build-runner: ubuntu-24.04
             test-runner: ubuntu-latest
           - target: aarch64-linux
-            build-runner: ubuntu-22.04-arm
+            build-runner: ubuntu-24.04-arm
             test-runner: ubuntu-24.04-arm
           - target: x86_64-macos
             build-runner: macos-15-intel
